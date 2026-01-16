@@ -2,20 +2,20 @@
 
 > **Focus for Next Session**: Work through these steps sequentially. Each step is testable independently before moving on.
 
-## Current State (v2.2)
+## Current State (v2.3)
 
 **Working:**
 - Real-time voice calls (Gemini 2.5 native audio + Twilio Media Streams)
 - Senior profiles + PostgreSQL database
 - Memory system (storage, semantic search, extraction at call end)
-- Reminder storage (in DB, but not triggered automatically)
 - Conversation history with transcripts
 - Admin UI at `/admin`
 - ✅ **User speech transcription (Deepgram STT)**
 - ✅ **Mid-conversation memory retrieval** (triggers on keywords)
 - ✅ **News updates via OpenAI web search** (based on interests, cached 1hr)
+- ✅ **Scheduled reminder calls** (auto-triggers when reminders due)
 
-**Next Priority:** Scheduled Calls
+**Next Priority:** Admin Dashboard
 
 ---
 
@@ -44,25 +44,30 @@ Twilio Audio → ┬→ Gemini (voice AI + response)
 
 ---
 
-### Step 2: Scheduled Call System
+### Step 2: Scheduled Call System ✅ COMPLETE
 **Goal:** Reminders actually trigger automated calls
 
-**Why second:** Reminders exist in DB. This connects them to outbound calls. Now with working transcription, calls will be higher quality.
+**Status:** ✅ Implemented January 2026
 
-**Tasks:**
-1. Add a simple scheduler (node-cron or setInterval polling)
-2. Query for reminders due in the next minute
-3. Trigger outbound call when reminder fires
-4. Inject reminder context into Gemini prompt
-   - Example: "Remember to gently remind them to take their blood pressure medication"
-5. Mark reminder as delivered after call
+**What was built:**
+- `services/scheduler.js` - Scheduler service with 60-second polling
+- Queries for due reminders (one-time and recurring)
+- Triggers outbound calls via Twilio
+- Injects reminder context into system prompt
+- Marks reminders as delivered after call initiated
 
-**Files to modify:**
-- `index.js` - Add scheduler startup
-- Create `services/scheduler.js` - Scheduling logic
-- `gemini-live.js` - Accept reminder context in system prompt
+**Architecture:**
+```
+Server Boot → Scheduler Starts (60s interval)
+    ↓
+Check Due Reminders → Trigger Outbound Call
+    ↓
+/voice/answer → Get Reminder Context → Inject into System Prompt
+    ↓
+Donna delivers reminder naturally in conversation
+```
 
-**Test:** Create a reminder for 2 minutes from now, verify Donna calls and mentions it.
+**Verified:** Scheduler running in production, checks every 60 seconds.
 
 ---
 
@@ -166,13 +171,13 @@ Call Start → Senior Profile (interests) → OpenAI Web Search → News Context
 │  Step 1: Deepgram STT ✅ DONE                          │
 │  └── "Mid-call memory retrieval unlocked"              │
 │              ↓                                          │
-│  Step 5: News Updates ✅ DONE (moved up)               │
+│  Step 5: News Updates ✅ DONE                          │
 │  └── "Richer conversations with current info"          │
 │              ↓                                          │
-│  Step 2: Scheduled Calls ← CURRENT PRIORITY            │
+│  Step 2: Scheduled Calls ✅ DONE                       │
 │  └── "Reminders trigger automated calls"               │
 │              ↓                                          │
-│  Step 3: Admin Dashboard                               │
+│  Step 3: Admin Dashboard ← CURRENT PRIORITY            │
 │  └── "Full visibility and management"                  │
 │              ↓                                          │
 │  Step 4: Caregiver Login                               │
@@ -194,6 +199,7 @@ Call Start → Senior Profile (interests) → OpenAI Web Search → News Context
 | Audio conversion | `audio-utils.js` |
 | Memory system | `services/memory.js` |
 | News updates | `services/news.js` |
+| Scheduled calls | `services/scheduler.js` |
 | Senior profiles | `services/seniors.js` |
 | Database schema | `db/schema.js` |
 | Provider abstraction | `providers/` (prepared, not integrated) |
@@ -229,4 +235,4 @@ ELEVENLABS_VOICE_ID=...
 
 ---
 
-*Last updated: January 16, 2026 - Steps 1 & 5 complete (Deepgram STT, News Updates)*
+*Last updated: January 16, 2026 - Steps 1, 2, 5 complete (Deepgram STT, Scheduled Calls, News Updates)*

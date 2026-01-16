@@ -24,27 +24,28 @@
 
 **See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for the complete implementation roadmap.**
 
-Current priority: **Scheduled Calls** (make reminders trigger automated calls)
+Current priority: **Admin Dashboard** (full visibility and management)
 
 ### Quick Summary of Next Steps:
 1. ~~**Deepgram STT**~~ - **DONE** (mid-call memory retrieval unlocked)
 2. ~~**News Updates**~~ - **DONE** (OpenAI web search, cached 1hr)
-3. **Scheduled Calls** - Reminders trigger automated calls
+3. ~~**Scheduled Calls**~~ - **DONE** (reminders trigger automated calls)
 4. **Admin Dashboard** - Full visibility and management
 5. **Caregiver Login** - Secure multi-user access
 6. **ElevenLabs TTS** - Production voice quality
 
 ---
 
-## Current Status: v2.2 (News Updates Added)
+## Current Status: v2.3 (Scheduled Calls Added)
 
 ### Working Features
 - Real-time voice calls (Twilio + Gemini 2.5 Native Audio)
 - Bidirectional audio streaming via WebSocket
 - AI transcription of Donna's speech (Gemini output transcription)
 - User speech transcription (Deepgram STT)
-- Mid-conversation memory retrieval (triggers on keywords like "daughter", "doctor", etc.)
-- **News updates via OpenAI web search** - NEW (based on senior's interests, cached 1hr)
+- Mid-conversation memory retrieval (triggers on keywords)
+- News updates via OpenAI web search (based on interests, cached 1hr)
+- **Scheduled reminder calls** - NEW (auto-triggers calls when reminders are due)
 - Senior profile management with database
 - Memory storage with semantic embeddings (pgvector + OpenAI)
 - Memory extraction from conversations
@@ -292,4 +293,4 @@ Keep this file as the **single source of truth** for AI assistants working on Do
  
 ---
  
-*Last updated: January 16, 2026 - v2.2 (News Updates complete)*
+*Last updated: January 16, 2026 - v2.3 (Scheduled Calls complete)*

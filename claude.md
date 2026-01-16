@@ -24,10 +24,10 @@
 
 **See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for the complete implementation roadmap.**
 
-Current priority: **Step 1 - Deepgram STT** (user speech transcription to unlock mid-call memory retrieval)
+Current priority: **Step 2 - Scheduled Calls** (make reminders trigger automated calls)
 
 ### Quick Summary of Next Steps:
-1. **Deepgram STT** - Mid-call memory retrieval unlocked
+1. ~~**Deepgram STT**~~ - **DONE** (mid-call memory retrieval unlocked)
 2. **Scheduled Calls** - Reminders trigger automated calls
 3. **Admin Dashboard** - Full visibility and management
 4. **Caregiver Login** - Secure multi-user access
@@ -36,28 +36,29 @@ Current priority: **Step 1 - Deepgram STT** (user speech transcription to unlock
 
 ---
 
-## Current Status: v2.0 (Production Ready)
+## Current Status: v2.1 (Deepgram STT Added)
 
 ### Working Features
 - Real-time voice calls (Twilio + Gemini 2.5 Native Audio)
 - Bidirectional audio streaming via WebSocket
-- AI transcription of Donna's speech (output transcription)
+- AI transcription of Donna's speech (Gemini output transcription)
+- **User speech transcription (Deepgram STT)** - NEW
+- **Mid-conversation memory retrieval** - NEW (triggers on keywords like "daughter", "doctor", etc.)
 - Senior profile management with database
 - Memory storage with semantic embeddings (pgvector + OpenAI)
 - Memory extraction from conversations
 - Admin UI for managing seniors
 
-### Known Limitation
-- User speech transcription not available (Gemini SDK bug)
-- Mid-conversation memory retrieval blocked until user transcription is resolved
-- **Planned Fix:** Deepgram integration for user speech transcription (Step 1 - current priority)
+### Environment Setup
+Requires `DEEPGRAM_API_KEY` in environment for user speech transcription.
+Without it, calls still work but mid-call memory retrieval is disabled.
 
 ---
 
-## Current Architecture (v2.0)
- 
+## Current Architecture (v2.1)
+
 **Status**: This is what's actually running today.
- 
+
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    CURRENT STACK                        │
@@ -69,51 +70,69 @@ Current priority: **Step 1 - Deepgram STT** (user speech transcription to unlock
 │   ┌─────────┐                                          │
 │   │ Twilio  │  ← Phone calls (inbound/outbound)        │
 │   └────┬────┘                                          │
-│        │                                                │
+│        │ Media Streams (WebSocket)                     │
 │        ▼                                                │
 │   ┌─────────────────┐                                  │
 │   │  Express Server │  ← index.js (root directory)     │
 │   │   (Railway)     │                                  │
 │   └────┬────────────┘                                  │
 │        │                                                │
-│        ▼                                                │
+│   ┌────┴────────────────────────┐                      │
+│   │                             │                      │
+│   ▼                             ▼                      │
+│   ┌─────────────────┐    ┌─────────────┐              │
+│   │ Gemini 2.5 Flash│    │  Deepgram   │              │
+│   │  (Native Voice) │    │   (STT)     │              │
+│   │  AI + TTS       │    │ Transcribes │              │
+│   └────┬────────────┘    │ user speech │              │
+│        │                 └──────┬──────┘              │
+│        │                        │                      │
+│        │            ┌───────────┘                      │
+│        │            ▼                                  │
+│        │    ┌───────────────┐                         │
+│        │    │Memory Triggers│ ← Mid-call retrieval    │
+│        │    └───────────────┘                         │
+│        ▼                                               │
 │   ┌─────────────────┐                                  │
-│   │ Gemini 2.5 Flash│  ← AI conversation engine        │
-│   │  (Native Voice) │                                  │
-│   └────┬────────────┘                                  │
-│        │                                                │
-│        ▼                                                │
-│   ┌─────────────────┐                                  │
-│   │   AWS Polly     │  ← Text-to-speech (via Twilio)   │
-│   │  (Twilio <Say>) │                                  │
+│   │   PostgreSQL    │  ← Neon (pgvector for memories)  │
 │   └─────────────────┘                                  │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
 ```
- 
+
 ### Current Flow
-1. Twilio initiates/receives call
-2. `<Gather speech>` captures senior's voice (Twilio's built-in STT)
-3. Gemini 2.5 Flash generates response
-4. `<Say voice="Polly.Joanna">` speaks response (Twilio's TTS)
-5. Loop continues until goodbye detected
- 
+1. Twilio initiates/receives call, connects via Media Streams WebSocket
+2. Audio streams bidirectionally through Express server
+3. User audio → Deepgram (STT) for transcription → triggers memory retrieval
+4. User audio → Gemini 2.5 Flash (native voice) for AI response
+5. Gemini audio response → sent back through Twilio to caller
+6. Memories extracted at call end, stored with embeddings
+
 ### Current Tech Stack
 | Component | Technology | Notes |
 |-----------|------------|-------|
 | **Hosting** | Railway | Auto-deploy from GitHub |
-| **Phone** | Twilio | Voice calls, webhooks |
-| **AI** | Gemini 2.5 Flash | Single API, native voice support |
-| **STT** | Twilio `<Gather>` | Built-in, no extra API |
-| **TTS** | AWS Polly (via Twilio) | `<Say>` verb with SSML |
+| **Phone** | Twilio | Voice calls, Media Streams WebSocket |
+| **AI** | Gemini 2.5 Flash | Native voice (audio in, audio out) |
+| **STT** | Deepgram | User speech transcription for memory triggers |
+| **TTS** | Gemini Native | Built into Gemini's audio output |
+| **Database** | Neon PostgreSQL | pgvector for semantic memory search |
+| **Embeddings** | OpenAI | For memory similarity search |
  
 ### Key Files (EDIT THESE)
 ```
-donna2/
-├── index.js              ← MAIN SERVER
-├── gemini-voice.js       ← Gemini session handler (if exists)
+/
+├── index.js              ← MAIN SERVER (Express + WebSocket)
+├── gemini-live.js        ← Gemini native audio session handler
+├── services/
+│   ├── seniors.js        ← Senior profile CRUD
+│   ├── memory.js         ← Memory storage + retrieval
+│   └── conversations.js  ← Conversation records
+├── db/
+│   └── schema.js         ← Database schema (Drizzle ORM)
+├── public/
+│   └── admin.html        ← Admin UI
 ├── package.json
-├── .env
 └── railway.json
 ```
  
@@ -179,20 +198,28 @@ donna2/
 ---
  
 ## Development Phases
- 
-| Phase | Milestones | Status | What It Adds |
-|-------|------------|--------|--------------|
-| **A** | 1-6 | **CURRENT** | Gemini voice, basic calls, goodbye detection |
-| **B** | 7-10 | Planned | Database, senior profiles, reminders, scheduling |
-| **C** | 11-15 | Planned | Claude, Deepgram, ElevenLabs, memory, analytics |
- 
-### Phase A Milestones (Current Focus)
-1. ✅ Hello World - Twilio answers, plays TTS
-2. 🔄 Gemini Response - AI generates greeting
-3. ⬜ Voice Conversation - Real-time via WebSocket
-4. ⬜ Outbound Calls - Donna initiates calls
-5. ⬜ Conversation Memory - In-session context
-6. ⬜ Goodbye Detection - Natural call ending
+
+| Phase | Status | What's Included |
+|-------|--------|-----------------|
+| **A** | ✅ **COMPLETE** | Gemini voice, WebSocket streaming, outbound calls |
+| **B** | ✅ **COMPLETE** | Database, senior profiles, memory system, Deepgram STT |
+| **C** | 🔄 **IN PROGRESS** | Scheduled calls, admin dashboard, caregiver auth |
+| **D** | Planned | News updates, ElevenLabs TTS, analytics |
+
+### Completed Milestones
+1. ✅ Twilio voice integration
+2. ✅ Gemini 2.5 native audio (bidirectional WebSocket)
+3. ✅ Outbound calls via API
+4. ✅ PostgreSQL + pgvector for memories
+5. ✅ Senior profile management
+6. ✅ Memory extraction from conversations
+7. ✅ Deepgram STT for user transcription
+8. ✅ Mid-call memory retrieval (keyword triggers)
+
+### Next Up (Phase C)
+- ⬜ **Scheduled Calls** - Reminders trigger automated calls
+- ⬜ Admin Dashboard - Full management UI
+- ⬜ Caregiver Authentication - Secure multi-user access
  
 ---
  
@@ -231,17 +258,23 @@ reference/
  
 ### Common Mistakes
 1. ❌ Editing `reference/modules/` thinking it's active code
-2. ❌ Assuming Claude/Deepgram/ElevenLabs are in use
+2. ❌ Assuming Claude or ElevenLabs are in use (Deepgram IS active for STT)
 3. ❌ Looking at `reference/llm-conversation/` for current prompts
 4. ❌ Treating `reference/` test counts as current project status
  
 ### Environment Variables (Current)
 ```bash
+# Required
 PORT=3001
-GOOGLE_API_KEY=your_gemini_key
+GOOGLE_API_KEY=...          # Gemini API
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=+1...
+DATABASE_URL=...            # Neon PostgreSQL
+OPENAI_API_KEY=...          # For embeddings
+
+# Optional (but recommended)
+DEEPGRAM_API_KEY=...        # User speech transcription
 ```
  
 ---
@@ -258,4 +291,4 @@ Keep this file as the **single source of truth** for AI assistants working on Do
  
 ---
  
-*Last updated: January 2026*
+*Last updated: January 16, 2026 - v2.1 (Deepgram STT complete)*

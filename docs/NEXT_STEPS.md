@@ -2,7 +2,7 @@
 
 > **Focus for Next Session**: Work through these steps sequentially. Each step is testable independently before moving on.
 
-## Current State (v2.0)
+## Current State (v2.1)
 
 **Working:**
 - Real-time voice calls (Gemini 2.5 native audio + Twilio Media Streams)
@@ -11,27 +11,25 @@
 - Reminder storage (in DB, but not triggered automatically)
 - Conversation history with transcripts
 - Admin UI at `/admin`
+- ✅ **User speech transcription (Deepgram STT)**
+- ✅ **Mid-conversation memory retrieval** (triggers on keywords like "daughter", "doctor", etc.)
 
-**Known Limitation:**
-- User speech transcription not working (Gemini SDK bug)
-- Mid-conversation memory retrieval blocked (needs user speech text)
+**Next Priority:** Step 2 - Scheduled Calls
 
 ---
 
 ## Step-by-Step Implementation Plan
 
-### Step 1: User Speech Transcription (Deepgram)
+### Step 1: User Speech Transcription (Deepgram) ✅ COMPLETE
 **Goal:** Enable mid-conversation memory retrieval
 
-**Why first:** This unblocks the memory trigger system that's already coded. User speech transcription is currently broken due to a Gemini SDK bug - fixing this is foundational for a quality conversation experience.
+**Status:** ✅ Implemented and verified working (January 2026)
 
-**Tasks:**
-1. Add Deepgram SDK (`@deepgram/sdk`)
-2. Fork audio stream: send to both Gemini (voice) and Deepgram (text)
-3. Use Deepgram transcription for:
-   - Memory trigger detection (already coded in `gemini-live.js`)
-   - More accurate conversation logging
-4. Enable `checkForRelevantMemories()` function
+**What was built:**
+- Deepgram SDK integration for real-time STT
+- Audio forked: Gemini (voice AI) + Deepgram (transcription)
+- Memory trigger detection on keywords ("daughter", "doctor", "medication", etc.)
+- Mid-call memory injection into conversation
 
 **Architecture:**
 ```
@@ -41,7 +39,7 @@ Twilio Audio → ┬→ Gemini (voice AI + response)
                Memory triggers → inject context
 ```
 
-**Test:** Mid-call, say "my daughter Sarah visited" - Donna should recall memories about Sarah.
+**Verified:** Mid-call memory retrieval working - mentioning family members triggers relevant memories.
 
 ---
 
@@ -165,10 +163,10 @@ caregiver_seniors (caregiver_id, senior_id)  -- junction table
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                                                         │
-│  Step 1: Deepgram STT                                  │
+│  Step 1: Deepgram STT ✅ DONE                          │
 │  └── "Mid-call memory retrieval unlocked"              │
 │              ↓                                          │
-│  Step 2: Scheduled Calls                               │
+│  Step 2: Scheduled Calls ← CURRENT PRIORITY            │
 │  └── "Reminders trigger automated calls"               │
 │              ↓                                          │
 │  Step 3: Admin Dashboard                               │
@@ -230,4 +228,4 @@ ELEVENLABS_VOICE_ID=...
 
 ---
 
-*Last updated: January 2026*
+*Last updated: January 16, 2026 - Step 1 (Deepgram STT) complete*

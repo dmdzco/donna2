@@ -20,7 +20,41 @@
  
 ---
  
-## Current Architecture (Phase A - Gemini Voice)
+## Next Session Focus
+
+**See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for the complete implementation roadmap.**
+
+Current priority: **Step 1 - Scheduled Call System** (make reminders trigger automated calls)
+
+### Quick Summary of Next Steps:
+1. **Scheduled Calls** - Reminders trigger automated calls
+2. **Admin Dashboard** - Full visibility and management
+3. **Caregiver Login** - Secure multi-user access
+4. **News Updates** - Richer conversations with current info
+5. **Deepgram STT** - Mid-call memory retrieval unlocked
+6. **ElevenLabs TTS** - Production voice quality
+
+---
+
+## Current Status: v2.0 (Production Ready)
+
+### Working Features
+- Real-time voice calls (Twilio + Gemini 2.5 Native Audio)
+- Bidirectional audio streaming via WebSocket
+- AI transcription of Donna's speech (output transcription)
+- Senior profile management with database
+- Memory storage with semantic embeddings (pgvector + OpenAI)
+- Memory extraction from conversations
+- Admin UI for managing seniors
+
+### Known Limitation
+- User speech transcription not available (Gemini SDK bug)
+- Mid-conversation memory retrieval blocked until user transcription is resolved
+- **Planned Fix:** Deepgram integration for user speech transcription (Step 5)
+
+---
+
+## Current Architecture (v2.0)
  
 **Status**: This is what's actually running today.
  

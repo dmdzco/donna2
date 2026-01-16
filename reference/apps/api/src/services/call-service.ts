@@ -49,11 +49,17 @@ export const callService = {
 
     const conversationId = conversationResult.rows[0].id;
 
-    // Initiate Twilio call
+    // Pass senior context to webhook for personalized greeting
+    const webhookParams = new URLSearchParams({
+      seniorName: senior.name,
+      conversationId: conversationId,
+    });
+
+    // Initiate Twilio call with personalized webhook
     const call = await twilioClient.calls.create({
       to: senior.phone,
       from: TWILIO_PHONE_NUMBER,
-      url: `${API_URL}/api/voice/connect`,
+      url: `${API_URL}/api/voice/connect?${webhookParams.toString()}`,
       statusCallback: `${API_URL}/api/voice/status`,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
       record: true,

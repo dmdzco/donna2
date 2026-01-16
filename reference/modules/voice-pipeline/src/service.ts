@@ -13,6 +13,10 @@ import type {
 export class VoicePipelineService implements IVoicePipeline {
   private readonly DEFAULT_VOICE_ID = 'default-elderly-friendly-voice';
 
+  // Elderly-friendly defaults: slower speech for clarity
+  private readonly DEFAULT_SPEED = 0.85; // Slower than normal (1.0) for better comprehension
+  private readonly DEFAULT_STABILITY = 0.75; // Slightly higher stability for consistent, predictable voice
+
   constructor(
     private sttAdapter: IDeepgramAdapter,
     private ttsAdapter: IElevenLabsAdapter
@@ -31,8 +35,8 @@ export class VoicePipelineService implements IVoicePipeline {
   async synthesize(text: string, config?: VoiceConfig): Promise<AudioBuffer> {
     const voiceId = config?.voiceId || this.DEFAULT_VOICE_ID;
     const options: TTSOptions = {
-      stability: config?.stability ?? 0.7,
-      speed: config?.speed ?? 1.0,
+      stability: config?.stability ?? this.DEFAULT_STABILITY,
+      speed: config?.speed ?? this.DEFAULT_SPEED,
     };
 
     // Delegate to TTS adapter
@@ -45,8 +49,8 @@ export class VoicePipelineService implements IVoicePipeline {
   ): AsyncIterable<AudioChunk> {
     const voiceId = config?.voiceId || this.DEFAULT_VOICE_ID;
     const options: TTSOptions = {
-      stability: config?.stability ?? 0.7,
-      speed: config?.speed ?? 1.0,
+      stability: config?.stability ?? this.DEFAULT_STABILITY,
+      speed: config?.speed ?? this.DEFAULT_SPEED,
     };
 
     // Delegate to TTS adapter

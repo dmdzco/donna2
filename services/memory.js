@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { db } from '../db/client.js';
 import { memories } from '../db/schema.js';
 import { eq, sql, desc, and } from 'drizzle-orm';
+import { newsService } from './news.js';
 
 let openai = null;
 const getOpenAI = () => {
@@ -103,7 +104,7 @@ export const memoryService = {
   },
 
   // Build context string for conversation
-  async buildContext(seniorId, currentTopic = null) {
+  async buildContext(seniorId, currentTopic = null, senior = null) {
     const contextParts = [];
 
     // Get relevant memories if there's a topic
@@ -133,6 +134,18 @@ export const memoryService = {
       recent.forEach(m => {
         contextParts.push(`- [${m.type}] ${m.content}`);
       });
+    }
+
+    // Fetch news based on senior's interests
+    if (senior?.interests?.length) {
+      try {
+        const newsContext = await newsService.getNewsForSenior(senior.interests);
+        if (newsContext) {
+          contextParts.push('\n' + newsContext);
+        }
+      } catch (error) {
+        console.error('[Memory] Error fetching news:', error.message);
+      }
     }
 
     return contextParts.join('\n');

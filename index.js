@@ -63,7 +63,7 @@ app.post('/voice/answer', async (req, res) => {
     senior = await seniorService.findByPhone(fromPhone);
     if (senior) {
       console.log(`[${callSid}] Found senior: ${senior.name} (${senior.id})`);
-      memoryContext = await memoryService.buildContext(senior.id);
+      memoryContext = await memoryService.buildContext(senior.id, null, senior);
       if (memoryContext) {
         console.log(`[${callSid}] Built memory context (${memoryContext.length} chars)`);
       }

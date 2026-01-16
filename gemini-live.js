@@ -28,7 +28,11 @@ Your personality:
     prompt += `\n\n${memoryContext}`;
   }
 
-  prompt += `\n\nUse this context naturally in conversation. Reference past topics when relevant but don't force it.`;
+  prompt += `\n\nUse this context naturally in conversation. Reference past topics when relevant but don't force it.
+
+If there's news in the context, you can bring it up conversationally when appropriate.
+Example: "I heard something interesting about [topic] today..." or "Did you hear about [news]?"
+Don't force news into conversation - only mention if it flows naturally or if they seem interested.`;
 
   return prompt;
 };

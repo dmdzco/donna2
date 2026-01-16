@@ -51,6 +51,10 @@ export class GeminiLiveSession {
     this.lastMemoryCheck = 0;
     this.memoryCheckCooldown = 20000; // 20 seconds between checks
     this.injectedMemoryIds = new Set(); // Don't repeat memories
+
+    // Transcription buffering (Gemini sends word-by-word)
+    this.outputBuffer = '';
+    this.inputBuffer = '';
   }
 
   async connect() {
@@ -72,6 +76,7 @@ export class GeminiLiveSession {
               }
             }
           },
+          inputAudioTranscription: {},
           outputAudioTranscription: {}
         },
         callbacks: {
@@ -116,31 +121,18 @@ export class GeminiLiveSession {
     // Log full message structure for debugging
     console.log(`[${this.streamSid}] Gemini message:`, JSON.stringify(message).substring(0, 500));
 
-    // Capture user's speech transcription (input audio transcription)
+    // Buffer user's speech transcription (comes word-by-word)
     const inputTranscription = message.serverContent?.inputTranscription?.text ||
                                 message.inputTranscription?.text;
     if (inputTranscription) {
-      console.log(`[${this.streamSid}] User said: "${inputTranscription}"`);
-      this.conversationLog.push({
-        role: 'user',
-        content: inputTranscription,
-        timestamp: new Date().toISOString()
-      });
-
-      // Check for relevant memories mid-conversation
-      this.checkForRelevantMemories(inputTranscription);
+      this.inputBuffer += inputTranscription;
     }
 
-    // Capture model's speech transcription (output audio transcription)
+    // Buffer model's speech transcription (comes word-by-word)
     const outputTranscription = message.serverContent?.outputTranscription?.text ||
                                  message.outputTranscription?.text;
     if (outputTranscription) {
-      console.log(`[${this.streamSid}] Donna said: "${outputTranscription}"`);
-      this.conversationLog.push({
-        role: 'assistant',
-        content: outputTranscription,
-        timestamp: new Date().toISOString()
-      });
+      this.outputBuffer += outputTranscription;
     }
 
     // Handle audio response from Gemini - check various possible structures
@@ -150,16 +142,6 @@ export class GeminiLiveSession {
 
     if (parts) {
       for (const part of parts) {
-        // Capture text responses for transcription (fallback if outputTranscription not available)
-        if (part.text && !outputTranscription) {
-          console.log(`[${this.streamSid}] Donna said (from text part): "${part.text}"`);
-          this.conversationLog.push({
-            role: 'assistant',
-            content: part.text,
-            timestamp: new Date().toISOString()
-          });
-        }
-
         // Check for audio data in various formats
         const audioData = part.inlineData?.data || part.audio?.data || part.data;
         const mimeType = part.inlineData?.mimeType || part.audio?.mimeType || part.mimeType;
@@ -189,9 +171,35 @@ export class GeminiLiveSession {
       }
     }
 
-    // Handle turn complete
+    // Handle turn complete - flush buffers and save complete utterances
     if (message.serverContent?.turnComplete || message.turnComplete) {
-      console.log(`[${this.streamSid}] Gemini turn complete`);
+      // Save buffered user input
+      if (this.inputBuffer.trim()) {
+        const userText = this.inputBuffer.trim();
+        console.log(`[${this.streamSid}] User said: "${userText}"`);
+        this.conversationLog.push({
+          role: 'user',
+          content: userText,
+          timestamp: new Date().toISOString()
+        });
+        // Check for relevant memories
+        this.checkForRelevantMemories(userText);
+        this.inputBuffer = '';
+      }
+
+      // Save buffered assistant output
+      if (this.outputBuffer.trim()) {
+        const assistantText = this.outputBuffer.trim();
+        console.log(`[${this.streamSid}] Donna said: "${assistantText}"`);
+        this.conversationLog.push({
+          role: 'assistant',
+          content: assistantText,
+          timestamp: new Date().toISOString()
+        });
+        this.outputBuffer = '';
+      }
+
+      console.log(`[${this.streamSid}] Turn complete`);
     }
   }
 

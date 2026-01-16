@@ -1,42 +1,17 @@
 {
   "name": "donna",
-  "version": "0.3.0",
-  "private": true,
-  "description": "AI-powered senior companion assistant with voice calls, reminders, and AI intelligence",
-  "packageManager": "npm@10.0.0",
-  "workspaces": [
-    "apps/*",
-    "packages/*",
-    "adapters/*",
-    "modules/*",
-    "config",
-    "database"
-  ],
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AI-powered senior companion assistant",
   "scripts": {
-    "dev": "turbo run dev",
-    "build": "turbo run build",
-    "lint": "turbo run lint",
-    "test": "turbo run test",
-    "db:migrate": "cd apps/api && npm run db:migrate",
-    "db:seed": "cd apps/api && npm run db:seed"
+    "start": "node index.js",
+    "dev": "node --watch index.js"
   },
-  "devDependencies": {
-    "drizzle-kit": "^0.31.8",
-    "turbo": "^2.0.0",
-    "typescript": "^5.3.0"
+  "dependencies": {
+    "express": "^4.21.0",
+    "twilio": "^5.4.0"
   },
   "engines": {
     "node": ">=20.0.0"
-  },
-  "dependencies": {
-    "@clerk/express": "^1.7.62",
-    "@clerk/nextjs": "^6.36.7",
-    "@neondatabase/serverless": "^1.0.2",
-    "@upstash/redis": "^1.36.1",
-    "@vercel/blob": "^2.0.0",
-    "bullmq": "^5.66.5",
-    "drizzle-orm": "^0.45.1",
-    "openai": "^6.16.0",
-    "pgvector": "^0.2.1"
   }
 }

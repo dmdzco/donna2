@@ -1,24 +1,18 @@
 # Dependencies
 node_modules/
-.pnp
-.pnp.js
-
-# Build outputs
-dist/
-build/
-.next/
-out/
 
 # Environment
 .env
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*.local
+
+# Build
+dist/
+.next/
 
 # IDE
-.vscode/
 .idea/
+.vscode/
 *.swp
 *.swo
 
@@ -27,32 +21,12 @@ out/
 Thumbs.db
 
 # Logs
-logs/
 *.log
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
-# Testing
+# Database
+*.db
+*.sqlite
+
+# Test
 coverage/
-.nyc_output/
-
-# Turbo
-.turbo/
-
-# TypeScript
-*.tsbuildinfo
-
-# TypeScript build outputs in src directories
-# (compiled JS files should not be committed)
-**/src/**/*.js
-**/src/**/*.js.map
-**/src/**/*.d.ts
-**/src/**/*.d.ts.map
-
-# Next.js type declarations (auto-generated)
-next-env.d.ts
-
-# Misc
-.vercel
-.cache

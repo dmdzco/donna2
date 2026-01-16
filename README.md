@@ -148,20 +148,24 @@ See [docs/guides/DEPLOYMENT_PLAN.md](docs/guides/DEPLOYMENT_PLAN.md)
 
 ```
 donna/
-├── index.js              # Server entry (Milestone 1)
+├── index.js              # Current code (Milestone 1)
 ├── package.json
-├── railway.json          # Railway config
-├── .env.example          # Environment template
-└── docs/
-    ├── INCREMENTAL_BUILD_GUIDE.md   # Main roadmap
-    ├── guides/
-    │   └── DEPLOYMENT_PLAN.md
-    └── architecture/                 # Future reference
-        ├── OVERVIEW.md
-        └── MODULES.md
+├── railway.json
+├── .env.example
+├── docs/
+│   ├── INCREMENTAL_BUILD_GUIDE.md   # Main roadmap
+│   ├── guides/
+│   └── architecture/
+└── reference/            # DO NOT USE YET - Phase C reference only
+    ├── README.md         # Explains when to use this code
+    ├── modules/          # Business logic (Milestones 7-14)
+    ├── adapters/         # External services (Milestone 11+)
+    ├── apps/             # Full Express API
+    ├── database/         # Drizzle schemas
+    └── config/           # DI container
 ```
 
-As you progress through milestones, the structure grows to include `modules/`, `adapters/`, `database/`, etc.
+The `reference/` folder contains a complete implementation of the full architecture. **Do not use it for Milestones 1-6.** It's there to guide implementation when you reach Phase B and C.
 
 ## License
 

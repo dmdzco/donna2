@@ -9,6 +9,8 @@ import { seniorService } from './services/seniors.js';
 import { memoryService } from './services/memory.js';
 import { conversationService } from './services/conversations.js';
 import { schedulerService, startScheduler } from './services/scheduler.js';
+import { BrowserSession } from './browser-session.js';
+import { parse as parseUrl } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -47,7 +49,7 @@ app.get('/health', (req, res) => {
     milestone: 7,
     activeSessions: sessions.size,
     ai: 'gemini-2.5-flash-native-audio',
-    features: ['news-updates', 'scheduled-calls']
+    features: ['news-updates', 'scheduled-calls', 'browser-calling']
   });
 });
 
@@ -416,10 +418,68 @@ wss.on('connection', async (twilioWs, req) => {
   });
 });
 
+// === BROWSER CALL WebSocket ===
+const browserWss = new WebSocketServer({ server, path: '/browser-call' });
+
+browserWss.on('connection', async (browserWs, req) => {
+  console.log('[Browser] New browser call connection');
+
+  // Parse query params for seniorId
+  const { query } = parseUrl(req.url, true);
+  const seniorId = query.seniorId;
+
+  let senior = null;
+  let memoryContext = null;
+  let browserSession = null;
+
+  // Pre-fetch senior context
+  if (seniorId) {
+    try {
+      senior = await seniorService.getById(seniorId);
+      if (senior) {
+        console.log(`[Browser] Found senior: ${senior.name}`);
+        memoryContext = await memoryService.buildContext(senior.id, null, senior);
+      }
+    } catch (error) {
+      console.error('[Browser] Error fetching senior:', error);
+    }
+  }
+
+  // Create browser session
+  browserSession = new BrowserSession(browserWs, senior, memoryContext);
+
+  try {
+    await browserSession.connect();
+  } catch (error) {
+    console.error('[Browser] Failed to start session:', error);
+    browserWs.close();
+    return;
+  }
+
+  // Handle incoming audio from browser
+  browserWs.on('message', (message) => {
+    if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
+      browserSession.sendAudio(message);
+    }
+  });
+
+  browserWs.on('close', async () => {
+    console.log('[Browser] Connection closed');
+    if (browserSession) {
+      await browserSession.close();
+    }
+  });
+
+  browserWs.on('error', (error) => {
+    console.error('[Browser] WebSocket error:', error);
+  });
+});
+
 server.listen(PORT, () => {
   console.log(`Donna listening on port ${PORT}`);
   console.log(`Voice webhook: ${BASE_URL}/voice/answer`);
   console.log(`Media stream: ${WS_URL}/media-stream`);
+  console.log(`Browser call: ${WS_URL}/browser-call`);
   console.log(`Milestone: 7 (Phase C - Scheduled Calls)`);
 
   // Start the reminder scheduler (check every minute)

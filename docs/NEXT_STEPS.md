@@ -2,7 +2,7 @@
 
 > **Focus for Next Session**: Work through these steps sequentially. Each step is testable independently before moving on.
 
-## Current State (v2.1)
+## Current State (v2.2)
 
 **Working:**
 - Real-time voice calls (Gemini 2.5 native audio + Twilio Media Streams)
@@ -12,9 +12,10 @@
 - Conversation history with transcripts
 - Admin UI at `/admin`
 - ✅ **User speech transcription (Deepgram STT)**
-- ✅ **Mid-conversation memory retrieval** (triggers on keywords like "daughter", "doctor", etc.)
+- ✅ **Mid-conversation memory retrieval** (triggers on keywords)
+- ✅ **News updates via OpenAI web search** (based on interests, cached 1hr)
 
-**Next Priority:** Step 2 - Scheduled Calls
+**Next Priority:** Scheduled Calls
 
 ---
 
@@ -111,25 +112,24 @@ caregiver_seniors (caregiver_id, senior_id)  -- junction table
 
 ---
 
-### Step 5: News/Weather Updates
+### Step 5: News/Weather Updates ✅ COMPLETE
 **Goal:** Richer conversations with current information
 
-**Why fifth:** Adds value once core system is stable.
+**Status:** ✅ Implemented January 2026
 
-**Tasks:**
-1. Integrate news API (options: NewsAPI, Google News, or OpenAI web search)
-2. Fetch headlines based on:
-   - Senior's location (for local news/weather)
-   - Senior's interests (sports, politics, etc.)
-3. Inject as system prompt context before call
-4. Let Donna mention naturally: "I saw some interesting news today..."
+**What was built:**
+- `services/news.js` - News service using OpenAI Responses API with web_search tool
+- Fetches 2-3 positive, senior-appropriate headlines based on interests
+- 1-hour cache to reduce API calls
+- Integrated into memory context builder
+- System prompt updated with guidance for natural news conversation
 
-**Implementation options:**
-- A: Pre-fetch news daily, store in DB
-- B: Fetch fresh at call start
-- C: Use OpenAI's web search tool for real-time info
+**Architecture:**
+```
+Call Start → Senior Profile (interests) → OpenAI Web Search → News Context → System Prompt
+```
 
-**Test:** Call a senior, Donna shares relevant news when conversation allows.
+**Verified:** News context added to conversations for seniors with interests configured.
 
 ---
 
@@ -166,6 +166,9 @@ caregiver_seniors (caregiver_id, senior_id)  -- junction table
 │  Step 1: Deepgram STT ✅ DONE                          │
 │  └── "Mid-call memory retrieval unlocked"              │
 │              ↓                                          │
+│  Step 5: News Updates ✅ DONE (moved up)               │
+│  └── "Richer conversations with current info"          │
+│              ↓                                          │
 │  Step 2: Scheduled Calls ← CURRENT PRIORITY            │
 │  └── "Reminders trigger automated calls"               │
 │              ↓                                          │
@@ -174,9 +177,6 @@ caregiver_seniors (caregiver_id, senior_id)  -- junction table
 │              ↓                                          │
 │  Step 4: Caregiver Login                               │
 │  └── "Secure multi-user access"                        │
-│              ↓                                          │
-│  Step 5: News Updates                                  │
-│  └── "Richer conversations with current info"          │
 │              ↓                                          │
 │  Step 6: ElevenLabs TTS                                │
 │  └── "Production voice quality"                        │
@@ -193,6 +193,7 @@ caregiver_seniors (caregiver_id, senior_id)  -- junction table
 | Voice calls | `gemini-live.js`, `index.js` |
 | Audio conversion | `audio-utils.js` |
 | Memory system | `services/memory.js` |
+| News updates | `services/news.js` |
 | Senior profiles | `services/seniors.js` |
 | Database schema | `db/schema.js` |
 | Provider abstraction | `providers/` (prepared, not integrated) |
@@ -228,4 +229,4 @@ ELEVENLABS_VOICE_ID=...
 
 ---
 
-*Last updated: January 16, 2026 - Step 1 (Deepgram STT) complete*
+*Last updated: January 16, 2026 - Steps 1 & 5 complete (Deepgram STT, News Updates)*

@@ -3,7 +3,7 @@ import { createClient } from '@deepgram/sdk';
 import { base64MulawToBase64Pcm16k, base64Pcm24kToBase64Mulaw8k } from './audio-utils.js';
 import { memoryService } from './services/memory.js';
 
-const buildSystemPrompt = (senior, memoryContext) => {
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null) => {
   let prompt = `You are Donna, a warm and caring AI companion for elderly individuals.
 
 Your personality:
@@ -28,6 +28,11 @@ Your personality:
     prompt += `\n\n${memoryContext}`;
   }
 
+  // Add reminder prompt if this is a reminder call
+  if (reminderPrompt) {
+    prompt += reminderPrompt;
+  }
+
   prompt += `\n\nUse this context naturally in conversation. Reference past topics when relevant but don't force it.
 
 If there's news in the context, you can bring it up conversationally when appropriate.
@@ -41,11 +46,12 @@ Don't force news into conversation - only mention if it flows naturally or if th
 const MEMORY_TRIGGERS = /\b(remember|forgot|last time|yesterday|doctor|medicine|son|daughter|grandchild|friend|family|birthday|visit|told you|mentioned|we talked)\b/i;
 
 export class GeminiLiveSession {
-  constructor(twilioWs, streamSid, senior = null, memoryContext = null) {
+  constructor(twilioWs, streamSid, senior = null, memoryContext = null, reminderPrompt = null) {
     this.twilioWs = twilioWs;
     this.streamSid = streamSid;
     this.senior = senior;
     this.memoryContext = memoryContext;
+    this.reminderPrompt = reminderPrompt;
     this.geminiSession = null;
     this.ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
     this.isConnected = false;
@@ -68,8 +74,8 @@ export class GeminiLiveSession {
   }
 
   async connect() {
-    const systemPrompt = buildSystemPrompt(this.senior, this.memoryContext);
-    console.log(`[${this.streamSid}] System prompt built for ${this.senior?.name || 'unknown caller'}`);
+    const systemPrompt = buildSystemPrompt(this.senior, this.memoryContext, this.reminderPrompt);
+    console.log(`[${this.streamSid}] System prompt built for ${this.senior?.name || 'unknown caller'}${this.reminderPrompt ? ' (reminder call)' : ''}`);
 
     try {
       this.geminiSession = await this.ai.live.connect({

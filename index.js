@@ -8,6 +8,7 @@ import { GeminiLiveSession } from './gemini-live.js';
 import { seniorService } from './services/seniors.js';
 import { memoryService } from './services/memory.js';
 import { conversationService } from './services/conversations.js';
+import { schedulerService, startScheduler } from './services/scheduler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -43,9 +44,10 @@ const callMetadata = new Map();
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    milestone: 6,
+    milestone: 7,
     activeSessions: sessions.size,
-    ai: 'gemini-2.5-flash-native-audio'
+    ai: 'gemini-2.5-flash-native-audio',
+    features: ['news-updates', 'scheduled-calls']
   });
 });
 
@@ -55,12 +57,21 @@ app.post('/voice/answer', async (req, res) => {
   const fromPhone = req.body.From || req.body.To; // From for inbound, To for outbound
   console.log(`[${callSid}] Call answered from ${fromPhone}, starting media stream`);
 
+  // Check if this call was triggered by a reminder
+  const reminderContext = schedulerService.getReminderContext(callSid);
+  let reminderPrompt = null;
+  if (reminderContext) {
+    console.log(`[${callSid}] This is a reminder call: "${reminderContext.reminder.title}"`);
+    reminderPrompt = schedulerService.formatReminderPrompt(reminderContext.reminder);
+  }
+
   // Look up senior by phone number
   let senior = null;
   let memoryContext = null;
 
   try {
-    senior = await seniorService.findByPhone(fromPhone);
+    // If reminder call, we already have the senior
+    senior = reminderContext?.senior || await seniorService.findByPhone(fromPhone);
     if (senior) {
       console.log(`[${callSid}] Found senior: ${senior.name} (${senior.id})`);
       memoryContext = await memoryService.buildContext(senior.id, null, senior);
@@ -90,7 +101,7 @@ app.post('/voice/answer', async (req, res) => {
   }
 
   // Store metadata for when WebSocket connects
-  callMetadata.set(callSid, { senior, memoryContext, fromPhone, conversationId });
+  callMetadata.set(callSid, { senior, memoryContext, fromPhone, conversationId, reminderPrompt });
 
   const twiml = new twilio.twiml.VoiceResponse();
 
@@ -142,8 +153,9 @@ app.post('/voice/status', async (req, res) => {
       }
       sessions.delete(CallSid);
     }
-    // Clean up metadata
+    // Clean up metadata and reminder context
     callMetadata.delete(CallSid);
+    schedulerService.clearReminderContext(CallSid);
   }
 });
 
@@ -339,7 +351,8 @@ wss.on('connection', async (twilioWs, req) => {
             twilioWs,
             streamSid,
             metadata.senior,
-            metadata.memoryContext
+            metadata.memoryContext,
+            metadata.reminderPrompt
           );
           sessions.set(callSid, geminiSession);
 
@@ -389,5 +402,8 @@ server.listen(PORT, () => {
   console.log(`Donna listening on port ${PORT}`);
   console.log(`Voice webhook: ${BASE_URL}/voice/answer`);
   console.log(`Media stream: ${WS_URL}/media-stream`);
-  console.log(`Milestone: 6 (Phase A - Native Audio)`);
+  console.log(`Milestone: 7 (Phase C - Scheduled Calls)`);
+
+  // Start the reminder scheduler (check every minute)
+  startScheduler(BASE_URL, 60000);
 });

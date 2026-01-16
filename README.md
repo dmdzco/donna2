@@ -1,49 +1,58 @@
-# Donna - Senior Companion Assistant
+# Donna - AI Senior Companion
 
-**Status:** ✅ All Phases Complete | 🧪 170/170 Tests Passing | 🚀 Production Ready
+AI-powered companion that provides elderly individuals with friendly phone conversations, helpful reminders, and personalized updates.
 
-An AI-powered companion that provides elderly individuals with friendly phone conversations, helpful reminders, and personalized updates. Built with a modern serverless architecture and comprehensive modular design.
+## Quick Start
 
-## Features
+```bash
+npm install
+npm run dev
+```
 
-### 📞 Voice Communication (Phase 1)
-- **AI Phone Calls**: Natural conversations via Twilio with landline or mobile
-- **Real-time Speech Processing**: Deepgram (STT) + ElevenLabs (TTS)
-- **Conversation Management**: Full conversation history and turn tracking
-- **Call Orchestration**: Lifecycle management with webhooks
+Test it works:
+```bash
+curl http://localhost:3001/health
+```
 
-### 💊 Reminders & Scheduling (Phase 2)
-- **Medication Reminders**: Natural reminders woven into conversation
-- **Appointment Tracking**: Schedule and deliver reminders
-- **Automated Scheduling**: BullMQ job queue with retry logic
-- **Audio Storage**: Call recordings in Vercel Blob
+Deploy to Railway, configure Twilio webhook, and call your number.
 
-### 🧠 AI Intelligence (Phase 3)
-- **Observer Agent**: Real-time conversation quality analysis
-- **Long-term Memory**: Remembers preferences, concerns, and past conversations
-- **Analytics Engine**: Usage metrics, engagement tracking, sentiment analysis
-- **Personalized Context**: Dynamic conversation context building
+## Build Approach
 
-### 🌐 Caregiver Portal
-- **Web Dashboard**: Manage senior profiles and reminders
-- **Conversation History**: View transcripts and insights
-- **Analytics Dashboard**: Track call frequency and engagement
+Donna is built incrementally, starting simple and adding complexity:
 
-## Architecture
+| Phase | Milestones | What You Get |
+|-------|------------|--------------|
+| **A** | 1-6 | Twilio + Gemini native voice (simple, works today) |
+| **B** | 7-10 | Add database, reminders, scheduling |
+| **C** | 11-15 | Full architecture with Claude, memory, analytics |
 
-See [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md) for detailed system design.
+**Start here:** [docs/INCREMENTAL_BUILD_GUIDE.md](docs/INCREMENTAL_BUILD_GUIDE.md)
 
-**Modular Design:** 11 business modules + 5 external adapters with dependency injection
+### Current: Milestone 1 - Hello World
+
+Twilio answers calls and plays a greeting. No AI yet, just proving the pipeline works.
+
+```
+Phone Call → Twilio → Your Server → TwiML Response → "Hello!"
+```
+
+### Next Steps
+
+1. **Milestone 2**: Add Gemini for real AI conversations
+2. **Milestone 3**: WebSocket streaming for natural dialogue
+3. **Milestone 4**: Outbound calls (Donna calls the senior)
+
+## Long-Term Architecture
+
+The full system (Phase C, Milestones 11-15) looks like this:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                 Caregiver Portal (Next.js)                  │
 └────────────────────────┬────────────────────────────────────┘
-                         │ HTTP/REST
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
+                         │
+┌────────────────────────▼────────────────────────────────────┐
 │                  API Server (Express.js)                     │
-│            Routes → DI Container → Modules                   │
 └────────────────────────┬────────────────────────────────────┘
                          │
             ┌────────────┴────────────┐
@@ -51,362 +60,108 @@ See [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md) for detailed 
   ┌──────────────────┐      ┌──────────────────┐
   │ Business Modules │      │ External Adapters│
   ├──────────────────┤      ├──────────────────┤
-  │ • Senior Profiles│      │ • Anthropic AI   │
-  │ • LLM Conversation│     │ • Deepgram (STT) │
-  │ • Skills System  │      │ • ElevenLabs(TTS)│
-  │ • Voice Pipeline │      │ • Twilio (Calls) │
-  │ • Call Orchestrator│    │ • Vercel Blob    │
-  │ • Conversation Mgr│     └──────────────────┘
-  │ • Reminder Mgmt  │
-  │ • Scheduler      │
-  │ • Observer Agent │
-  │ • Memory/Context │
+  │ • Senior Profiles│      │ • Claude AI      │
+  │ • Voice Pipeline │      │ • Deepgram (STT) │
+  │ • Call Manager   │      │ • ElevenLabs(TTS)│
+  │ • Reminders      │      │ • Twilio (Calls) │
+  │ • Scheduler      │      │ • Cloud Storage  │
+  │ • Memory/Context │      └──────────────────┘
   │ • Analytics      │
   └──────────────────┘
             │
-            ▼
-  ┌──────────────────────────────────┐
-  │  Serverless Infrastructure       │
-  │  • Neon (PostgreSQL)             │
-  │  • Drizzle ORM (Type-safe)       │
-  │  • Upstash Redis (Job Queue)     │
-  │  • Vercel Blob (Storage)         │
-  │  • Clerk (Authentication)        │
-  └──────────────────────────────────┘
+  ┌─────────▼──────────────────────────┐
+  │  Infrastructure                    │
+  │  • Neon (PostgreSQL)               │
+  │  • Upstash Redis (Job Queue)       │
+  │  • Clerk (Authentication)          │
+  └────────────────────────────────────┘
 ```
 
-## Tech Stack
+But you don't need all this to start. Phase A uses just Twilio + Gemini.
 
-### Frontend
-- **Framework**: Next.js 14, TypeScript, Tailwind CSS
-- **State**: React Query
-- **Auth**: Clerk
+## Tech Stack by Phase
 
-### Backend
-- **Runtime**: Node.js 20+
-- **Framework**: Express.js, TypeScript
-- **Architecture**: Modular DI pattern (16 modules)
-- **Testing**: Vitest (162 tests, 100% passing)
-
-### Database & Storage
-- **Database**: Neon (Serverless PostgreSQL)
-- **ORM**: Drizzle (Type-safe, zero runtime overhead)
-- **Storage**: Vercel Blob (Audio recordings)
-- **Queue**: Upstash Redis + BullMQ
-
-### Voice & AI
+### Phase A (Milestones 1-6) - Start Here
 - **Calls**: Twilio
-- **STT**: Deepgram
-- **TTS**: ElevenLabs
-- **AI**: Anthropic Claude Sonnet 3.5
+- **AI**: Google Gemini 2.5 Flash (native voice)
+- **Deploy**: Railway
 
-## Getting Started
+### Phase B (Milestones 7-10) - Add Persistence
+- **Database**: Neon (PostgreSQL)
+- **ORM**: Drizzle
+- **Queue**: Upstash Redis
 
-### Prerequisites
+### Phase C (Milestones 11-15) - Full Stack
+- **AI**: Claude + Deepgram + ElevenLabs
+- **Memory**: pgvector for semantic search
+- **Auth**: Clerk
+- **Analytics**: Custom dashboard
 
-**API Keys & Services:**
-- [Neon](https://neon.tech) account (Serverless PostgreSQL)
-- [Clerk](https://clerk.com) account (Authentication)
-- [Upstash](https://upstash.com) account (Redis)
-- [Vercel](https://vercel.com) account (Blob storage + deployment)
-- [Twilio](https://twilio.com) account (Phone calls)
-- [Deepgram](https://deepgram.com) API key (STT)
-- [ElevenLabs](https://elevenlabs.io) API key (TTS)
-- [Anthropic](https://anthropic.com) API key (Claude AI)
+## Environment Variables
 
-**Local Development:**
-- Node.js 20+
-- npm or yarn
-
-### Installation
-
-1. **Clone the repository:**
+Start with just these (Milestone 1):
 ```bash
-git clone https://github.com/your-org/donna.git
-cd donna
+PORT=3001
 ```
 
-2. **Install dependencies:**
+Add as you progress:
 ```bash
-npm install
-```
+# Milestone 2+
+GOOGLE_API_KEY=your_gemini_key
 
-3. **Set up environment variables:**
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your credentials:
-```bash
-# Database (Neon)
-DATABASE_URL=postgresql://user:pass@host.neon.tech/donna?sslmode=require
-
-# Authentication (Clerk)
-CLERK_SECRET_KEY=sk_test_...
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
-
-# Voice Services
-DEEPGRAM_API_KEY=...
-ELEVENLABS_API_KEY=...
-ELEVENLABS_VOICE_ID=rachel
+# Milestone 4+
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=+1...
 
-# AI
-ANTHROPIC_API_KEY=sk-ant-...
+# Milestone 7+
+DATABASE_URL=postgresql://...
 
-# Storage & Queue
-BLOB_READ_WRITE_TOKEN=vercel_blob_...
-UPSTASH_REDIS_REST_URL=https://...upstash.io
-UPSTASH_REDIS_REST_TOKEN=...
-
-# Application
-API_URL=http://localhost:3001
-WEB_URL=http://localhost:3000
+# Milestone 11+
+ANTHROPIC_API_KEY=...
+DEEPGRAM_API_KEY=...
+ELEVENLABS_API_KEY=...
 ```
 
-4. **Run database migrations:**
-```bash
-npm run db:migrate
-```
+See [.env.example](.env.example) for all variables.
 
-5. **Start development servers:**
-```bash
-npm run dev
-```
+## Deployment
 
-The API server will run on `http://localhost:3001`
+**Railway** (recommended):
+1. Push to GitHub
+2. Connect repo on [railway.app](https://railway.app)
+3. Add environment variables
+4. Deploy
 
-### Testing
+See [docs/guides/DEPLOYMENT_PLAN.md](docs/guides/DEPLOYMENT_PLAN.md)
 
-**Run all tests (162 tests):**
-```bash
-npm test
-```
+## Documentation
 
-**Run tests in watch mode:**
-```bash
-npm test -- --watch
-```
-
-**Run tests with coverage:**
-```bash
-npm test -- --coverage
-```
-
-**Test UIs (Manual Testing):**
-- Phase 1: http://localhost:3001/test/test-phase1.html
-- Phase 2: http://localhost:3001/test/test-phase2.html
-- Phase 3: http://localhost:3001/test/test-phase3.html
+| Doc | Purpose |
+|-----|---------|
+| [INCREMENTAL_BUILD_GUIDE.md](docs/INCREMENTAL_BUILD_GUIDE.md) | Step-by-step milestone guide |
+| [DEPLOYMENT_PLAN.md](docs/guides/DEPLOYMENT_PLAN.md) | Railway deployment |
+| [architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md) | Full system design (Phase C) |
+| [architecture/MODULES.md](docs/architecture/MODULES.md) | Module reference (Phase C) |
 
 ## Project Structure
 
 ```
 donna/
-├── apps/
-│   ├── web/                       # Next.js caregiver portal
-│   └── api/                       # Express backend
-│       ├── src/
-│       │   ├── routes/            # API endpoints
-│       │   │   ├── auth.ts
-│       │   │   ├── seniors.ts
-│       │   │   ├── reminders.ts
-│       │   │   ├── conversations.ts
-│       │   │   ├── voice.ts
-│       │   │   ├── test-phase1.ts
-│       │   │   ├── test-phase2.ts
-│       │   │   └── test-phase3.ts
-│       │   ├── middleware/        # Express middleware
-│       │   └── index.ts           # Server entry
-│       └── public/                # Test UI HTML files
-│           ├── test-phase1.html
-│           ├── test-phase2.html
-│           └── test-phase3.html
-├── modules/                       # Business logic modules
-│   ├── senior-profiles/           # Senior CRUD
-│   ├── llm-conversation/          # Claude conversation engine
-│   ├── skills-system/             # Pluggable skills
-│   ├── voice-pipeline/            # STT/TTS orchestration
-│   ├── conversation-manager/      # Conversation storage
-│   ├── call-orchestrator/         # Call lifecycle
-│   ├── reminder-management/       # Reminder CRUD
-│   ├── scheduler-service/         # BullMQ scheduling
-│   ├── observer-agent/            # Conversation analysis
-│   ├── memory-context/            # Long-term memory
-│   └── analytics-engine/          # Metrics & insights
-├── adapters/                      # External service wrappers
-│   ├── anthropic/                 # Claude AI
-│   ├── deepgram/                  # Speech-to-Text
-│   ├── elevenlabs/                # Text-to-Speech
-│   ├── twilio/                    # Phone calls
-│   └── vercel-blob/               # File storage
-├── packages/
-│   └── shared/                    # Shared interfaces & types
-│       └── src/interfaces/
-│           └── module-interfaces.ts
-├── config/
-│   └── dependency-injection.ts    # DI container setup
-├── database/
-│   ├── schema.ts                  # Drizzle schema
-│   ├── migrations/                # SQL migrations
-│   └── db.ts                      # Database client
-├── docs/
-│   ├── architecture/              # Architecture docs
-│   │   └── OVERVIEW.md
-│   ├── guides/                    # How-to guides
-│   │   └── DEPLOYMENT_PLAN.md
-│   └── status/                    # Project status
-│       ├── PHASE1_COMPLETE.md
-│       ├── CHANGELOG.md
-│       └── REMAINING_WORK.md
-└── .env.example                   # Environment template
+├── index.js              # Server entry (Milestone 1)
+├── package.json
+├── railway.json          # Railway config
+├── .env.example          # Environment template
+└── docs/
+    ├── INCREMENTAL_BUILD_GUIDE.md   # Main roadmap
+    ├── guides/
+    │   └── DEPLOYMENT_PLAN.md
+    └── architecture/                 # Future reference
+        ├── OVERVIEW.md
+        └── MODULES.md
 ```
 
-## API Endpoints
-
-### Authentication
-- `POST /api/auth/register` - Create caregiver account
-- `POST /api/auth/login` - Login
-- `GET /api/auth/me` - Get current user
-
-### Seniors
-- `GET /api/seniors` - List seniors
-- `POST /api/seniors` - Add senior
-- `GET /api/seniors/:id` - Get senior
-- `PUT /api/seniors/:id` - Update senior
-- `DELETE /api/seniors/:id` - Delete senior
-
-### Reminders
-- `GET /api/reminders/senior/:seniorId` - List reminders
-- `POST /api/reminders` - Create reminder
-- `DELETE /api/reminders/:id` - Delete reminder
-
-### Conversations
-- `GET /api/conversations/senior/:seniorId` - List conversations
-- `GET /api/conversations/:id` - Get conversation with transcript
-
-### Voice
-- `POST /api/voice/call/:seniorId` - Initiate call
-- `POST /api/voice/connect` - Twilio webhook (call answered)
-- `POST /api/voice/status` - Twilio webhook (call status)
-
-### Test Routes
-- `GET /api/test/phase1/*` - Phase 1 module testing
-- `GET /api/test/phase2/*` - Phase 2 module testing
-- `GET /api/test/phase3/*` - Phase 3 module testing
-
-## Modular Architecture
-
-### Design Principles
-
-**Interface-First Design:**
-All modules depend on interfaces, not concrete implementations. This enables:
-- Easy unit testing with mocks
-- Swappable implementations
-- Clear contracts between modules
-
-**Dependency Injection:**
-All modules are registered in `DonnaContainer` and dependencies are injected via constructors:
-
-```typescript
-const container = DonnaContainer.getInstance();
-const callOrchestrator = container.get<ICallOrchestrator>('CallOrchestrator');
-```
-
-**Repository Pattern:**
-Separation of data access (Repository) from business logic (Service):
-
-```typescript
-// Repository: Database operations with Drizzle ORM
-class ConversationRepository {
-  constructor(private db: DrizzleDB) {}
-  async create(data: ConversationData): Promise<Conversation> { ... }
-}
-
-// Service: Business logic
-class ConversationManagerService {
-  constructor(private repository: IConversationRepository) {}
-  async create(data: ConversationData): Promise<Conversation> { ... }
-}
-```
-
-### Module Categories
-
-**Business Modules (11 modules):**
-1. Senior Profiles - CRUD for senior profiles
-2. LLM Conversation - Claude conversation engine
-3. Skills System - Pluggable skills (news, companionship)
-4. Voice Pipeline - STT/TTS orchestration
-5. Conversation Manager - Conversation storage
-6. Call Orchestrator - Call lifecycle management
-7. Reminder Management - Reminder CRUD
-8. Scheduler Service - BullMQ job scheduling
-9. Observer Agent - Conversation quality analysis
-10. Memory & Context - Long-term memory
-11. Analytics Engine - Usage metrics
-
-**External Adapters (6 adapters):**
-1. Anthropic - Claude AI integration
-2. Deepgram - Speech-to-Text
-3. ElevenLabs - Text-to-Speech
-4. Twilio - Phone call gateway
-5. Vercel Blob - Audio file storage
-6. OpenAI - Embeddings for semantic memory search
-
-## Deployment
-
-See [docs/guides/DEPLOYMENT_PLAN.md](docs/guides/DEPLOYMENT_PLAN.md) for comprehensive deployment instructions.
-
-### Quick Deploy to Vercel
-
-1. **Install Vercel CLI:**
-```bash
-npm install -g vercel
-```
-
-2. **Login and deploy:**
-```bash
-vercel login
-vercel
-```
-
-3. **Add environment variables:**
-```bash
-vercel env add DATABASE_URL
-vercel env add ANTHROPIC_API_KEY
-# ... add all required env vars
-```
-
-4. **Deploy to production:**
-```bash
-vercel --prod
-```
-
-### Environment Variables
-
-All required environment variables are documented in `.env.example`. Key variables include:
-
-- `DATABASE_URL` - Neon PostgreSQL connection
-- `CLERK_SECRET_KEY` - Clerk authentication
-- `ANTHROPIC_API_KEY` - Claude AI
-- `DEEPGRAM_API_KEY` - Speech-to-Text
-- `ELEVENLABS_API_KEY` - Text-to-Speech
-- `TWILIO_ACCOUNT_SID` - Phone calls
-- `BLOB_READ_WRITE_TOKEN` - Vercel Blob storage
-- `UPSTASH_REDIS_REST_URL` - Redis job queue
-
-## Documentation
-
-- **Architecture Overview**: [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md)
-- **Deployment Guide**: [docs/guides/DEPLOYMENT_PLAN.md](docs/guides/DEPLOYMENT_PLAN.md)
-- **Phase 1 Complete**: [docs/status/PHASE1_COMPLETE.md](docs/status/PHASE1_COMPLETE.md)
-- **Remaining Work**: [docs/status/REMAINING_WORK.md](docs/status/REMAINING_WORK.md)
-- **Changelog**: [docs/status/CHANGELOG.md](docs/status/CHANGELOG.md)
-
-## Contributing
-
-This is a private project. For questions or contributions, please contact the project maintainers.
+As you progress through milestones, the structure grows to include `modules/`, `adapters/`, `database/`, etc.
 
 ## License
 

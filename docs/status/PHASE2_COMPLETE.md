@@ -1,7 +1,8 @@
-# ✅ Phase 2 Complete - Infrastructure Migration & Data Management
+# Phase 2 Reference - Infrastructure & Data Management
 
-**Status:** All modules implemented, tested, and pushed to GitHub
-**Commit:** `497f0d7` - feat: Complete Phase 2 - Infrastructure Migration & Data Management
+> **Note:** This document describes the database and scheduling infrastructure for the full architecture. This corresponds to **Milestones 7-10** in the incremental build. Start with [INCREMENTAL_BUILD_GUIDE.md](../INCREMENTAL_BUILD_GUIDE.md) for the milestone-based approach.
+
+**Original Implementation:** January 2026
 **Tests:** 38/38 passing (100%)
 
 ---
@@ -26,7 +27,7 @@ Phase 2 was split into two parts: **Infrastructure Migration (Phase 2A)** and **
 - Neon (serverless PostgreSQL, auto-scaling, 0ms cold starts)
 - Upstash (serverless Redis, pay-per-use)
 - Clerk (managed authentication)
-- Vercel Blob (CDN-backed storage)
+- Cloud Storage (CDN-backed storage)
 
 **Benefits:**
 - ✅ Pay only for what you use
@@ -242,14 +243,14 @@ UPSTASH_REDIS_REST_TOKEN=your_token_here
 
 ---
 
-### 3. Vercel Blob Adapter (Storage)
+### 3. Cloud Storage Adapter (Storage)
 
-**Location:** `adapters/vercel-blob/`
+**Location:** `adapters/storage/`
 **Tests:** 7/7 passing ✅
 **Interface:** `IStorageAdapter`
 
 #### **Purpose:**
-Store call recordings and audio files in Vercel Blob storage
+Store call recordings and audio files in Cloud Storage storage
 
 #### **Capabilities:**
 - `uploadAudio()` - Upload audio buffer to Blob storage
@@ -257,16 +258,16 @@ Store call recordings and audio files in Vercel Blob storage
 - `deleteAudio()` - Remove audio file
 - `listAudioFiles()` - List all audio files for a conversation
 
-#### **Why Vercel Blob?**
+#### **Why Cloud Storage?**
 - ✅ CDN-backed (fast global delivery)
 - ✅ Simple API (no S3 complexity)
 - ✅ Automatic HTTPS
 - ✅ Pay-per-use pricing
-- ✅ Integrates seamlessly with Vercel deployment
+- ✅ Integrates seamlessly with Cloud deployment
 
 #### **Environment Variable:**
 ```bash
-BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
+BLOB_READ_WRITE_TOKEN=storage_rw_...
 ```
 
 #### **Usage Example:**
@@ -277,7 +278,7 @@ const url = await storageAdapter.uploadAudio(
   audioBuffer,
   'audio/mpeg'
 );
-// Returns: https://your-blob.vercel-storage.com/conversations/conv-123/recording.mp3
+// Returns: https://your-storage.example.com/conversations/conv-123/recording.mp3
 
 // Generate signed URL (expires in 1 hour)
 const signedUrl = await storageAdapter.getSignedUrl(url, { expiresIn: 3600 });
@@ -353,7 +354,7 @@ const scheduler = new SchedulerService(
 );
 this.set('Scheduler', scheduler);
 
-const storageAdapter = new VercelBlobAdapter({
+const storageAdapter = new StorageAdapter({
   token: this.config.storage.token,
 });
 this.set('StorageAdapter', storageAdapter);
@@ -400,8 +401,8 @@ CLERK_SECRET_KEY=sk_test_...
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
 
 # === PHASE 2B: BUSINESS MODULES (REQUIRED) ===
-# Storage (Vercel Blob)
-BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
+# Storage (Cloud Storage)
+BLOB_READ_WRITE_TOKEN=storage_rw_...
 
 # Job Queue (Upstash Redis)
 UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
@@ -430,14 +431,14 @@ JWT_SECRET=your_jwt_secret_min_32_chars_long
 ```bash
 npm test modules/reminder-management
 npm test modules/scheduler-service
-npm test adapters/vercel-blob
+npm test adapters/storage
 ```
 
 ### Run Individual Module Tests:
 ```bash
 cd modules/reminder-management && npm test
 cd modules/scheduler-service && npm test
-cd adapters/vercel-blob && npm test
+cd adapters/storage && npm test
 ```
 
 ### Run Tests in Watch Mode:
@@ -455,7 +456,7 @@ cd modules/reminder-management && npm test -- --watch
 | Reminder Management | 17/17 | ✅ |
 | Scheduler Service | 14/14 | ✅ |
 | **Adapters** | | |
-| Vercel Blob | 7/7 | ✅ |
+| Cloud Storage | 7/7 | ✅ |
 | **TOTAL** | **38/38** | **✅ 100%** |
 
 ---
@@ -502,7 +503,7 @@ Phase 2 is **complete**. Ready to proceed with Phase 3:
 ### Architecture:
 - ✅ Serverless PostgreSQL (Neon)
 - ✅ Serverless Redis (Upstash)
-- ✅ Serverless storage (Vercel Blob)
+- ✅ Serverless storage (Cloud Storage)
 - ✅ Managed authentication (Clerk)
 
 ### Developer Experience:
@@ -521,7 +522,7 @@ Before deploying Phase 2 to production:
 - [ ] Run database migrations
 - [ ] Set up Clerk account and webhooks
 - [ ] Create Upstash Redis instance
-- [ ] Set up Vercel Blob storage
+- [ ] Set up Cloud Storage storage
 - [ ] Set all environment variables
 - [ ] Test scheduled call flow
 - [ ] Verify BullMQ worker is running
@@ -543,8 +544,8 @@ Before deploying Phase 2 to production:
 
 **Phase 2 is complete and production-ready!**
 
-- ✅ Infrastructure migrated to serverless (Drizzle, Neon, Clerk, Upstash, Vercel Blob)
-- ✅ 3 new modules implemented (Reminder Management, Scheduler Service, Vercel Blob Adapter)
+- ✅ Infrastructure migrated to serverless (Drizzle, Neon, Clerk, Upstash, Cloud Storage)
+- ✅ 3 new modules implemented (Reminder Management, Scheduler Service, Cloud Storage Adapter)
 - ✅ 38/38 tests passing (100% pass rate)
 - ✅ All repositories use Drizzle ORM
 - ✅ DI container updated

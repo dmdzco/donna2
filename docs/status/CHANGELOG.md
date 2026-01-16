@@ -1,18 +1,24 @@
 # Changelog
 
-All notable changes to the Donna project will be documented in this file.
+All notable changes to the Donna project.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+> **Note:** This changelog documents the original complex architecture build. The project is now being rebuilt incrementally - see [INCREMENTAL_BUILD_GUIDE.md](../INCREMENTAL_BUILD_GUIDE.md).
 
 ---
 
-## [Unreleased]
+## [0.1.0] - Current
 
-### Planned
-- API routes refactoring to use modules
-- Integration tests with Twilio webhooks
-- Performance monitoring (Sentry/DataDog)
+### Milestone 1 - Hello World
+- Simple Express server with Twilio webhook
+- Health check endpoint
+- Railway deployment ready
+- Starting point for incremental build
+
+---
+
+## Previous Architecture Reference
+
+The entries below document what was built in the original complex architecture. These features will be rebuilt incrementally through Milestones 7-15.
 
 ---
 
@@ -62,19 +68,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Phase 2B - Business Modules:**
 - Reminder Management module - CRUD for medication/appointment reminders (17 tests)
 - Scheduler Service module - BullMQ job scheduling with retry logic (14 tests)
-- Vercel Blob Storage Adapter - Audio file storage (7 tests)
+- Cloud Storage Storage Adapter - Audio file storage (7 tests)
 
 **Stack Changes:**
 - Database: PostgreSQL → Neon + Drizzle ORM
 - Auth: Custom JWT → Clerk (managed service)
-- Storage: Planned S3 → Vercel Blob
+- Storage: Planned S3 → Cloud Storage
 - Queue: Planned Redis → Upstash Redis (serverless)
-- Hosting: Self-hosted → Vercel
+- Hosting: Self-hosted → Railway
 
 **Impact:**
 - Removed User Management module from Phase 2 (Clerk handles it)
 - Improved type safety with Drizzle ORM
-- Simplified deployment with Vercel
+- Simplified deployment with Railway
 
 **Tests:** 38/38 passing (Phase 2)
 **Git Commit:** `497f0d7`
@@ -168,7 +174,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Complete AI enhancement with semantic memory search, conversation analysis, and analytics.
 
 ### Version 0.2.0 - "Serverless Foundation"
-Modern serverless stack upgrade preparing for scalable deployment on Vercel.
+Modern serverless stack upgrade preparing for scalable deployment on Railway.
 
 ### Version 0.1.0 - "Voice Infrastructure"
 Complete voice communication system with phone calls, speech processing, and conversation management.

@@ -1,6 +1,8 @@
 # Example: Using Modules in API Routes
 
-This document shows how to refactor API routes to use the new modular architecture.
+> **Note:** This document shows the modular API pattern used in the full architecture (Phase C, Milestones 11+). For the current simple implementation, see [INCREMENTAL_BUILD_GUIDE.md](../INCREMENTAL_BUILD_GUIDE.md).
+
+This pattern shows how to refactor API routes to use the modular architecture.
 
 ## Before: Direct Implementation
 

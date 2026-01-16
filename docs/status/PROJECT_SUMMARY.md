@@ -346,20 +346,13 @@ JWT_SECRET=your_jwt_secret_min_32_chars
 
 ### **Deployment Options**
 
-**Recommended: Vercel**
-```bash
-npm install -g vercel
-vercel login
-vercel
-vercel env add DATABASE_URL
-# ... add all env vars
-vercel --prod
-```
+**Recommended: Railway**
 
-**Also Supported:**
-- Railway (full Node.js apps)
-- Render (free tier with persistent storage)
-- Netlify (serverless functions)
+1. Push to GitHub
+2. Go to [railway.app](https://railway.app)
+3. Click "New Project" → "Deploy from GitHub repo"
+4. Add environment variables
+5. Deploy
 
 **See:** [docs/guides/DEPLOYMENT_PLAN.md](../guides/DEPLOYMENT_PLAN.md)
 

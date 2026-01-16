@@ -139,9 +139,9 @@ CREATE TABLE IF NOT EXISTS seniors (...)
 
 **To deploy to production:**
 1. Follow `docs/guides/DEPLOYMENT_PLAN.md`
-2. Choose platform: Vercel (recommended), Railway, Render
+2. Deploy to Railway
 3. Add environment variables
-4. Deploy!
+4. Configure Twilio webhooks
 
 ---
 
@@ -189,15 +189,15 @@ Generate and apply migration files.
 3. Run `npx drizzle-kit push:pg`
 4. Verify tables created
 
-### Priority 3: Deploy Test UIs Online (1 hour)
-Make test UIs accessible to anyone via public URL.
+### Priority 3: Deploy Online (1 hour)
+Make the app accessible via public URL.
 
 **Steps:**
 1. Follow `docs/guides/DEPLOYMENT_PLAN.md`
-2. Deploy to Vercel (easiest)
+2. Deploy to Railway
 3. Add environment variables
-4. Test all 3 UIs
-5. Share public URLs
+4. Configure Twilio webhooks
+5. Test the deployment
 
 ---
 

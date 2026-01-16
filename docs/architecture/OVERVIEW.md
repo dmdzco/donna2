@@ -85,11 +85,11 @@
 
 | Component | Technology | Purpose | Benefits |
 |-----------|-----------|---------|----------|
-| **Frontend Hosting** | Vercel | Next.js deployment | Edge functions, auto-scaling, instant deployments |
+| **Hosting** | Railway | Node.js deployment | Auto-deploy from GitHub, easy scaling |
 | **Database** | Neon | Serverless PostgreSQL | Autoscaling, branching, 0ms cold starts |
 | **ORM** | Drizzle | Type-safe database access | TypeScript-first, lightweight, migration support |
 | **Authentication** | Clerk | User management & auth | Social login, session management, webhooks |
-| **File Storage** | Vercel Blob | Audio recordings | CDN-backed, simple API, serverless |
+| **File Storage** | S3/Cloudflare R2 | Audio recordings | CDN-backed, simple API, serverless |
 | **Job Queue** | Upstash Redis | Scheduled calls (BullMQ) | Serverless Redis, durable queues |
 
 ### Why Serverless?
@@ -105,7 +105,7 @@
 - Easy environment management
 
 **Performance:**
-- Global edge network (Vercel)
+- Fast deployments (Railway)
 - Connection pooling (Neon)
 - Near-zero cold starts
 
@@ -124,9 +124,9 @@
 |-------|--------|-------|-------------------|
 | **Database** | PostgreSQL (pg) | Neon + Drizzle | ✅ Yes - Migrate to Drizzle schemas |
 | **Auth** | JWT + bcrypt | Clerk | ✅ Yes - Remove User Management module |
-| **Storage** | S3/MinIO | Vercel Blob | ✅ Yes - Update audio storage adapter |
+| **Storage** | S3/MinIO | S3/R2 | ✅ Yes - Update audio storage adapter |
 | **Queue** | BullMQ + Redis | BullMQ + Upstash | ⚠️ Minor - Update Redis connection |
-| **Hosting** | Self-hosted | Vercel | ✅ Yes - Add vercel.json config |
+| **Hosting** | Self-hosted | Railway | ✅ Yes - Add railway.json config |
 
 ### Migration Priority
 
@@ -147,19 +147,19 @@
    - Update connection string
 
 **Phase 2B (During Phase 2):**
-4. ✅ **Add Vercel Blob Storage**
+4. ✅ **Add Cloud Storage**
    - Create storage adapter for audio files
-   - Migrate from local/S3 storage
+   - Use S3-compatible storage (R2, S3)
 
 5. ✅ **Setup Upstash Redis**
    - Create Upstash account
    - Update Scheduler Service to use Upstash
 
 **Phase 2C (Deployment):**
-6. ✅ **Deploy to Vercel** (Ready)
-   - Configure vercel.json
+6. ✅ **Deploy to Railway** (Ready)
+   - Configure railway.json
    - Set environment variables
-   - Deploy API as serverless functions
+   - Deploy API
 
 ---
 
@@ -696,9 +696,9 @@ open http://localhost:3001/test/test-phase1.html
 ### Production Deployment
 
 **Recommended Stack:**
-- **Hosting:** Railway, Render, or Heroku
-- **Database:** Managed PostgreSQL (Supabase, Neon, Railway)
-- **Redis:** Redis Cloud or Upstash (for Phase 2)
+- **Hosting:** Railway
+- **Database:** Neon (Serverless PostgreSQL)
+- **Redis:** Upstash (for scheduled jobs)
 - **Environment:** Node.js ≥20
 
 **Deployment Steps:**
@@ -737,7 +737,7 @@ All 12 business modules and 6 adapters are implemented with 170/170 tests passin
 
 1. **API Routes Refactoring** - Replace direct DB queries with module calls (see `docs/status/REMAINING_WORK.md`)
 2. **Database Migrations** - Generate SQL migration files with Drizzle Kit
-3. **Production Deployment** - Deploy to Vercel/Railway following deployment guide
+3. **Production Deployment** - Deploy to Railway following deployment guide
 4. **Integration Testing** - End-to-end call flow testing with Twilio webhooks
 5. **Monitoring Setup** - Add APM and error tracking (Sentry)
 

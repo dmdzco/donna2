@@ -2,6 +2,7 @@ import { db } from '../db/client.js';
 import { reminders, seniors } from '../db/schema.js';
 import { eq, and, lte, isNull, or, sql } from 'drizzle-orm';
 import twilio from 'twilio';
+import { memoryService } from './memory.js';
 
 // Initialize Twilio client lazily
 let twilioClient = null;
@@ -12,8 +13,11 @@ const getTwilioClient = () => {
   return twilioClient;
 };
 
-// Store reminder context for active calls (callSid -> reminder)
+// Store pre-fetched context for outbound calls (callSid -> { reminder, senior, memoryContext, reminderPrompt })
 export const pendingReminderCalls = new Map();
+
+// Store pre-fetched context by phone number (for manual API calls)
+export const prefetchedContextByPhone = new Map();
 
 export const schedulerService = {
   /**
@@ -74,6 +78,7 @@ export const schedulerService = {
 
   /**
    * Trigger an outbound call for a reminder
+   * Pre-fetches memory context BEFORE calling Twilio to reduce lag
    */
   async triggerReminderCall(reminder, senior, baseUrl) {
     const client = getTwilioClient();
@@ -83,7 +88,13 @@ export const schedulerService = {
     }
 
     try {
-      console.log(`[Scheduler] Triggering call for reminder: "${reminder.title}" to ${senior.name}`);
+      console.log(`[Scheduler] Pre-fetching context for ${senior.name}...`);
+
+      // PRE-FETCH: Build memory context (includes news) BEFORE the call
+      const memoryContext = await memoryService.buildContext(senior.id, null, senior);
+      const reminderPrompt = this.formatReminderPrompt(reminder);
+
+      console.log(`[Scheduler] Context ready (${memoryContext?.length || 0} chars), triggering call...`);
 
       const call = await client.calls.create({
         to: senior.phone,
@@ -93,10 +104,12 @@ export const schedulerService = {
         statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
       });
 
-      // Store reminder context for this call
+      // Store pre-fetched context for this call (ready when /voice/answer is hit)
       pendingReminderCalls.set(call.sid, {
         reminder,
         senior,
+        memoryContext,  // PRE-FETCHED
+        reminderPrompt, // PRE-FORMATTED
         triggeredAt: new Date()
       });
 
@@ -107,6 +120,37 @@ export const schedulerService = {
       console.error('[Scheduler] Failed to initiate call:', error.message);
       return null;
     }
+  },
+
+  /**
+   * Pre-fetch context for a manual outbound call (before Twilio connects)
+   */
+  async prefetchForPhone(phoneNumber, senior) {
+    console.log(`[Scheduler] Pre-fetching context for manual call to ${senior?.name || phoneNumber}...`);
+
+    const memoryContext = senior
+      ? await memoryService.buildContext(senior.id, null, senior)
+      : null;
+
+    prefetchedContextByPhone.set(phoneNumber, {
+      senior,
+      memoryContext,
+      fetchedAt: new Date()
+    });
+
+    console.log(`[Scheduler] Pre-fetch complete for ${phoneNumber}`);
+    return { senior, memoryContext };
+  },
+
+  /**
+   * Get pre-fetched context for a phone number (for manual API calls)
+   */
+  getPrefetchedContext(phoneNumber) {
+    const context = prefetchedContextByPhone.get(phoneNumber);
+    if (context) {
+      prefetchedContextByPhone.delete(phoneNumber); // One-time use
+    }
+    return context;
   },
 
   /**

@@ -35,9 +35,14 @@ Your personality:
 
   prompt += `\n\nUse this context naturally in conversation. Reference past topics when relevant but don't force it.
 
-If there's news in the context, you can bring it up conversationally when appropriate.
-Example: "I heard something interesting about [topic] today..." or "Did you hear about [news]?"
-Don't force news into conversation - only mention if it flows naturally or if they seem interested.`;
+CONVERSATION FLOW:
+1. Start with a warm greeting using their name
+2. Ask how they're doing today
+3. After they respond, share ONE interesting news item from the context (if available)
+   Example: "I heard something interesting today - [brief news]. What do you think about that?"
+4. Let the conversation flow naturally from there
+
+Keep the news mention brief and conversational. If they're not interested, move on gracefully.`;
 
   return prompt;
 };

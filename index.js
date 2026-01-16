@@ -57,32 +57,44 @@ app.post('/voice/answer', async (req, res) => {
   const fromPhone = req.body.From || req.body.To; // From for inbound, To for outbound
   console.log(`[${callSid}] Call answered from ${fromPhone}, starting media stream`);
 
-  // Check if this call was triggered by a reminder
+  // Check if this call was triggered by a reminder (context is PRE-FETCHED)
   const reminderContext = schedulerService.getReminderContext(callSid);
-  let reminderPrompt = null;
-  if (reminderContext) {
-    console.log(`[${callSid}] This is a reminder call: "${reminderContext.reminder.title}"`);
-    reminderPrompt = schedulerService.formatReminderPrompt(reminderContext.reminder);
-  }
 
-  // Look up senior by phone number
+  // Check if we have pre-fetched context for manual outbound call
+  const prefetchedContext = schedulerService.getPrefetchedContext(fromPhone);
+
   let senior = null;
   let memoryContext = null;
+  let reminderPrompt = null;
 
-  try {
-    // If reminder call, we already have the senior
-    senior = reminderContext?.senior || await seniorService.findByPhone(fromPhone);
-    if (senior) {
-      console.log(`[${callSid}] Found senior: ${senior.name} (${senior.id})`);
-      memoryContext = await memoryService.buildContext(senior.id, null, senior);
-      if (memoryContext) {
-        console.log(`[${callSid}] Built memory context (${memoryContext.length} chars)`);
+  if (reminderContext) {
+    // REMINDER CALL: Use pre-fetched context (no lag!)
+    console.log(`[${callSid}] Reminder call with pre-fetched context: "${reminderContext.reminder.title}"`);
+    senior = reminderContext.senior;
+    memoryContext = reminderContext.memoryContext;
+    reminderPrompt = reminderContext.reminderPrompt;
+  } else if (prefetchedContext) {
+    // MANUAL OUTBOUND: Use pre-fetched context
+    console.log(`[${callSid}] Manual call with pre-fetched context`);
+    senior = prefetchedContext.senior;
+    memoryContext = prefetchedContext.memoryContext;
+  } else {
+    // INBOUND CALL: Fetch context now (can't pre-fetch unknown callers)
+    try {
+      senior = await seniorService.findByPhone(fromPhone);
+      if (senior) {
+        console.log(`[${callSid}] Inbound call from ${senior.name}, fetching context...`);
+        memoryContext = await memoryService.buildContext(senior.id, null, senior);
+      } else {
+        console.log(`[${callSid}] Unknown caller, no senior profile found`);
       }
-    } else {
-      console.log(`[${callSid}] Unknown caller, no senior profile found`);
+    } catch (error) {
+      console.error(`[${callSid}] Error looking up senior:`, error);
     }
-  } catch (error) {
-    console.error(`[${callSid}] Error looking up senior:`, error);
+  }
+
+  if (memoryContext) {
+    console.log(`[${callSid}] Memory context ready (${memoryContext.length} chars)`);
   }
 
   // Create conversation record in database
@@ -168,6 +180,12 @@ app.post('/api/call', async (req, res) => {
   }
 
   try {
+    // PRE-FETCH: Look up senior and build context BEFORE calling Twilio
+    const senior = await seniorService.findByPhone(phoneNumber);
+    if (senior) {
+      await schedulerService.prefetchForPhone(phoneNumber, senior);
+    }
+
     const call = await twilioClient.calls.create({
       to: phoneNumber,
       from: process.env.TWILIO_PHONE_NUMBER,

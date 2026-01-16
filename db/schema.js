@@ -1,0 +1,61 @@
+import { pgTable, uuid, varchar, text, timestamp, boolean, json, integer, vector } from 'drizzle-orm/pg-core';
+
+// Senior profiles
+export const seniors = pgTable('seniors', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  phone: varchar('phone', { length: 50 }).notNull().unique(),
+  timezone: varchar('timezone', { length: 100 }).default('America/New_York'),
+  interests: text('interests').array(),
+  familyInfo: json('family_info'),
+  medicalNotes: text('medical_notes'),
+  preferredCallTimes: json('preferred_call_times'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Conversations (call history)
+export const conversations = pgTable('conversations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  seniorId: uuid('senior_id').references(() => seniors.id),
+  callSid: varchar('call_sid', { length: 100 }),
+  startedAt: timestamp('started_at').notNull(),
+  endedAt: timestamp('ended_at'),
+  durationSeconds: integer('duration_seconds'),
+  status: varchar('status', { length: 50 }),
+  summary: text('summary'),
+  sentiment: varchar('sentiment', { length: 50 }),
+  concerns: text('concerns').array(),
+  transcript: json('transcript'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// Memories with vector embeddings for semantic search
+export const memories = pgTable('memories', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  seniorId: uuid('senior_id').references(() => seniors.id),
+  type: varchar('type', { length: 50 }).notNull(), // fact, preference, event, concern, relationship
+  content: text('content').notNull(),
+  source: varchar('source', { length: 255 }), // conversation_id or 'manual'
+  importance: integer('importance').default(50), // 0-100
+  embedding: vector('embedding', { dimensions: 1536 }), // OpenAI text-embedding-3-small
+  metadata: json('metadata'), // additional context
+  createdAt: timestamp('created_at').defaultNow(),
+  lastAccessedAt: timestamp('last_accessed_at'),
+});
+
+// Reminders
+export const reminders = pgTable('reminders', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  seniorId: uuid('senior_id').references(() => seniors.id),
+  type: varchar('type', { length: 50 }), // medication, appointment, custom
+  title: varchar('title', { length: 255 }).notNull(),
+  description: text('description'),
+  scheduledTime: timestamp('scheduled_time'),
+  isRecurring: boolean('is_recurring').default(false),
+  cronExpression: varchar('cron_expression', { length: 100 }),
+  isActive: boolean('is_active').default(true),
+  lastDeliveredAt: timestamp('last_delivered_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+});

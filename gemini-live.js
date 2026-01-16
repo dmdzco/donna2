@@ -118,7 +118,9 @@ export class GeminiLiveSession {
       console.log(`[${this.streamSid}] Sent greeting prompt for ${this.senior?.name || 'unknown'}`);
 
       // Initialize Deepgram for user speech transcription
+      console.log(`[${this.streamSid}] About to connect Deepgram...`);
       await this.connectDeepgram();
+      console.log(`[${this.streamSid}] Deepgram connection attempt complete`);
 
     } catch (error) {
       console.error(`[${this.streamSid}] Failed to connect to Gemini:`, error);

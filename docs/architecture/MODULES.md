@@ -1,18 +1,20 @@
-# Donna Modular Architecture - Quick Start
+# Donna Modular Architecture
 
-This guide helps you understand and work with Donna's new modular architecture.
+This guide explains Donna's modular architecture design. This architecture is the goal for Phase C (Milestones 11-15) of the incremental build.
+
+> **Note:** Start with the simple Gemini voice implementation first. See [INCREMENTAL_BUILD_GUIDE.md](../INCREMENTAL_BUILD_GUIDE.md) for the milestone-based roadmap.
 
 ---
 
-## 🎯 What Is This?
+## Overview
 
-Donna is now built with **12 independent modules** that can be:
-- ✅ Tested in isolation
-- ✅ Swapped without affecting others
-- ✅ Deployed separately
-- ✅ Developed in parallel
+The full Donna architecture uses **independent modules** that can be:
+- Tested in isolation
+- Swapped without affecting others
+- Deployed separately
+- Developed in parallel
 
-## 📦 Implemented Modules (So Far)
+## Module Reference
 
 ### ✅ 1. Senior Profiles Module
 **Location**: `modules/senior-profiles/`
@@ -366,55 +368,48 @@ Modules should be pure functions of their inputs. Store state in databases, not 
 
 ---
 
-## 📊 Current Status
+## Target Architecture (Phase C)
 
-| Module | Status | Tests | Documentation |
-|--------|--------|-------|---------------|
-| Senior Profiles | ✅ Implemented | ⏳ TODO | ✅ Complete |
-| LLM Conversation | ✅ Implemented | ⏳ TODO | ✅ Complete |
-| Skills System | ✅ Implemented | ⏳ TODO | ✅ Complete |
-| Anthropic Adapter | ✅ Implemented | ⏳ TODO | ✅ Complete |
-| User Management | ⏳ TODO | - | ✅ Spec ready |
-| Reminder Management | ⏳ TODO | - | ✅ Spec ready |
-| Conversation Manager | ⏳ TODO | - | ✅ Spec ready |
-| Call Orchestrator | ⏳ TODO | - | ✅ Spec ready |
-| Scheduler | ⏳ TODO | - | ✅ Spec ready |
-| Voice Pipeline | ⏳ TODO | - | ✅ Spec ready |
-| Observer Agent | ⏳ TODO | - | ✅ Spec ready |
-| Memory & Context | ⏳ TODO | - | ✅ Spec ready |
-| Analytics | ⏳ TODO | - | ✅ Spec ready |
+This modular architecture is the goal for Milestones 11-15. The modules will be built incrementally:
 
----
-
-## 🤝 Contributing
-
-When adding features:
-
-1. **Check if it's a new module or enhancement to existing**
-2. **Define interface first** (in `module-interfaces.ts`)
-3. **Implement module** (in `modules/`)
-4. **Add tests** (in `modules/*/tests/`)
-5. **Register in container** (in `config/dependency-injection.ts`)
-6. **Update routes** (if needed, in `apps/api/src/routes/`)
+| Module | Milestone | Purpose |
+|--------|-----------|---------|
+| Senior Profiles | 7 | CRUD for senior profiles |
+| Reminder Management | 8 | Medication/appointment reminders |
+| Scheduler | 9 | Automated call scheduling |
+| Conversation Manager | 11 | Conversation storage |
+| Call Orchestrator | 11 | Call lifecycle management |
+| Voice Pipeline | 11 | STT/TTS orchestration |
+| LLM Conversation | 11 | Claude conversation engine |
+| Observer Agent | 12 | Conversation quality analysis |
+| Memory & Context | 13 | Long-term memory |
+| Analytics | 14 | Usage metrics & insights |
 
 ---
 
-## 🆘 Getting Help
+## Adding New Modules
 
-- **Architecture questions**: See `docs/ARCHITECTURE_V2.md`
-- **Migration questions**: See `docs/MIGRATION_GUIDE.md`
-- **Route examples**: See `docs/EXAMPLE_ROUTE_USAGE.md`
-- **Interface reference**: See `packages/shared/src/interfaces/module-interfaces.ts`
+When the architecture is ready (Phase C):
+
+1. Define interface first
+2. Implement module in `modules/`
+3. Add tests
+4. Register in DI container
+5. Update routes if needed
 
 ---
 
-## ✨ Benefits Summary
+## Getting Help
 
-✅ **Interchangeable**: Swap any module or adapter
-✅ **Testable**: Mock any dependency
-✅ **Maintainable**: Changes isolated to one module
-✅ **Scalable**: Each module can scale independently
-✅ **Clear**: Easy to understand what each piece does
-✅ **Parallel**: Multiple teams can work simultaneously
+- **Build roadmap**: See `docs/INCREMENTAL_BUILD_GUIDE.md`
+- **Architecture overview**: See `docs/architecture/OVERVIEW.md`
+- **Deployment**: See `docs/guides/DEPLOYMENT_PLAN.md`
 
-Happy coding! 🚀
+---
+
+## Benefits
+
+- **Interchangeable**: Swap any module or adapter
+- **Testable**: Mock any dependency
+- **Maintainable**: Changes isolated to one module
+- **Scalable**: Each module can scale independently

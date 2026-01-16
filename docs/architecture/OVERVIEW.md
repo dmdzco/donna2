@@ -1,7 +1,8 @@
-# Donna Architecture V2 - Modular Design
+# Donna Architecture - Full System Design
 
-**Last Updated:** January 2026
-**Status:** All Phases Complete ✅ | 170/170 Tests Passing ✅ | Production Ready 🚀
+This document describes the complete Donna architecture. This is the target for **Phase C (Milestones 11-15)** of the incremental build.
+
+> **Getting Started?** See [INCREMENTAL_BUILD_GUIDE.md](../INCREMENTAL_BUILD_GUIDE.md) for the milestone-based roadmap starting with simple Gemini voice.
 
 ---
 
@@ -53,7 +54,7 @@
 │ ✅ Voice Pipeline        │              │ ✅ Twilio (Calls)        │
 │ ✅ Conversation Manager  │              │                          │
 │ ✅ Call Orchestrator     │              │ Phase 2 (COMPLETE):      │
-│                          │              │ ✅ Vercel Blob (Storage) │
+│                          │              │ ✅ Cloud Storage (Storage) │
 │ Phase 2 (COMPLETE):      │              │                          │
 │ ✅ Reminder Management   │              │ Phase 3 (COMPLETE):      │
 │ ✅ Scheduler Service     │              │ ✅ OpenAI (Embeddings)   │
@@ -72,7 +73,7 @@
 │  • Neon (Serverless PostgreSQL - Database)                   │
 │  • Drizzle ORM (Type-safe database access)                   │
 │  • Upstash Redis (Serverless job queue for Scheduler)        │
-│  • Vercel Blob (Audio recording storage)                     │
+│  • Cloud Storage (Audio recording storage)                     │
 │  • Clerk (Authentication & user management)                  │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -321,7 +322,7 @@ class VoicePipelineService {
 | **Deepgram Adapter** | Adapter | ✅ Complete | 5/5 | Speech-to-Text |
 | **ElevenLabs Adapter** | Adapter | ✅ Complete | 9/9 | Text-to-Speech |
 | **Twilio Adapter** | Adapter | ✅ Complete | 12/12 | Phone call gateway |
-| **Vercel Blob Adapter** | Adapter | ✅ Complete | 7/7 | Audio file storage |
+| **Cloud Storage Adapter** | Adapter | ✅ Complete | 7/7 | Audio file storage |
 | **OpenAI Adapter** | Adapter | ✅ Complete | 8/8 | Embeddings for semantic search |
 
 **Total Modules:** 17 implemented | 11 business modules ✅ | 6 adapters ✅ | 170/170 tests passing ✅
@@ -392,7 +393,7 @@ class VoicePipelineService {
    - 14 tests passing
    - Interface: `ISchedulerService`
 
-3. **Vercel Blob Adapter** (`adapters/vercel-blob/`)
+3. **Cloud Storage Adapter** (`adapters/storage/`)
    - Audio file storage
    - 7 tests passing
    - Interface: `IStorageAdapter`
@@ -511,7 +512,7 @@ class VoicePipelineService {
 - ✅ Neon database account
 - ✅ Clerk account
 - ✅ Upstash Redis account
-- ✅ Vercel account
+- ✅ Railway account
 
 **Deliverables:**
 1. ✅ Drizzle ORM integration (migrate all repositories)
@@ -524,7 +525,7 @@ class VoicePipelineService {
 **Deliverables:**
 1. ✅ Reminder Management module (17 tests)
 2. ✅ Scheduler Service module with Upstash Redis (14 tests)
-3. ✅ Vercel Blob storage adapter (7 tests)
+3. ✅ Cloud Storage storage adapter (7 tests)
 
 **Success Criteria:**
 - ✅ All repositories use Drizzle ORM (type-safe)
@@ -534,7 +535,7 @@ class VoicePipelineService {
 - ✅ Calls can be scheduled for specific times
 - ✅ Scheduled calls execute automatically via BullMQ
 - ✅ Failed calls retry with exponential backoff
-- ✅ Audio recordings stored in Vercel Blob
+- ✅ Audio recordings stored in Cloud Storage
 
 ---
 
@@ -550,7 +551,7 @@ class VoicePipelineService {
 - ✅ Anthropic Claude API (for Observer Agent)
 - ✅ PostgreSQL with pgvector extension (for semantic memory search)
 - ✅ OpenAI API (for text embeddings)
-- ✅ Vercel Blob (for audio storage)
+- ✅ Cloud Storage (for audio storage)
 
 **Modules:**
 1. ✅ Observer Agent - Conversation quality analysis (14 tests)

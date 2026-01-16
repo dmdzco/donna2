@@ -67,18 +67,43 @@ export class BrowserSession {
             voiceConfig: {
               prebuiltVoiceConfig: { voiceName: 'Aoede' }
             }
+          },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {}
+        },
+        callbacks: {
+          onopen: () => {
+            console.log('[Browser] Connected to Gemini Live API');
+            this.isConnected = true;
+            this.sendToBrowser({ type: 'status', message: 'Connected to Donna!', state: 'ready' });
+          },
+          onmessage: (message) => {
+            this.handleGeminiMessage(message);
+          },
+          onerror: (error) => {
+            console.error('[Browser] Gemini error:', error.message);
+            this.sendToBrowser({ type: 'status', message: 'Connection error', state: 'error' });
+          },
+          onclose: (event) => {
+            console.log('[Browser] Gemini connection closed:', event?.reason || 'unknown');
+            this.isConnected = false;
           }
         }
       });
 
-      this.isConnected = true;
-      console.log('[Browser] Connected to Gemini');
+      // Send greeting prompt to start the conversation
+      const greetingPrompt = this.senior
+        ? `Greet ${this.senior.name} warmly by name. You're their AI companion Donna calling to check in. Keep it brief - just say hi.`
+        : 'Say a brief, warm greeting. You are Donna, an AI companion.';
 
-      // Handle Gemini responses
-      this.geminiSession.on('message', (msg) => this.handleGeminiMessage(msg));
-
-      // Send status to browser
-      this.sendToBrowser({ type: 'status', message: 'Connected to Donna!', state: 'ready' });
+      this.geminiSession.sendClientContent({
+        turns: [{
+          role: 'user',
+          parts: [{ text: greetingPrompt }]
+        }],
+        turnComplete: true
+      });
+      console.log(`[Browser] Sent greeting prompt for ${this.senior?.name || 'unknown'}`);
 
     } catch (error) {
       console.error('[Browser] Failed to connect to Gemini:', error);

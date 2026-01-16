@@ -1,0 +1,19 @@
+{
+  "name": "@donna/vercel-blob",
+  "version": "1.0.0",
+  "description": "Vercel Blob Storage Adapter - Audio file storage",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@donna/shared": "*",
+    "@vercel/blob": "^0.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  }
+}

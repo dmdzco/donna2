@@ -1,0 +1,19 @@
+{
+  "name": "@donna/llm-conversation",
+  "version": "1.0.0",
+  "description": "LLM conversation engine module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo 'No tests yet'"
+  },
+  "dependencies": {
+    "@donna/shared": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "jest": "^29.0.0"
+  }
+}

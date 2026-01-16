@@ -1,0 +1,1 @@
+export { ObserverAgentService } from './service';

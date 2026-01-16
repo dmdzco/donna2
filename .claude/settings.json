@@ -1,0 +1,22 @@
+{
+  "projectName": "Donna",
+  "description": "AI voice companion for elderly individuals",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '📱 Donna Project Loaded' && echo 'Focus areas: Accessibility, Privacy, Senior UX' && echo ''"
+          }
+        ]
+      }
+    ]
+  },
+  "preferences": {
+    "accessibilityFirst": true,
+    "seniorFriendlyUX": true,
+    "hipaaCompliant": true
+  }
+}

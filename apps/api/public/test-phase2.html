@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Donna Phase 2 Test UI</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    h1 {
+      color: #f5576c;
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: #666;
+      font-size: 14px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .card h2 {
+      color: #333;
+      font-size: 20px;
+      margin-bottom: 16px;
+      border-bottom: 2px solid #f5576c;
+      padding-bottom: 8px;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      color: #555;
+      margin-bottom: 6px;
+      font-size: 14px;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: #f5576c;
+    }
+
+    button {
+      width: 100%;
+      padding: 12px 20px;
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(245, 87, 108, 0.4);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .response {
+      margin-top: 16px;
+      padding: 12px;
+      background: #f5f7fa;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: 'Courier New', monospace;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .response.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .response.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .status-indicator {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 8px;
+    }
+
+    .status-indicator.connected {
+      background: #28a745;
+    }
+
+    .status-indicator.disconnected {
+      background: #dc3545;
+    }
+
+    .module-list {
+      list-style: none;
+      padding: 0;
+    }
+
+    .module-list li {
+      padding: 8px 12px;
+      margin-bottom: 8px;
+      background: #f5f7fa;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .module-list .status {
+      float: right;
+      font-weight: 600;
+    }
+
+    .module-list .status.ready {
+      color: #28a745;
+    }
+
+    .module-list .status.not-ready {
+      color: #dc3545;
+    }
+
+    @media (max-width: 768px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📅 Donna Phase 2 Test Interface</h1>
+      <p class="subtitle">Test business modules - Reminders, Scheduler & Storage</p>
+    </header>
+
+    <div class="grid">
+      <!-- System Status -->
+      <div class="card">
+        <h2>📊 System Status</h2>
+        <ul class="module-list" id="moduleStatus">
+          <li>
+            <span class="status-indicator disconnected"></span>
+            Loading modules...
+          </li>
+        </ul>
+        <button onclick="checkSystemStatus()" style="margin-top: 12px;">Refresh Status</button>
+      </div>
+
+      <!-- Reminder Management - Create -->
+      <div class="card">
+        <h2>💊 Create Reminder</h2>
+        <div class="form-group">
+          <label for="reminderSeniorId">Senior ID</label>
+          <input type="text" id="reminderSeniorId" placeholder="Enter senior ID" />
+        </div>
+        <div class="form-group">
+          <label for="reminderType">Type</label>
+          <select id="reminderType">
+            <option value="medication">Medication</option>
+            <option value="appointment">Appointment</option>
+            <option value="activity">Activity</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="reminderTitle">Title</label>
+          <input type="text" id="reminderTitle" placeholder="e.g., Take morning pills" />
+        </div>
+        <div class="form-group">
+          <label for="reminderDescription">Description</label>
+          <textarea id="reminderDescription" rows="2" placeholder="Additional details..."></textarea>
+        </div>
+        <div class="form-group">
+          <label for="reminderTime">Scheduled Time</label>
+          <input type="time" id="reminderTime" value="09:00" />
+        </div>
+        <button onclick="createReminder()">Create Reminder</button>
+        <div class="response" id="createReminderResponse" style="display: none;"></div>
+      </div>
+
+      <!-- Reminder Management - List -->
+      <div class="card">
+        <h2>📋 View Reminders</h2>
+        <div class="form-group">
+          <label for="listReminderSeniorId">Senior ID</label>
+          <input type="text" id="listReminderSeniorId" placeholder="Enter senior ID" />
+        </div>
+        <button onclick="listReminders()">Get All Reminders</button>
+        <button onclick="getPendingReminders()" style="margin-top: 8px;">Get Pending Only</button>
+        <div class="response" id="listReminderResponse" style="display: none;"></div>
+      </div>
+
+      <!-- Scheduler - Schedule Call -->
+      <div class="card">
+        <h2>⏰ Schedule Call</h2>
+        <div class="form-group">
+          <label for="scheduleSeniorId">Senior ID</label>
+          <input type="text" id="scheduleSeniorId" placeholder="Enter senior ID" />
+        </div>
+        <div class="form-group">
+          <label for="scheduleDate">Date</label>
+          <input type="date" id="scheduleDate" />
+        </div>
+        <div class="form-group">
+          <label for="scheduleTime">Time</label>
+          <input type="time" id="scheduleTime" value="14:00" />
+        </div>
+        <button onclick="scheduleCall()">Schedule Call</button>
+        <div class="response" id="scheduleResponse" style="display: none;"></div>
+      </div>
+
+      <!-- Scheduler - View Upcoming -->
+      <div class="card">
+        <h2>📅 View Scheduled Calls</h2>
+        <div class="form-group">
+          <label for="viewScheduleSeniorId">Senior ID</label>
+          <input type="text" id="viewScheduleSeniorId" placeholder="Enter senior ID" />
+        </div>
+        <button onclick="getUpcomingCalls()">Get Upcoming Calls</button>
+        <div class="response" id="upcomingResponse" style="display: none;"></div>
+      </div>
+
+      <!-- Storage Adapter -->
+      <div class="card">
+        <h2>💾 Test Storage</h2>
+        <div class="form-group">
+          <label for="storageConvId">Conversation ID</label>
+          <input type="text" id="storageConvId" placeholder="conv-123" />
+        </div>
+        <div class="form-group">
+          <label for="storageData">Test Data (base64)</label>
+          <textarea id="storageData" rows="3" placeholder="Enter base64-encoded data">SGVsbG8gV29ybGQh</textarea>
+        </div>
+        <button onclick="testStorage()">Upload Test File</button>
+        <div class="response" id="storageResponse" style="display: none;"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>📋 Test Logs</h2>
+      <div class="response" id="testLogs" style="display: block; max-height: 400px;">
+        Ready to test Phase 2 modules...
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+
+    // Set default date to tomorrow
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    document.getElementById('scheduleDate').value = tomorrow.toISOString().split('T')[0];
+
+    function log(message, type = 'info') {
+      const logs = document.getElementById('testLogs');
+      const timestamp = new Date().toLocaleTimeString();
+      const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : 'ℹ️';
+      logs.textContent += `\n[${timestamp}] ${prefix} ${message}`;
+      logs.scrollTop = logs.scrollHeight;
+    }
+
+    async function checkSystemStatus() {
+      try {
+        log('Checking Phase 2 module status...', 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase2/status`);
+        const data = await response.json();
+
+        const statusList = document.getElementById('moduleStatus');
+        statusList.innerHTML = '';
+
+        Object.entries(data.modules).forEach(([name, status]) => {
+          const li = document.createElement('li');
+          const indicator = status.ready ? 'connected' : 'disconnected';
+          const statusClass = status.ready ? 'ready' : 'not-ready';
+          li.innerHTML = `
+            <span class="status-indicator ${indicator}"></span>
+            ${name}
+            <span class="status ${statusClass}">${status.ready ? 'Ready' : 'Not Ready'}</span>
+          `;
+          statusList.appendChild(li);
+        });
+
+        log('Phase 2 status refreshed', 'success');
+      } catch (error) {
+        log(`Error checking status: ${error.message}`, 'error');
+      }
+    }
+
+    async function createReminder() {
+      const seniorId = document.getElementById('reminderSeniorId').value;
+      const type = document.getElementById('reminderType').value;
+      const title = document.getElementById('reminderTitle').value;
+      const description = document.getElementById('reminderDescription').value;
+      const scheduledTime = document.getElementById('reminderTime').value;
+      const responseDiv = document.getElementById('createReminderResponse');
+
+      if (!seniorId || !title) {
+        responseDiv.textContent = 'Senior ID and Title are required';
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        return;
+      }
+
+      try {
+        log(`Creating ${type} reminder for senior ${seniorId}...`, 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase2/reminders`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ seniorId, type, title, description, scheduledTime })
+        });
+
+        const data = await response.json();
+        responseDiv.textContent = JSON.stringify(data, null, 2);
+        responseDiv.className = response.ok ? 'response success' : 'response error';
+        responseDiv.style.display = 'block';
+
+        if (response.ok) {
+          log(`Reminder created: ${data.reminder?.id}`, 'success');
+        } else {
+          log(`Failed: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        log(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function listReminders() {
+      const seniorId = document.getElementById('listReminderSeniorId').value;
+      const responseDiv = document.getElementById('listReminderResponse');
+
+      if (!seniorId) {
+        responseDiv.textContent = 'Senior ID is required';
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        return;
+      }
+
+      try {
+        log(`Fetching reminders for senior ${seniorId}...`, 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase2/reminders/${seniorId}`);
+        const data = await response.json();
+
+        responseDiv.textContent = JSON.stringify(data, null, 2);
+        responseDiv.className = response.ok ? 'response success' : 'response error';
+        responseDiv.style.display = 'block';
+
+        if (response.ok) {
+          log(`Found ${data.count} reminders`, 'success');
+        } else {
+          log(`Failed: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        log(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function getPendingReminders() {
+      const seniorId = document.getElementById('listReminderSeniorId').value;
+      const responseDiv = document.getElementById('listReminderResponse');
+
+      if (!seniorId) {
+        responseDiv.textContent = 'Senior ID is required';
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        return;
+      }
+
+      try {
+        log(`Fetching pending reminders for senior ${seniorId}...`, 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase2/reminders/${seniorId}/pending`);
+        const data = await response.json();
+
+        responseDiv.textContent = JSON.stringify(data, null, 2);
+        responseDiv.className = response.ok ? 'response success' : 'response error';
+        responseDiv.style.display = 'block';
+
+        if (response.ok) {
+          log(`Found ${data.count} pending reminders`, 'success');
+        } else {
+          log(`Failed: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        log(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function scheduleCall() {
+      const seniorId = document.getElementById('scheduleSeniorId').value;
+      const date = document.getElementById('scheduleDate').value;
+      const time = document.getElementById('scheduleTime').value;
+      const responseDiv = document.getElementById('scheduleResponse');
+
+      if (!seniorId || !date || !time) {
+        responseDiv.textContent = 'All fields are required';
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        return;
+      }
+
+      const scheduledTime = `${date}T${time}:00`;
+
+      try {
+        log(`Scheduling call for ${scheduledTime}...`, 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase2/schedule`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ seniorId, scheduledTime })
+        });
+
+        const data = await response.json();
+        responseDiv.textContent = JSON.stringify(data, null, 2);
+        responseDiv.className = response.ok ? 'response success' : 'response error';
+        responseDiv.style.display = 'block';
+
+        if (response.ok) {
+          log(`Call scheduled: ${data.scheduledCall?.id}`, 'success');
+        } else {
+          log(`Failed: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        log(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function getUpcomingCalls() {
+      const seniorId = document.getElementById('viewScheduleSeniorId').value;
+      const responseDiv = document.getElementById('upcomingResponse');
+
+      if (!seniorId) {
+        responseDiv.textContent = 'Senior ID is required';
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        return;
+      }
+
+      try {
+        log(`Fetching upcoming calls for senior ${seniorId}...`, 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase2/schedule/${seniorId}`);
+        const data = await response.json();
+
+        responseDiv.textContent = JSON.stringify(data, null, 2);
+        responseDiv.className = response.ok ? 'response success' : 'response error';
+        responseDiv.style.display = 'block';
+
+        if (response.ok) {
+          log(`Found ${data.count} upcoming calls`, 'success');
+        } else {
+          log(`Failed: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        log(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function testStorage() {
+      const conversationId = document.getElementById('storageConvId').value;
+      const data = document.getElementById('storageData').value;
+      const responseDiv = document.getElementById('storageResponse');
+
+      if (!conversationId || !data) {
+        responseDiv.textContent = 'Conversation ID and data are required';
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        return;
+      }
+
+      try {
+        log('Testing Vercel Blob storage...', 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase2/storage/upload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversationId, data, contentType: 'audio/mpeg' })
+        });
+
+        const result = await response.json();
+        responseDiv.textContent = JSON.stringify(result, null, 2);
+        responseDiv.className = response.ok ? 'response success' : 'response error';
+        responseDiv.style.display = 'block';
+
+        if (response.ok) {
+          log(`File uploaded: ${result.url}`, 'success');
+        } else {
+          log(`Failed: ${result.error}`, 'error');
+        }
+      } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        log(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    // Check status on page load
+    window.addEventListener('load', () => {
+      log('Phase 2 Test UI loaded', 'success');
+      checkSystemStatus();
+    });
+  </script>
+</body>
+</html>

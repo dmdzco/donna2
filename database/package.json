@@ -1,0 +1,16 @@
+{
+  "name": "@donna/database",
+  "version": "1.0.0",
+  "description": "Donna database schema and migrations",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

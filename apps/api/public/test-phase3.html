@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Donna Phase 3 Test UI</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    h1 {
+      color: #4facfe;
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: #666;
+      font-size: 14px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .card h2 {
+      color: #333;
+      font-size: 20px;
+      margin-bottom: 16px;
+      border-bottom: 2px solid #4facfe;
+      padding-bottom: 8px;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      color: #555;
+      margin-bottom: 6px;
+      font-size: 14px;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: #4facfe;
+    }
+
+    button {
+      width: 100%;
+      padding: 12px 20px;
+      background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(79, 172, 254, 0.4);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .response {
+      margin-top: 16px;
+      padding: 12px;
+      background: #f5f7fa;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: 'Courier New', monospace;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .response.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .response.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .status-indicator {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 8px;
+    }
+
+    .status-indicator.connected {
+      background: #28a745;
+    }
+
+    .status-indicator.disconnected {
+      background: #dc3545;
+    }
+
+    .module-list {
+      list-style: none;
+      padding: 0;
+    }
+
+    .module-list li {
+      padding: 8px 12px;
+      margin-bottom: 8px;
+      background: #f5f7fa;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .module-list .status {
+      float: right;
+      font-weight: 600;
+    }
+
+    .module-list .status.ready {
+      color: #28a745;
+    }
+
+    .module-list .status.not-ready {
+      color: #dc3545;
+    }
+
+    @media (max-width: 768px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🧠 Donna Phase 3 Test Interface</h1>
+      <p class="subtitle">Test AI enhancement - Observer, Memory & Analytics</p>
+    </header>
+
+    <div class="grid">
+      <!-- System Status -->
+      <div class="card">
+        <h2>📊 System Status</h2>
+        <ul class="module-list" id="moduleStatus">
+          <li>
+            <span class="status-indicator disconnected"></span>
+            Loading modules...
+          </li>
+        </ul>
+        <button onclick="checkSystemStatus()" style="margin-top: 12px;">Refresh Status</button>
+      </div>
+
+      <!-- Memory - Store Memory -->
+      <div class="card">
+        <h2>💾 Store Memory</h2>
+        <div class="form-group">
+          <label for="memorySeniorId">Senior ID</label>
+          <input type="text" id="memorySeniorId" placeholder="Enter senior ID" />
+        </div>
+        <div class="form-group">
+          <label for="memoryType">Memory Type</label>
+          <select id="memoryType">
+            <option value="fact">Fact</option>
+            <option value="preference">Preference</option>
+            <option value="event">Event</option>
+            <option value="concern">Concern</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="memoryContent">Content</label>
+          <textarea id="memoryContent" rows="3" placeholder="e.g., Prefers tea over coffee"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="memorySource">Source</label>
+          <input type="text" id="memorySource" placeholder="e.g., conv-123 or manual" value="manual" />
+        </div>
+        <div class="form-group">
+          <label for="memoryImportance">Importance (0-1)</label>
+          <input type="number" id="memoryImportance" min="0" max="1" step="0.1" value="0.5" />
+        </div>
+        <button onclick="storeMemory()">Store Memory</button>
+        <div class="response" id="storeMemoryResponse" style="display: none;"></div>
+      </div>
+
+      <!-- Memory - Get Memories -->
+      <div class="card">
+        <h2>🔍 Search Memories</h2>
+        <div class="form-group">
+          <label for="searchSeniorId">Senior ID</label>
+          <input type="text" id="searchSeniorId" placeholder="Enter senior ID" />
+        </div>
+        <div class="form-group">
+          <label for="searchQuery">Search Query</label>
+          <input type="text" id="searchQuery" placeholder="e.g., tea, garden, family" />
+        </div>
+        <button onclick="searchMemories()">Search</button>
+        <button onclick="getAllMemories()" style="margin-top: 8px;">Get All Memories</button>
+        <div class="response" id="memoryResponse" style="display: none;"></div>
+      </div>
+
+      <!-- Memory - Build Context -->
+      <div class="card">
+        <h2>📚 Build Context</h2>
+        <div class="form-group">
+          <label for="contextSeniorId">Senior ID</label>
+          <input type="text" id="contextSeniorId" placeholder="Enter senior ID" />
+        </div>
+        <div class="form-group">
+          <label for="daysBack">Days Back</label>
+          <input type="number" id="daysBack" min="1" max="30" value="7" />
+        </div>
+        <button onclick="buildContext()">Build Context</button>
+        <div class="response" id="contextResponse" style="display: none;"></div>
+      </div>
+
+      <!-- Analytics - Track Event -->
+      <div class="card">
+        <h2>📈 Track Event</h2>
+        <div class="form-group">
+          <label for="eventSeniorId">Senior ID</label>
+          <input type="text" id="eventSeniorId" placeholder="Enter senior ID" />
+        </div>
+        <div class="form-group">
+          <label for="eventType">Event Type</label>
+          <select id="eventType">
+            <option value="call_started">Call Started</option>
+            <option value="call_completed">Call Completed</option>
+            <option value="call_failed">Call Failed</option>
+            <option value="reminder_delivered">Reminder Delivered</option>
+            <option value="concern_flagged">Concern Flagged</option>
+          </select>
+        </div>
+        <button onclick="trackEvent()">Track Event</button>
+        <div class="response" id="trackEventResponse" style="display: none;"></div>
+      </div>
+
+      <!-- Analytics - Senior Insights -->
+      <div class="card">
+        <h2>💡 Get Senior Insights</h2>
+        <div class="form-group">
+          <label for="insightsSeniorId">Senior ID</label>
+          <input type="text" id="insightsSeniorId" placeholder="Enter senior ID" />
+        </div>
+        <div class="form-group">
+          <label for="insightsDays">Period (days)</label>
+          <input type="number" id="insightsDays" min="1" max="90" value="30" />
+        </div>
+        <button onclick="getSeniorInsights()">Get Insights</button>
+        <div class="response" id="insightsResponse" style="display: none;"></div>
+      </div>
+
+      <!-- Analytics - System Metrics -->
+      <div class="card">
+        <h2>⚡ System Metrics</h2>
+        <p style="color: #666; font-size: 14px; margin-bottom: 16px;">
+          View system-wide health metrics (last 24 hours)
+        </p>
+        <button onclick="getSystemMetrics()">Get System Metrics</button>
+        <div class="response" id="metricsResponse" style="display: none;"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>📋 Test Logs</h2>
+      <div class="response" id="testLogs" style="display: block; max-height: 400px;">
+        Ready to test Phase 3 modules...
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+
+    function log(message, type = 'info') {
+      const logs = document.getElementById('testLogs');
+      const timestamp = new Date().toLocaleTimeString();
+      const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : 'ℹ️';
+      logs.textContent += `\n[${timestamp}] ${prefix} ${message}`;
+      logs.scrollTop = logs.scrollHeight;
+    }
+
+    async function checkSystemStatus() {
+      try {
+        log('Checking Phase 3 module status...', 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase3/status`);
+        const data = await response.json();
+
+        const statusList = document.getElementById('moduleStatus');
+        statusList.innerHTML = '';
+
+        Object.entries(data.modules).forEach(([name, status]) => {
+          const li = document.createElement('li');
+          const indicator = status.ready ? 'connected' : 'disconnected';
+          const statusClass = status.ready ? 'ready' : 'not-ready';
+          li.innerHTML = `
+            <span class="status-indicator ${indicator}"></span>
+            ${name}
+            <span class="status ${statusClass}">${status.ready ? 'Ready' : 'Not Ready'}</span>
+          `;
+          statusList.appendChild(li);
+        });
+
+        log('Phase 3 status refreshed', 'success');
+      } catch (error) {
+        log(`Error checking status: ${error.message}`, 'error');
+      }
+    }
+
+    async function storeMemory() {
+      const seniorId = document.getElementById('memorySeniorId').value;
+      const type = document.getElementById('memoryType').value;
+      const content = document.getElementById('memoryContent').value;
+      const source = document.getElementById('memorySource').value;
+      const importance = parseFloat(document.getElementById('memoryImportance').value);
+      const responseDiv = document.getElementById('storeMemoryResponse');
+
+      if (!seniorId || !content || !source) {
+        responseDiv.textContent = 'Senior ID, Content, and Source are required';
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        return;
+      }
+
+      try {
+        log(`Storing ${type} memory for senior ${seniorId}...`, 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase3/memory`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ seniorId, type, content, source, importance })
+        });
+
+        const data = await response.json();
+        responseDiv.textContent = JSON.stringify(data, null, 2);
+        responseDiv.className = response.ok ? 'response success' : 'response error';
+        responseDiv.style.display = 'block';
+
+        if (response.ok) {
+          log(`Memory stored: ${data.memory?.id}`, 'success');
+        } else {
+          log(`Failed: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        log(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function searchMemories() {
+      const seniorId = document.getElementById('searchSeniorId').value;
+      const query = document.getElementById('searchQuery').value;
+      const responseDiv = document.getElementById('memoryResponse');
+
+      if (!seniorId || !query) {
+        responseDiv.textContent = 'Senior ID and Search Query are required';
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        return;
+      }
+
+      try {
+        log(`Searching memories: "${query}"...`, 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase3/memory/${seniorId}/search?query=${encodeURIComponent(query)}`);
+        const data = await response.json();
+
+        responseDiv.textContent = JSON.stringify(data, null, 2);
+        responseDiv.className = response.ok ? 'response success' : 'response error';
+        responseDiv.style.display = 'block';
+
+        if (response.ok) {
+          log(`Found ${data.count} memories`, 'success');
+        } else {
+          log(`Failed: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        log(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function getAllMemories() {
+      const seniorId = document.getElementById('searchSeniorId').value;
+      const responseDiv = document.getElementById('memoryResponse');
+
+      if (!seniorId) {
+        responseDiv.textContent = 'Senior ID is required';
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        return;
+      }
+
+      try {
+        log(`Fetching all memories for senior ${seniorId}...`, 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase3/memory/${seniorId}`);
+        const data = await response.json();
+
+        responseDiv.textContent = JSON.stringify(data, null, 2);
+        responseDiv.className = response.ok ? 'response success' : 'response error';
+        responseDiv.style.display = 'block';
+
+        if (response.ok) {
+          log(`Found ${data.count} memories`, 'success');
+        } else {
+          log(`Failed: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        log(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function buildContext() {
+      const seniorId = document.getElementById('contextSeniorId').value;
+      const daysBack = parseInt(document.getElementById('daysBack').value);
+      const responseDiv = document.getElementById('contextResponse');
+
+      if (!seniorId) {
+        responseDiv.textContent = 'Senior ID is required';
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        return;
+      }
+
+      try {
+        log(`Building context for senior ${seniorId} (${daysBack} days)...`, 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase3/context/build`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            seniorId,
+            scope: { daysBack }
+          })
+        });
+
+        const data = await response.json();
+        responseDiv.textContent = JSON.stringify(data, null, 2);
+        responseDiv.className = response.ok ? 'response success' : 'response error';
+        responseDiv.style.display = 'block';
+
+        if (response.ok) {
+          log('Context built successfully', 'success');
+        } else {
+          log(`Failed: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        log(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function trackEvent() {
+      const seniorId = document.getElementById('eventSeniorId').value;
+      const type = document.getElementById('eventType').value;
+      const responseDiv = document.getElementById('trackEventResponse');
+
+      if (!seniorId) {
+        responseDiv.textContent = 'Senior ID is required';
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        return;
+      }
+
+      try {
+        log(`Tracking event: ${type} for senior ${seniorId}...`, 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase3/analytics/track`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, seniorId, metadata: {} })
+        });
+
+        const data = await response.json();
+        responseDiv.textContent = JSON.stringify(data, null, 2);
+        responseDiv.className = response.ok ? 'response success' : 'response error';
+        responseDiv.style.display = 'block';
+
+        if (response.ok) {
+          log('Event tracked successfully', 'success');
+        } else {
+          log(`Failed: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        log(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function getSeniorInsights() {
+      const seniorId = document.getElementById('insightsSeniorId').value;
+      const days = parseInt(document.getElementById('insightsDays').value);
+      const responseDiv = document.getElementById('insightsResponse');
+
+      if (!seniorId) {
+        responseDiv.textContent = 'Senior ID is required';
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        return;
+      }
+
+      const end = new Date();
+      const start = new Date();
+      start.setDate(start.getDate() - days);
+
+      try {
+        log(`Generating insights for senior ${seniorId} (${days} days)...`, 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase3/analytics/insights`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            seniorId,
+            period: { start: start.toISOString(), end: end.toISOString() }
+          })
+        });
+
+        const data = await response.json();
+        responseDiv.textContent = JSON.stringify(data, null, 2);
+        responseDiv.className = response.ok ? 'response success' : 'response error';
+        responseDiv.style.display = 'block';
+
+        if (response.ok) {
+          log('Insights generated successfully', 'success');
+        } else {
+          log(`Failed: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        log(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function getSystemMetrics() {
+      const responseDiv = document.getElementById('metricsResponse');
+
+      try {
+        log('Fetching system metrics...', 'info');
+        const response = await fetch(`${API_BASE}/api/test/phase3/analytics/metrics`);
+        const data = await response.json();
+
+        responseDiv.textContent = JSON.stringify(data, null, 2);
+        responseDiv.className = response.ok ? 'response success' : 'response error';
+        responseDiv.style.display = 'block';
+
+        if (response.ok) {
+          log('System metrics retrieved', 'success');
+        } else {
+          log(`Failed: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+        responseDiv.className = 'response error';
+        responseDiv.style.display = 'block';
+        log(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    // Check status on page load
+    window.addEventListener('load', () => {
+      log('Phase 3 Test UI loaded', 'success');
+      checkSystemStatus();
+    });
+  </script>
+</body>
+</html>

@@ -3,12 +3,24 @@ import { db } from '../db/client.js';
 import { memories } from '../db/schema.js';
 import { eq, sql, desc, and } from 'drizzle-orm';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openai = null;
+const getOpenAI = () => {
+  if (!openai) {
+    if (!process.env.OPENAI_API_KEY) {
+      console.warn('[Memory] OPENAI_API_KEY not set - memory features disabled');
+      return null;
+    }
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return openai;
+};
 
 export const memoryService = {
   // Generate embedding for text using OpenAI
   async generateEmbedding(text) {
-    const response = await openai.embeddings.create({
+    const client = getOpenAI();
+    if (!client) return null;
+    const response = await client.embeddings.create({
       model: 'text-embedding-3-small',
       input: text,
     });
@@ -18,6 +30,10 @@ export const memoryService = {
   // Store a new memory with embedding
   async store(seniorId, type, content, source = null, importance = 50, metadata = null) {
     const embedding = await this.generateEmbedding(content);
+    if (!embedding) {
+      console.log('[Memory] Skipping store - OpenAI not configured');
+      return null;
+    }
 
     const [memory] = await db.insert(memories).values({
       seniorId,
@@ -36,6 +52,7 @@ export const memoryService = {
   // Semantic search - find memories similar to query
   async search(seniorId, query, limit = 5, minSimilarity = 0.7) {
     const queryEmbedding = await this.generateEmbedding(query);
+    if (!queryEmbedding) return [];
 
     const results = await db.execute(sql`
       SELECT
@@ -139,7 +156,12 @@ Return format:
 Only include genuinely important or memorable information. Be concise.`;
 
     try {
-      const response = await openai.chat.completions.create({
+      const client = getOpenAI();
+      if (!client) {
+        console.log('[Memory] Skipping extraction - OpenAI not configured');
+        return;
+      }
+      const response = await client.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: prompt }],
         response_format: { type: 'json_object' }

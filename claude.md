@@ -24,14 +24,14 @@
 
 **See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for the complete implementation roadmap.**
 
-Current priority: **Step 1 - Scheduled Call System** (make reminders trigger automated calls)
+Current priority: **Step 1 - Deepgram STT** (user speech transcription to unlock mid-call memory retrieval)
 
 ### Quick Summary of Next Steps:
-1. **Scheduled Calls** - Reminders trigger automated calls
-2. **Admin Dashboard** - Full visibility and management
-3. **Caregiver Login** - Secure multi-user access
-4. **News Updates** - Richer conversations with current info
-5. **Deepgram STT** - Mid-call memory retrieval unlocked
+1. **Deepgram STT** - Mid-call memory retrieval unlocked
+2. **Scheduled Calls** - Reminders trigger automated calls
+3. **Admin Dashboard** - Full visibility and management
+4. **Caregiver Login** - Secure multi-user access
+5. **News Updates** - Richer conversations with current info
 6. **ElevenLabs TTS** - Production voice quality
 
 ---
@@ -50,7 +50,7 @@ Current priority: **Step 1 - Scheduled Call System** (make reminders trigger aut
 ### Known Limitation
 - User speech transcription not available (Gemini SDK bug)
 - Mid-conversation memory retrieval blocked until user transcription is resolved
-- **Planned Fix:** Deepgram integration for user speech transcription (Step 5)
+- **Planned Fix:** Deepgram integration for user speech transcription (Step 1 - current priority)
 
 ---
 

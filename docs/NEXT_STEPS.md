@@ -20,10 +20,35 @@
 
 ## Step-by-Step Implementation Plan
 
-### Step 1: Scheduled Call System
+### Step 1: User Speech Transcription (Deepgram)
+**Goal:** Enable mid-conversation memory retrieval
+
+**Why first:** This unblocks the memory trigger system that's already coded. User speech transcription is currently broken due to a Gemini SDK bug - fixing this is foundational for a quality conversation experience.
+
+**Tasks:**
+1. Add Deepgram SDK (`@deepgram/sdk`)
+2. Fork audio stream: send to both Gemini (voice) and Deepgram (text)
+3. Use Deepgram transcription for:
+   - Memory trigger detection (already coded in `gemini-live.js`)
+   - More accurate conversation logging
+4. Enable `checkForRelevantMemories()` function
+
+**Architecture:**
+```
+Twilio Audio → ┬→ Gemini (voice AI + response)
+               └→ Deepgram (user speech → text)
+                     ↓
+               Memory triggers → inject context
+```
+
+**Test:** Mid-call, say "my daughter Sarah visited" - Donna should recall memories about Sarah.
+
+---
+
+### Step 2: Scheduled Call System
 **Goal:** Reminders actually trigger automated calls
 
-**Why first:** Reminders exist in DB. This connects them to outbound calls.
+**Why second:** Reminders exist in DB. This connects them to outbound calls. Now with working transcription, calls will be higher quality.
 
 **Tasks:**
 1. Add a simple scheduler (node-cron or setInterval polling)
@@ -42,10 +67,10 @@
 
 ---
 
-### Step 2: Admin Dashboard Enhancement
+### Step 3: Admin Dashboard Enhancement
 **Goal:** Full visibility into seniors, reminders, and conversations
 
-**Why second:** Need visibility before adding caregiver accounts.
+**Why third:** Need visibility before adding caregiver accounts.
 
 **Tasks:**
 1. Expand existing `/admin` page or create separate Next.js app
@@ -66,10 +91,10 @@
 
 ---
 
-### Step 3: Caregiver Authentication
+### Step 4: Caregiver Authentication
 **Goal:** Secure multi-user access with login
 
-**Why third:** Secure the dashboard before exposing externally.
+**Why fourth:** Secure the dashboard before exposing externally.
 
 **Tasks:**
 1. Choose auth provider (Clerk recommended, or simple JWT)
@@ -88,10 +113,10 @@ caregiver_seniors (caregiver_id, senior_id)  -- junction table
 
 ---
 
-### Step 4: News/Weather Updates
+### Step 5: News/Weather Updates
 **Goal:** Richer conversations with current information
 
-**Why fourth:** Adds value once core system is stable.
+**Why fifth:** Adds value once core system is stable.
 
 **Tasks:**
 1. Integrate news API (options: NewsAPI, Google News, or OpenAI web search)
@@ -107,31 +132,6 @@ caregiver_seniors (caregiver_id, senior_id)  -- junction table
 - C: Use OpenAI's web search tool for real-time info
 
 **Test:** Call a senior, Donna shares relevant news when conversation allows.
-
----
-
-### Step 5: User Speech Transcription (Deepgram)
-**Goal:** Enable mid-conversation memory retrieval
-
-**Why fifth:** Unblocks the memory trigger system that's already coded.
-
-**Tasks:**
-1. Add Deepgram SDK (`@deepgram/sdk`)
-2. Fork audio stream: send to both Gemini (voice) and Deepgram (text)
-3. Use Deepgram transcription for:
-   - Memory trigger detection (already coded in `gemini-live.js`)
-   - More accurate conversation logging
-4. Enable `checkForRelevantMemories()` function
-
-**Architecture:**
-```
-Twilio Audio → ┬→ Gemini (voice AI + response)
-               └→ Deepgram (user speech → text)
-                     ↓
-               Memory triggers → inject context
-```
-
-**Test:** Mid-call, say "my daughter Sarah visited" - Donna should recall memories about Sarah.
 
 ---
 
@@ -165,20 +165,20 @@ Twilio Audio → ┬→ Gemini (voice AI + response)
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                                                         │
-│  Step 1: Scheduled Calls                               │
+│  Step 1: Deepgram STT                                  │
+│  └── "Mid-call memory retrieval unlocked"              │
+│              ↓                                          │
+│  Step 2: Scheduled Calls                               │
 │  └── "Reminders trigger automated calls"               │
 │              ↓                                          │
-│  Step 2: Admin Dashboard                               │
+│  Step 3: Admin Dashboard                               │
 │  └── "Full visibility and management"                  │
 │              ↓                                          │
-│  Step 3: Caregiver Login                               │
+│  Step 4: Caregiver Login                               │
 │  └── "Secure multi-user access"                        │
 │              ↓                                          │
-│  Step 4: News Updates                                  │
+│  Step 5: News Updates                                  │
 │  └── "Richer conversations with current info"          │
-│              ↓                                          │
-│  Step 5: Deepgram STT                                  │
-│  └── "Mid-call memory retrieval unlocked"              │
 │              ↓                                          │
 │  Step 6: ElevenLabs TTS                                │
 │  └── "Production voice quality"                        │
@@ -213,19 +213,19 @@ TWILIO_PHONE_NUMBER=...
 DATABASE_URL=...
 OPENAI_API_KEY=...
 
-# Step 4: News (pick one)
-NEWS_API_KEY=...              # If using NewsAPI
-
-# Step 5: Deepgram
+# Step 1: Deepgram (current priority)
 DEEPGRAM_API_KEY=...
+
+# Step 4: Auth (if using Clerk)
+CLERK_SECRET_KEY=...
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=...
+
+# Step 5: News (pick one)
+NEWS_API_KEY=...              # If using NewsAPI
 
 # Step 6: ElevenLabs
 ELEVENLABS_API_KEY=...
 ELEVENLABS_VOICE_ID=...
-
-# Step 3: Auth (if using Clerk)
-CLERK_SECRET_KEY=...
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=...
 ```
 
 ---

@@ -1,4 +1,5 @@
 import { GoogleGenAI, Modality } from '@google/genai';
+import { createClient } from '@deepgram/sdk';
 import { base64MulawToBase64Pcm16k, base64Pcm24kToBase64Mulaw8k } from './audio-utils.js';
 import { memoryService } from './services/memory.js';
 
@@ -55,6 +56,11 @@ export class GeminiLiveSession {
     // Transcription buffering (Gemini sends word-by-word)
     this.outputBuffer = '';
     this.inputBuffer = '';
+
+    // Deepgram STT for user speech transcription
+    this.deepgram = null;
+    this.dgConnection = null;
+    this.dgConnected = false;
   }
 
   async connect() {
@@ -111,9 +117,72 @@ export class GeminiLiveSession {
       });
       console.log(`[${this.streamSid}] Sent greeting prompt for ${this.senior?.name || 'unknown'}`);
 
+      // Initialize Deepgram for user speech transcription
+      await this.connectDeepgram();
+
     } catch (error) {
       console.error(`[${this.streamSid}] Failed to connect to Gemini:`, error);
       throw error;
+    }
+  }
+
+  async connectDeepgram() {
+    if (!process.env.DEEPGRAM_API_KEY) {
+      console.log(`[${this.streamSid}] DEEPGRAM_API_KEY not set, skipping STT`);
+      return;
+    }
+
+    try {
+      this.deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+
+      this.dgConnection = this.deepgram.listen.live({
+        model: 'nova-2',
+        language: 'en-US',
+        encoding: 'mulaw',
+        sample_rate: 8000,
+        channels: 1,
+        punctuate: true,
+        interim_results: false, // Only final results for memory triggers
+      });
+
+      this.dgConnection.on('open', () => {
+        console.log(`[${this.streamSid}] Deepgram connected`);
+        this.dgConnected = true;
+      });
+
+      this.dgConnection.on('Results', (data) => {
+        const transcript = data.channel?.alternatives?.[0]?.transcript;
+        if (transcript && data.is_final) {
+          console.log(`[${this.streamSid}] User (Deepgram): "${transcript}"`);
+
+          // Log to conversation for end-of-call memory extraction
+          this.conversationLog.push({
+            role: 'user',
+            content: transcript,
+            timestamp: new Date().toISOString()
+          });
+
+          // Check for relevant memories to inject into Gemini
+          this.checkForRelevantMemories(transcript);
+        }
+      });
+
+      this.dgConnection.on('error', (error) => {
+        console.error(`[${this.streamSid}] Deepgram error:`, error.message);
+        this.dgConnected = false;
+        this.dgConnection = null;
+      });
+
+      this.dgConnection.on('close', () => {
+        console.log(`[${this.streamSid}] Deepgram connection closed`);
+        this.dgConnected = false;
+      });
+
+    } catch (error) {
+      console.error(`[${this.streamSid}] Failed to connect Deepgram:`, error.message);
+      // Graceful degradation - continue without STT
+      this.dgConnection = null;
+      this.dgConnected = false;
     }
   }
 
@@ -218,6 +287,12 @@ export class GeminiLiveSession {
           mimeType: 'audio/pcm;rate=16000'
         }
       });
+
+      // Send raw mulaw to Deepgram for transcription (no conversion needed)
+      if (this.dgConnected && this.dgConnection) {
+        const mulawBuffer = Buffer.from(base64Mulaw, 'base64');
+        this.dgConnection.send(mulawBuffer);
+      }
     } catch (error) {
       console.error(`[${this.streamSid}] Error sending audio:`, error);
     }
@@ -321,6 +396,18 @@ export class GeminiLiveSession {
     // Extract memories before closing
     await this.extractMemories();
 
+    // Close Deepgram connection
+    if (this.dgConnection) {
+      try {
+        this.dgConnection.finish();
+      } catch (error) {
+        // Ignore close errors
+      }
+      this.dgConnection = null;
+      this.dgConnected = false;
+    }
+
+    // Close Gemini connection
     if (this.geminiSession) {
       try {
         this.geminiSession.close();

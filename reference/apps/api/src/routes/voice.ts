@@ -46,21 +46,38 @@ voiceRouter.post('/call/:seniorId', authenticate, async (req: AuthRequest, res, 
 voiceRouter.post('/connect', async (req, res) => {
   const response = new VoiceResponse();
 
-  // Initial greeting
-  response.say(
-    {
-      voice: 'Polly.Joanna',
-      language: 'en-US',
-    },
-    'Hello! This is Donna calling. How are you doing today?'
-  );
+  // Get personalized context from query params
+  const seniorName = req.query.seniorName as string || 'there';
+  const conversationId = req.query.conversationId as string;
 
-  // Connect to media stream for real-time audio
-  const connect = response.connect();
-  connect.stream({
+  // Start media stream IMMEDIATELY for faster response after greeting
+  // Using <Start><Stream> runs in parallel with <Say>, reducing latency
+  const start = response.start();
+  start.stream({
     url: `wss://${process.env.API_URL?.replace(/^https?:\/\//, '')}/api/voice/stream`,
     track: 'both_tracks',
+    name: conversationId || 'donna-stream',
   });
+
+  // Personalized, elderly-friendly greeting
+  // Using Polly.Joanna-Neural for warmer, more natural voice
+  // Speaking slowly and clearly with their name for recognition
+  response.say(
+    {
+      voice: 'Polly.Joanna-Neural',
+      language: 'en-US',
+    },
+    `<speak>
+      <prosody rate="90%" pitch="-5%">
+        Hello ${seniorName}! <break time="300ms"/>
+        This is Donna. <break time="200ms"/>
+        How are you doing today?
+      </prosody>
+    </speak>`
+  );
+
+  // Keep the call open for bidirectional conversation
+  response.pause({ length: 60 });
 
   res.type('text/xml');
   res.send(response.toString());

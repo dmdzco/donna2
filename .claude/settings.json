@@ -1,6 +1,4 @@
 {
-  "projectName": "Donna",
-  "description": "AI voice companion for elderly individuals",
   "hooks": {
     "SessionStart": [
       {
@@ -14,9 +12,14 @@
       }
     ]
   },
+  "projectName": "Donna",
+  "description": "AI voice companion for elderly individuals",
   "preferences": {
     "accessibilityFirst": true,
     "seniorFriendlyUX": true,
     "hipaaCompliant": true
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true
   }
 }

@@ -113,32 +113,45 @@ export class BrowserSession {
   }
 
   handleGeminiMessage(msg) {
-    // Handle audio response
-    if (msg.serverContent?.modelTurn?.parts) {
-      for (const part of msg.serverContent.modelTurn.parts) {
-        if (part.inlineData?.mimeType?.includes('audio')) {
+    // Log message for debugging
+    console.log('[Browser] Gemini message:', JSON.stringify(msg).substring(0, 300));
+
+    // Handle audio response - check various possible structures (like gemini-live.js)
+    const parts = msg.serverContent?.modelTurn?.parts ||
+                  msg.modelTurn?.parts ||
+                  msg.parts;
+
+    if (parts) {
+      for (const part of parts) {
+        const audioData = part.inlineData?.data || part.audio?.data || part.data;
+        const mimeType = part.inlineData?.mimeType || part.audio?.mimeType || part.mimeType;
+
+        if (audioData && mimeType?.includes('audio')) {
           // Convert base64 PCM to binary and send to browser
-          const audioData = Buffer.from(part.inlineData.data, 'base64');
-          this.browserWs.send(audioData);
+          const buffer = Buffer.from(audioData, 'base64');
+          console.log(`[Browser] Sending audio chunk: ${buffer.length} bytes`);
+          this.browserWs.send(buffer);
         }
       }
     }
 
-    // Handle transcription
-    if (msg.serverContent?.outputTranscription?.text) {
-      const text = msg.serverContent.outputTranscription.text;
-      this.conversationLog.push({ role: 'donna', text });
-      this.sendToBrowser({ type: 'transcript', speaker: 'donna', text });
+    // Handle transcription - check various structures
+    const outputText = msg.serverContent?.outputTranscription?.text ||
+                       msg.outputTranscription?.text;
+    if (outputText) {
+      this.conversationLog.push({ role: 'donna', text: outputText });
+      this.sendToBrowser({ type: 'transcript', speaker: 'donna', text: outputText });
     }
 
-    if (msg.serverContent?.inputTranscription?.text) {
-      const text = msg.serverContent.inputTranscription.text;
-      this.conversationLog.push({ role: 'user', text });
-      this.sendToBrowser({ type: 'transcript', speaker: 'user', text });
+    const inputText = msg.serverContent?.inputTranscription?.text ||
+                      msg.inputTranscription?.text;
+    if (inputText) {
+      this.conversationLog.push({ role: 'user', text: inputText });
+      this.sendToBrowser({ type: 'transcript', speaker: 'user', text: inputText });
     }
 
     // Handle turn complete
-    if (msg.serverContent?.turnComplete) {
+    if (msg.serverContent?.turnComplete || msg.turnComplete) {
       this.sendToBrowser({ type: 'status', message: 'Your turn to speak...', state: 'listening' });
     }
   }
@@ -158,9 +171,9 @@ export class BrowserSession {
       const base64Audio = Buffer.from(pcmBuffer).toString('base64');
 
       this.geminiSession.sendRealtimeInput({
-        media: {
-          mimeType: 'audio/pcm;rate=16000',
-          data: base64Audio
+        audio: {
+          data: base64Audio,
+          mimeType: 'audio/pcm;rate=16000'
         }
       });
     } catch (error) {

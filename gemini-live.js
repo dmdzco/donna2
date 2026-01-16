@@ -32,6 +32,9 @@ Your personality:
   return prompt;
 };
 
+// Topics that warrant memory lookup
+const MEMORY_TRIGGERS = /\b(remember|forgot|last time|yesterday|doctor|medicine|son|daughter|grandchild|friend|family|birthday|visit|told you|mentioned|we talked)\b/i;
+
 export class GeminiLiveSession {
   constructor(twilioWs, streamSid, senior = null, memoryContext = null) {
     this.twilioWs = twilioWs;
@@ -43,6 +46,11 @@ export class GeminiLiveSession {
     this.isConnected = false;
     this.conversationLog = []; // Track conversation for memory extraction
     this.memoriesExtracted = false; // Prevent double extraction
+
+    // Mid-conversation memory retrieval state
+    this.lastMemoryCheck = 0;
+    this.memoryCheckCooldown = 20000; // 20 seconds between checks
+    this.injectedMemoryIds = new Set(); // Don't repeat memories
   }
 
   async connect() {
@@ -118,6 +126,9 @@ export class GeminiLiveSession {
         content: inputTranscription,
         timestamp: new Date().toISOString()
       });
+
+      // Check for relevant memories mid-conversation
+      this.checkForRelevantMemories(inputTranscription);
     }
 
     // Capture model's speech transcription (output audio transcription)
@@ -201,6 +212,50 @@ export class GeminiLiveSession {
       });
     } catch (error) {
       console.error(`[${this.streamSid}] Error sending audio:`, error);
+    }
+  }
+
+  // Check for relevant memories based on user speech
+  async checkForRelevantMemories(userText) {
+    // Skip if no senior or not connected
+    if (!this.senior?.id || !this.isConnected || !this.geminiSession) return;
+
+    // Check cooldown
+    const now = Date.now();
+    if (now - this.lastMemoryCheck < this.memoryCheckCooldown) return;
+
+    // Check if text contains trigger words
+    if (!MEMORY_TRIGGERS.test(userText)) return;
+
+    console.log(`[${this.streamSid}] Memory trigger detected: "${userText.substring(0, 50)}..."`);
+    this.lastMemoryCheck = now;
+
+    try {
+      // Search for relevant memories
+      const relevant = await memoryService.search(this.senior.id, userText, 3, 0.6);
+
+      // Filter out already-injected memories
+      const newMemories = relevant.filter(m => !this.injectedMemoryIds.has(m.id));
+
+      if (newMemories.length > 0) {
+        // Mark as injected
+        newMemories.forEach(m => this.injectedMemoryIds.add(m.id));
+
+        // Format memories for context
+        const context = newMemories.map(m => m.content).join('. ');
+        console.log(`[${this.streamSid}] Injecting ${newMemories.length} memories: "${context.substring(0, 100)}..."`);
+
+        // Inject as context hint to Gemini
+        this.geminiSession.sendClientContent({
+          turns: [{
+            role: 'user',
+            parts: [{ text: `[Context from previous conversations: ${context}. Use this naturally if relevant, don't announce it.]` }]
+          }],
+          turnComplete: false // Don't force immediate response
+        });
+      }
+    } catch (error) {
+      console.error(`[${this.streamSid}] Memory lookup failed:`, error.message);
     }
   }
 

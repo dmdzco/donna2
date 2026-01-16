@@ -63,9 +63,7 @@ export class GeminiLiveSession {
 
     try {
       this.geminiSession = await this.ai.live.connect({
-        // Using gemini-2.0-flash-live for working input transcription
-        // (native-audio model has a bug where inputTranscription is not sent)
-        model: 'gemini-2.0-flash-live-001',
+        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: {

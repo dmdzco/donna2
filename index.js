@@ -358,14 +358,22 @@ wss.on('error', (error) => {
 wss.on('connection', async (twilioWs, req) => {
   console.log('New WebSocket connection from Twilio');
   console.log(`[WS] Ready state: ${twilioWs.readyState}, URL: ${req.url}`);
-  console.log(`[WS] Headers: ${JSON.stringify(req.headers['user-agent'] || 'none')}`);
+  console.log(`[WS] Headers: ${JSON.stringify(req.headers)}`);
+
+  // Immediately send a pong to acknowledge connection
+  try {
+    twilioWs.pong();
+    console.log('[WS] Sent pong');
+  } catch (e) {
+    console.log('[WS] Pong error:', e.message);
+  }
 
   // Send a ping to keep connection alive
   const pingInterval = setInterval(() => {
     if (twilioWs.readyState === 1) {
       twilioWs.ping();
     }
-  }, 30000);
+  }, 5000); // More frequent pings
 
   let streamSid = null;
   let callSid = null;

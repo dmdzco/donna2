@@ -348,12 +348,14 @@ const wss = new WebSocketServer({ server, path: '/media-stream' });
 
 wss.on('connection', async (twilioWs, req) => {
   console.log('New WebSocket connection from Twilio');
+  console.log(`[WS] Ready state: ${twilioWs.readyState}, URL: ${req.url}`);
 
   let streamSid = null;
   let callSid = null;
   let geminiSession = null;
 
   twilioWs.on('message', async (message) => {
+    console.log(`[WS] Message received, event: ${JSON.parse(message).event}`);
     try {
       const data = JSON.parse(message);
 
@@ -404,8 +406,8 @@ wss.on('connection', async (twilioWs, req) => {
     }
   });
 
-  twilioWs.on('close', async () => {
-    console.log(`[${callSid}] WebSocket closed`);
+  twilioWs.on('close', async (code, reason) => {
+    console.log(`[${callSid}] WebSocket closed - code: ${code}, reason: ${reason?.toString() || 'none'}`);
     // Close session if still in sessions map (status callback may have already handled it)
     if (geminiSession && sessions.has(callSid)) {
       try {

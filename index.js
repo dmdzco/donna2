@@ -130,8 +130,10 @@ app.post('/voice/answer', async (req, res) => {
     name: 'donna-stream'
   });
 
+  const twimlStr = twiml.toString();
+  console.log(`[${callSid}] TwiML: ${twimlStr}`);
   res.type('text/xml');
-  res.send(twiml.toString());
+  res.send(twimlStr);
 });
 
 // Twilio status callback
@@ -346,9 +348,21 @@ const server = createServer(app);
 // Create WebSocket server for Twilio Media Streams
 const wss = new WebSocketServer({ server, path: '/media-stream' });
 
+wss.on('error', (error) => {
+  console.error('[WSS] Server error:', error);
+});
+
 wss.on('connection', async (twilioWs, req) => {
   console.log('New WebSocket connection from Twilio');
   console.log(`[WS] Ready state: ${twilioWs.readyState}, URL: ${req.url}`);
+  console.log(`[WS] Headers: ${JSON.stringify(req.headers['user-agent'] || 'none')}`);
+
+  // Send a ping to keep connection alive
+  const pingInterval = setInterval(() => {
+    if (twilioWs.readyState === 1) {
+      twilioWs.ping();
+    }
+  }, 30000);
 
   let streamSid = null;
   let callSid = null;
@@ -408,6 +422,7 @@ wss.on('connection', async (twilioWs, req) => {
 
   twilioWs.on('close', async (code, reason) => {
     console.log(`[${callSid}] WebSocket closed - code: ${code}, reason: ${reason?.toString() || 'none'}`);
+    clearInterval(pingInterval);
     // Close session if still in sessions map (status callback may have already handled it)
     if (geminiSession && sessions.has(callSid)) {
       try {

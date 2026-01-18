@@ -11,6 +11,9 @@ import { conversationService } from './services/conversations.js';
 import { schedulerService, startScheduler } from './services/scheduler.js';
 import { BrowserSession } from './browser-session.js';
 import { parse as parseUrl } from 'url';
+import { db } from './db/client.js';
+import { reminders, seniors, conversations } from './db/schema.js';
+import { eq, desc, gte, and, sql } from 'drizzle-orm';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -335,6 +338,148 @@ app.get('/api/conversations', async (req, res) => {
   try {
     const convos = await conversationService.getRecent(50);
     res.json(convos);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === REMINDER APIs ===
+
+// List all reminders with senior info
+app.get('/api/reminders', async (req, res) => {
+  try {
+    const result = await db.select({
+      id: reminders.id,
+      seniorId: reminders.seniorId,
+      seniorName: seniors.name,
+      type: reminders.type,
+      title: reminders.title,
+      description: reminders.description,
+      scheduledTime: reminders.scheduledTime,
+      isRecurring: reminders.isRecurring,
+      cronExpression: reminders.cronExpression,
+      isActive: reminders.isActive,
+      lastDeliveredAt: reminders.lastDeliveredAt,
+      createdAt: reminders.createdAt,
+    })
+    .from(reminders)
+    .leftJoin(seniors, eq(reminders.seniorId, seniors.id))
+    .where(eq(reminders.isActive, true))
+    .orderBy(desc(reminders.createdAt));
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create a reminder
+app.post('/api/reminders', async (req, res) => {
+  try {
+    const { seniorId, type, title, description, scheduledTime, isRecurring, cronExpression } = req.body;
+    const [reminder] = await db.insert(reminders).values({
+      seniorId,
+      type: type || 'custom',
+      title,
+      description,
+      scheduledTime: scheduledTime ? new Date(scheduledTime) : null,
+      isRecurring: isRecurring || false,
+      cronExpression,
+    }).returning();
+    res.json(reminder);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update a reminder
+app.patch('/api/reminders/:id', async (req, res) => {
+  try {
+    const { title, description, scheduledTime, isRecurring, cronExpression, isActive } = req.body;
+    const updateData = {};
+    if (title !== undefined) updateData.title = title;
+    if (description !== undefined) updateData.description = description;
+    if (scheduledTime !== undefined) updateData.scheduledTime = new Date(scheduledTime);
+    if (isRecurring !== undefined) updateData.isRecurring = isRecurring;
+    if (cronExpression !== undefined) updateData.cronExpression = cronExpression;
+    if (isActive !== undefined) updateData.isActive = isActive;
+
+    const [reminder] = await db.update(reminders)
+      .set(updateData)
+      .where(eq(reminders.id, req.params.id))
+      .returning();
+    res.json(reminder);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete a reminder
+app.delete('/api/reminders/:id', async (req, res) => {
+  try {
+    await db.delete(reminders).where(eq(reminders.id, req.params.id));
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === STATS API ===
+
+// Dashboard statistics
+app.get('/api/stats', async (req, res) => {
+  try {
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const next24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+    // Total active seniors
+    const [{ count: totalSeniors }] = await db.select({ count: sql`count(*)` })
+      .from(seniors)
+      .where(eq(seniors.isActive, true));
+
+    // Calls today
+    const [{ count: callsToday }] = await db.select({ count: sql`count(*)` })
+      .from(conversations)
+      .where(gte(conversations.startedAt, startOfDay));
+
+    // Upcoming reminders (next 24 hours)
+    const upcomingReminders = await db.select({
+      id: reminders.id,
+      title: reminders.title,
+      type: reminders.type,
+      scheduledTime: reminders.scheduledTime,
+      seniorName: seniors.name,
+    })
+    .from(reminders)
+    .leftJoin(seniors, eq(reminders.seniorId, seniors.id))
+    .where(and(
+      eq(reminders.isActive, true),
+      gte(reminders.scheduledTime, now),
+    ))
+    .orderBy(reminders.scheduledTime)
+    .limit(10);
+
+    // Recent calls (last 5)
+    const recentCalls = await db.select({
+      id: conversations.id,
+      seniorName: seniors.name,
+      startedAt: conversations.startedAt,
+      durationSeconds: conversations.durationSeconds,
+      status: conversations.status,
+    })
+    .from(conversations)
+    .leftJoin(seniors, eq(conversations.seniorId, seniors.id))
+    .orderBy(desc(conversations.startedAt))
+    .limit(5);
+
+    res.json({
+      totalSeniors: parseInt(totalSeniors) || 0,
+      callsToday: parseInt(callsToday) || 0,
+      upcomingRemindersCount: upcomingReminders.length,
+      activeCalls: sessions.size,
+      upcomingReminders,
+      recentCalls,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

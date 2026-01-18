@@ -13,71 +13,125 @@
       line-height: 1.6;
     }
     .container {
-      max-width: 900px;
+      max-width: 1100px;
       margin: 0 auto;
       padding: 20px;
     }
     header {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
-      padding: 30px 20px;
-      margin-bottom: 30px;
+      padding: 20px;
+      margin-bottom: 20px;
       border-radius: 12px;
     }
-    header h1 { font-size: 28px; margin-bottom: 5px; }
-    header p { opacity: 0.9; font-size: 14px; }
+    header h1 { font-size: 24px; margin-bottom: 4px; }
+    header p { opacity: 0.9; font-size: 13px; }
 
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+    .tab {
+      padding: 12px 24px;
+      background: none;
+      border: none;
+      font-size: 15px;
+      font-weight: 500;
+      color: #666;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: all 0.2s;
+    }
+    .tab:hover { color: #667eea; }
+    .tab.active {
+      color: #667eea;
+      border-bottom-color: #667eea;
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Cards */
     .card {
       background: white;
       border-radius: 12px;
-      padding: 24px;
+      padding: 20px;
       margin-bottom: 20px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.08);
     }
     .card h2 {
-      font-size: 18px;
-      margin-bottom: 20px;
+      font-size: 16px;
+      margin-bottom: 16px;
       color: #444;
       border-bottom: 2px solid #667eea;
-      padding-bottom: 10px;
+      padding-bottom: 8px;
     }
 
-    .form-group {
-      margin-bottom: 16px;
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
     }
-    label {
-      display: block;
-      font-weight: 600;
-      margin-bottom: 6px;
-      font-size: 14px;
-      color: #555;
+    .stat-card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
     }
-    input, textarea {
-      width: 100%;
-      padding: 12px;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      font-size: 16px;
-      transition: border-color 0.2s;
+    .stat-value {
+      font-size: 32px;
+      font-weight: 700;
+      color: #667eea;
     }
-    input:focus, textarea:focus {
-      outline: none;
-      border-color: #667eea;
-    }
-    textarea { resize: vertical; min-height: 80px; }
-    .hint {
-      font-size: 12px;
+    .stat-label {
+      font-size: 13px;
       color: #888;
       margin-top: 4px;
     }
 
+    /* Forms */
+    .form-group { margin-bottom: 14px; }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 4px;
+      font-size: 13px;
+      color: #555;
+    }
+    input, textarea, select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+    input:focus, textarea:focus, select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    textarea { resize: vertical; min-height: 70px; }
+    .hint { font-size: 11px; color: #888; margin-top: 2px; }
+
+    /* Buttons */
     button {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
       border: none;
-      padding: 12px 24px;
+      padding: 10px 20px;
       border-radius: 8px;
-      font-size: 16px;
+      font-size: 14px;
       font-weight: 600;
       cursor: pointer;
       transition: transform 0.2s, box-shadow 0.2s;
@@ -86,106 +140,60 @@
       transform: translateY(-1px);
       box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
     }
-    button:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-      transform: none;
-    }
-    button.secondary {
-      background: #e0e0e0;
-      color: #333;
-    }
-    button.secondary:hover {
-      background: #d0d0d0;
-      box-shadow: none;
-    }
-    button.danger {
-      background: #e74c3c;
-    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    button.secondary { background: #e0e0e0; color: #333; }
+    button.secondary:hover { background: #d0d0d0; box-shadow: none; }
+    button.danger { background: #e74c3c; }
+    button.small { padding: 6px 12px; font-size: 12px; }
 
-    .seniors-list {
-      display: grid;
-      gap: 16px;
-    }
-    .senior-card {
+    /* Lists */
+    .list-item {
       background: #fafafa;
       border: 1px solid #eee;
       border-radius: 10px;
-      padding: 16px;
+      padding: 14px;
+      margin-bottom: 12px;
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
     }
-    .senior-info h3 {
-      font-size: 18px;
-      margin-bottom: 4px;
-    }
-    .senior-info p {
-      font-size: 14px;
-      color: #666;
-      margin-bottom: 2px;
-    }
-    .senior-info .tags {
-      margin-top: 8px;
-    }
+    .list-item h3 { font-size: 15px; margin-bottom: 2px; }
+    .list-item p { font-size: 13px; color: #666; margin-bottom: 2px; }
+    .list-item .meta { font-size: 12px; color: #888; }
+    .list-item .actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .list-item .actions button { padding: 6px 10px; font-size: 12px; }
+
     .tag {
       display: inline-block;
       background: #e8e8ff;
       color: #667eea;
-      padding: 4px 10px;
-      border-radius: 20px;
-      font-size: 12px;
-      margin-right: 6px;
-      margin-bottom: 4px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      margin-right: 4px;
     }
-    .senior-actions {
-      display: flex;
-      gap: 8px;
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
     }
-    .senior-actions button {
-      padding: 8px 12px;
-      font-size: 13px;
-    }
+    .status-badge.completed { background: #d4edda; color: #155724; }
+    .status-badge.failed, .status-badge.no-answer { background: #f8d7da; color: #721c24; }
+    .status-badge.in-progress { background: #fff3cd; color: #856404; }
 
+    /* Empty state */
     .empty-state {
       text-align: center;
       padding: 40px;
       color: #888;
     }
-    .empty-state svg {
-      width: 60px;
-      height: 60px;
-      margin-bottom: 16px;
-      opacity: 0.5;
-    }
 
-    .toast {
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      background: #333;
-      color: white;
-      padding: 14px 24px;
-      border-radius: 8px;
-      font-size: 14px;
-      opacity: 0;
-      transform: translateY(20px);
-      transition: all 0.3s;
-      z-index: 1000;
-    }
-    .toast.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
-    .toast.success { background: #27ae60; }
-    .toast.error { background: #e74c3c; }
-
+    /* Modal */
     .modal-overlay {
       position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
+      top: 0; left: 0; right: 0; bottom: 0;
       background: rgba(0,0,0,0.5);
       display: none;
       justify-content: center;
@@ -198,11 +206,11 @@
       border-radius: 12px;
       padding: 24px;
       width: 90%;
-      max-width: 500px;
-      max-height: 90vh;
+      max-width: 600px;
+      max-height: 80vh;
       overflow-y: auto;
     }
-    .modal h2 { margin-bottom: 20px; }
+    .modal h2 { margin-bottom: 16px; font-size: 18px; }
     .modal-actions {
       display: flex;
       gap: 12px;
@@ -210,159 +218,254 @@
       margin-top: 20px;
     }
 
-    .memories-section {
-      margin-top: 16px;
-      padding-top: 16px;
-      border-top: 1px solid #eee;
-    }
-    .memory-item {
-      background: white;
+    /* Transcript */
+    .transcript { max-height: 400px; overflow-y: auto; }
+    .transcript-message {
       padding: 10px;
-      border-radius: 6px;
       margin-bottom: 8px;
-      font-size: 14px;
+      border-radius: 8px;
     }
-    .memory-item .type {
+    .transcript-message.donna { background: #e8e8ff; }
+    .transcript-message.user { background: #f0f0f0; }
+    .transcript-message .speaker {
       font-weight: 600;
-      color: #667eea;
-      text-transform: uppercase;
-      font-size: 11px;
+      font-size: 12px;
+      margin-bottom: 4px;
     }
 
-    .senior-memories {
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px dashed #ddd;
+    /* Recurring options */
+    .recurring-options {
+      display: flex;
+      gap: 16px;
+      margin-top: 8px;
     }
-    .memories-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: #888;
-      margin-bottom: 8px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+    .recurring-options label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: normal;
+      cursor: pointer;
     }
-    .memory-chip {
-      background: #f8f8ff;
-      border: 1px solid #e8e8ff;
-      border-radius: 6px;
-      padding: 8px 10px;
-      font-size: 13px;
-      margin-bottom: 6px;
-      line-height: 1.4;
-    }
-    .memory-type {
-      display: inline-block;
-      background: #667eea;
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #333;
       color: white;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      margin-right: 6px;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.3s;
+      z-index: 1000;
     }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.success { background: #27ae60; }
+    .toast.error { background: #e74c3c; }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
       <h1>Donna Admin</h1>
-      <p>Manage seniors, their profiles, and memories</p>
+      <p>Manage seniors, calls, and reminders</p>
     </header>
 
-    <!-- Add Senior Form -->
-    <div class="card">
-      <h2>Add New Senior</h2>
-      <form id="addSeniorForm">
-        <div class="form-group">
-          <label for="name">Name *</label>
-          <input type="text" id="name" required placeholder="e.g., Margaret Johnson">
-        </div>
-        <div class="form-group">
-          <label for="phone">Phone Number *</label>
-          <input type="tel" id="phone" required placeholder="e.g., +1 555 123 4567">
-          <p class="hint">Include country code. This is how Donna identifies callers.</p>
-        </div>
-        <div class="form-group">
-          <label for="location">Location</label>
-          <input type="text" id="location" placeholder="e.g., Miami, FL">
-        </div>
-        <div class="form-group">
-          <label for="interests">Interests</label>
-          <input type="text" id="interests" placeholder="e.g., gardening, baking, crossword puzzles">
-          <p class="hint">Comma-separated list of hobbies and interests</p>
-        </div>
-        <div class="form-group">
-          <label for="medicalNotes">Medical Notes (optional)</label>
-          <textarea id="medicalNotes" placeholder="Any health information Donna should be aware of..."></textarea>
-        </div>
-        <button type="submit">Add Senior</button>
-      </form>
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="seniors">Seniors</button>
+      <button class="tab" data-tab="calls">Calls</button>
+      <button class="tab" data-tab="reminders">Reminders</button>
     </div>
 
-    <!-- Seniors List -->
-    <div class="card">
-      <h2>Seniors</h2>
-      <div id="seniorsList" class="seniors-list">
-        <div class="empty-state">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          <p>No seniors added yet</p>
+    <!-- Dashboard Tab -->
+    <div id="dashboard" class="tab-content active">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="statSeniors">-</div>
+          <div class="stat-label">Seniors</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-value" id="statCallsToday">-</div>
+          <div class="stat-label">Calls Today</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="statUpcoming">-</div>
+          <div class="stat-label">Upcoming</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="statActive">-</div>
+          <div class="stat-label">Active Calls</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Recent Calls</h2>
+        <div id="recentCallsList"></div>
+      </div>
+
+      <div class="card">
+        <h2>Upcoming Reminders</h2>
+        <div id="upcomingRemindersList"></div>
+      </div>
+    </div>
+
+    <!-- Seniors Tab -->
+    <div id="seniors" class="tab-content">
+      <div class="card">
+        <h2>Add New Senior</h2>
+        <form id="addSeniorForm">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="name">Name *</label>
+              <input type="text" id="name" required placeholder="e.g., Margaret Johnson">
+            </div>
+            <div class="form-group">
+              <label for="phone">Phone *</label>
+              <input type="tel" id="phone" required placeholder="e.g., +1 555 123 4567">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="location">Location</label>
+              <input type="text" id="location" placeholder="e.g., Miami, FL">
+            </div>
+            <div class="form-group">
+              <label for="interests">Interests</label>
+              <input type="text" id="interests" placeholder="gardening, baking, puzzles">
+              <p class="hint">Comma-separated</p>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="medicalNotes">Medical Notes</label>
+            <textarea id="medicalNotes" placeholder="Any health information..."></textarea>
+          </div>
+          <button type="submit">Add Senior</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Seniors</h2>
+        <div id="seniorsList"></div>
+      </div>
+    </div>
+
+    <!-- Calls Tab -->
+    <div id="calls" class="tab-content">
+      <div class="card">
+        <h2>Call History</h2>
+        <div id="callsList"></div>
+      </div>
+    </div>
+
+    <!-- Reminders Tab -->
+    <div id="reminders" class="tab-content">
+      <div class="card">
+        <h2>Add New Reminder</h2>
+        <form id="addReminderForm">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="reminderSenior">Senior *</label>
+              <select id="reminderSenior" required>
+                <option value="">Select senior...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="reminderType">Type</label>
+              <select id="reminderType">
+                <option value="medication">Medication</option>
+                <option value="appointment">Appointment</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="reminderTitle">Title *</label>
+            <input type="text" id="reminderTitle" required placeholder="e.g., Blood pressure medication">
+          </div>
+          <div class="form-group">
+            <label for="reminderDescription">Description</label>
+            <textarea id="reminderDescription" placeholder="Additional details..."></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="reminderDate">Date</label>
+              <input type="date" id="reminderDate">
+            </div>
+            <div class="form-group">
+              <label for="reminderTime">Time *</label>
+              <input type="time" id="reminderTime" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Recurring</label>
+            <div class="recurring-options">
+              <label><input type="radio" name="recurring" value="once" checked> One-time</label>
+              <label><input type="radio" name="recurring" value="daily"> Daily</label>
+              <label><input type="radio" name="recurring" value="weekly"> Weekly</label>
+            </div>
+          </div>
+          <button type="submit">Add Reminder</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Active Reminders</h2>
+        <div id="remindersList"></div>
       </div>
     </div>
   </div>
 
-  <!-- Edit Modal -->
-  <div class="modal-overlay" id="editModal">
+  <!-- Edit Senior Modal -->
+  <div class="modal-overlay" id="editSeniorModal">
     <div class="modal">
       <h2>Edit Senior</h2>
       <form id="editSeniorForm">
-        <input type="hidden" id="editId">
-        <div class="form-group">
-          <label for="editName">Name *</label>
-          <input type="text" id="editName" required>
+        <input type="hidden" id="editSeniorId">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="editName">Name *</label>
+            <input type="text" id="editName" required>
+          </div>
+          <div class="form-group">
+            <label for="editPhone">Phone *</label>
+            <input type="tel" id="editPhone" required>
+          </div>
         </div>
-        <div class="form-group">
-          <label for="editPhone">Phone Number *</label>
-          <input type="tel" id="editPhone" required>
-        </div>
-        <div class="form-group">
-          <label for="editLocation">Location</label>
-          <input type="text" id="editLocation">
-        </div>
-        <div class="form-group">
-          <label for="editInterests">Interests</label>
-          <input type="text" id="editInterests">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="editLocation">Location</label>
+            <input type="text" id="editLocation">
+          </div>
+          <div class="form-group">
+            <label for="editInterests">Interests</label>
+            <input type="text" id="editInterests">
+          </div>
         </div>
         <div class="form-group">
           <label for="editMedicalNotes">Medical Notes</label>
           <textarea id="editMedicalNotes"></textarea>
         </div>
-
-        <div class="memories-section">
-          <label>Add Memory</label>
-          <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-            <select id="memoryType" style="padding: 10px; border-radius: 6px; border: 1px solid #ddd;">
-              <option value="fact">Fact</option>
-              <option value="preference">Preference</option>
-              <option value="event">Event</option>
-              <option value="concern">Concern</option>
-              <option value="relationship">Relationship</option>
-            </select>
-            <input type="text" id="memoryContent" placeholder="e.g., Has a grandson named Tommy" style="flex: 1;">
-            <button type="button" onclick="addMemory()" class="secondary">Add</button>
-          </div>
-          <div id="memoriesList"></div>
-        </div>
-
         <div class="modal-actions">
-          <button type="button" class="secondary" onclick="closeEditModal()">Cancel</button>
+          <button type="button" class="secondary" onclick="closeModal('editSeniorModal')">Cancel</button>
           <button type="submit">Save Changes</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Transcript Modal -->
+  <div class="modal-overlay" id="transcriptModal">
+    <div class="modal">
+      <h2 id="transcriptTitle">Call Transcript</h2>
+      <div id="transcriptContent" class="transcript"></div>
+      <div class="modal-actions">
+        <button class="secondary" onclick="closeModal('transcriptModal')">Close</button>
+      </div>
     </div>
   </div>
 
@@ -370,9 +473,9 @@
   <div class="toast" id="toast"></div>
 
   <script>
-    const API_BASE = window.location.origin;
+    const API = window.location.origin;
 
-    // Toast notifications
+    // Toast
     function showToast(message, type = 'success') {
       const toast = document.getElementById('toast');
       toast.textContent = message;
@@ -380,286 +483,412 @@
       setTimeout(() => toast.classList.remove('show'), 3000);
     }
 
-    // Load seniors with their memories
-    async function loadSeniors() {
-      try {
-        const res = await fetch(`${API_BASE}/api/seniors`);
-        const seniors = await res.json();
+    // Tabs
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(tab.dataset.tab).classList.add('active');
+      });
+    });
 
-        // Fetch memories for each senior
-        const seniorsWithMemories = await Promise.all(
-          seniors.map(async (senior) => {
-            try {
-              const memRes = await fetch(`${API_BASE}/api/seniors/${senior.id}/memories`);
-              const memories = await memRes.json();
-              return { ...senior, memories: memories.slice(0, 5) }; // Show up to 5 memories
-            } catch {
-              return { ...senior, memories: [] };
-            }
-          })
-        );
-
-        renderSeniors(seniorsWithMemories);
-      } catch (error) {
-        showToast('Failed to load seniors', 'error');
-      }
-    }
-
-    // Render seniors list
-    function renderSeniors(seniors) {
-      const container = document.getElementById('seniorsList');
-
-      if (seniors.length === 0) {
-        container.innerHTML = `
-          <div class="empty-state">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            <p>No seniors added yet</p>
-          </div>
-        `;
-        return;
-      }
-
-      container.innerHTML = seniors.map(senior => `
-        <div class="senior-card">
-          <div class="senior-info">
-            <h3>${escapeHtml(senior.name)}</h3>
-            <p>${escapeHtml(senior.phone)}</p>
-            ${senior.familyInfo?.location ? `<p>${escapeHtml(senior.familyInfo.location)}</p>` : ''}
-            <div class="tags">
-              ${(senior.interests || []).map(i => `<span class="tag">${escapeHtml(i)}</span>`).join('')}
-            </div>
-            ${senior.memories && senior.memories.length > 0 ? `
-              <div class="senior-memories">
-                <p class="memories-label">Memories:</p>
-                ${senior.memories.map(m => `
-                  <div class="memory-chip">
-                    <span class="memory-type">${escapeHtml(m.type)}</span>
-                    ${escapeHtml(m.content)}
-                  </div>
-                `).join('')}
-              </div>
-            ` : ''}
-          </div>
-          <div class="senior-actions">
-            <button onclick="callSenior('${senior.phone}', '${escapeHtml(senior.name)}')">Call</button>
-            <button class="secondary" onclick="editSenior('${senior.id}')">Edit</button>
-            <button class="danger" onclick="deleteSenior('${senior.id}')">Delete</button>
-          </div>
-        </div>
-      `).join('');
+    // Modals
+    function closeModal(id) {
+      document.getElementById(id).classList.remove('show');
     }
 
     // Escape HTML
-    function escapeHtml(text) {
+    function esc(text) {
       if (!text) return '';
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
     }
 
-    // Add senior
+    // Format date
+    function formatDate(dateStr) {
+      if (!dateStr) return '-';
+      const d = new Date(dateStr);
+      const now = new Date();
+      const diff = now - d;
+      if (diff < 60000) return 'Just now';
+      if (diff < 3600000) return `${Math.floor(diff/60000)} min ago`;
+      if (diff < 86400000) return `${Math.floor(diff/3600000)} hours ago`;
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    }
+
+    function formatDuration(seconds) {
+      if (!seconds) return '0:00';
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+
+    // ============ DASHBOARD ============
+    async function loadDashboard() {
+      try {
+        const res = await fetch(`${API}/api/stats`);
+        const stats = await res.json();
+
+        document.getElementById('statSeniors').textContent = stats.totalSeniors;
+        document.getElementById('statCallsToday').textContent = stats.callsToday;
+        document.getElementById('statUpcoming').textContent = stats.upcomingRemindersCount;
+        document.getElementById('statActive').textContent = stats.activeCalls;
+
+        // Recent calls
+        const callsHtml = stats.recentCalls?.length
+          ? stats.recentCalls.map(c => `
+            <div class="list-item">
+              <div>
+                <h3>${esc(c.seniorName) || 'Unknown'}</h3>
+                <p class="meta">${formatDate(c.startedAt)} &bull; ${formatDuration(c.durationSeconds)}</p>
+              </div>
+              <span class="status-badge ${c.status || ''}">${c.status || 'unknown'}</span>
+            </div>
+          `).join('')
+          : '<p class="empty-state">No recent calls</p>';
+        document.getElementById('recentCallsList').innerHTML = callsHtml;
+
+        // Upcoming reminders
+        const remHtml = stats.upcomingReminders?.length
+          ? stats.upcomingReminders.map(r => `
+            <div class="list-item">
+              <div>
+                <h3>${esc(r.title)}</h3>
+                <p>${esc(r.seniorName)} &bull; ${r.type}</p>
+                <p class="meta">${new Date(r.scheduledTime).toLocaleString()}</p>
+              </div>
+            </div>
+          `).join('')
+          : '<p class="empty-state">No upcoming reminders</p>';
+        document.getElementById('upcomingRemindersList').innerHTML = remHtml;
+      } catch (e) {
+        console.error('Failed to load dashboard', e);
+      }
+    }
+
+    // ============ SENIORS ============
+    async function loadSeniors() {
+      try {
+        const res = await fetch(`${API}/api/seniors`);
+        const seniors = await res.json();
+        renderSeniors(seniors);
+        populateSeniorDropdown(seniors);
+      } catch (e) {
+        showToast('Failed to load seniors', 'error');
+      }
+    }
+
+    function renderSeniors(seniors) {
+      if (!seniors.length) {
+        document.getElementById('seniorsList').innerHTML = '<p class="empty-state">No seniors yet</p>';
+        return;
+      }
+      document.getElementById('seniorsList').innerHTML = seniors.map(s => `
+        <div class="list-item">
+          <div>
+            <h3>${esc(s.name)}</h3>
+            <p>${esc(s.phone)}</p>
+            ${s.familyInfo?.location ? `<p class="meta">${esc(s.familyInfo.location)}</p>` : ''}
+            <div>${(s.interests || []).map(i => `<span class="tag">${esc(i)}</span>`).join('')}</div>
+          </div>
+          <div class="actions">
+            <button class="small" onclick="callSenior('${s.phone}', '${esc(s.name)}')">Call</button>
+            <button class="small secondary" onclick="editSenior('${s.id}')">Edit</button>
+            <button class="small danger" onclick="deleteSenior('${s.id}')">Delete</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function populateSeniorDropdown(seniors) {
+      const sel = document.getElementById('reminderSenior');
+      sel.innerHTML = '<option value="">Select senior...</option>' +
+        seniors.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+    }
+
     document.getElementById('addSeniorForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = e.target.querySelector('button[type="submit"]');
       btn.disabled = true;
-      btn.textContent = 'Adding...';
-
-      const interests = document.getElementById('interests').value
-        .split(',')
-        .map(i => i.trim())
-        .filter(i => i);
 
       const data = {
         name: document.getElementById('name').value,
         phone: document.getElementById('phone').value,
-        interests,
-        familyInfo: {
-          location: document.getElementById('location').value
-        },
+        interests: document.getElementById('interests').value.split(',').map(i => i.trim()).filter(i => i),
+        familyInfo: { location: document.getElementById('location').value },
         medicalNotes: document.getElementById('medicalNotes').value
       };
 
       try {
-        const res = await fetch(`${API_BASE}/api/seniors`, {
+        const res = await fetch(`${API}/api/seniors`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
-
-        if (!res.ok) throw new Error('Failed to add senior');
-
-        showToast(`${data.name} added successfully!`);
+        if (!res.ok) throw new Error('Failed');
+        showToast('Senior added!');
         e.target.reset();
         loadSeniors();
-      } catch (error) {
-        showToast(error.message, 'error');
+        loadDashboard();
+      } catch (err) {
+        showToast('Failed to add senior', 'error');
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Add Senior';
       }
     });
 
-    // Edit senior
-    let currentEditId = null;
-
     async function editSenior(id) {
-      currentEditId = id;
       try {
-        const res = await fetch(`${API_BASE}/api/seniors/${id}`);
-        const senior = await res.json();
-
-        document.getElementById('editId').value = id;
-        document.getElementById('editName').value = senior.name;
-        document.getElementById('editPhone').value = senior.phone;
-        document.getElementById('editLocation').value = senior.familyInfo?.location || '';
-        document.getElementById('editInterests').value = (senior.interests || []).join(', ');
-        document.getElementById('editMedicalNotes').value = senior.medicalNotes || '';
-
-        // Load memories
-        loadMemories(id);
-
-        document.getElementById('editModal').classList.add('show');
-      } catch (error) {
+        const res = await fetch(`${API}/api/seniors/${id}`);
+        const s = await res.json();
+        document.getElementById('editSeniorId').value = id;
+        document.getElementById('editName').value = s.name;
+        document.getElementById('editPhone').value = s.phone;
+        document.getElementById('editLocation').value = s.familyInfo?.location || '';
+        document.getElementById('editInterests').value = (s.interests || []).join(', ');
+        document.getElementById('editMedicalNotes').value = s.medicalNotes || '';
+        document.getElementById('editSeniorModal').classList.add('show');
+      } catch (e) {
         showToast('Failed to load senior', 'error');
       }
     }
 
-    async function loadMemories(seniorId) {
-      try {
-        const res = await fetch(`${API_BASE}/api/seniors/${seniorId}/memories`);
-        const memories = await res.json();
-
-        const container = document.getElementById('memoriesList');
-        if (memories.length === 0) {
-          container.innerHTML = '<p style="color: #888; font-size: 13px;">No memories yet</p>';
-        } else {
-          container.innerHTML = memories.map(m => `
-            <div class="memory-item">
-              <span class="type">${escapeHtml(m.type)}</span>
-              ${escapeHtml(m.content)}
-            </div>
-          `).join('');
-        }
-      } catch (error) {
-        console.error('Failed to load memories', error);
-      }
-    }
-
-    async function addMemory() {
-      const type = document.getElementById('memoryType').value;
-      const content = document.getElementById('memoryContent').value.trim();
-
-      if (!content) {
-        showToast('Please enter memory content', 'error');
-        return;
-      }
-
-      try {
-        await fetch(`${API_BASE}/api/seniors/${currentEditId}/memories`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type, content, importance: 70 })
-        });
-
-        document.getElementById('memoryContent').value = '';
-        loadMemories(currentEditId);
-        showToast('Memory added!');
-      } catch (error) {
-        showToast('Failed to add memory', 'error');
-      }
-    }
-
-    function closeEditModal() {
-      document.getElementById('editModal').classList.remove('show');
-      currentEditId = null;
-    }
-
-    // Save edit
     document.getElementById('editSeniorForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const id = document.getElementById('editId').value;
-
-      const interests = document.getElementById('editInterests').value
-        .split(',')
-        .map(i => i.trim())
-        .filter(i => i);
-
+      const id = document.getElementById('editSeniorId').value;
       const data = {
         name: document.getElementById('editName').value,
         phone: document.getElementById('editPhone').value,
-        interests,
-        familyInfo: {
-          location: document.getElementById('editLocation').value
-        },
+        interests: document.getElementById('editInterests').value.split(',').map(i => i.trim()).filter(i => i),
+        familyInfo: { location: document.getElementById('editLocation').value },
         medicalNotes: document.getElementById('editMedicalNotes').value
       };
 
       try {
-        const res = await fetch(`${API_BASE}/api/seniors/${id}`, {
+        await fetch(`${API}/api/seniors/${id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
-
-        if (!res.ok) throw new Error('Failed to update');
-
         showToast('Senior updated!');
-        closeEditModal();
+        closeModal('editSeniorModal');
         loadSeniors();
-      } catch (error) {
-        showToast(error.message, 'error');
+      } catch (e) {
+        showToast('Failed to update', 'error');
       }
     });
 
-    // Call senior
-    async function callSenior(phone, name) {
-      if (!confirm(`Call ${name} at ${phone}?`)) return;
-
-      try {
-        const res = await fetch(`${API_BASE}/api/call`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phoneNumber: phone })
-        });
-
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Failed to initiate call');
-
-        showToast(`Calling ${name}...`);
-      } catch (error) {
-        showToast(error.message, 'error');
-      }
-    }
-
-    // Delete senior
     async function deleteSenior(id) {
-      if (!confirm('Are you sure you want to delete this senior?')) return;
-
+      if (!confirm('Delete this senior?')) return;
       try {
-        const res = await fetch(`${API_BASE}/api/seniors/${id}`, {
+        await fetch(`${API}/api/seniors/${id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ isActive: false })
         });
-
-        if (!res.ok) throw new Error('Failed to delete');
-
         showToast('Senior deleted');
         loadSeniors();
-      } catch (error) {
-        showToast(error.message, 'error');
+        loadDashboard();
+      } catch (e) {
+        showToast('Failed to delete', 'error');
       }
     }
 
-    // Close modal on overlay click
-    document.getElementById('editModal').addEventListener('click', (e) => {
-      if (e.target === e.currentTarget) closeEditModal();
+    async function callSenior(phone, name) {
+      if (!confirm(`Call ${name}?`)) return;
+      try {
+        const res = await fetch(`${API}/api/call`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phoneNumber: phone })
+        });
+        if (!res.ok) throw new Error('Failed');
+        showToast(`Calling ${name}...`);
+        setTimeout(loadDashboard, 2000);
+      } catch (e) {
+        showToast('Failed to call', 'error');
+      }
+    }
+
+    // ============ CALLS ============
+    async function loadCalls() {
+      try {
+        const res = await fetch(`${API}/api/conversations`);
+        const calls = await res.json();
+        renderCalls(calls);
+      } catch (e) {
+        showToast('Failed to load calls', 'error');
+      }
+    }
+
+    function renderCalls(calls) {
+      if (!calls.length) {
+        document.getElementById('callsList').innerHTML = '<p class="empty-state">No calls yet</p>';
+        return;
+      }
+      document.getElementById('callsList').innerHTML = calls.map(c => `
+        <div class="list-item">
+          <div>
+            <h3>${esc(c.seniorName) || 'Unknown'}</h3>
+            <p>${new Date(c.startedAt).toLocaleString()}</p>
+            <p class="meta">Duration: ${formatDuration(c.durationSeconds)} &bull;
+              <span class="status-badge ${c.status || ''}">${c.status || 'unknown'}</span>
+            </p>
+          </div>
+          <div class="actions">
+            ${c.transcript ? `<button class="small secondary" onclick='showTranscript(${JSON.stringify(c)})'>Transcript</button>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function showTranscript(call) {
+      document.getElementById('transcriptTitle').textContent =
+        `Call with ${call.seniorName || 'Unknown'} - ${new Date(call.startedAt).toLocaleDateString()}`;
+
+      const transcript = call.transcript || [];
+      if (!transcript.length) {
+        document.getElementById('transcriptContent').innerHTML = '<p class="empty-state">No transcript available</p>';
+      } else {
+        document.getElementById('transcriptContent').innerHTML = transcript.map(t => `
+          <div class="transcript-message ${t.role === 'assistant' ? 'donna' : 'user'}">
+            <div class="speaker">${t.role === 'assistant' ? 'Donna' : 'User'}</div>
+            <div>${esc(t.content)}</div>
+          </div>
+        `).join('');
+      }
+      document.getElementById('transcriptModal').classList.add('show');
+    }
+
+    // ============ REMINDERS ============
+    async function loadReminders() {
+      try {
+        const res = await fetch(`${API}/api/reminders`);
+        const reminders = await res.json();
+        renderReminders(reminders);
+      } catch (e) {
+        showToast('Failed to load reminders', 'error');
+      }
+    }
+
+    function renderReminders(reminders) {
+      if (!reminders.length) {
+        document.getElementById('remindersList').innerHTML = '<p class="empty-state">No reminders yet</p>';
+        return;
+      }
+      document.getElementById('remindersList').innerHTML = reminders.map(r => {
+        const schedule = r.isRecurring
+          ? (r.cronExpression === '0 * * * *' ? 'Daily' : r.cronExpression || 'Recurring')
+          : 'One-time';
+        const time = r.scheduledTime ? new Date(r.scheduledTime).toLocaleString() : '-';
+        return `
+          <div class="list-item">
+            <div>
+              <h3>${r.type === 'medication' ? '💊' : r.type === 'appointment' ? '📅' : '📌'} ${esc(r.title)}</h3>
+              <p>${esc(r.seniorName)}</p>
+              <p class="meta">${schedule} &bull; ${time}</p>
+              ${r.lastDeliveredAt ? `<p class="meta">Last: ${formatDate(r.lastDeliveredAt)}</p>` : ''}
+            </div>
+            <div class="actions">
+              <button class="small danger" onclick="deleteReminder('${r.id}')">Delete</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    document.getElementById('addReminderForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = e.target.querySelector('button[type="submit"]');
+      btn.disabled = true;
+
+      const recurring = document.querySelector('input[name="recurring"]:checked').value;
+      const date = document.getElementById('reminderDate').value;
+      const time = document.getElementById('reminderTime').value;
+
+      let scheduledTime = null;
+      let cronExpression = null;
+      let isRecurring = false;
+
+      if (recurring === 'daily') {
+        isRecurring = true;
+        cronExpression = '0 * * * *'; // Simplified - scheduler handles time matching
+        // Set scheduledTime to today at the specified time for first trigger
+        const today = new Date();
+        const [h, m] = time.split(':');
+        today.setHours(parseInt(h), parseInt(m), 0, 0);
+        scheduledTime = today.toISOString();
+      } else if (recurring === 'weekly') {
+        isRecurring = true;
+        cronExpression = 'weekly';
+        const today = new Date();
+        const [h, m] = time.split(':');
+        today.setHours(parseInt(h), parseInt(m), 0, 0);
+        scheduledTime = today.toISOString();
+      } else {
+        // One-time
+        if (date && time) {
+          scheduledTime = new Date(`${date}T${time}`).toISOString();
+        }
+      }
+
+      const data = {
+        seniorId: document.getElementById('reminderSenior').value,
+        type: document.getElementById('reminderType').value,
+        title: document.getElementById('reminderTitle').value,
+        description: document.getElementById('reminderDescription').value,
+        scheduledTime,
+        isRecurring,
+        cronExpression
+      };
+
+      try {
+        const res = await fetch(`${API}/api/reminders`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        if (!res.ok) throw new Error('Failed');
+        showToast('Reminder added!');
+        e.target.reset();
+        loadReminders();
+        loadDashboard();
+      } catch (err) {
+        showToast('Failed to add reminder', 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    async function deleteReminder(id) {
+      if (!confirm('Delete this reminder?')) return;
+      try {
+        await fetch(`${API}/api/reminders/${id}`, { method: 'DELETE' });
+        showToast('Reminder deleted');
+        loadReminders();
+        loadDashboard();
+      } catch (e) {
+        showToast('Failed to delete', 'error');
+      }
+    }
+
+    // Close modals on overlay click
+    document.querySelectorAll('.modal-overlay').forEach(m => {
+      m.addEventListener('click', (e) => {
+        if (e.target === m) m.classList.remove('show');
+      });
     });
 
     // Initial load
+    loadDashboard();
     loadSeniors();
+    loadCalls();
+    loadReminders();
+
+    // Refresh dashboard every 30 seconds
+    setInterval(loadDashboard, 30000);
   </script>
 </body>
 </html>

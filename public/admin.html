@@ -247,6 +247,43 @@
       cursor: pointer;
     }
 
+    /* Memories */
+    .memories-section {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #eee;
+    }
+    .memory-chip {
+      background: #f8f8ff;
+      border: 1px solid #e8e8ff;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .memory-type {
+      display: inline-block;
+      background: #667eea;
+      color: white;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-right: 6px;
+    }
+    .senior-memories {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px dashed #ddd;
+    }
+    .senior-memories .label {
+      font-size: 11px;
+      color: #888;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
     /* Toast */
     .toast {
       position: fixed;
@@ -450,6 +487,23 @@
           <label for="editMedicalNotes">Medical Notes</label>
           <textarea id="editMedicalNotes"></textarea>
         </div>
+
+        <div class="memories-section">
+          <h3 style="font-size: 14px; margin-bottom: 12px; color: #667eea;">Memories</h3>
+          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <select id="memoryType" style="padding: 8px; border-radius: 6px; border: 1px solid #ddd; font-size: 13px;">
+              <option value="fact">Fact</option>
+              <option value="preference">Preference</option>
+              <option value="event">Event</option>
+              <option value="concern">Concern</option>
+              <option value="relationship">Relationship</option>
+            </select>
+            <input type="text" id="memoryContent" placeholder="e.g., Has a grandson named Tommy" style="flex: 1; font-size: 13px;">
+            <button type="button" class="small secondary" onclick="addMemory()">Add</button>
+          </div>
+          <div id="memoriesList" style="max-height: 200px; overflow-y: auto;"></div>
+        </div>
+
         <div class="modal-actions">
           <button type="button" class="secondary" onclick="closeModal('editSeniorModal')">Cancel</button>
           <button type="submit">Save Changes</button>
@@ -573,7 +627,21 @@
       try {
         const res = await fetch(`${API}/api/seniors`);
         const seniors = await res.json();
-        renderSeniors(seniors);
+
+        // Fetch memories for each senior
+        const seniorsWithMemories = await Promise.all(
+          seniors.map(async (senior) => {
+            try {
+              const memRes = await fetch(`${API}/api/seniors/${senior.id}/memories`);
+              const memories = await memRes.json();
+              return { ...senior, memories: memories.slice(0, 5) };
+            } catch {
+              return { ...senior, memories: [] };
+            }
+          })
+        );
+
+        renderSeniors(seniorsWithMemories);
         populateSeniorDropdown(seniors);
       } catch (e) {
         showToast('Failed to load seniors', 'error');
@@ -587,11 +655,22 @@
       }
       document.getElementById('seniorsList').innerHTML = seniors.map(s => `
         <div class="list-item">
-          <div>
+          <div style="flex: 1;">
             <h3>${esc(s.name)}</h3>
             <p>${esc(s.phone)}</p>
             ${s.familyInfo?.location ? `<p class="meta">${esc(s.familyInfo.location)}</p>` : ''}
             <div>${(s.interests || []).map(i => `<span class="tag">${esc(i)}</span>`).join('')}</div>
+            ${s.memories && s.memories.length > 0 ? `
+              <div class="senior-memories">
+                <p class="label">Memories</p>
+                ${s.memories.map(m => `
+                  <div class="memory-chip">
+                    <span class="memory-type">${esc(m.type)}</span>
+                    ${esc(m.content)}
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
           </div>
           <div class="actions">
             <button class="small" onclick="callSenior('${s.phone}', '${esc(s.name)}')">Call</button>
@@ -639,7 +718,10 @@
       }
     });
 
+    let currentEditId = null;
+
     async function editSenior(id) {
+      currentEditId = id;
       try {
         const res = await fetch(`${API}/api/seniors/${id}`);
         const s = await res.json();
@@ -649,9 +731,51 @@
         document.getElementById('editLocation').value = s.familyInfo?.location || '';
         document.getElementById('editInterests').value = (s.interests || []).join(', ');
         document.getElementById('editMedicalNotes').value = s.medicalNotes || '';
+        loadMemories(id);
         document.getElementById('editSeniorModal').classList.add('show');
       } catch (e) {
         showToast('Failed to load senior', 'error');
+      }
+    }
+
+    async function loadMemories(seniorId) {
+      try {
+        const res = await fetch(`${API}/api/seniors/${seniorId}/memories`);
+        const memories = await res.json();
+        const container = document.getElementById('memoriesList');
+        if (!memories.length) {
+          container.innerHTML = '<p style="color: #888; font-size: 12px;">No memories yet</p>';
+        } else {
+          container.innerHTML = memories.map(m => `
+            <div class="memory-chip">
+              <span class="memory-type">${esc(m.type)}</span>
+              ${esc(m.content)}
+            </div>
+          `).join('');
+        }
+      } catch (e) {
+        console.error('Failed to load memories', e);
+      }
+    }
+
+    async function addMemory() {
+      const type = document.getElementById('memoryType').value;
+      const content = document.getElementById('memoryContent').value.trim();
+      if (!content) {
+        showToast('Enter memory content', 'error');
+        return;
+      }
+      try {
+        await fetch(`${API}/api/seniors/${currentEditId}/memories`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, content, importance: 70 })
+        });
+        document.getElementById('memoryContent').value = '';
+        loadMemories(currentEditId);
+        showToast('Memory added!');
+      } catch (e) {
+        showToast('Failed to add memory', 'error');
       }
     }
 

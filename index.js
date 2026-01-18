@@ -56,8 +56,12 @@ app.get('/health', (req, res) => {
 // Twilio webhook - incoming/outgoing call answered
 app.post('/voice/answer', async (req, res) => {
   const callSid = req.body.CallSid;
-  const fromPhone = req.body.From || req.body.To; // From for inbound, To for outbound
-  console.log(`[${callSid}] Call answered from ${fromPhone}, starting media stream`);
+  // For outbound calls: From = Twilio number, To = person being called
+  // For inbound calls: From = caller, To = Twilio number
+  const twilioNumber = process.env.TWILIO_PHONE_NUMBER;
+  const isOutbound = req.body.From === twilioNumber || req.body.Direction === 'outbound-api';
+  const fromPhone = isOutbound ? req.body.To : req.body.From;
+  console.log(`[${callSid}] Call answered (${isOutbound ? 'outbound' : 'inbound'}) - target: ${fromPhone}`);
 
   // Check if this call was triggered by a reminder (context is PRE-FETCHED)
   const reminderContext = schedulerService.getReminderContext(callSid);

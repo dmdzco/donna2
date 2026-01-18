@@ -19,6 +19,9 @@ export const pendingReminderCalls = new Map();
 // Store pre-fetched context by phone number (for manual API calls)
 export const prefetchedContextByPhone = new Map();
 
+// Normalize phone to last 10 digits (matches seniors.js)
+const normalizePhone = (phone) => phone.replace(/\D/g, '').slice(-10);
+
 export const schedulerService = {
   /**
    * Find reminders that are due now
@@ -132,13 +135,15 @@ export const schedulerService = {
       ? await memoryService.buildContext(senior.id, null, senior)
       : null;
 
-    prefetchedContextByPhone.set(phoneNumber, {
+    // Normalize phone for consistent lookup
+    const normalized = normalizePhone(phoneNumber);
+    prefetchedContextByPhone.set(normalized, {
       senior,
       memoryContext,
       fetchedAt: new Date()
     });
 
-    console.log(`[Scheduler] Pre-fetch complete for ${phoneNumber}`);
+    console.log(`[Scheduler] Pre-fetch complete for ${normalized}`);
     return { senior, memoryContext };
   },
 
@@ -146,9 +151,11 @@ export const schedulerService = {
    * Get pre-fetched context for a phone number (for manual API calls)
    */
   getPrefetchedContext(phoneNumber) {
-    const context = prefetchedContextByPhone.get(phoneNumber);
+    // Normalize phone for consistent lookup
+    const normalized = normalizePhone(phoneNumber);
+    const context = prefetchedContextByPhone.get(normalized);
     if (context) {
-      prefetchedContextByPhone.delete(phoneNumber); // One-time use
+      prefetchedContextByPhone.delete(normalized); // One-time use
     }
     return context;
   },

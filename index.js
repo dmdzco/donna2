@@ -446,7 +446,19 @@ wss.on('connection', async (twilioWs, req) => {
   });
 
   twilioWs.on('error', (error) => {
-    console.error(`[${callSid}] WebSocket error:`, error);
+    console.error(`[${callSid}] WebSocket error:`, error.message, error.code, error.stack);
+  });
+
+  twilioWs.on('ping', () => {
+    console.log(`[${callSid}] Received ping`);
+  });
+
+  twilioWs.on('pong', () => {
+    console.log(`[${callSid}] Received pong`);
+  });
+
+  twilioWs.on('unexpected-response', (req, res) => {
+    console.log(`[${callSid}] Unexpected response:`, res.statusCode);
   });
 });
 

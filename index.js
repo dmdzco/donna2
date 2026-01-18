@@ -345,6 +345,12 @@ app.get('/api/conversations', async (req, res) => {
   }
 });
 
+// Debug: log all media-stream requests
+app.all('/media-stream', (req, res, next) => {
+  console.log(`[HTTP] /media-stream request: ${req.method}, upgrade: ${req.headers.upgrade}`);
+  next();
+});
+
 // Create HTTP server
 const server = createServer(app);
 
@@ -379,8 +385,11 @@ wss.on('connection', async (twilioWs, req) => {
   let callSid = null;
   let geminiSession = null;
 
-  twilioWs.on('message', async (message) => {
-    console.log(`[WS] Message received, event: ${JSON.parse(message).event}`);
+  twilioWs.on('message', async (message, isBinary) => {
+    console.log(`[WS] Message received (binary: ${isBinary}, length: ${message.length})`);
+    console.log(`[WS] Raw: ${message.toString().substring(0, 200)}`);
+    const event = JSON.parse(message).event;
+    console.log(`[WS] Event: ${event}`);
     try {
       const data = JSON.parse(message);
 

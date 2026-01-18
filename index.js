@@ -123,6 +123,9 @@ app.post('/voice/answer', async (req, res) => {
 
   const twiml = new twilio.twiml.VoiceResponse();
 
+  // Brief pause to let connection establish
+  twiml.pause({ length: 1 });
+
   // Connect to bidirectional media stream
   const connect = twiml.connect();
   connect.stream({

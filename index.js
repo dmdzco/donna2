@@ -355,7 +355,7 @@ app.all('/media-stream', (req, res, next) => {
 const server = createServer(app);
 
 // Create WebSocket server for Twilio Media Streams
-const wss = new WebSocketServer({ server, path: '/media-stream' });
+const wss = new WebSocketServer({ noServer: true });
 
 wss.on('error', (error) => {
   console.error('[WSS] Server error:', error);
@@ -472,7 +472,7 @@ wss.on('connection', async (twilioWs, req) => {
 });
 
 // === BROWSER CALL WebSocket ===
-const browserWss = new WebSocketServer({ server, path: '/browser-call' });
+const browserWss = new WebSocketServer({ noServer: true });
 
 browserWss.on('connection', async (browserWs, req) => {
   console.log('[Browser] New browser call connection');
@@ -526,6 +526,27 @@ browserWss.on('connection', async (browserWs, req) => {
   browserWs.on('error', (error) => {
     console.error('[Browser] WebSocket error:', error);
   });
+});
+
+// Handle WebSocket upgrade manually for both servers
+server.on('upgrade', (request, socket, head) => {
+  const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
+  console.log(`[Upgrade] Path: ${pathname}`);
+
+  if (pathname === '/media-stream') {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      console.log('[Upgrade] WebSocket upgraded for media-stream');
+      wss.emit('connection', ws, request);
+    });
+  } else if (pathname === '/browser-call') {
+    browserWss.handleUpgrade(request, socket, head, (ws) => {
+      console.log('[Upgrade] WebSocket upgraded for browser-call');
+      browserWss.emit('connection', ws, request);
+    });
+  } else {
+    console.log(`[Upgrade] Unknown path: ${pathname}, destroying socket`);
+    socket.destroy();
+  }
 });
 
 server.listen(PORT, () => {

@@ -123,9 +123,6 @@ app.post('/voice/answer', async (req, res) => {
 
   const twiml = new twilio.twiml.VoiceResponse();
 
-  // Brief pause to let connection establish
-  twiml.pause({ length: 1 });
-
   // Connect to bidirectional media stream
   const connect = twiml.connect();
   connect.stream({
@@ -133,10 +130,8 @@ app.post('/voice/answer', async (req, res) => {
     name: 'donna-stream'
   });
 
-  const twimlStr = twiml.toString();
-  console.log(`[${callSid}] TwiML: ${twimlStr}`);
   res.type('text/xml');
-  res.send(twimlStr);
+  res.send(twiml.toString());
 });
 
 // Twilio status callback
@@ -345,12 +340,6 @@ app.get('/api/conversations', async (req, res) => {
   }
 });
 
-// Debug: log all media-stream requests
-app.all('/media-stream', (req, res, next) => {
-  console.log(`[HTTP] /media-stream request: ${req.method}, upgrade: ${req.headers.upgrade}`);
-  next();
-});
-
 // Create HTTP server
 const server = createServer(app);
 
@@ -363,33 +352,19 @@ wss.on('error', (error) => {
 
 wss.on('connection', async (twilioWs, req) => {
   console.log('New WebSocket connection from Twilio');
-  console.log(`[WS] Ready state: ${twilioWs.readyState}, URL: ${req.url}`);
-  console.log(`[WS] Headers: ${JSON.stringify(req.headers)}`);
-
-  // Immediately send a pong to acknowledge connection
-  try {
-    twilioWs.pong();
-    console.log('[WS] Sent pong');
-  } catch (e) {
-    console.log('[WS] Pong error:', e.message);
-  }
 
   // Send a ping to keep connection alive
   const pingInterval = setInterval(() => {
     if (twilioWs.readyState === 1) {
       twilioWs.ping();
     }
-  }, 5000); // More frequent pings
+  }, 30000);
 
   let streamSid = null;
   let callSid = null;
   let geminiSession = null;
 
-  twilioWs.on('message', async (message, isBinary) => {
-    console.log(`[WS] Message received (binary: ${isBinary}, length: ${message.length})`);
-    console.log(`[WS] Raw: ${message.toString().substring(0, 200)}`);
-    const event = JSON.parse(message).event;
-    console.log(`[WS] Event: ${event}`);
+  twilioWs.on('message', async (message) => {
     try {
       const data = JSON.parse(message);
 
@@ -440,8 +415,8 @@ wss.on('connection', async (twilioWs, req) => {
     }
   });
 
-  twilioWs.on('close', async (code, reason) => {
-    console.log(`[${callSid}] WebSocket closed - code: ${code}, reason: ${reason?.toString() || 'none'}`);
+  twilioWs.on('close', async () => {
+    console.log(`[${callSid}] WebSocket closed`);
     clearInterval(pingInterval);
     // Close session if still in sessions map (status callback may have already handled it)
     if (geminiSession && sessions.has(callSid)) {
@@ -455,19 +430,7 @@ wss.on('connection', async (twilioWs, req) => {
   });
 
   twilioWs.on('error', (error) => {
-    console.error(`[${callSid}] WebSocket error:`, error.message, error.code, error.stack);
-  });
-
-  twilioWs.on('ping', () => {
-    console.log(`[${callSid}] Received ping`);
-  });
-
-  twilioWs.on('pong', () => {
-    console.log(`[${callSid}] Received pong`);
-  });
-
-  twilioWs.on('unexpected-response', (req, res) => {
-    console.log(`[${callSid}] Unexpected response:`, res.statusCode);
+    console.error(`[${callSid}] WebSocket error:`, error);
   });
 });
 
@@ -531,20 +494,16 @@ browserWss.on('connection', async (browserWs, req) => {
 // Handle WebSocket upgrade manually for both servers
 server.on('upgrade', (request, socket, head) => {
   const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
-  console.log(`[Upgrade] Path: ${pathname}`);
 
   if (pathname === '/media-stream') {
     wss.handleUpgrade(request, socket, head, (ws) => {
-      console.log('[Upgrade] WebSocket upgraded for media-stream');
       wss.emit('connection', ws, request);
     });
   } else if (pathname === '/browser-call') {
     browserWss.handleUpgrade(request, socket, head, (ws) => {
-      console.log('[Upgrade] WebSocket upgraded for browser-call');
       browserWss.emit('connection', ws, request);
     });
   } else {
-    console.log(`[Upgrade] Unknown path: ${pathname}, destroying socket`);
     socket.destroy();
   }
 });

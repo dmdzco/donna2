@@ -69,12 +69,34 @@
 7. [ ] Verify Observer Agent logs to console every 30s
 8. [ ] Compare call quality with V0
 
-**Known Issues to Monitor:**
-- Latency: V1 has ~1.5-2s latency vs V0's ~500ms
-- Audio format: Ensure PCM 24kHz → mulaw 8kHz conversion works
-- Turn detection: Deepgram utterance end detection accuracy
-
 **Test:** Complete a 2-minute conversation on V1, verify transcript, check logs.
+
+---
+
+### Step 6.5: V1 Latency Optimization
+**Goal:** Reduce V1 latency from ~1.5s to <600ms
+
+**See full plan:** [docs/plans/2026-01-18-v1-latency-optimization.md](./plans/2026-01-18-v1-latency-optimization.md)
+
+**Phase 1 - Quick Wins (1.5s → ~800ms):**
+- [ ] Switch Claude Sonnet → Haiku
+- [ ] Tune Deepgram endpointing (500ms → 300ms)
+- [ ] Implement streaming TTS
+
+**Phase 2 - Streaming Pipeline (~800ms → ~500ms):**
+- [ ] Stream Claude responses (sentence-by-sentence)
+- [ ] ElevenLabs WebSocket connection
+- [ ] Make Observer non-blocking
+
+**Phase 3 - Alternative Providers (~500ms → ~350ms):**
+- [ ] Test Cartesia TTS (~50-100ms)
+- [ ] Test Deepgram TTS (~100-200ms)
+- [ ] Test Gemini Flash text mode (~200ms)
+
+**Phase 4 - Advanced:**
+- [ ] Speculative execution
+- [ ] Filler words for instant feedback
+- [ ] Response caching
 
 ---
 
@@ -144,6 +166,12 @@ observer_signals (
 │  Step 6: V1 Pipeline Testing ← CURRENT PRIORITY        │
 │  └── "Validate Claude + Observer + ElevenLabs"         │
 │              ↓                                          │
+│  Step 6.5: V1 Latency Optimization                     │
+│  └── "Reduce 1.5s → <600ms"                            │
+│      Phase 1: Haiku + tuned Deepgram + streaming TTS   │
+│      Phase 2: Full streaming pipeline                  │
+│      Phase 3: Cartesia/Deepgram TTS alternatives       │
+│              ↓                                          │
 │  Step 7: Caregiver Login                               │
 │  └── "Secure multi-user access"                        │
 │              ↓                                          │
@@ -206,4 +234,4 @@ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=...
 
 ---
 
-*Last updated: January 18, 2026 - v2.4 (Dual Pipeline complete)*
+*Last updated: January 18, 2026 - v2.4 (Dual Pipeline + Latency Optimization Plan)*

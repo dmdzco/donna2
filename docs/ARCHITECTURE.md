@@ -57,32 +57,35 @@
 │  │   │         V0 PIPELINE                  │  │         V1 PIPELINE              │ │   │
 │  │   │      (GeminiLiveSession)             │  │     (V1AdvancedSession)          │ │   │
 │  │   │                                      │  │                                  │ │   │
-│  │   │  ┌────────────────────────────────┐  │  │  ┌────────────────────────────┐  │ │   │
-│  │   │  │      Gemini 2.5 Flash          │  │  │  │       Deepgram STT         │  │ │   │
-│  │   │  │      Native Audio              │  │  │  │    (Speech-to-Text)        │  │ │   │
+│  │   │  ┌────────────────────────────────┐  │  │  CRITICAL PATH:                  │ │   │
+│  │   │  │      Gemini 2.5 Flash          │  │  │  ┌────────────────────────────┐  │ │   │
+│  │   │  │      Native Audio              │  │  │  │       Deepgram STT         │  │ │   │
 │  │   │  │  • Audio in → Audio out        │  │  │  └─────────────┬──────────────┘  │ │   │
 │  │   │  │  • Built-in STT + TTS          │  │  │                │                 │ │   │
 │  │   │  │  • ~500ms latency              │  │  │                ▼                 │ │   │
 │  │   │  └────────────────────────────────┘  │  │  ┌────────────────────────────┐  │ │   │
 │  │   │                                      │  │  │     Claude Sonnet          │  │ │   │
-│  │   │  ┌────────────────────────────────┐  │  │  │   (Conversation LLM)       │  │ │   │
-│  │   │  │    Deepgram (Parallel)         │  │  │  └─────────────┬──────────────┘  │ │   │
-│  │   │  │  • User speech transcription   │  │  │                │                 │ │   │
-│  │   │  │  • Memory trigger detection    │  │  │                ▼                 │ │   │
-│  │   │  └────────────────────────────────┘  │  │  ┌────────────────────────────┐  │ │   │
-│  │   │                                      │  │  │      ElevenLabs TTS        │  │ │   │
-│  │   └──────────────────────────────────────┘  │  │    (Text-to-Speech)        │  │ │   │
-│  │                                             │  └─────────────┬──────────────┘  │ │   │
-│  │                                             │                │                 │ │   │
-│  │                                             │  ┌─────────────▼──────────────┐  │ │   │
-│  │                                             │  │     Observer Agent         │  │ │   │
-│  │                                             │  │   (Runs every 30s)         │  │ │   │
-│  │                                             │  │  • Engagement analysis     │  │ │   │
-│  │                                             │  │  • Emotional state         │  │ │   │
-│  │                                             │  │  • Reminder timing         │  │ │   │
-│  │                                             │  │  • Caregiver concerns      │  │ │   │
-│  │                                             │  └────────────────────────────┘  │ │   │
-│  │                                             └──────────────────────────────────┘ │   │
+│  │   │  ┌────────────────────────────────┐  │  │  └─────────────┬──────────────┘  │ │   │
+│  │   │  │    Deepgram (Parallel)         │  │  │                │                 │ │   │
+│  │   │  │  • User speech transcription   │  │  │                ▼                 │ │   │
+│  │   │  │  • Memory trigger detection    │  │  │  ┌────────────────────────────┐  │ │   │
+│  │   │  └────────────────────────────────┘  │  │  │      ElevenLabs TTS        │  │ │   │
+│  │   │                                      │  │  └─────────────┬──────────────┘  │ │   │
+│  │   └──────────────────────────────────────┘  │                │                 │ │   │
+│  │                                             │                ▼                 │ │   │
+│  │   ┌──────────────────────────────────────┐  │        Audio to Twilio          │ │   │
+│  │   │    PARALLEL (not in critical path)   │  │        ~1.5s latency            │ │   │
+│  │   │                                      │  └──────────────────────────────────┘ │   │
+│  │   │  ┌────────────────────────────────┐  │                                       │   │
+│  │   │  │     Observer Agent             │  │  Listens to conversation history      │   │
+│  │   │  │     (Background, every 30s)    │◄─┼──Signals used by NEXT Claude turn     │   │
+│  │   │  │                                │  │  Never blocks current response        │   │
+│  │   │  │  • Engagement analysis         │  │                                       │   │
+│  │   │  │  • Emotional state detection   │  │                                       │   │
+│  │   │  │  • Reminder timing signals     │  │                                       │   │
+│  │   │  │  • Caregiver concern flags     │  │                                       │   │
+│  │   │  └────────────────────────────────┘  │                                       │   │
+│  │   └──────────────────────────────────────┘                                       │   │
 │  │                                                                                   │   │
 │  └───────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                          │
@@ -340,52 +343,64 @@ if (pipeline === 'v1') {
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        V1 PIPELINE FLOW                              │
 │                                                                      │
+│   ════════════════════════════════════════════════════════════════  │
+│   CRITICAL PATH (adds to latency)          PARALLEL (no latency)    │
+│   ════════════════════════════════════════════════════════════════  │
+│                                                                      │
 │   Twilio Audio (mulaw 8kHz)                                         │
 │        │                                                             │
 │        ▼                                                             │
 │   ┌─────────────┐                                                   │
 │   │  Deepgram   │  ◄─── WebSocket connection                        │
 │   │    STT      │       model: nova-2                               │
-│   │             │       encoding: mulaw                              │
-│   │             │       sample_rate: 8000                            │
 │   └──────┬──────┘                                                   │
 │          │                                                           │
-│          │ Transcript                                                │
-│          ▼                                                           │
-│   ┌─────────────┐       ┌──────────────────┐                        │
-│   │   Claude    │◄──────│  Observer Agent  │                        │
-│   │   Sonnet    │       │  (every 30s)     │                        │
-│   │             │       │                  │                        │
-│   │ System      │       │ Analyzes:        │                        │
-│   │ prompt +    │       │ • Engagement     │                        │
-│   │ Observer    │       │ • Emotion        │                        │
-│   │ signals     │       │ • Reminder time  │                        │
-│   │             │       │ • Concerns       │                        │
-│   └──────┬──────┘       └──────────────────┘                        │
-│          │                                                           │
-│          │ Text response                                             │
-│          ▼                                                           │
-│   ┌─────────────┐                                                   │
-│   │ ElevenLabs  │  ◄─── model: eleven_turbo_v2_5                    │
-│   │    TTS      │       voice: Rachel                               │
-│   │             │       format: pcm_24000                            │
-│   └──────┬──────┘                                                   │
-│          │                                                           │
-│          │ PCM 24kHz audio                                          │
+│          │ Transcript ─────────────────────┐                        │
+│          │                                 │                        │
+│          ▼                                 ▼                        │
+│   ┌─────────────┐                 ┌──────────────────┐              │
+│   │   Claude    │                 │  Observer Agent  │ PARALLEL     │
+│   │   Sonnet    │                 │  (every 30s)     │ (async)      │
+│   │             │                 │                  │              │
+│   │ Uses last   │◄── signals ────│ Analyzes full    │              │
+│   │ observer    │    (from       │ conversation     │              │
+│   │ signal      │    previous    │ history          │              │
+│   │             │    analysis)   │                  │              │
+│   └──────┬──────┘                 │ Outputs:         │              │
+│          │                        │ • Engagement     │              │
+│          │ Text response          │ • Emotion        │              │
+│          │                        │ • Reminder time  │              │
+│          ▼                        │ • Concerns       │              │
+│   ┌─────────────┐                 └──────────────────┘              │
+│   │ ElevenLabs  │                        │                          │
+│   │    TTS      │                        │                          │
+│   └──────┬──────┘                        ▼                          │
+│          │                        Stored for NEXT turn              │
+│          │                        (never blocks current)            │
 │          ▼                                                           │
 │   ┌─────────────┐                                                   │
 │   │   Convert   │                                                   │
-│   │  PCM 24kHz  │                                                   │
 │   │  → mulaw    │                                                   │
 │   └──────┬──────┘                                                   │
 │          │                                                           │
 │          ▼                                                           │
 │   Twilio (back to phone)                                            │
 │                                                                      │
-│   Latency: ~1.5s (target: <600ms with optimizations)                │
+│   ════════════════════════════════════════════════════════════════  │
+│   CRITICAL PATH LATENCY: ~1.5s (target: <600ms)                     │
+│   OBSERVER LATENCY: 0ms (runs in background, doesn't block)         │
+│   ════════════════════════════════════════════════════════════════  │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+**Observer Agent Design:**
+- Runs on a 30-second interval (configurable)
+- Analyzes the full conversation history
+- Results stored in `lastObserverSignal`
+- Used by the NEXT Claude response, not the current one
+- Never awaited in the response critical path
+- If analysis takes 2-3 seconds, it doesn't matter - user doesn't wait
 
 **Key Files:**
 - `pipelines/v1-advanced.js` - Session handler

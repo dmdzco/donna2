@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { GeminiLiveSession } from './gemini-live.js';
+import { V1AdvancedSession } from './pipelines/v1-advanced.js';
 import { seniorService } from './services/seniors.js';
 import { memoryService } from './services/memory.js';
 import { conversationService } from './services/conversations.js';
@@ -49,10 +50,14 @@ const callMetadata = new Map();
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    milestone: 7,
+    milestone: 8,
     activeSessions: sessions.size,
-    ai: 'gemini-2.5-flash-native-audio',
-    features: ['news-updates', 'scheduled-calls', 'browser-calling']
+    pipelines: {
+      v0: 'gemini-2.5-flash-native-audio',
+      v1: 'claude-sonnet + observer + elevenlabs'
+    },
+    defaultPipeline: process.env.DEFAULT_PIPELINE || 'v0',
+    features: ['news-updates', 'scheduled-calls', 'browser-calling', 'dual-pipeline']
   });
 });
 
@@ -121,8 +126,14 @@ app.post('/voice/answer', async (req, res) => {
     }
   }
 
+  // Get pipeline preference (default to v0 for inbound/reminder calls)
+  const pipeline = pendingPipelines.get(callSid) || process.env.DEFAULT_PIPELINE || 'v0';
+  pendingPipelines.delete(callSid); // Clean up
+
+  console.log(`[${callSid}] Using pipeline: ${pipeline}`);
+
   // Store metadata for when WebSocket connects
-  callMetadata.set(callSid, { senior, memoryContext, fromPhone, conversationId, reminderPrompt });
+  callMetadata.set(callSid, { senior, memoryContext, fromPhone, conversationId, reminderPrompt, pipeline });
 
   const twiml = new twilio.twiml.VoiceResponse();
 
@@ -180,12 +191,20 @@ app.post('/voice/status', async (req, res) => {
   }
 });
 
+// Store pipeline preference for pending calls (callSid -> pipeline)
+const pendingPipelines = new Map();
+
 // API: Initiate outbound call
 app.post('/api/call', async (req, res) => {
-  const { phoneNumber } = req.body;
+  const { phoneNumber, pipeline = 'v0' } = req.body;
 
   if (!phoneNumber) {
     return res.status(400).json({ error: 'phoneNumber required' });
+  }
+
+  // Validate pipeline
+  if (!['v0', 'v1'].includes(pipeline)) {
+    return res.status(400).json({ error: 'Invalid pipeline. Use v0 or v1' });
   }
 
   try {
@@ -203,8 +222,11 @@ app.post('/api/call', async (req, res) => {
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
     });
 
-    console.log(`Initiated call ${call.sid} to ${phoneNumber}`);
-    res.json({ success: true, callSid: call.sid });
+    // Store pipeline preference for this call
+    pendingPipelines.set(call.sid, pipeline);
+
+    console.log(`Initiated ${pipeline} call ${call.sid} to ${phoneNumber}`);
+    res.json({ success: true, callSid: call.sid, pipeline });
 
   } catch (error) {
     console.error('Failed to initiate call:', error);
@@ -525,21 +547,35 @@ wss.on('connection', async (twilioWs, req) => {
 
           // Get metadata stored during /voice/answer
           const metadata = callMetadata.get(callSid) || {};
+          const pipeline = metadata.pipeline || 'v0';
 
-          // Create and connect Gemini Live session with senior context
-          geminiSession = new GeminiLiveSession(
-            twilioWs,
-            streamSid,
-            metadata.senior,
-            metadata.memoryContext,
-            metadata.reminderPrompt
-          );
+          // Create appropriate session based on pipeline
+          if (pipeline === 'v1') {
+            console.log(`[${callSid}] Creating V1 Advanced session (Claude + Observer)`);
+            geminiSession = new V1AdvancedSession(
+              twilioWs,
+              streamSid,
+              metadata.senior,
+              metadata.memoryContext,
+              metadata.reminderPrompt,
+              [] // TODO: Get pending reminders
+            );
+          } else {
+            console.log(`[${callSid}] Creating V0 Gemini session`);
+            geminiSession = new GeminiLiveSession(
+              twilioWs,
+              streamSid,
+              metadata.senior,
+              metadata.memoryContext,
+              metadata.reminderPrompt
+            );
+          }
           sessions.set(callSid, geminiSession);
 
           try {
             await geminiSession.connect();
           } catch (error) {
-            console.error(`[${callSid}] Failed to start Gemini session:`, error);
+            console.error(`[${callSid}] Failed to start ${pipeline} session:`, error);
           }
           break;
 
@@ -658,7 +694,8 @@ server.listen(PORT, () => {
   console.log(`Voice webhook: ${BASE_URL}/voice/answer`);
   console.log(`Media stream: ${WS_URL}/media-stream`);
   console.log(`Browser call: ${WS_URL}/browser-call`);
-  console.log(`Milestone: 7 (Phase C - Scheduled Calls)`);
+  console.log(`Milestone: 8 (Dual Pipeline - V0 Gemini / V1 Claude+Observer)`);
+  console.log(`Default pipeline: ${process.env.DEFAULT_PIPELINE || 'v0'}`);
 
   // Start the reminder scheduler (check every minute)
   startScheduler(BASE_URL, 60000);

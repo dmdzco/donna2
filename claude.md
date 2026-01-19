@@ -24,178 +24,196 @@
 
 **See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for the complete implementation roadmap.**
 
-Current priority: **Admin Dashboard** (full visibility and management)
+Current priority: **V1 Pipeline Testing** (Claude + Observer + ElevenLabs)
 
 ### Quick Summary of Next Steps:
 1. ~~**Deepgram STT**~~ - **DONE** (mid-call memory retrieval unlocked)
 2. ~~**News Updates**~~ - **DONE** (OpenAI web search, cached 1hr)
 3. ~~**Scheduled Calls**~~ - **DONE** (reminders trigger automated calls)
-4. **Admin Dashboard** - Full visibility and management
-5. **Caregiver Login** - Secure multi-user access
-6. **ElevenLabs TTS** - Production voice quality
+4. ~~**Admin Dashboard**~~ - **DONE** (4-tab interface with full management)
+5. ~~**Dual Pipeline**~~ - **DONE** (V0 Gemini / V1 Claude+Observer selectable)
+6. **Caregiver Login** - Secure multi-user access
+7. **V1 Pipeline Testing** - Validate Claude + Observer + ElevenLabs
 
 ---
 
-## Current Status: v2.3 (Scheduled Calls Added)
+## Current Status: v2.4 (Dual Pipeline)
 
 ### Working Features
-- Real-time voice calls (Twilio + Gemini 2.5 Native Audio)
+- **Dual Pipeline Architecture** - Select V0 or V1 from admin UI
+  - **V0**: Gemini 2.5 Native Audio (current default)
+  - **V1**: Deepgram STT → Claude + Observer → ElevenLabs TTS
+- Real-time voice calls (Twilio)
 - Bidirectional audio streaming via WebSocket
-- AI transcription of Donna's speech (Gemini output transcription)
+- AI transcription (Gemini output / Deepgram input)
 - User speech transcription (Deepgram STT)
 - Mid-conversation memory retrieval (triggers on keywords)
 - News updates via OpenAI web search (based on interests, cached 1hr)
-- **Scheduled reminder calls** - NEW (auto-triggers calls when reminders are due)
+- Scheduled reminder calls (auto-triggers calls when reminders are due)
+- **Enhanced Admin Dashboard** - 4 tabs: Dashboard, Seniors, Calls, Reminders
 - Senior profile management with database
 - Memory storage with semantic embeddings (pgvector + OpenAI)
 - Memory extraction from conversations
-- Admin UI for managing seniors
 
 ### Environment Setup
-Requires `DEEPGRAM_API_KEY` in environment for user speech transcription.
-Without it, calls still work but mid-call memory retrieval is disabled.
+```bash
+DEEPGRAM_API_KEY=...        # Required for STT (both pipelines)
+ELEVENLABS_API_KEY=...      # Required for V1 pipeline TTS
+ANTHROPIC_API_KEY=...       # Required for V1 pipeline (Claude)
+DEFAULT_PIPELINE=v0         # Optional: v0 or v1 (default: v0)
+```
 
 ---
 
-## Current Architecture (v2.1)
+## Current Architecture (v2.4 - Dual Pipeline)
 
-**Status**: This is what's actually running today.
+**Status**: Both pipelines running in production. Select from Admin UI.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    CURRENT STACK                        │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│   Senior's Phone                                        │
-│        │                                                │
-│        ▼                                                │
-│   ┌─────────┐                                          │
-│   │ Twilio  │  ← Phone calls (inbound/outbound)        │
-│   └────┬────┘                                          │
-│        │ Media Streams (WebSocket)                     │
-│        ▼                                                │
-│   ┌─────────────────┐                                  │
-│   │  Express Server │  ← index.js (root directory)     │
-│   │   (Railway)     │                                  │
-│   └────┬────────────┘                                  │
-│        │                                                │
-│   ┌────┴────────────────────────┐                      │
-│   │                             │                      │
-│   ▼                             ▼                      │
-│   ┌─────────────────┐    ┌─────────────┐              │
-│   │ Gemini 2.5 Flash│    │  Deepgram   │              │
-│   │  (Native Voice) │    │   (STT)     │              │
-│   │  AI + TTS       │    │ Transcribes │              │
-│   └────┬────────────┘    │ user speech │              │
-│        │                 └──────┬──────┘              │
-│        │                        │                      │
-│        │            ┌───────────┘                      │
-│        │            ▼                                  │
-│        │    ┌───────────────┐                         │
-│        │    │Memory Triggers│ ← Mid-call retrieval    │
-│        │    └───────────────┘                         │
-│        ▼                                               │
-│   ┌─────────────────┐                                  │
-│   │   PostgreSQL    │  ← Neon (pgvector for memories)  │
-│   └─────────────────┘                                  │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         DUAL PIPELINE ARCHITECTURE                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   ┌─────────────────┐                                                        │
+│   │  Admin Dashboard │ ← Pipeline Selector (V0/V1)                          │
+│   │   /admin.html    │                                                       │
+│   └────────┬─────────┘                                                       │
+│            │                                                                 │
+│            ▼                                                                 │
+│   ┌──────────────────┐        ┌──────────────────┐                          │
+│   │  Senior's Phone  │        │    /api/call     │ ← pipeline: 'v0' | 'v1'  │
+│   └────────┬─────────┘        └────────┬─────────┘                          │
+│            │                           │                                     │
+│            ▼                           ▼                                     │
+│   ┌────────────────────────────────────────────────┐                        │
+│   │              Twilio Media Streams               │                        │
+│   │           (WebSocket /media-stream)             │                        │
+│   └────────────────────┬───────────────────────────┘                        │
+│                        │                                                     │
+│           ┌────────────┴────────────┐                                       │
+│           │    Pipeline Router      │                                       │
+│           │      (index.js)         │                                       │
+│           └────────┬───────┬────────┘                                       │
+│                    │       │                                                 │
+│        ┌───────────┘       └───────────┐                                    │
+│        ▼                               ▼                                    │
+│ ┌─────────────────────────┐  ┌─────────────────────────────────────────┐   │
+│ │   V0: GeminiLiveSession │  │      V1: V1AdvancedSession              │   │
+│ │      (gemini-live.js)   │  │   (pipelines/v1-advanced.js)            │   │
+│ ├─────────────────────────┤  ├─────────────────────────────────────────┤   │
+│ │                         │  │                                         │   │
+│ │   Audio In ──────────┐  │  │   Audio In                              │   │
+│ │                      │  │  │       │                                 │   │
+│ │                      ▼  │  │       ▼                                 │   │
+│ │   ┌─────────────────────┐  │   ┌─────────────┐                       │   │
+│ │   │  Gemini 2.5 Flash   │  │   │  Deepgram   │ ← STT                 │   │
+│ │   │  (Native Audio)     │  │   │   (STT)     │                       │   │
+│ │   │  AI + TTS in one    │  │   └──────┬──────┘                       │   │
+│ │   └──────────┬──────────┘  │          │                              │   │
+│ │              │          │  │          ▼                              │   │
+│ │              │          │  │   ┌─────────────────────────────────┐   │   │
+│ │              │          │  │   │  Claude Sonnet + Observer Agent │   │   │
+│ │              │          │  │   │  (pipelines/observer-agent.js)  │   │   │
+│ │              │          │  │   └──────────────┬──────────────────┘   │   │
+│ │              │          │  │                  │                      │   │
+│ │              │          │  │                  ▼                      │   │
+│ │              │          │  │   ┌─────────────┐                       │   │
+│ │              │          │  │   │ ElevenLabs  │ ← TTS                 │   │
+│ │              │          │  │   │   (TTS)     │                       │   │
+│ │              │          │  │   └──────┬──────┘                       │   │
+│ │              │          │  │          │                              │   │
+│ │              ▼          │  │          ▼                              │   │
+│ │        Audio Out        │  │    Audio Out                            │   │
+│ │                         │  │                                         │   │
+│ │  + Deepgram (parallel)  │  │  Observer runs every 30s:               │   │
+│ │    for memory triggers  │  │  • Engagement level                     │   │
+│ │                         │  │  • Emotional state                      │   │
+│ └─────────────────────────┘  │  • Reminder timing                      │   │
+│                              │  • Concerns for caregivers              │   │
+│                              └─────────────────────────────────────────┘   │
+│                                                                              │
+│   ┌──────────────────────────────────────────────────────────────────────┐  │
+│   │                        Shared Services                                │  │
+│   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │  │
+│   │  │ Memory System│  │   Scheduler  │  │  News/Weather│               │  │
+│   │  │ (pgvector)   │  │  (reminders) │  │ (OpenAI web) │               │  │
+│   │  └──────────────┘  └──────────────┘  └──────────────┘               │  │
+│   └────────────────────────────────┬─────────────────────────────────────┘  │
+│                                    ▼                                         │
+│   ┌──────────────────────────────────────────────────────────────────────┐  │
+│   │                     PostgreSQL (Neon + pgvector)                      │  │
+│   │  seniors | conversations | memories | reminders                       │  │
+│   └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Current Flow
-1. Twilio initiates/receives call, connects via Media Streams WebSocket
-2. Audio streams bidirectionally through Express server
-3. User audio → Deepgram (STT) for transcription → triggers memory retrieval
-4. User audio → Gemini 2.5 Flash (native voice) for AI response
-5. Gemini audio response → sent back through Twilio to caller
-6. Memories extracted at call end, stored with embeddings
+### Pipeline Comparison
 
-### Current Tech Stack
-| Component | Technology | Notes |
-|-----------|------------|-------|
-| **Hosting** | Railway | Auto-deploy from GitHub |
-| **Phone** | Twilio | Voice calls, Media Streams WebSocket |
-| **AI** | Gemini 2.5 Flash | Native voice (audio in, audio out) |
-| **STT** | Deepgram | User speech transcription for memory triggers |
-| **TTS** | Gemini Native | Built into Gemini's audio output |
-| **Database** | Neon PostgreSQL | pgvector for semantic memory search |
-| **Embeddings** | OpenAI | For memory similarity search |
- 
-### Key Files (EDIT THESE)
+| Feature | V0 (Gemini Native) | V1 (Claude + Observer) |
+|---------|-------------------|------------------------|
+| **AI Model** | Gemini 2.5 Flash | Claude Sonnet |
+| **STT** | Gemini built-in + Deepgram | Deepgram |
+| **TTS** | Gemini built-in | ElevenLabs |
+| **Latency** | ~500ms (1 API) | ~1.5-2s (3 APIs) |
+| **Observer Agent** | No | Yes (every 30s) |
+| **Voice Quality** | Good | Production-grade |
+| **Customization** | Limited | Full control |
+| **Cost** | Low (free tier) | Higher (per-service) |
+| **Status** | Default, stable | Testing |
+
+### V0 Flow (Default)
+1. Twilio audio → Gemini 2.5 Flash (native voice)
+2. Gemini responds with audio
+3. Deepgram runs in parallel for memory triggers
+4. Memories extracted at call end
+
+### V1 Flow (Advanced)
+1. Twilio audio → Deepgram STT → text
+2. Text → Claude with Observer signals
+3. Observer Agent analyzes conversation every 30s
+4. Claude response → ElevenLabs TTS → audio
+5. Memories extracted at call end
+
+### Tech Stack
+
+| Component | V0 | V1 | Shared |
+|-----------|----|----|--------|
+| **Hosting** | - | - | Railway |
+| **Phone** | - | - | Twilio Media Streams |
+| **AI** | Gemini 2.5 Flash | Claude Sonnet | - |
+| **STT** | Deepgram (parallel) | Deepgram (main) | - |
+| **TTS** | Gemini Native | ElevenLabs | - |
+| **Observer** | - | Claude-based | - |
+| **Database** | - | - | Neon PostgreSQL + pgvector |
+| **Embeddings** | - | - | OpenAI |
+| **Scheduler** | - | - | In-process polling |
+
+### Key Files
+
 ```
 /
-├── index.js              ← MAIN SERVER (Express + WebSocket)
-├── gemini-live.js        ← Gemini native audio session handler
+├── index.js                    ← MAIN SERVER (Express + WebSocket + Pipeline Router)
+├── gemini-live.js              ← V0: Gemini native audio session
+├── pipelines/
+│   ├── v1-advanced.js          ← V1: Advanced pipeline (STT → Claude → TTS)
+│   └── observer-agent.js       ← V1: Observer Agent (conversation analyzer)
+├── adapters/
+│   └── elevenlabs.js           ← ElevenLabs TTS adapter
 ├── services/
-│   ├── seniors.js        ← Senior profile CRUD
-│   ├── memory.js         ← Memory storage + retrieval
-│   └── conversations.js  ← Conversation records
+│   ├── seniors.js              ← Senior profile CRUD
+│   ├── memory.js               ← Memory storage + semantic search
+│   ├── conversations.js        ← Conversation records
+│   ├── scheduler.js            ← Reminder scheduler (polls every 60s)
+│   └── news.js                 ← News via OpenAI web search
 ├── db/
-│   └── schema.js         ← Database schema (Drizzle ORM)
+│   └── schema.js               ← Database schema (Drizzle ORM)
 ├── public/
-│   └── admin.html        ← Admin UI
+│   └── admin.html              ← Admin UI (4 tabs + pipeline selector)
+├── audio-utils.js              ← Audio format conversion (mulaw ↔ PCM)
 ├── package.json
 └── railway.json
 ```
- 
----
- 
-## Planned Architecture (Phase C - Production)
- 
-**Status**: NOT YET IMPLEMENTED. The `reference/` directory contains code from a failed previous attempt. Use for learning only.
- 
-```
-┌─────────────────────────────────────────────────────────┐
-│                   PLANNED STACK                         │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│   ┌─────────────────┐      ┌──────────────────┐        │
-│   │Caregiver Portal │      │   Senior's Phone │        │
-│   │    (Next.js)    │      └────────┬─────────┘        │
-│   └────────┬────────┘               │                  │
-│            │                        │                  │
-│            ▼                        ▼                  │
-│   ┌─────────────────────────────────────────┐          │
-│   │          Express API Server             │          │
-│   └─────────────────┬───────────────────────┘          │
-│                     │                                   │
-│         ┌───────────┼───────────┐                      │
-│         ▼           ▼           ▼                      │
-│   ┌──────────┐ ┌──────────┐ ┌──────────┐              │
-│   │ Deepgram │ │  Claude  │ │ElevenLabs│              │
-│   │  (STT)   │ │  (LLM)   │ │  (TTS)   │              │
-│   └──────────┘ └──────────┘ └──────────┘              │
-│         │           │           │                      │
-│         └───────────┼───────────┘                      │
-│                     ▼                                   │
-│   ┌─────────────────────────────────────────┐          │
-│   │              Modules                     │          │
-│   │  • Voice Pipeline    • Observer Agent   │          │
-│   │  • Conversation Mgr  • Memory System    │          │
-│   │  • Call Orchestrator • Analytics        │          │
-│   │  • Reminder System   • Skills System    │          │
-│   └─────────────────┬───────────────────────┘          │
-│                     ▼                                   │
-│   ┌─────────────────────────────────────────┐          │
-│   │           Infrastructure                 │          │
-│   │  • Neon (PostgreSQL + pgvector)         │          │
-│   │  • Upstash Redis (Job Queue)            │          │
-│   │  • Clerk (Authentication)               │          │
-│   │  • Vercel Blob (Audio Storage)          │          │
-│   └─────────────────────────────────────────┘          │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
-```
- 
-### Why Migrate Later?
-| Aspect | Current (Gemini) | Planned (Claude Stack) |
-|--------|------------------|------------------------|
-| **Latency** | 1 API call | 3 API calls (higher latency) |
-| **Setup** | 1 API key | 4+ API keys |
-| **Voice Quality** | Good | Production-grade |
-| **Customization** | Limited | Full control |
-| **Cost** | Free tier | Pay per service |
-| **Memory** | In-session only | Long-term with pgvector |
  
 ---
  
@@ -205,8 +223,9 @@ Without it, calls still work but mid-call memory retrieval is disabled.
 |-------|--------|-----------------|
 | **A** | ✅ **COMPLETE** | Gemini voice, WebSocket streaming, outbound calls |
 | **B** | ✅ **COMPLETE** | Database, senior profiles, memory system, Deepgram STT |
-| **C** | 🔄 **IN PROGRESS** | Scheduled calls, admin dashboard, caregiver auth |
-| **D** | Planned | News updates, ElevenLabs TTS, analytics |
+| **C** | ✅ **COMPLETE** | Scheduled calls, admin dashboard, news updates |
+| **D** | ✅ **COMPLETE** | Dual pipeline (V0 Gemini / V1 Claude+Observer+ElevenLabs) |
+| **E** | 🔄 **IN PROGRESS** | V1 testing, caregiver auth, analytics |
 
 ### Completed Milestones
 1. ✅ Twilio voice integration
@@ -217,11 +236,17 @@ Without it, calls still work but mid-call memory retrieval is disabled.
 6. ✅ Memory extraction from conversations
 7. ✅ Deepgram STT for user transcription
 8. ✅ Mid-call memory retrieval (keyword triggers)
+9. ✅ News updates via OpenAI web search
+10. ✅ Scheduled reminder calls (auto-trigger)
+11. ✅ Enhanced admin dashboard (4 tabs)
+12. ✅ **V1 Pipeline** (Claude + Observer + ElevenLabs)
+13. ✅ **Pipeline selector** (switch between V0/V1 in UI)
 
-### Next Up (Phase C)
-- ⬜ **Scheduled Calls** - Reminders trigger automated calls
-- ⬜ Admin Dashboard - Full management UI
-- ⬜ Caregiver Authentication - Secure multi-user access
+### Next Up (Phase E)
+- ⬜ **V1 Pipeline Testing** - Validate end-to-end call quality
+- ⬜ **Caregiver Authentication** - Secure multi-user access (Clerk)
+- ⬜ **Observer Logging** - Store observer signals in database
+- ⬜ **Analytics Dashboard** - Call metrics, engagement trends
  
 ---
  
@@ -249,35 +274,58 @@ reference/
 ## For AI Assistants
  
 ### When Making Changes
- 
+
 | Task | Where to Look |
 |------|---------------|
-| Change voice/conversation behavior | Root `index.js` or `gemini-voice.js` |
-| Modify system prompt | Root Gemini code (NOT `reference/`) |
-| Add new feature | Root directory files |
-| Understand target architecture | `reference/` (read-only reference) |
+| Change V0 (Gemini) behavior | `gemini-live.js` |
+| Change V1 (Claude) behavior | `pipelines/v1-advanced.js` |
+| Modify Observer Agent | `pipelines/observer-agent.js` |
+| Change TTS settings | `adapters/elevenlabs.js` |
+| Modify system prompts | Both `gemini-live.js` and `pipelines/v1-advanced.js` |
+| Add new API endpoint | `index.js` |
+| Update admin UI | `public/admin.html` |
+| Database changes | `db/schema.js` |
+| Understand reference patterns | `reference/` (read-only, not active) |
 | Check deployment config | `railway.json`, `.env.example` |
- 
+
 ### Common Mistakes
 1. ❌ Editing `reference/modules/` thinking it's active code
-2. ❌ Assuming Claude or ElevenLabs are in use (Deepgram IS active for STT)
-3. ❌ Looking at `reference/llm-conversation/` for current prompts
-4. ❌ Treating `reference/` test counts as current project status
- 
-### Environment Variables (Current)
+2. ❌ Forgetting to set `ELEVENLABS_API_KEY` when testing V1
+3. ❌ Not selecting the correct pipeline in admin UI before calling
+4. ❌ Looking at `reference/llm-conversation/` for current prompts
+5. ❌ Treating `reference/` test counts as current project status
+
+### Environment Variables
+
 ```bash
-# Required
+# ============ REQUIRED (Both Pipelines) ============
 PORT=3001
-GOOGLE_API_KEY=...          # Gemini API
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=+1...
 DATABASE_URL=...            # Neon PostgreSQL
-OPENAI_API_KEY=...          # For embeddings
+OPENAI_API_KEY=...          # For embeddings + news search
 
-# Optional (but recommended)
-DEEPGRAM_API_KEY=...        # User speech transcription
+# ============ V0 PIPELINE (Gemini) ============
+GOOGLE_API_KEY=...          # Gemini 2.5 Flash
+
+# ============ V1 PIPELINE (Claude + Observer + ElevenLabs) ============
+ANTHROPIC_API_KEY=...       # Claude Sonnet (conversation + observer)
+ELEVENLABS_API_KEY=...      # Text-to-speech
+
+# ============ BOTH PIPELINES ============
+DEEPGRAM_API_KEY=...        # STT (required for V1, optional for V0)
+
+# ============ OPTIONAL ============
+DEFAULT_PIPELINE=v0         # v0 or v1 (default: v0)
 ```
+
+### Pipeline Selection
+
+The pipeline is selected:
+1. **Per-call**: Via `pipeline` parameter in `/api/call` body
+2. **Admin UI**: Dropdown in header persists to localStorage
+3. **Default**: Falls back to `DEFAULT_PIPELINE` env var or `v0`
  
 ---
  
@@ -293,4 +341,4 @@ Keep this file as the **single source of truth** for AI assistants working on Do
  
 ---
  
-*Last updated: January 16, 2026 - v2.3 (Scheduled Calls complete)*
+*Last updated: January 18, 2026 - v2.4 (Dual Pipeline: V0 Gemini / V1 Claude+Observer+ElevenLabs)*

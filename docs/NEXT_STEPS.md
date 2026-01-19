@@ -1,165 +1,132 @@
 # Donna - Next Steps Roadmap
 
-> **Focus for Next Session**: Work through these steps sequentially. Each step is testable independently before moving on.
+> **Focus for Next Session**: V1 Pipeline Testing + Caregiver Authentication
 
-## Current State (v2.3)
+## Current State (v2.4 - Dual Pipeline)
 
 **Working:**
-- Real-time voice calls (Gemini 2.5 native audio + Twilio Media Streams)
+- **Dual Pipeline Architecture** - V0 (Gemini) and V1 (Claude+Observer) selectable from admin
+- Real-time voice calls (Twilio Media Streams)
+- Enhanced admin dashboard (4 tabs: Dashboard, Seniors, Calls, Reminders)
 - Senior profiles + PostgreSQL database
 - Memory system (storage, semantic search, extraction at call end)
 - Conversation history with transcripts
-- Admin UI at `/admin`
-- ✅ **User speech transcription (Deepgram STT)**
-- ✅ **Mid-conversation memory retrieval** (triggers on keywords)
-- ✅ **News updates via OpenAI web search** (based on interests, cached 1hr)
-- ✅ **Scheduled reminder calls** (auto-triggers when reminders due)
+- User speech transcription (Deepgram STT)
+- Mid-conversation memory retrieval (triggers on keywords)
+- News updates via OpenAI web search
+- Scheduled reminder calls (auto-triggers when reminders due)
+- **V1 Pipeline Components:**
+  - Observer Agent (analyzes conversation every 30s)
+  - Claude Sonnet for response generation
+  - ElevenLabs TTS
 
-**Next Priority:** Admin Dashboard
+**Next Priority:** V1 Pipeline Testing → Caregiver Authentication
 
 ---
 
-## Step-by-Step Implementation Plan
+## Completed Steps
 
 ### Step 1: User Speech Transcription (Deepgram) ✅ COMPLETE
-**Goal:** Enable mid-conversation memory retrieval
-
-**Status:** ✅ Implemented and verified working (January 2026)
-
-**What was built:**
 - Deepgram SDK integration for real-time STT
-- Audio forked: Gemini (voice AI) + Deepgram (transcription)
-- Memory trigger detection on keywords ("daughter", "doctor", "medication", etc.)
-- Mid-call memory injection into conversation
+- Memory trigger detection on keywords
+- Mid-call memory injection
 
-**Architecture:**
-```
-Twilio Audio → ┬→ Gemini (voice AI + response)
-               └→ Deepgram (user speech → text)
-                     ↓
-               Memory triggers → inject context
-```
+### Step 2: News/Weather Updates ✅ COMPLETE
+- OpenAI web search API for news
+- Interest-based, cached 1 hour
 
-**Verified:** Mid-call memory retrieval working - mentioning family members triggers relevant memories.
+### Step 3: Scheduled Call System ✅ COMPLETE
+- `services/scheduler.js` with 60-second polling
+- Reminder context injection into calls
 
----
+### Step 4: Admin Dashboard ✅ COMPLETE
+- 4-tab interface: Dashboard, Seniors, Calls, Reminders
+- Stats cards, recent calls, upcoming reminders
+- Create/edit/delete seniors and reminders
+- Memory management in senior edit modal
+- **Pipeline selector** in header
 
-### Step 2: Scheduled Call System ✅ COMPLETE
-**Goal:** Reminders actually trigger automated calls
-
-**Status:** ✅ Implemented January 2026
-
-**What was built:**
-- `services/scheduler.js` - Scheduler service with 60-second polling
-- Queries for due reminders (one-time and recurring)
-- Triggers outbound calls via Twilio
-- Injects reminder context into system prompt
-- Marks reminders as delivered after call initiated
-
-**Architecture:**
-```
-Server Boot → Scheduler Starts (60s interval)
-    ↓
-Check Due Reminders → Trigger Outbound Call
-    ↓
-/voice/answer → Get Reminder Context → Inject into System Prompt
-    ↓
-Donna delivers reminder naturally in conversation
-```
-
-**Verified:** Scheduler running in production, checks every 60 seconds.
+### Step 5: Dual Pipeline (V0/V1) ✅ COMPLETE
+- V0: Gemini 2.5 Flash Native Audio (default)
+- V1: Deepgram STT → Claude + Observer → ElevenLabs TTS
+- Observer Agent runs every 30 seconds
+- Pipeline selectable per-call from admin UI
 
 ---
 
-### Step 3: Admin Dashboard Enhancement
-**Goal:** Full visibility into seniors, reminders, and conversations
+## Next Steps
 
-**Why third:** Need visibility before adding caregiver accounts.
+### Step 6: V1 Pipeline Testing ← CURRENT PRIORITY
+**Goal:** Validate V1 pipeline works end-to-end
 
-**Tasks:**
-1. Expand existing `/admin` page or create separate Next.js app
-2. Features needed:
-   - List all seniors with search/filter
-   - View/edit senior profiles
-   - View memories for each senior
-   - Create/edit/delete reminders
-   - View recent call transcripts
-   - Trigger test calls from UI
-   - View scheduled calls
+**Testing Checklist:**
+1. [ ] Set required env vars: `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`, `DEEPGRAM_API_KEY`
+2. [ ] Select V1 from admin dropdown
+3. [ ] Trigger call to test number
+4. [ ] Verify Deepgram receives and transcribes audio
+5. [ ] Verify Claude generates appropriate responses
+6. [ ] Verify ElevenLabs produces audio that plays through Twilio
+7. [ ] Verify Observer Agent logs to console every 30s
+8. [ ] Compare call quality with V0
 
-**Options:**
-- A: Enhance `public/admin.html` with more features
-- B: Create `web/` Next.js app for full dashboard
+**Known Issues to Monitor:**
+- Latency: V1 has ~1.5-2s latency vs V0's ~500ms
+- Audio format: Ensure PCM 24kHz → mulaw 8kHz conversion works
+- Turn detection: Deepgram utterance end detection accuracy
 
-**Test:** Manage a senior entirely through the web UI (create, add reminder, trigger call, view transcript).
+**Test:** Complete a 2-minute conversation on V1, verify transcript, check logs.
 
 ---
 
-### Step 4: Caregiver Authentication
+### Step 7: Caregiver Authentication
 **Goal:** Secure multi-user access with login
 
-**Why fourth:** Secure the dashboard before exposing externally.
-
 **Tasks:**
-1. Choose auth provider (Clerk recommended, or simple JWT)
+1. Choose auth provider (Clerk recommended)
 2. Create caregiver table in database
-3. Link caregivers to seniors (many-to-many relationship)
+3. Link caregivers to seniors (many-to-many)
 4. Protect API routes with authentication middleware
-5. Filter data to only show assigned seniors
+5. Filter data to show only assigned seniors
 
 **Database additions:**
 ```sql
-caregivers (id, email, name, created_at)
-caregiver_seniors (caregiver_id, senior_id)  -- junction table
+caregivers (id, email, name, auth_id, created_at)
+caregiver_seniors (caregiver_id, senior_id)
 ```
 
-**Test:** Log in as caregiver, only see your assigned seniors.
+**Test:** Log in as caregiver, only see assigned seniors.
 
 ---
 
-### Step 5: News/Weather Updates ✅ COMPLETE
-**Goal:** Richer conversations with current information
+### Step 8: Observer Signal Storage
+**Goal:** Store observer analysis for caregiver review
 
-**Status:** ✅ Implemented January 2026
+**Tasks:**
+1. Add `observer_signals` table to database
+2. Store signals after each observer analysis
+3. Display concerns in call transcript view
+4. Add concerns summary to dashboard
 
-**What was built:**
-- `services/news.js` - News service using OpenAI Responses API with web_search tool
-- Fetches 2-3 positive, senior-appropriate headlines based on interests
-- 1-hour cache to reduce API calls
-- Integrated into memory context builder
-- System prompt updated with guidance for natural news conversation
-
-**Architecture:**
+**Schema:**
+```sql
+observer_signals (
+  id, conversation_id,
+  engagement_level, emotional_state,
+  concerns, created_at
+)
 ```
-Call Start → Senior Profile (interests) → OpenAI Web Search → News Context → System Prompt
-```
-
-**Verified:** News context added to conversations for seniors with interests configured.
 
 ---
 
-### Step 6: Voice Quality Upgrade (ElevenLabs)
-**Goal:** Production-grade voice synthesis
+### Step 9: Analytics Dashboard
+**Goal:** Insights for caregivers
 
-**Why last:** Voice provider swapping is a bigger lift, nice-to-have.
-
-**Options:**
-
-**Option A: Keep Gemini Native Audio**
-- Pros: Simpler, lower latency, already working
-- Cons: Less control over voice quality
-
-**Option B: Gemini for conversation + ElevenLabs for TTS**
-- Use `providers/` abstraction layer
-- Gemini handles conversation logic, outputs text
-- Route text through ElevenLabs for speech
-- Handle audio format conversion
-
-**Option C: Full provider swap (Claude + Deepgram + ElevenLabs)**
-- Most complex, highest quality
-- Use prepared `providers/session-manager.js`
-
-**Test:** Compare call quality before/after voice upgrade.
+**Metrics to track:**
+- Call frequency per senior
+- Average call duration
+- Engagement trends over time
+- Reminder delivery success rate
+- Concern frequency
 
 ---
 
@@ -169,70 +136,74 @@ Call Start → Senior Profile (interests) → OpenAI Web Search → News Context
 ┌─────────────────────────────────────────────────────────┐
 │                                                         │
 │  Step 1: Deepgram STT ✅ DONE                          │
-│  └── "Mid-call memory retrieval unlocked"              │
+│  Step 2: News Updates ✅ DONE                          │
+│  Step 3: Scheduled Calls ✅ DONE                       │
+│  Step 4: Admin Dashboard ✅ DONE                       │
+│  Step 5: Dual Pipeline ✅ DONE                         │
 │              ↓                                          │
-│  Step 5: News Updates ✅ DONE                          │
-│  └── "Richer conversations with current info"          │
+│  Step 6: V1 Pipeline Testing ← CURRENT PRIORITY        │
+│  └── "Validate Claude + Observer + ElevenLabs"         │
 │              ↓                                          │
-│  Step 2: Scheduled Calls ✅ DONE                       │
-│  └── "Reminders trigger automated calls"               │
-│              ↓                                          │
-│  Step 3: Admin Dashboard ← CURRENT PRIORITY            │
-│  └── "Full visibility and management"                  │
-│              ↓                                          │
-│  Step 4: Caregiver Login                               │
+│  Step 7: Caregiver Login                               │
 │  └── "Secure multi-user access"                        │
 │              ↓                                          │
-│  Step 6: ElevenLabs TTS                                │
-│  └── "Production voice quality"                        │
+│  Step 8: Observer Signal Storage                       │
+│  └── "Store and display concerns"                      │
+│              ↓                                          │
+│  Step 9: Analytics Dashboard                           │
+│  └── "Engagement trends and insights"                  │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Quick Reference: Files to Know
+## Quick Reference: Files by Feature
 
-| Feature Area | Key Files |
-|--------------|-----------|
-| Voice calls | `gemini-live.js`, `index.js` |
+| Feature | Key Files |
+|---------|-----------|
+| V0 Pipeline (Gemini) | `gemini-live.js` |
+| V1 Pipeline (Claude) | `pipelines/v1-advanced.js` |
+| Observer Agent | `pipelines/observer-agent.js` |
+| ElevenLabs TTS | `adapters/elevenlabs.js` |
+| Pipeline Router | `index.js` (WebSocket handler) |
 | Audio conversion | `audio-utils.js` |
 | Memory system | `services/memory.js` |
 | News updates | `services/news.js` |
 | Scheduled calls | `services/scheduler.js` |
 | Senior profiles | `services/seniors.js` |
 | Database schema | `db/schema.js` |
-| Provider abstraction | `providers/` (prepared, not integrated) |
 | Admin UI | `public/admin.html` |
 
 ---
 
-## Environment Variables Needed
+## Environment Variables
 
 ```bash
-# Currently required
-GOOGLE_API_KEY=...
+# ============ REQUIRED (Both Pipelines) ============
+PORT=3001
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=...
 DATABASE_URL=...
-OPENAI_API_KEY=...
+OPENAI_API_KEY=...          # Embeddings + news
 
-# Step 1: Deepgram (current priority)
-DEEPGRAM_API_KEY=...
+# ============ V0 PIPELINE ============
+GOOGLE_API_KEY=...          # Gemini 2.5 Flash
 
-# Step 4: Auth (if using Clerk)
+# ============ V1 PIPELINE ============
+ANTHROPIC_API_KEY=...       # Claude Sonnet
+ELEVENLABS_API_KEY=...      # TTS
+DEEPGRAM_API_KEY=...        # STT (also used by V0 for memory triggers)
+
+# ============ OPTIONAL ============
+DEFAULT_PIPELINE=v0         # v0 or v1
+
+# ============ FUTURE: AUTH ============
 CLERK_SECRET_KEY=...
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=...
-
-# Step 5: News (pick one)
-NEWS_API_KEY=...              # If using NewsAPI
-
-# Step 6: ElevenLabs
-ELEVENLABS_API_KEY=...
-ELEVENLABS_VOICE_ID=...
 ```
 
 ---
 
-*Last updated: January 16, 2026 - Steps 1, 2, 5 complete (Deepgram STT, Scheduled Calls, News Updates)*
+*Last updated: January 18, 2026 - v2.4 (Dual Pipeline complete)*

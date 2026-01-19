@@ -67,6 +67,8 @@ DEFAULT_PIPELINE=v0         # Optional: v0 or v1 (default: v0)
 
 ## Current Architecture (v2.4 - Dual Pipeline)
 
+**Full architecture documentation**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
 **Status**: Both pipelines running in production. Select from Admin UI.
 
 ```

@@ -188,8 +188,10 @@ Analyzes conversation every 30 seconds:
 
 ## Documentation
 
-- [CLAUDE.md](./CLAUDE.md) - AI assistant context (architecture, files)
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) - Comprehensive system architecture
+- [CLAUDE.md](./CLAUDE.md) - AI assistant context
 - [docs/NEXT_STEPS.md](./docs/NEXT_STEPS.md) - Implementation roadmap
+- [docs/plans/](./docs/plans/) - Design documents and optimization plans
 
 ## License
 

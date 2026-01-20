@@ -127,7 +127,7 @@ function extractCompleteSentences(buffer) {
   return { complete: sentences, remaining };
 }
 
-const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null) => {
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null, useSonnet = false) => {
   let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
 
 RESPONSE FORMAT:
@@ -154,10 +154,48 @@ RESPONSE FORMAT:
     prompt += reminderPrompt;
   }
 
-  // Only inject memories (factual context the model needs)
-  // Skip all guidance/instructions - Haiku reads them aloud
+  // Always inject memories (factual context)
   if (dynamicMemoryContext) {
     prompt += `\n\n${dynamicMemoryContext}`;
+  }
+
+  // Only inject guidance when using Sonnet (Haiku reads instructions aloud)
+  if (useSonnet) {
+    const guidanceParts = [];
+
+    if (quickObserverGuidance) {
+      guidanceParts.push(quickObserverGuidance);
+    }
+
+    if (fastObserverGuidance) {
+      guidanceParts.push(fastObserverGuidance);
+    }
+
+    if (observerSignal) {
+      const parts = [];
+      if (observerSignal.engagement_level === 'low') {
+        parts.push('User seems disengaged - ask about their interests');
+      }
+      if (observerSignal.emotional_state && observerSignal.emotional_state !== 'unknown') {
+        parts.push(`User feeling ${observerSignal.emotional_state}`);
+      }
+      if (observerSignal.should_deliver_reminder && observerSignal.reminder_to_deliver) {
+        parts.push(`Mention reminder: ${observerSignal.reminder_to_deliver}`);
+      }
+      if (observerSignal.suggested_topic) {
+        parts.push(`Good topic: ${observerSignal.suggested_topic}`);
+      }
+      if (observerSignal.should_end_call) {
+        parts.push('Wrap up the call naturally');
+      }
+      if (parts.length > 0) {
+        guidanceParts.push(parts.join('. '));
+      }
+    }
+
+    if (guidanceParts.length > 0) {
+      prompt += `\n\n<guidance>\n${guidanceParts.join('\n')}\n</guidance>`;
+    }
   }
 
   return prompt;
@@ -491,13 +529,25 @@ export class V1AdvancedSession {
       // Layer 1: Quick Observer (0ms) - for post-turn processing
       const quickResult = quickAnalyze(userMessage, this.conversationLog.slice(-6));
 
-      // Build system prompt with observer signal and dynamic memories
+      // Dynamic model selection based on observer recommendations (BEFORE building prompt)
+      const modelConfig = selectModelConfig(
+        quickResult,
+        this.lastFastObserverResult,
+        this.lastObserverSignal
+      );
+      const useSonnet = modelConfig.model === MODELS.SMART;
+      console.log(`[V1][${this.streamSid}] Model: ${useSonnet ? 'Sonnet' : 'Haiku'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
+
+      // Build system prompt - only inject guidance if using Sonnet
       const systemPrompt = buildSystemPrompt(
         this.senior,
         this.memoryContext,
         this.reminderPrompt,
         this.lastObserverSignal,
-        this.dynamicMemoryContext
+        this.dynamicMemoryContext,
+        quickResult.guidance,
+        null, // fast guidance not used in non-streaming
+        useSonnet
       );
 
       // Build messages array
@@ -512,14 +562,6 @@ export class V1AdvancedSession {
       if (userMessage && !userMessage.includes('Greet') && !userMessage.includes('greeting')) {
         messages.push({ role: 'user', content: userMessage });
       }
-
-      // Dynamic model selection based on observer recommendations
-      const modelConfig = selectModelConfig(
-        quickResult,
-        this.lastFastObserverResult,
-        this.lastObserverSignal
-      );
-      console.log(`[V1][${this.streamSid}] Model: ${modelConfig.model === MODELS.SMART ? 'Sonnet' : 'Haiku'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
 
       // Generate response with Claude
       console.log(`[V1][${this.streamSid}] Calling Claude...`);
@@ -574,9 +616,8 @@ export class V1AdvancedSession {
     try {
       // Layer 1: Quick Observer (0ms) - affects THIS response
       const quickResult = quickAnalyze(userMessage, this.conversationLog.slice(-6));
-      const quickGuidance = quickResult.guidance;
 
-      if (quickGuidance) {
+      if (quickResult.guidance) {
         console.log(`[V1][${this.streamSid}] Quick observer: ${quickResult.healthSignals.length} health, ${quickResult.emotionSignals.length} emotion signals`);
       }
 
@@ -585,15 +626,25 @@ export class V1AdvancedSession {
         ? formatFastObserverGuidance(this.lastFastObserverResult)
         : null;
 
-      // Build system prompt with all observer layers
+      // Dynamic model selection FIRST (before building prompt)
+      const modelConfig = selectModelConfig(
+        quickResult,
+        this.lastFastObserverResult,
+        this.lastObserverSignal
+      );
+      const useSonnet = modelConfig.model === MODELS.SMART;
+      console.log(`[V1][${this.streamSid}] Model: ${useSonnet ? 'Sonnet' : 'Haiku'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
+
+      // Build system prompt - only inject guidance if using Sonnet
       const systemPrompt = buildSystemPrompt(
         this.senior,
         this.memoryContext,
         this.reminderPrompt,
         this.lastObserverSignal,
         this.dynamicMemoryContext,
-        quickGuidance,
-        fastGuidance
+        quickResult.guidance,
+        fastGuidance,
+        useSonnet
       );
 
       // Build messages array
@@ -634,14 +685,6 @@ export class V1AdvancedSession {
 
       // Mark as speaking
       this.isSpeaking = true;
-
-      // Dynamic model selection based on observer recommendations
-      const modelConfig = selectModelConfig(
-        quickResult,
-        this.lastFastObserverResult,
-        this.lastObserverSignal
-      );
-      console.log(`[V1][${this.streamSid}] Model: ${modelConfig.model === MODELS.SMART ? 'Sonnet' : 'Haiku'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
 
       // Start Claude stream AND TTS connection in parallel
       console.log(`[V1][${this.streamSid}] Calling Claude (streaming)...`);

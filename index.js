@@ -6,13 +6,14 @@ import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { GeminiLiveSession } from './gemini-live.js';
+// V0 imports commented out - preparing for removal
+// import { GeminiLiveSession } from './gemini-live.js';
 import { V1AdvancedSession } from './pipelines/v1-advanced.js';
 import { seniorService } from './services/seniors.js';
 import { memoryService } from './services/memory.js';
 import { conversationService } from './services/conversations.js';
 import { schedulerService, startScheduler } from './services/scheduler.js';
-import { BrowserSession } from './browser-session.js';
+// import { BrowserSession } from './browser-session.js';
 import { parse as parseUrl } from 'url';
 import { db } from './db/client.js';
 import { reminders, seniors, conversations } from './db/schema.js';
@@ -65,13 +66,10 @@ const callMetadata = new Map();
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '2.4',
+    version: '3.0',
     activeSessions: sessions.size,
-    pipelines: {
-      v0: 'gemini-2.5-flash-native-audio',
-      v1: 'claude-sonnet + observer + elevenlabs'
-    },
-    defaultPipeline: process.env.DEFAULT_PIPELINE || 'v0',
+    pipeline: 'claude-streaming + 4-layer-observer + elevenlabs',
+    features: ['dynamic-model-routing', 'post-turn-agent', 'streaming-tts'],
   });
 });
 
@@ -140,11 +138,11 @@ app.post('/voice/answer', async (req, res) => {
     }
   }
 
-  // Get pipeline preference (default to v0 for inbound/reminder calls)
-  const pipeline = pendingPipelines.get(callSid) || process.env.DEFAULT_PIPELINE || 'v0';
+  // V1 is now the only pipeline (V0 Gemini removed)
+  const pipeline = 'v1';
   pendingPipelines.delete(callSid); // Clean up
 
-  console.log(`[${callSid}] Using pipeline: ${pipeline}`);
+  console.log(`[${callSid}] Using pipeline: v1 (Claude + 4-layer observer)`);
 
   // Store metadata for when WebSocket connects
   callMetadata.set(callSid, { senior, memoryContext, fromPhone, conversationId, reminderPrompt, pipeline });
@@ -210,15 +208,11 @@ const pendingPipelines = new Map();
 
 // API: Initiate outbound call
 app.post('/api/call', async (req, res) => {
-  const { phoneNumber, pipeline = 'v0' } = req.body;
+  const { phoneNumber } = req.body;
+  // Note: 'pipeline' param ignored - V1 is now the only pipeline
 
   if (!phoneNumber) {
     return res.status(400).json({ error: 'phoneNumber required' });
-  }
-
-  // Validate pipeline
-  if (!['v0', 'v1'].includes(pipeline)) {
-    return res.status(400).json({ error: 'Invalid pipeline. Use v0 or v1' });
   }
 
   try {
@@ -236,11 +230,11 @@ app.post('/api/call', async (req, res) => {
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
     });
 
-    // Store pipeline preference for this call
-    pendingPipelines.set(call.sid, pipeline);
+    // V1 is the only pipeline now
+    pendingPipelines.set(call.sid, 'v1');
 
-    console.log(`Initiated ${pipeline} call ${call.sid} to ${phoneNumber}`);
-    res.json({ success: true, callSid: call.sid, pipeline });
+    console.log(`Initiated v1 call ${call.sid} to ${phoneNumber}`);
+    res.json({ success: true, callSid: call.sid, pipeline: 'v1' });
 
   } catch (error) {
     console.error('Failed to initiate call:', error);
@@ -832,35 +826,23 @@ wss.on('connection', async (twilioWs, req) => {
 
           // Get metadata stored during /voice/answer
           const metadata = callMetadata.get(callSid) || {};
-          const pipeline = metadata.pipeline || 'v0';
 
-          // Create appropriate session based on pipeline
-          if (pipeline === 'v1') {
-            console.log(`[${callSid}] Creating V1 Advanced session (Claude + Observer)`);
-            geminiSession = new V1AdvancedSession(
-              twilioWs,
-              streamSid,
-              metadata.senior,
-              metadata.memoryContext,
-              metadata.reminderPrompt,
-              [] // TODO: Get pending reminders
-            );
-          } else {
-            console.log(`[${callSid}] Creating V0 Gemini session`);
-            geminiSession = new GeminiLiveSession(
-              twilioWs,
-              streamSid,
-              metadata.senior,
-              metadata.memoryContext,
-              metadata.reminderPrompt
-            );
-          }
+          // V3.0: Always use V1 (Claude + 4-layer observer)
+          console.log(`[${callSid}] Creating V1 session (Claude + 4-layer observer)`);
+          geminiSession = new V1AdvancedSession(
+            twilioWs,
+            streamSid,
+            metadata.senior,
+            metadata.memoryContext,
+            metadata.reminderPrompt,
+            [] // TODO: Get pending reminders
+          );
           sessions.set(callSid, geminiSession);
 
           try {
             await geminiSession.connect();
           } catch (error) {
-            console.error(`[${callSid}] Failed to start ${pipeline} session:`, error);
+            console.error(`[${callSid}] Failed to start V1 session:`, error);
           }
           break;
 
@@ -900,64 +882,53 @@ wss.on('connection', async (twilioWs, req) => {
   });
 });
 
-// === BROWSER CALL WebSocket ===
-const browserWss = new WebSocketServer({ noServer: true });
+// === BROWSER CALL WebSocket (V0 - disabled in v3.0) ===
+// Browser calls used V0 Gemini sessions - commented out for now
+// const browserWss = new WebSocketServer({ noServer: true });
+//
+// browserWss.on('connection', async (browserWs, req) => {
+//   console.log('[Browser] New browser call connection');
+//   const { query } = parseUrl(req.url, true);
+//   const seniorId = query.seniorId;
+//   let senior = null;
+//   let memoryContext = null;
+//   let browserSession = null;
+//   if (seniorId) {
+//     try {
+//       senior = await seniorService.getById(seniorId);
+//       if (senior) {
+//         console.log(`[Browser] Found senior: ${senior.name}`);
+//         memoryContext = await memoryService.buildContext(senior.id, null, senior);
+//       }
+//     } catch (error) {
+//       console.error('[Browser] Error fetching senior:', error);
+//     }
+//   }
+//   browserSession = new BrowserSession(browserWs, senior, memoryContext);
+//   try {
+//     await browserSession.connect();
+//   } catch (error) {
+//     console.error('[Browser] Failed to start session:', error);
+//     browserWs.close();
+//     return;
+//   }
+//   browserWs.on('message', (message) => {
+//     if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
+//       browserSession.sendAudio(message);
+//     }
+//   });
+//   browserWs.on('close', async () => {
+//     console.log('[Browser] Connection closed');
+//     if (browserSession) {
+//       await browserSession.close();
+//     }
+//   });
+//   browserWs.on('error', (error) => {
+//     console.error('[Browser] WebSocket error:', error);
+//   });
+// });
 
-browserWss.on('connection', async (browserWs, req) => {
-  console.log('[Browser] New browser call connection');
-
-  // Parse query params for seniorId
-  const { query } = parseUrl(req.url, true);
-  const seniorId = query.seniorId;
-
-  let senior = null;
-  let memoryContext = null;
-  let browserSession = null;
-
-  // Pre-fetch senior context
-  if (seniorId) {
-    try {
-      senior = await seniorService.getById(seniorId);
-      if (senior) {
-        console.log(`[Browser] Found senior: ${senior.name}`);
-        memoryContext = await memoryService.buildContext(senior.id, null, senior);
-      }
-    } catch (error) {
-      console.error('[Browser] Error fetching senior:', error);
-    }
-  }
-
-  // Create browser session
-  browserSession = new BrowserSession(browserWs, senior, memoryContext);
-
-  try {
-    await browserSession.connect();
-  } catch (error) {
-    console.error('[Browser] Failed to start session:', error);
-    browserWs.close();
-    return;
-  }
-
-  // Handle incoming audio from browser
-  browserWs.on('message', (message) => {
-    if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
-      browserSession.sendAudio(message);
-    }
-  });
-
-  browserWs.on('close', async () => {
-    console.log('[Browser] Connection closed');
-    if (browserSession) {
-      await browserSession.close();
-    }
-  });
-
-  browserWs.on('error', (error) => {
-    console.error('[Browser] WebSocket error:', error);
-  });
-});
-
-// Handle WebSocket upgrade manually for both servers
+// Handle WebSocket upgrade for Twilio media stream
 server.on('upgrade', (request, socket, head) => {
   const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
 
@@ -965,22 +936,22 @@ server.on('upgrade', (request, socket, head) => {
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit('connection', ws, request);
     });
-  } else if (pathname === '/browser-call') {
-    browserWss.handleUpgrade(request, socket, head, (ws) => {
-      browserWss.emit('connection', ws, request);
-    });
+  // Browser call disabled in v3.0 (was V0 Gemini)
+  // } else if (pathname === '/browser-call') {
+  //   browserWss.handleUpgrade(request, socket, head, (ws) => {
+  //     browserWss.emit('connection', ws, request);
+  //   });
   } else {
     socket.destroy();
   }
 });
 
 server.listen(PORT, () => {
-  console.log(`Donna v2.4 listening on port ${PORT}`);
+  console.log(`Donna v3.0 listening on port ${PORT}`);
   console.log(`Voice webhook: ${BASE_URL}/voice/answer`);
   console.log(`Media stream: ${WS_URL}/media-stream`);
-  console.log(`Browser call: ${WS_URL}/browser-call`);
-  console.log(`Pipelines: V0 (Gemini) / V1 (Claude+Observer+ElevenLabs)`);
-  console.log(`Default pipeline: ${process.env.DEFAULT_PIPELINE || 'v0'}`);
+  console.log(`Pipeline: Claude + 4-layer observer + ElevenLabs streaming`);
+  console.log(`Features: Dynamic model routing, Post-turn agent, Streaming TTS`);
 
   // Start the reminder scheduler (check every minute)
   startScheduler(BASE_URL, 60000);

@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Call, Timeline, Turn, ObserverSummary, Continuity } from '../types';
 
-const API_BASE = '/api/observability';
+const API_BASE = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api/observability`
+  : '/api/observability';
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url);

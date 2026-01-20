@@ -22,9 +22,15 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
   const connect = useCallback(() => {
     // Determine WebSocket URL
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/api/observability/live`;
+    let wsUrl: string;
+    if (import.meta.env.VITE_API_URL) {
+      const apiUrl = new URL(import.meta.env.VITE_API_URL);
+      const wsProtocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      wsUrl = `${wsProtocol}//${apiUrl.host}/api/observability/live`;
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      wsUrl = `${protocol}//${window.location.host}/api/observability/live`;
+    }
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;

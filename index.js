@@ -22,12 +22,14 @@ const __dirname = dirname(__filename);
 
 const app = express();
 
-// CORS - allow admin dashboard and local development
+// CORS - allow admin dashboard, observability, and local development
 app.use(cors({
   origin: [
     'https://donna-admin.vercel.app',
+    'https://observability-production-3677.up.railway.app',
     'http://localhost:3000',
     'http://localhost:3001',
+    'http://localhost:5174',
   ],
   credentials: true,
 }));
@@ -515,6 +517,277 @@ app.get('/api/stats', async (req, res) => {
       recentCalls,
     });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === OBSERVABILITY API ===
+
+// Get recent calls for observability dashboard
+app.get('/api/observability/calls', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const calls = await db.select({
+      id: conversations.id,
+      callSid: conversations.callSid,
+      seniorId: conversations.seniorId,
+      seniorName: seniors.name,
+      seniorPhone: seniors.phone,
+      startedAt: conversations.startedAt,
+      endedAt: conversations.endedAt,
+      durationSeconds: conversations.durationSeconds,
+      status: conversations.status,
+      summary: conversations.summary,
+      sentiment: conversations.sentiment,
+      concerns: conversations.concerns,
+    })
+    .from(conversations)
+    .leftJoin(seniors, eq(conversations.seniorId, seniors.id))
+    .orderBy(desc(conversations.startedAt))
+    .limit(limit);
+
+    // Transform to match dashboard expected format
+    const formattedCalls = calls.map(call => ({
+      id: call.id,
+      call_sid: call.callSid,
+      senior_id: call.seniorId,
+      senior_name: call.seniorName,
+      senior_phone: call.seniorPhone,
+      started_at: call.startedAt,
+      ended_at: call.endedAt,
+      duration_seconds: call.durationSeconds,
+      status: call.status || 'completed',
+      summary: call.summary,
+      sentiment: call.sentiment,
+      concerns: call.concerns,
+      turn_count: 0, // Will be populated from transcript if available
+    }));
+
+    res.json({ calls: formattedCalls });
+  } catch (error) {
+    console.error('Error fetching calls:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get active calls
+app.get('/api/observability/active', async (req, res) => {
+  try {
+    const activeCalls = [];
+    for (const [callSid, session] of sessions.entries()) {
+      const metadata = callMetadata.get(callSid);
+      if (metadata) {
+        activeCalls.push({
+          id: callSid,
+          call_sid: callSid,
+          senior_id: metadata.senior?.id,
+          senior_name: metadata.senior?.name || 'Unknown',
+          senior_phone: metadata.senior?.phone || 'Unknown',
+          started_at: metadata.startedAt || new Date().toISOString(),
+          status: 'in_progress',
+          turn_count: session.turnCount || 0,
+        });
+      }
+    }
+    res.json({ activeCalls });
+  } catch (error) {
+    console.error('Error fetching active calls:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get call details by ID
+app.get('/api/observability/calls/:id', async (req, res) => {
+  try {
+    const [call] = await db.select({
+      id: conversations.id,
+      callSid: conversations.callSid,
+      seniorId: conversations.seniorId,
+      seniorName: seniors.name,
+      seniorPhone: seniors.phone,
+      startedAt: conversations.startedAt,
+      endedAt: conversations.endedAt,
+      durationSeconds: conversations.durationSeconds,
+      status: conversations.status,
+      summary: conversations.summary,
+      sentiment: conversations.sentiment,
+      concerns: conversations.concerns,
+      transcript: conversations.transcript,
+    })
+    .from(conversations)
+    .leftJoin(seniors, eq(conversations.seniorId, seniors.id))
+    .where(eq(conversations.id, req.params.id));
+
+    if (!call) {
+      return res.status(404).json({ error: 'Call not found' });
+    }
+
+    res.json({
+      id: call.id,
+      call_sid: call.callSid,
+      senior_id: call.seniorId,
+      senior_name: call.seniorName,
+      senior_phone: call.seniorPhone,
+      started_at: call.startedAt,
+      ended_at: call.endedAt,
+      duration_seconds: call.durationSeconds,
+      status: call.status || 'completed',
+      summary: call.summary,
+      sentiment: call.sentiment,
+      concerns: call.concerns,
+      transcript: call.transcript,
+    });
+  } catch (error) {
+    console.error('Error fetching call:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get call timeline (events from transcript)
+app.get('/api/observability/calls/:id/timeline', async (req, res) => {
+  try {
+    const [call] = await db.select({
+      id: conversations.id,
+      callSid: conversations.callSid,
+      startedAt: conversations.startedAt,
+      endedAt: conversations.endedAt,
+      durationSeconds: conversations.durationSeconds,
+      transcript: conversations.transcript,
+    })
+    .from(conversations)
+    .where(eq(conversations.id, req.params.id));
+
+    if (!call) {
+      return res.status(404).json({ error: 'Call not found' });
+    }
+
+    // Build timeline from transcript
+    const events = [];
+
+    // Add call start event
+    events.push({
+      type: 'call.initiated',
+      timestamp: call.startedAt,
+      data: { callSid: call.callSid },
+    });
+
+    // Add transcript events if available
+    if (call.transcript && Array.isArray(call.transcript)) {
+      call.transcript.forEach((turn, index) => {
+        if (turn.role === 'user') {
+          events.push({
+            type: 'turn.transcribed',
+            timestamp: turn.timestamp || call.startedAt,
+            data: { content: turn.content, turnIndex: index },
+          });
+        } else if (turn.role === 'assistant') {
+          events.push({
+            type: 'turn.response',
+            timestamp: turn.timestamp || call.startedAt,
+            data: { content: turn.content, turnIndex: index },
+          });
+        }
+        // Add observer signals if present
+        if (turn.observer) {
+          events.push({
+            type: 'observer.signal',
+            timestamp: turn.timestamp || call.startedAt,
+            data: turn.observer,
+          });
+        }
+      });
+    }
+
+    // Add call end event
+    if (call.endedAt) {
+      events.push({
+        type: 'call.ended',
+        timestamp: call.endedAt,
+        data: { durationSeconds: call.durationSeconds },
+      });
+    }
+
+    res.json({
+      callId: call.id,
+      events,
+    });
+  } catch (error) {
+    console.error('Error fetching timeline:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get call turns (conversation turns)
+app.get('/api/observability/calls/:id/turns', async (req, res) => {
+  try {
+    const [call] = await db.select({
+      transcript: conversations.transcript,
+    })
+    .from(conversations)
+    .where(eq(conversations.id, req.params.id));
+
+    if (!call) {
+      return res.status(404).json({ error: 'Call not found' });
+    }
+
+    const turns = (call.transcript || []).map((turn, index) => ({
+      id: index,
+      role: turn.role,
+      content: turn.content,
+      timestamp: turn.timestamp,
+    }));
+
+    res.json({ turns });
+  } catch (error) {
+    console.error('Error fetching turns:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get observer signals for a call
+app.get('/api/observability/calls/:id/observer', async (req, res) => {
+  try {
+    const [call] = await db.select({
+      transcript: conversations.transcript,
+      concerns: conversations.concerns,
+      sentiment: conversations.sentiment,
+    })
+    .from(conversations)
+    .where(eq(conversations.id, req.params.id));
+
+    if (!call) {
+      return res.status(404).json({ error: 'Call not found' });
+    }
+
+    // Extract observer signals from transcript
+    const signals = [];
+    if (call.transcript && Array.isArray(call.transcript)) {
+      call.transcript.forEach((turn) => {
+        if (turn.observer) {
+          signals.push({
+            timestamp: turn.timestamp,
+            engagementLevel: turn.observer.engagement_level || turn.observer.engagementLevel,
+            emotionalState: turn.observer.emotional_state || turn.observer.emotionalState,
+            concerns: turn.observer.concerns || [],
+            suggestedTopic: turn.observer.suggested_topic || turn.observer.suggestedTopic,
+            shouldDeliverReminder: turn.observer.should_deliver_reminder || turn.observer.shouldDeliverReminder,
+            shouldEndCall: turn.observer.should_end_call || turn.observer.shouldEndCall,
+          });
+        }
+      });
+    }
+
+    // Calculate aggregates
+    const aggregates = {
+      avgEngagement: 'medium',
+      dominantEmotion: call.sentiment || 'neutral',
+      totalConcerns: (call.concerns || []).length,
+      concerns: call.concerns || [],
+    };
+
+    res.json({ signals, aggregates });
+  } catch (error) {
+    console.error('Error fetching observer data:', error);
     res.status(500).json({ error: error.message });
   }
 });

@@ -50,12 +50,13 @@
 
 | Feature | V0 (Gemini Native) | V1 (Claude + Streaming) |
 |---------|-------------------|------------------------|
-| **AI Model** | Gemini 2.5 Flash | Claude Sonnet (streaming) |
+| **AI Model** | Gemini 2.5 Flash | Claude Haiku (default) / Sonnet (upgraded) |
 | **STT** | Gemini built-in + Deepgram | Deepgram |
 | **TTS** | Gemini built-in | ElevenLabs WebSocket |
 | **Greeting Latency** | ~500ms | ~400ms (pre-built) |
-| **Response Latency** | ~500ms | ~800ms (streaming) |
+| **Response Latency** | ~500ms | ~600ms (Haiku streaming) |
 | **Observer Layers** | No | 3 layers (0ms/300ms/800ms) |
+| **Model Selection** | Fixed | Dynamic (observer-driven) |
 | **Best For** | Quick responses | Quality + insights |
 
 ### V1 Streaming Architecture
@@ -169,6 +170,11 @@ The pipeline is selected:
 
 See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
 - ~~V1 Latency Optimization~~ ✓ Completed (streaming pipeline)
+- ~~Haiku Default Model~~ ✓ Completed (faster responses)
+- **Dynamic Model Routing** ← Next priority
+  - Observers output `modelRecommendation` to upgrade Haiku → Sonnet
+  - Triggers: health mentions, emotional support, low engagement
+  - See [docs/DYNAMIC_MODEL_ROUTING.md](docs/DYNAMIC_MODEL_ROUTING.md)
 - Caregiver Authentication
 - Observer Signal Storage
 - Analytics Dashboard

@@ -1,5 +1,5 @@
 import { db } from '../db/client.js';
-import { conversations } from '../db/schema.js';
+import { conversations, seniors } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
 
 export const conversationService = {
@@ -52,10 +52,27 @@ export const conversationService = {
       .limit(limit);
   },
 
-  // Get all recent conversations
+  // Get all recent conversations with senior names
   async getRecent(limit = 20) {
-    return db.select().from(conversations)
-      .orderBy(desc(conversations.startedAt))
-      .limit(limit);
+    const results = await db.select({
+      id: conversations.id,
+      seniorId: conversations.seniorId,
+      callSid: conversations.callSid,
+      startedAt: conversations.startedAt,
+      endedAt: conversations.endedAt,
+      durationSeconds: conversations.durationSeconds,
+      status: conversations.status,
+      summary: conversations.summary,
+      sentiment: conversations.sentiment,
+      concerns: conversations.concerns,
+      transcript: conversations.transcript,
+      seniorName: seniors.name,
+    })
+    .from(conversations)
+    .leftJoin(seniors, eq(conversations.seniorId, seniors.id))
+    .orderBy(desc(conversations.startedAt))
+    .limit(limit);
+
+    return results;
   }
 };

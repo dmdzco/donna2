@@ -911,12 +911,16 @@
       }
     }
 
+    // Store calls data for transcript lookup
+    let callsData = [];
+
     function renderCalls(calls) {
+      callsData = calls; // Store for transcript lookup
       if (!calls.length) {
         document.getElementById('callsList').innerHTML = '<p class="empty-state">No calls yet</p>';
         return;
       }
-      document.getElementById('callsList').innerHTML = calls.map(c => `
+      document.getElementById('callsList').innerHTML = calls.map((c, idx) => `
         <div class="list-item">
           <div>
             <h3>${esc(c.seniorName) || 'Unknown'}</h3>
@@ -926,10 +930,15 @@
             </p>
           </div>
           <div class="actions">
-            ${c.transcript ? `<button class="small secondary" onclick='showTranscript(${JSON.stringify(c)})'>Transcript</button>` : ''}
+            ${c.transcript && c.transcript.length > 0 ? `<button class="small secondary" onclick="showTranscriptById(${idx})">Transcript</button>` : '<span class="meta">No transcript</span>'}
           </div>
         </div>
       `).join('');
+    }
+
+    function showTranscriptById(idx) {
+      const call = callsData[idx];
+      if (call) showTranscript(call);
     }
 
     function showTranscript(call) {

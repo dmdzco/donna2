@@ -2,27 +2,47 @@
 
 ## Overview
 
-This document specifies the enhanced observer architecture for Donna's V1 pipeline. The key change is transforming Layer 2 from a reactive sentiment analyzer into a **proactive Conversation Director** that guides the flow of each call.
+This document specifies Donna's V1 pipeline architecture with the **Conversation Director** - a proactive AI layer that guides each call in real-time.
 
 ---
 
 ## Architecture Summary
 
+### Real-Time (During Call)
+
 | Layer | Name | Model | Speed | Role |
 |-------|------|-------|-------|------|
 | L1 | Quick Observer | Regex (no AI) | 0ms | Instant pattern detection |
 | L2 | **Conversation Director** | Gemini 3 Flash | ~100-150ms | Proactive flow guidance |
-| L3 | Deep Observer | Gemini 3 Pro | ~300ms | Caregiver alerts, complex analysis |
 | Voice | Main Conversation | Claude Haiku/Sonnet | ~250-400ms | Talks to senior |
 
-### Why These Models?
+### Post-Call (Async Batch)
 
-| Model | Role | Why |
-|-------|------|-----|
-| **Gemini 3 Flash (L2)** | Conversation Director | Fastest, cheapest, good enough for flow guidance |
-| **Gemini 3 Pro (L3)** | Deep Observer | Strong reasoning for concern detection, 3x cheaper than Sonnet |
-| **Claude Haiku (Voice)** | Default conversation | Warm, empathetic, fast |
-| **Claude Sonnet (Voice)** | Upgraded conversation | Best empathy for emotional/health moments |
+| Process | Model | Trigger | Output |
+|---------|-------|---------|--------|
+| Call Analysis | Gemini Flash | Call ends | Summary, alerts, analytics |
+
+### Why This Architecture?
+
+- **No real-time L3** - Deep analysis doesn't help the live conversation (too slow)
+- **Post-call is cheaper** - Run full transcript through Gemini Flash once, not per-turn
+- **Same quality** - Caregiver alerts generated from complete context, not partial
+- **4x cost savings** - ~$0.0005 post-call vs ~$0.002 real-time per call
+
+---
+
+## Layer 1: Quick Observer (Unchanged)
+
+**File:** `pipelines/quick-observer.js`
+
+Instant regex-based pattern detection that affects the CURRENT response:
+- Health mentions (pain, fell, dizzy, medication)
+- Family mentions (daughter, grandkids)
+- Emotional signals (lonely, sad, worried)
+- Engagement detection (short responses)
+- Question detection
+
+**No changes needed** - L1 works well as-is.
 
 ---
 
@@ -30,14 +50,15 @@ This document specifies the enhanced observer architecture for Donna's V1 pipeli
 
 ### Purpose
 
-The Conversation Director proactively guides each call by:
+Transform the Fast Observer from reactive sentiment analysis into a **proactive Conversation Director** that guides the flow of each call.
 
-1. **Tracking state** - What topics covered, what's pending, call phase
-2. **Steering flow** - When to transition topics, what to discuss next
-3. **Managing reminders** - Finding natural moments to deliver reminders
-4. **Monitoring pacing** - Detecting if conversation is dragging or rushed
-5. **Recommending model** - When to upgrade from Haiku to Sonnet
-6. **Providing guidance** - Specific instructions for Claude's next response
+The Conversation Director:
+1. **Tracks state** - Topics covered, goals pending, call phase
+2. **Steers flow** - When to transition topics, what to discuss next
+3. **Manages reminders** - Finding natural moments to deliver reminders
+4. **Monitors pacing** - Detecting if conversation is dragging or rushed
+5. **Recommends model** - When to upgrade from Haiku to Sonnet
+6. **Provides guidance** - Specific instructions for Claude's next response
 
 ### Input
 
@@ -50,7 +71,7 @@ The Conversation Director proactively guides each call by:
     family: ["daughter Sarah", "grandson Tommy"],
   },
 
-  // Call state
+  // Call state (tracked by v1-advanced.js)
   callState: {
     minutesElapsed: 4.5,
     maxDuration: 10,
@@ -58,18 +79,17 @@ The Conversation Director proactively guides each call by:
     pendingReminders: [
       { id: "rem1", title: "Afternoon medication", description: "Take blood pressure pill" }
     ],
-    topicsCovered: ["greeting", "health"],
     remindersDelivered: []
   },
 
-  // Conversation
+  // Conversation history
   conversationHistory: [
     { role: "assistant", content: "Hello Margaret! How are you feeling today?" },
     { role: "user", content: "Oh, I'm doing alright. A bit tired." },
     // ...
   ],
 
-  // Pre-fetched memories
+  // Pre-fetched memories (from memory service)
   memories: [
     { content: "Margaret's daughter Sarah visits every Sunday", importance: 0.9 },
     { content: "She loves her rose garden", importance: 0.8 }
@@ -499,151 +519,208 @@ Now analyze the current conversation and provide direction:
 
 ---
 
-## Layer 3: Deep Observer (Gemini 3 Pro)
+## Post-Call Analysis (Async)
 
 ### Purpose
 
-The Deep Observer runs async after each response and focuses on:
+After each call ends, run a single analysis on the complete transcript to generate:
+- Call summary for records
+- Caregiver alerts (health, cognitive, safety concerns)
+- Engagement metrics
+- Follow-up suggestions for next call
 
-1. **Concern detection** - Health issues, cognitive changes, safety risks
-2. **Pattern analysis** - Multi-turn emotional patterns, engagement trends
-3. **Caregiver alerts** - Flagging issues for family members
-4. **Call summary** - End-of-call summary for records
+### Why Post-Call Instead of Real-Time?
 
-### Output Schema
+| Real-Time L3 | Post-Call Batch |
+|--------------|-----------------|
+| Runs every turn (~10x per call) | Runs once per call |
+| ~$0.002 per call | ~$0.0005 per call |
+| Partial context each time | Full conversation context |
+| Complex orchestration | Simple batch job |
+| Adds latency risk | Zero latency impact |
+
+### Implementation
+
+**File:** `services/call-analysis.js` (new file)
 
 ```javascript
-{
-  "engagement_level": "high|medium|low",
-  "emotional_state": "detailed description of emotional patterns",
-  "concerns": [
-    {
-      "type": "health|cognitive|safety|emotional|social",
-      "severity": "low|medium|high",
-      "description": "what was observed",
-      "evidence": "quotes or specific observations",
-      "recommended_action": "what caregiver should know/do"
-    }
-  ],
-  "positive_observations": [
-    "good things noticed during call"
-  ],
-  "topics_discussed": ["list of topics"],
-  "reminders_delivered": ["which reminders were given"],
-  "call_quality": {
-    "engagement_score": 1-10,
-    "rapport_quality": "strong|moderate|weak",
-    "goals_achieved": true|false
-  },
-  "follow_up_suggestions": [
-    "things to bring up next call"
-  ]
-}
-```
+/**
+ * Post-Call Analysis
+ *
+ * Runs after call ends to generate summary, alerts, and analytics.
+ * Uses Gemini Flash for cost efficiency.
+ */
 
-### System Prompt for Gemini 3 Pro
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-```
-You are a Deep Observer analyzing a phone conversation between Donna (an AI companion) and an elderly individual.
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+const gemini = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-Your job is to identify concerns for caregivers, detect patterns, and provide a comprehensive analysis of the call.
+const ANALYSIS_PROMPT = `You are analyzing a completed phone call between Donna (an AI companion) and an elderly individual.
 
 ## SENIOR CONTEXT
-
 Name: {{SENIOR_NAME}}
 Known conditions: {{HEALTH_CONDITIONS}}
-Family contacts: {{FAMILY_MEMBERS}}
-Previous concerns: {{PREVIOUS_CONCERNS}}
+Family: {{FAMILY_MEMBERS}}
 
-## FULL CONVERSATION
+## FULL CALL TRANSCRIPT
+{{TRANSCRIPT}}
 
-{{CONVERSATION_TRANSCRIPT}}
+## ANALYSIS REQUIRED
 
-## ANALYSIS FOCUS
+Analyze the complete call and provide:
 
-### Concern Categories
+1. **Summary** (2-3 sentences): What happened in this call?
 
-**Health Concerns:**
-- Mentions of pain, discomfort, symptoms
-- Medication confusion or non-compliance
-- Falls or mobility issues
-- Sleep problems
-- Appetite changes
-- New symptoms
+2. **Topics Discussed**: List main topics covered
 
-**Cognitive Concerns:**
-- Confusion about time, place, people
-- Repeating questions
-- Difficulty following conversation
-- Memory gaps
-- Disorientation
+3. **Reminders**: Were any reminders delivered? Which ones?
 
-**Safety Concerns:**
-- Mentions of strangers, scams
-- Being alone for extended periods
-- Home safety issues (stairs, locks)
-- Financial concerns or exploitation
+4. **Engagement Score** (1-10): How engaged was the senior?
 
-**Emotional Concerns:**
-- Persistent loneliness
-- Depression indicators
-- Anxiety about specific things
-- Grief that seems unprocessed
-- Isolation from family
+5. **Concerns for Caregiver**: Flag any issues the family should know about
+   - Health concerns (pain, symptoms, medication issues, falls)
+   - Cognitive concerns (confusion, memory issues, disorientation)
+   - Emotional concerns (persistent sadness, loneliness, anxiety)
+   - Safety concerns (mentions of strangers, scams, being alone)
 
-**Social Concerns:**
-- Lack of contact with family
-- Loss of interests
-- Withdrawal from activities
-- Conflict with caregivers
+   For each concern, provide:
+   - Type: health|cognitive|emotional|safety
+   - Severity: low|medium|high
+   - Description: What was observed
+   - Evidence: Quote or specific observation
+   - Action: What caregiver should do
 
-### Severity Levels
+6. **Positive Observations**: Good things noticed (high engagement, positive mood, etc.)
 
-**High:** Immediate caregiver notification recommended
-- Falls, chest pain, severe confusion
-- Mentions of self-harm or giving up
-- Signs of exploitation or abuse
-- Medical emergency indicators
-
-**Medium:** Caregiver should know within 24 hours
-- Medication non-compliance
-- Moderate cognitive changes
-- Persistent low mood
-- Isolation patterns
-
-**Low:** Note for next check-in
-- Minor complaints
-- Slight mood changes
-- Small concerns worth monitoring
+7. **Follow-up Suggestions**: Things to bring up in the next call
 
 ## OUTPUT FORMAT
 
 Respond with ONLY valid JSON:
 
 {
-  "engagement_level": "high|medium|low",
-  "emotional_state": "string - detailed description",
+  "summary": "string",
+  "topics_discussed": ["string"],
+  "reminders_delivered": ["string"],
+  "engagement_score": number,
   "concerns": [
     {
-      "type": "health|cognitive|safety|emotional|social",
+      "type": "health|cognitive|emotional|safety",
       "severity": "low|medium|high",
       "description": "string",
-      "evidence": "string - quotes or observations",
+      "evidence": "string",
       "recommended_action": "string"
     }
   ],
   "positive_observations": ["string"],
-  "topics_discussed": ["string"],
-  "reminders_delivered": ["string"],
+  "follow_up_suggestions": ["string"],
   "call_quality": {
-    "engagement_score": number 1-10,
-    "rapport_quality": "strong|moderate|weak",
-    "goals_achieved": boolean
-  },
-  "follow_up_suggestions": ["string"]
+    "rapport": "strong|moderate|weak",
+    "goals_achieved": boolean,
+    "duration_appropriate": boolean
+  }
+}
+`;
+
+export async function analyzeCompletedCall(transcript, seniorContext) {
+  const prompt = ANALYSIS_PROMPT
+    .replace('{{SENIOR_NAME}}', seniorContext.name)
+    .replace('{{HEALTH_CONDITIONS}}', seniorContext.conditions?.join(', ') || 'None known')
+    .replace('{{FAMILY_MEMBERS}}', seniorContext.family?.join(', ') || 'Unknown')
+    .replace('{{TRANSCRIPT}}', formatTranscript(transcript));
+
+  try {
+    const result = await gemini.generateContent(prompt);
+    const text = result.response.text();
+
+    let jsonText = text;
+    if (text.includes('```')) {
+      jsonText = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+    }
+
+    return JSON.parse(jsonText);
+  } catch (error) {
+    console.error('[CallAnalysis] Error:', error.message);
+    return getDefaultAnalysis();
+  }
 }
 
-Analyze the conversation:
+function formatTranscript(history) {
+  return history
+    .map(m => `${m.role === 'assistant' ? 'DONNA' : 'SENIOR'}: ${m.content}`)
+    .join('\n\n');
+}
+
+function getDefaultAnalysis() {
+  return {
+    summary: 'Analysis unavailable',
+    topics_discussed: [],
+    reminders_delivered: [],
+    engagement_score: 5,
+    concerns: [],
+    positive_observations: [],
+    follow_up_suggestions: [],
+    call_quality: {
+      rapport: 'moderate',
+      goals_achieved: false,
+      duration_appropriate: true
+    }
+  };
+}
+```
+
+### Trigger Post-Call Analysis
+
+**File:** `pipelines/v1-advanced.js`
+
+Add to the call cleanup/end handler:
+
+```javascript
+// When call ends
+async onCallEnd() {
+  // ... existing cleanup ...
+
+  // Run post-call analysis async (don't block)
+  this.runPostCallAnalysis().catch(err => {
+    console.error('[V1] Post-call analysis failed:', err.message);
+  });
+}
+
+async runPostCallAnalysis() {
+  const { analyzeCompletedCall } = await import('../services/call-analysis.js');
+
+  const analysis = await analyzeCompletedCall(
+    this.conversationHistory,
+    this.senior
+  );
+
+  // Save to database
+  await this.saveCallAnalysis(analysis);
+
+  // If high-severity concerns, notify caregiver
+  const highSeverity = analysis.concerns.filter(c => c.severity === 'high');
+  if (highSeverity.length > 0) {
+    await this.notifyCaregiver(highSeverity);
+  }
+
+  console.log(`[V1] Call analysis complete. Engagement: ${analysis.engagement_score}/10`);
+}
+
+async saveCallAnalysis(analysis) {
+  // Save to conversations table or separate call_analyses table
+  await db.insert(callAnalyses).values({
+    conversation_id: this.conversationId,
+    senior_id: this.senior?.id,
+    summary: analysis.summary,
+    topics: analysis.topics_discussed,
+    engagement_score: analysis.engagement_score,
+    concerns: analysis.concerns,
+    positive_observations: analysis.positive_observations,
+    follow_up_suggestions: analysis.follow_up_suggestions,
+    created_at: new Date()
+  });
+}
 ```
 
 ---
@@ -666,6 +743,8 @@ ANTHROPIC_API_KEY=your_anthropic_key
 
 ### Step 3: Update fast-observer.js
 
+Replace the current implementation with the Conversation Director:
+
 ```javascript
 /**
  * Conversation Director - Layer 2
@@ -677,9 +756,10 @@ ANTHROPIC_API_KEY=your_anthropic_key
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-const gemini = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' }); // or gemini-3-flash when available
+const gemini = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+// Use 'gemini-3-flash' when available
 
-const DIRECTOR_PROMPT = `... [full prompt from above] ...`;
+const DIRECTOR_PROMPT = `[INSERT FULL PROMPT FROM ABOVE]`;
 
 export async function getConversationDirection(
   userMessage,
@@ -689,13 +769,13 @@ export async function getConversationDirection(
   memories = []
 ) {
   const prompt = DIRECTOR_PROMPT
-    .replace('{{SENIOR_NAME}}', seniorContext.name)
-    .replace('{{MINUTES_ELAPSED}}', callState.minutesElapsed.toFixed(1))
-    .replace('{{MAX_DURATION}}', callState.maxDuration || 10)
-    .replace('{{CALL_TYPE}}', callState.callType || 'check-in')
-    .replace('{{PENDING_REMINDERS}}', formatReminders(callState.pendingReminders))
-    .replace('{{INTERESTS}}', seniorContext.interests?.join(', ') || 'unknown')
-    .replace('{{FAMILY_MEMBERS}}', formatFamily(seniorContext.family))
+    .replace('{{SENIOR_NAME}}', seniorContext?.name || 'Friend')
+    .replace('{{MINUTES_ELAPSED}}', (callState?.minutesElapsed || 0).toFixed(1))
+    .replace('{{MAX_DURATION}}', callState?.maxDuration || 10)
+    .replace('{{CALL_TYPE}}', callState?.callType || 'check-in')
+    .replace('{{PENDING_REMINDERS}}', formatReminders(callState?.pendingReminders))
+    .replace('{{INTERESTS}}', seniorContext?.interests?.join(', ') || 'unknown')
+    .replace('{{FAMILY_MEMBERS}}', formatFamily(seniorContext?.family))
     .replace('{{MEMORIES}}', formatMemories(memories))
     .replace('{{CONVERSATION_HISTORY}}', formatHistory(conversationHistory));
 
@@ -767,22 +847,23 @@ function formatFamily(family) {
 
 function formatMemories(memories) {
   if (!memories?.length) return 'None available';
-  return memories.map(m => `- ${m.content}`).join('\n');
+  return memories.slice(0, 5).map(m => `- ${m.content}`).join('\n');
 }
 
 function formatHistory(history) {
+  if (!history?.length) return 'Call just started';
   return history
+    .slice(-10) // Last 10 turns for context
     .map(m => `${m.role === 'assistant' ? 'DONNA' : 'SENIOR'}: ${m.content}`)
     .join('\n');
 }
 
-// Keep backward compatibility
-export async function fastAnalyzeWithTools(userMessage, conversationHistory, seniorId) {
-  // This can call getConversationDirection internally
-  // or be deprecated in favor of the new function
-}
-
+/**
+ * Format director output for injection into Claude's system prompt
+ */
 export function formatDirectorGuidance(direction) {
+  if (!direction) return null;
+
   const lines = [];
 
   // Call phase and state
@@ -791,6 +872,11 @@ export function formatDirectorGuidance(direction) {
   // Engagement alert
   if (direction.analysis.engagement_level === 'low') {
     lines.push(`[ALERT: Low engagement - need to re-engage]`);
+  }
+
+  // Emotional tone
+  if (direction.analysis.emotional_tone === 'sad' || direction.analysis.emotional_tone === 'concerned') {
+    lines.push(`[EMOTIONAL: Senior seems ${direction.analysis.emotional_tone} - be extra gentle]`);
   }
 
   // Direction
@@ -821,89 +907,29 @@ export function formatDirectorGuidance(direction) {
 
   return lines.join('\n');
 }
-```
 
-### Step 4: Update observer-agent.js (L3)
-
-```javascript
-/**
- * Deep Observer - Layer 3
- *
- * Comprehensive conversation analysis using Gemini 3 Pro.
- * Runs async after response, focuses on caregiver alerts.
- */
-
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-const geminiPro = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' }); // or gemini-3-pro when available
-
-const DEEP_OBSERVER_PROMPT = `... [full prompt from above] ...`;
-
-export class DeepObserver {
-  constructor(seniorContext) {
-    this.seniorContext = seniorContext;
-  }
-
-  async analyze(conversationHistory) {
-    const prompt = DEEP_OBSERVER_PROMPT
-      .replace('{{SENIOR_NAME}}', this.seniorContext.name)
-      .replace('{{HEALTH_CONDITIONS}}', this.seniorContext.conditions?.join(', ') || 'None known')
-      .replace('{{FAMILY_MEMBERS}}', this.seniorContext.family?.join(', ') || 'Unknown')
-      .replace('{{PREVIOUS_CONCERNS}}', this.seniorContext.previousConcerns || 'None')
-      .replace('{{CONVERSATION_TRANSCRIPT}}', this.formatTranscript(conversationHistory));
-
-    try {
-      const result = await geminiPro.generateContent(prompt);
-      const text = result.response.text();
-
-      let jsonText = text;
-      if (text.includes('```')) {
-        jsonText = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
-      }
-
-      return JSON.parse(jsonText);
-    } catch (error) {
-      console.error('[DeepObserver] Error:', error.message);
-      return this.getDefaultAnalysis();
-    }
-  }
-
-  formatTranscript(history) {
-    return history
-      .map(m => `${m.role === 'assistant' ? 'DONNA' : 'SENIOR'}: ${m.content}`)
-      .join('\n\n');
-  }
-
-  getDefaultAnalysis() {
-    return {
-      engagement_level: 'medium',
-      emotional_state: 'Unable to analyze',
-      concerns: [],
-      positive_observations: [],
-      topics_discussed: [],
-      reminders_delivered: [],
-      call_quality: {
-        engagement_score: 5,
-        rapport_quality: 'moderate',
-        goals_achieved: false
-      },
-      follow_up_suggestions: []
-    };
-  }
+// Export for backwards compatibility
+export async function fastAnalyzeWithTools(userMessage, conversationHistory, seniorId) {
+  // Wrapper that calls new function with minimal context
+  return getConversationDirection(userMessage, conversationHistory, {}, {});
 }
 ```
 
-### Step 5: Update v1-advanced.js
+### Step 4: Update v1-advanced.js
+
+Add call state tracking and integrate the Conversation Director:
 
 ```javascript
+// Add to imports
+import { getConversationDirection, formatDirectorGuidance } from './fast-observer.js';
+import { analyzeCompletedCall } from '../services/call-analysis.js';
+
 // Add to constructor
 this.callState = {
   startTime: Date.now(),
   minutesElapsed: 0,
   callType: 'check-in',
-  pendingReminders: this.pendingReminders,
-  topicsCovered: [],
+  pendingReminders: this.pendingReminders || [],
   remindersDelivered: []
 };
 
@@ -913,54 +939,72 @@ updateCallState() {
 }
 
 // In processUtterance, before calling Claude:
+
+// 1. Update call state
 this.updateCallState();
 
-// Get director guidance (runs in parallel with other setup)
+// 2. Get director guidance (runs in parallel with other setup)
 const directorPromise = getConversationDirection(
   userMessage,
   this.conversationHistory,
   this.senior,
   this.callState,
-  this.prefetchedMemories
+  this.prefetchedMemories || []
 );
 
-// Use director result
+// 3. Wait for director result
 const directorResult = await directorPromise;
 const directorGuidance = formatDirectorGuidance(directorResult);
 
-// Select model based on director recommendation
+// 4. Select model based on director recommendation
 const modelConfig = {
   model: directorResult.model_recommendation.use_sonnet
     ? 'claude-sonnet-4-20250514'
     : 'claude-3-haiku-20240307',
-  max_tokens: directorResult.model_recommendation.max_tokens
+  max_tokens: directorResult.model_recommendation.max_tokens || 150
 };
 
-// Inject guidance into system prompt
+console.log(`[V1] Director: ${directorResult.guidance.priority_action} | Model: ${modelConfig.model} | Tokens: ${modelConfig.max_tokens}`);
+
+// 5. Inject guidance into system prompt (update buildSystemPrompt call)
 const systemPrompt = buildSystemPrompt(
   this.senior,
   this.memoryContext,
   this.reminderPrompt,
-  this.lastObserverSignal,
+  null, // observerSignal - no longer used
   dynamicMemoryContext,
   quickGuidance,
-  directorGuidance  // NEW - replaces old fastObserverGuidance
+  directorGuidance  // NEW - from Conversation Director
 );
 
-// Call Claude with selected model
+// 6. Call Claude with selected model
 const stream = await anthropic.messages.stream({
   model: modelConfig.model,
   max_tokens: modelConfig.max_tokens,
   system: systemPrompt,
   messages: claudeMessages,
 });
+
+// 7. Track reminder delivery (if director said to deliver)
+if (directorResult.reminder.should_deliver) {
+  this.callState.remindersDelivered.push(directorResult.reminder.which_reminder);
+}
 ```
+
+### Step 5: Create call-analysis.js
+
+Create `services/call-analysis.js` with the post-call analysis code from above.
+
+### Step 6: Add Call End Handler
+
+Add post-call analysis trigger to the call end handler in `v1-advanced.js`.
 
 ---
 
 ## Testing Checklist
 
-- [ ] L2 outputs comprehensive direction JSON
+### Conversation Director (L2)
+- [ ] Outputs comprehensive direction JSON
 - [ ] Opening phase guides toward health check
 - [ ] Transition phrases are natural
 - [ ] Reminders delivered at good moments
@@ -969,24 +1013,41 @@ const stream = await anthropic.messages.stream({
 - [ ] Emotional moments recommend Sonnet
 - [ ] Grief/loss gets extended, empathetic responses
 - [ ] Wrap-up happens naturally at end of call
-- [ ] L3 detects health concerns
-- [ ] L3 detects cognitive concerns
-- [ ] L3 generates caregiver alerts
 - [ ] Model selection works (Haiku/Sonnet switching)
 - [ ] Token limits adjust based on context
 
+### Post-Call Analysis
+- [ ] Generates summary after call ends
+- [ ] Detects health concerns from transcript
+- [ ] Detects cognitive concerns
+- [ ] Assigns correct severity levels
+- [ ] Saves analysis to database
+- [ ] High-severity concerns trigger notifications
+
 ---
 
-## Cost Estimates
+## Cost Summary
 
-| Component | Model | Cost per 1M tokens | Per-call estimate |
-|-----------|-------|-------------------|-------------------|
-| L2 Director | Gemini 3 Flash | $0.10 / $0.40 | ~$0.0002 |
-| L3 Deep | Gemini 3 Pro | $1.00 / $4.00 | ~$0.002 |
-| Voice (default) | Claude Haiku | $1.00 / $5.00 | ~$0.001 |
-| Voice (upgraded) | Claude Sonnet | $3.00 / $15.00 | ~$0.003 |
+| Component | Model | Per Call |
+|-----------|-------|----------|
+| L1 Quick | Regex | $0 |
+| L2 Director | Gemini 3 Flash | ~$0.0002 |
+| Voice (80%) | Claude Haiku | ~$0.001 |
+| Voice (20%) | Claude Sonnet | ~$0.003 |
+| Post-Call | Gemini Flash | ~$0.0005 |
+| **Total** | | **~$0.002-0.004** |
 
-**Estimated total per call:** $0.003 - $0.006 depending on Sonnet usage
+---
+
+## File Summary
+
+| File | Action | Description |
+|------|--------|-------------|
+| `pipelines/quick-observer.js` | Keep | L1 regex patterns (no changes) |
+| `pipelines/fast-observer.js` | **Rewrite** | Conversation Director with Gemini Flash |
+| `pipelines/observer-agent.js` | **Remove/Deprecate** | No longer needed real-time |
+| `pipelines/v1-advanced.js` | **Update** | Add call state, integrate director, model selection |
+| `services/call-analysis.js` | **Create** | Post-call analysis with Gemini Flash |
 
 ---
 

@@ -251,28 +251,7 @@ DEFAULT_PIPELINE=v0         # Optional: v0 or v1 (default: v0)
 - ⬜ **Analytics Dashboard** - Call metrics, engagement trends
  
 ---
- 
-## Reference Directory
- 
-```
-reference/
-├── adapters/       # External service wrappers (Deepgram, ElevenLabs, etc.)
-├── modules/        # Business logic modules
-├── apps/           # Full Express API implementation
-├── database/       # Drizzle ORM schemas
-├── config/         # Dependency injection container
-└── packages/       # Shared TypeScript interfaces
-```
- 
-**IMPORTANT**: This code is from a **failed previous attempt**. It is kept for:
-- ✅ Learning architectural patterns
-- ✅ Reference for interface designs
-- ✅ Future migration guidance
-- ❌ NOT for current development
-- ❌ NOT running or deployed
- 
----
- 
+
 ## For AI Assistants
  
 ### When Making Changes
@@ -287,15 +266,12 @@ reference/
 | Add new API endpoint | `index.js` |
 | Update admin UI | `public/admin.html` |
 | Database changes | `db/schema.js` |
-| Understand reference patterns | `reference/` (read-only, not active) |
 | Check deployment config | `railway.json`, `.env.example` |
 
 ### Common Mistakes
-1. ❌ Editing `reference/modules/` thinking it's active code
-2. ❌ Forgetting to set `ELEVENLABS_API_KEY` when testing V1
-3. ❌ Not selecting the correct pipeline in admin UI before calling
-4. ❌ Looking at `reference/llm-conversation/` for current prompts
-5. ❌ Treating `reference/` test counts as current project status
+1. ❌ Forgetting to set `ELEVENLABS_API_KEY` when testing V1
+2. ❌ Not selecting the correct pipeline in admin UI before calling
+3. ❌ Modifying V0 code when intending to change V1 (or vice versa)
 
 ### Environment Variables
 

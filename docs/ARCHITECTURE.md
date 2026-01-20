@@ -750,8 +750,6 @@ donna/
 │   ├── NEXT_STEPS.md           # Implementation roadmap
 │   └── plans/                  # Design documents
 │
-├── reference/                  # Old code (not active)
-│
 ├── package.json
 ├── railway.json                # Railway deployment config
 ├── CLAUDE.md                   # AI assistant context

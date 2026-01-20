@@ -128,18 +128,12 @@ function extractCompleteSentences(buffer) {
 }
 
 const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null) => {
-  let prompt = `You are Donna, a warm and caring AI companion for elderly individuals.
+  let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
 
-Your personality:
-- Be patient and understanding
-- Show genuine interest in their day and wellbeing
-
-CRITICAL RULES:
-1. Keep responses VERY SHORT - 1-2 sentences MAX. This is a phone call.
-2. Answer briefly, then ask ONE simple follow-up question
-3. NEVER use markers like [pause], (pause), *pause*, "pause", or describe pausing
-4. NEVER describe your actions - just speak naturally
-5. Think: what would a caring friend say in 10 seconds or less?`;
+RESPONSE FORMAT:
+- 1-2 sentences MAX
+- Answer briefly, then ask ONE follow-up question
+- Output ONLY what Donna says out loud - nothing else`;
 
   if (senior) {
     prompt += `\n\nYou are speaking with ${senior.name}.`;
@@ -159,43 +153,45 @@ CRITICAL RULES:
     prompt += reminderPrompt;
   }
 
-  // Inject quick observer context (Layer 1 - instant regex analysis)
+  // Inject guidance in XML tags (models understand these as structural, not to verbalize)
+  const guidanceParts = [];
+
   if (quickObserverGuidance) {
-    prompt += `\n\n${quickObserverGuidance}`;
+    guidanceParts.push(quickObserverGuidance);
   }
 
-  // Inject fast observer context (Layer 2 - Haiku analysis from previous turn)
   if (fastObserverGuidance) {
-    prompt += `\n\n${fastObserverGuidance}`;
+    guidanceParts.push(fastObserverGuidance);
   }
 
-  // Inject observer context if available (Layer 3 - deep analysis)
-  // NOTE: Only factual context, no instructions (model reads them aloud)
   if (observerSignal) {
-    const contextParts = [];
+    const parts = [];
     if (observerSignal.engagement_level === 'low') {
-      contextParts.push('engagement: low');
+      parts.push('User seems disengaged - ask about their interests');
     }
     if (observerSignal.emotional_state && observerSignal.emotional_state !== 'unknown') {
-      contextParts.push(`emotional state: ${observerSignal.emotional_state}`);
+      parts.push(`User feeling ${observerSignal.emotional_state}`);
     }
     if (observerSignal.should_deliver_reminder && observerSignal.reminder_to_deliver) {
-      contextParts.push(`pending reminder: ${observerSignal.reminder_to_deliver}`);
+      parts.push(`Mention reminder: ${observerSignal.reminder_to_deliver}`);
     }
     if (observerSignal.suggested_topic) {
-      contextParts.push(`suggested topic: ${observerSignal.suggested_topic}`);
+      parts.push(`Good topic: ${observerSignal.suggested_topic}`);
     }
     if (observerSignal.should_end_call) {
-      contextParts.push('call winding down');
+      parts.push('Wrap up the call naturally');
     }
-    if (contextParts.length > 0) {
-      prompt += `\n\nObserver context: ${contextParts.join(', ')}`;
+    if (parts.length > 0) {
+      guidanceParts.push(parts.join('. '));
     }
   }
 
-  // Add dynamic memories found from user's current message
   if (dynamicMemoryContext) {
-    prompt += dynamicMemoryContext;
+    guidanceParts.push(dynamicMemoryContext);
+  }
+
+  if (guidanceParts.length > 0) {
+    prompt += `\n\n<guidance>\n${guidanceParts.join('\n')}\n</guidance>`;
   }
 
   return prompt;

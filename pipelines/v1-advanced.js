@@ -7,7 +7,7 @@ import { memoryService } from '../services/memory.js';
 
 const anthropic = new Anthropic();
 
-const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null) => {
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null) => {
   let prompt = `You are Donna, a warm and caring AI companion for elderly individuals.
 
 Your personality:
@@ -56,6 +56,11 @@ Your personality:
     }
   }
 
+  // Add dynamic memories found from user's current message
+  if (dynamicMemoryContext) {
+    prompt += dynamicMemoryContext;
+  }
+
   prompt += `\n\nUse this context naturally in conversation. Reference past topics when relevant but don't force it.`;
 
   return prompt;
@@ -99,6 +104,7 @@ export class V1AdvancedSession {
     this.pendingUtterances = [];
     this.isSpeaking = false; // Track if Donna is currently speaking
     this.wasInterrupted = false; // Track if user interrupted during response generation
+    this.dynamicMemoryContext = null; // Real-time memory search results
 
     // Silence detection for turn-taking
     this.lastAudioTime = Date.now();
@@ -137,8 +143,8 @@ export class V1AdvancedSession {
     // Start silence detection
     this.startSilenceDetection();
 
-    // Start observer check interval (every 30 seconds)
-    this.observerCheckInterval = setInterval(() => this.runObserver(), 30000);
+    // Backup observer check (every 60s) - main updates happen on each utterance
+    this.observerCheckInterval = setInterval(() => this.runObserver(), 60000);
 
     // Send initial greeting
     await this.generateAndSendResponse(
@@ -238,6 +244,9 @@ export class V1AdvancedSession {
 
     console.log(`[V1][${this.streamSid}] Processing: "${text}"`);
 
+    // Run observer and memory search in parallel (non-blocking)
+    this.runObserverAndMemorySearch(text);
+
     // Generate and send response
     await this.generateAndSendResponse(text);
 
@@ -248,17 +257,61 @@ export class V1AdvancedSession {
     }
   }
 
+  /**
+   * Run observer analysis and memory search in parallel
+   * Results are stored for next response, doesn't block current response
+   */
+  async runObserverAndMemorySearch(userText) {
+    if (!this.senior?.id) return;
+
+    try {
+      // Run both in parallel
+      const [observerResult, memoryResults] = await Promise.all([
+        this.observer.analyze(this.conversationLog).catch(e => {
+          console.error(`[V1][${this.streamSid}] Observer error:`, e.message);
+          return null;
+        }),
+        memoryService.search(this.senior.id, userText, 3, 0.65).catch(e => {
+          console.error(`[V1][${this.streamSid}] Memory search error:`, e.message);
+          return [];
+        })
+      ]);
+
+      // Update observer signal
+      if (observerResult) {
+        this.lastObserverSignal = observerResult;
+        console.log(`[V1][${this.streamSid}] Observer: engagement=${observerResult.engagement_level}, emotion=${observerResult.emotional_state}`);
+        if (observerResult.concerns?.length > 0) {
+          console.log(`[V1][${this.streamSid}] CONCERNS:`, observerResult.concerns);
+        }
+      }
+
+      // Inject relevant memories into context
+      if (memoryResults && memoryResults.length > 0) {
+        const memoryText = memoryResults.map(m => `- ${m.content}`).join('\n');
+        this.dynamicMemoryContext = `\n\n[RELEVANT MEMORIES - use naturally]\n${memoryText}`;
+        console.log(`[V1][${this.streamSid}] Found ${memoryResults.length} relevant memories`);
+      } else {
+        this.dynamicMemoryContext = null;
+      }
+
+    } catch (error) {
+      console.error(`[V1][${this.streamSid}] Observer/memory error:`, error.message);
+    }
+  }
+
   async generateAndSendResponse(userMessage) {
     this.isProcessing = true;
     this.wasInterrupted = false; // Reset interrupt flag
 
     try {
-      // Build system prompt with observer signal
+      // Build system prompt with observer signal and dynamic memories
       const systemPrompt = buildSystemPrompt(
         this.senior,
         this.memoryContext,
         this.reminderPrompt,
-        this.lastObserverSignal
+        this.lastObserverSignal,
+        this.dynamicMemoryContext
       );
 
       // Build messages array

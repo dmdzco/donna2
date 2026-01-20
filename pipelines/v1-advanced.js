@@ -1,6 +1,4 @@
 import { createClient } from '@deepgram/sdk';
-import Anthropic from '@anthropic-ai/sdk';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ObserverAgent } from './observer-agent.js';
 import { ElevenLabsAdapter } from '../adapters/elevenlabs.js';
 import { ElevenLabsStreamingTTS } from '../adapters/elevenlabs-streaming.js';
@@ -10,28 +8,23 @@ import { schedulerService } from '../services/scheduler.js';
 import { quickAnalyze } from './quick-observer.js';
 import { fastAnalyzeWithTools, formatFastObserverGuidance } from './fast-observer.js';
 import { runPostTurnTasks } from './post-turn-agent.js';
-
-const anthropic = new Anthropic();
-
-// Initialize Gemini client
-const geminiClient = process.env.GOOGLE_API_KEY
-  ? new GoogleGenerativeAI(process.env.GOOGLE_API_KEY)
-  : null;
+import { getAdapter, isModelAvailable, MODELS as LLM_MODELS } from '../adapters/llm/index.js';
 
 // Feature flag for streaming - set to false for rollback
 const V1_STREAMING_ENABLED = process.env.V1_STREAMING_ENABLED !== 'false';
 
-// Model configuration for dynamic routing
+// Model configuration for dynamic routing (can be overridden by env vars)
 const MODELS = {
-  FAST: 'gemini-3-flash-preview',       // Default - Gemini 3 Flash (fastest, handles instructions)
-  SMART: 'claude-sonnet-4-20250514'     // Upgraded - Claude Sonnet for complex situations
+  FAST: process.env.FAST_MODEL || 'gemini-3-flash',    // Default - fast responses
+  SMART: process.env.SMART_MODEL || 'claude-sonnet'    // Upgraded - complex situations
 };
 
-const DEFAULT_MAX_TOKENS = 100; // Slightly more tokens for Gemini
+const DEFAULT_MAX_TOKENS = 100;
 
+// Log available models
 console.log(`[V1] Streaming enabled: ${V1_STREAMING_ENABLED}, ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? 'set' : 'NOT SET'}`);
-console.log(`[V1] Gemini: ${geminiClient ? 'enabled' : 'DISABLED (no GOOGLE_API_KEY)'}`);
-
+console.log(`[V1] FAST model: ${MODELS.FAST} (${isModelAvailable(MODELS.FAST) ? 'available' : 'NOT AVAILABLE'})`);
+console.log(`[V1] SMART model: ${MODELS.SMART} (${isModelAvailable(MODELS.SMART) ? 'available' : 'NOT AVAILABLE'})`);
 /**
  * Select model and token count based on observer recommendations
  * Priority: Quick (immediate) > Fast (this turn) > Deep (from last turn)
@@ -75,58 +68,6 @@ function selectModelConfig(quickResult, fastResult, deepResult) {
   }
 
   return config;
-}
-
-/**
- * Call Gemini 3 Flash for fast responses
- * @param {string} systemPrompt - System instructions
- * @param {Array} messages - Conversation history
- * @param {number} maxTokens - Max output tokens
- * @returns {Promise<string>} Response text
- */
-async function callGemini(systemPrompt, messages, maxTokens = 100) {
-  if (!geminiClient) {
-    throw new Error('Gemini client not initialized - missing GOOGLE_API_KEY');
-  }
-
-  const model = geminiClient.getGenerativeModel({
-    model: MODELS.FAST,
-    generationConfig: {
-      maxOutputTokens: maxTokens,
-      temperature: 0.7,
-    },
-  });
-
-  // Convert messages to Gemini format
-  // Gemini requires first message to be from user, so skip leading assistant messages
-  let startIdx = 0;
-  for (let i = 0; i < messages.length; i++) {
-    if (messages[i].role === 'user') {
-      startIdx = i;
-      break;
-    }
-  }
-
-  const relevantMessages = messages.slice(startIdx);
-
-  // Prepend system prompt as first user message (systemInstruction breaks on gemini-3-flash-preview)
-  const allMessages = [
-    { role: 'user', content: `Instructions: ${systemPrompt}\n\nAcknowledge and follow these.` },
-    { role: 'assistant', content: 'Understood. I will follow these instructions.' },
-    ...relevantMessages
-  ];
-
-  const history = allMessages.slice(0, -1).map(m => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: m.content }],
-  }));
-
-  const lastMessage = allMessages[allMessages.length - 1];
-
-  const chat = model.startChat({ history });
-
-  const result = await chat.sendMessage(lastMessage?.content || 'Hello');
-  return result.response.text();
 }
 
 /**
@@ -188,11 +129,9 @@ function extractCompleteSentences(buffer) {
 }
 
 /**
- * Build system prompt
- * For Gemini: skip memoryContext (contains URLs that break systemInstruction)
- * For Claude: include everything in system prompt
+ * Build system prompt - full context, adapters handle any quirks
  */
-const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null, forGemini = false) => {
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null) => {
   let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
 
 RESPONSE FORMAT:
@@ -212,8 +151,7 @@ RESPONSE FORMAT:
     }
   }
 
-  // For Gemini: memoryContext goes in messages instead (has URLs that break systemInstruction)
-  if (!forGemini && memoryContext) {
+  if (memoryContext) {
     prompt += `\n\n${memoryContext}`;
   }
 
@@ -264,13 +202,12 @@ RESPONSE FORMAT:
     }
   }
 
-  // For Gemini: skip guidance in system prompt (XML tags break it) - goes in messages
-  // For Claude: include guidance with XML tags
-  if (!forGemini && guidanceParts.length > 0) {
+  // Always include guidance - adapters handle formatting
+  if (guidanceParts.length > 0) {
     prompt += `\n\n<guidance>\n${guidanceParts.join('\n')}\n</guidance>`;
   }
 
-  return { prompt, guidance: guidanceParts.length > 0 ? guidanceParts.join('\n') : null };
+  return { prompt };
 };
 
 /**
@@ -627,19 +564,20 @@ export class V1AdvancedSession {
         this.lastFastObserverResult,
         this.lastObserverSignal
       );
-      const useGemini = modelConfig.model === MODELS.FAST && geminiClient;
-      console.log(`[V1][${this.streamSid}] Model: ${useGemini ? 'Gemini 3 Flash' : 'Claude Sonnet'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
 
-      // Build system prompt - for Gemini, context/guidance goes in messages instead
-      const { prompt: systemPrompt, guidance } = buildSystemPrompt(
+      // Get the adapter for the selected model
+      const adapter = getAdapter(modelConfig.model);
+      console.log(`[V1][${this.streamSid}] Model: ${modelConfig.model} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
+
+      // Build system prompt (full context - adapter handles quirks)
+      const { prompt: systemPrompt } = buildSystemPrompt(
         this.senior,
         this.memoryContext,
         this.reminderPrompt,
         this.lastObserverSignal,
         this.dynamicMemoryContext,
         quickResult.guidance,
-        null, // fast guidance not used in non-streaming
-        useGemini // forGemini - skip memoryContext and guidance in system prompt
+        null // fast guidance not used in non-streaming
       );
 
       // Build messages array
@@ -650,46 +588,16 @@ export class V1AdvancedSession {
           content: entry.content
         }));
 
-      // For Gemini: inject context and guidance as messages (URLs/XML break systemInstruction)
-      if (useGemini) {
-        const contextParts = [];
-        if (this.memoryContext) contextParts.push(this.memoryContext);
-        if (guidance) contextParts.push(`Guidance for this response: ${guidance}`);
-
-        if (contextParts.length > 0) {
-          messages.unshift({
-            role: 'user',
-            content: `Context:\n${contextParts.join('\n\n')}\n\nUse this naturally.`
-          });
-          messages.splice(1, 0, {
-            role: 'assistant',
-            content: 'Understood.'
-          });
-        }
-      }
-
       // Add current message if not from greeting
       if (userMessage && !userMessage.includes('Greet') && !userMessage.includes('greeting')) {
         messages.push({ role: 'user', content: userMessage });
       }
 
-      let responseText;
-
-      if (useGemini) {
-        // Use Gemini 3 Flash for fast responses
-        console.log(`[V1][${this.streamSid}] Calling Gemini 3 Flash...`);
-        responseText = await callGemini(systemPrompt, messages, modelConfig.max_tokens);
-      } else {
-        // Use Claude Sonnet for complex situations
-        console.log(`[V1][${this.streamSid}] Calling Claude Sonnet...`);
-        const response = await anthropic.messages.create({
-          model: MODELS.SMART,
-          max_tokens: modelConfig.max_tokens,
-          system: systemPrompt,
-          messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
-        });
-        responseText = response.content[0].type === 'text' ? response.content[0].text : '';
-      }
+      // Generate response using adapter
+      console.log(`[V1][${this.streamSid}] Calling ${adapter.getModelName()}...`);
+      const responseText = await adapter.generate(systemPrompt, messages, {
+        maxTokens: modelConfig.max_tokens,
+      });
 
       // Check if interrupted during generation - skip TTS if so
       if (this.wasInterrupted) {
@@ -763,19 +671,20 @@ export class V1AdvancedSession {
         this.lastFastObserverResult,
         this.lastObserverSignal
       );
-      const useGemini = modelConfig.model === MODELS.FAST && geminiClient;
-      console.log(`[V1][${this.streamSid}] Model: ${useGemini ? 'Gemini 3 Flash' : 'Claude Sonnet'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
 
-      // Build system prompt - for Gemini, context/guidance goes in messages instead
-      const { prompt: systemPrompt, guidance } = buildSystemPrompt(
+      // Get the adapter for the selected model
+      const adapter = getAdapter(modelConfig.model);
+      console.log(`[V1][${this.streamSid}] Model: ${modelConfig.model} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
+
+      // Build system prompt (full context - adapter handles quirks)
+      const { prompt: systemPrompt } = buildSystemPrompt(
         this.senior,
         this.memoryContext,
         this.reminderPrompt,
         this.lastObserverSignal,
         this.dynamicMemoryContext,
         quickResult.guidance,
-        fastGuidance,
-        useGemini // forGemini - skip memoryContext and guidance in system prompt
+        fastGuidance
       );
 
       // Build messages array
@@ -785,24 +694,6 @@ export class V1AdvancedSession {
           role: entry.role,
           content: entry.content
         }));
-
-      // For Gemini: inject context and guidance as messages (URLs/XML break systemInstruction)
-      if (useGemini) {
-        const contextParts = [];
-        if (this.memoryContext) contextParts.push(this.memoryContext);
-        if (guidance) contextParts.push(`Guidance for this response: ${guidance}`);
-
-        if (contextParts.length > 0) {
-          messages.unshift({
-            role: 'user',
-            content: `Context:\n${contextParts.join('\n\n')}\n\nUse this naturally.`
-          });
-          messages.splice(1, 0, {
-            role: 'assistant',
-            content: 'Understood.'
-          });
-        }
-      }
 
       if (userMessage && !userMessage.includes('Greet') && !userMessage.includes('greeting')) {
         messages.push({ role: 'user', content: userMessage });
@@ -843,62 +734,29 @@ export class V1AdvancedSession {
       let firstTokenTime = null;
       let sentencesSent = 0;
 
-      if (useGemini) {
-        // Use Gemini 3 Flash streaming
-        console.log(`[V1][${this.streamSid}] Calling Gemini 3 Flash (streaming)...`);
+      // Stream using adapter
+      console.log(`[V1][${this.streamSid}] Calling ${adapter.getModelName()} (streaming)...`);
 
-        const model = geminiClient.getGenerativeModel({
-          model: MODELS.FAST,
-          generationConfig: {
-            maxOutputTokens: modelConfig.max_tokens,
-            temperature: 0.7,
-          },
-        });
+      const streamingTts = this.streamingTts;
+      const streamSid = this.streamSid;
+      const wasInterruptedRef = { value: false };
 
-        // Convert messages to Gemini format
-        // Gemini requires first message to be from user, so skip leading assistant messages
-        let startIdx = 0;
-        for (let i = 0; i < messages.length; i++) {
-          if (messages[i].role === 'user') {
-            startIdx = i;
-            break;
-          }
-        }
+      // Check for interruption periodically
+      const checkInterrupt = () => this.wasInterrupted;
 
-        const relevantMessages = messages.slice(startIdx);
+      try {
+        fullResponse = await adapter.stream(
+          systemPrompt,
+          messages,
+          { maxTokens: modelConfig.max_tokens },
+          async (text) => {
+            if (checkInterrupt()) return;
 
-        // Prepend system prompt as first user message (systemInstruction breaks on gemini-3-flash-preview)
-        const allMessages = [
-          { role: 'user', content: `Instructions: ${systemPrompt}\n\nAcknowledge and follow these.` },
-          { role: 'assistant', content: 'Understood. I will follow these instructions.' },
-          ...relevantMessages
-        ];
-
-        const history = allMessages.slice(0, -1).map(m => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }],
-        }));
-
-        const lastMessage = allMessages[allMessages.length - 1];
-        const chat = model.startChat({ history });
-
-        // Stream from Gemini
-        const result = await chat.sendMessageStream(lastMessage?.content || userMessage);
-
-        for await (const chunk of result.stream) {
-          if (this.wasInterrupted) {
-            console.log(`[V1][${this.streamSid}] Interrupted during Gemini streaming`);
-            break;
-          }
-
-          const text = chunk.text();
-          if (text) {
-            fullResponse += text;
             textBuffer += text;
 
             if (!firstTokenTime) {
               firstTokenTime = Date.now();
-              console.log(`[V1][${this.streamSid}] First token: ${firstTokenTime - startTime}ms`);
+              console.log(`[V1][${streamSid}] First token: ${firstTokenTime - startTime}ms`);
             }
 
             // Extract complete sentences and send to TTS
@@ -906,53 +764,16 @@ export class V1AdvancedSession {
             textBuffer = remaining;
 
             for (const sentence of complete) {
-              if (sentence.trim()) {
-                this.streamingTts.streamText(sentence + ' ');
+              if (sentence.trim() && !checkInterrupt()) {
+                streamingTts.streamText(sentence + ' ');
                 sentencesSent++;
                 await new Promise(r => setTimeout(r, 200));
               }
             }
           }
-        }
-      } else {
-        // Use Claude Sonnet streaming
-        console.log(`[V1][${this.streamSid}] Calling Claude Sonnet (streaming)...`);
-
-        const stream = await anthropic.messages.stream({
-          model: MODELS.SMART,
-          max_tokens: modelConfig.max_tokens,
-          system: systemPrompt,
-          messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
-        });
-
-        for await (const event of stream) {
-          if (this.wasInterrupted) {
-            console.log(`[V1][${this.streamSid}] Interrupted during Claude streaming`);
-            break;
-          }
-
-          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-            const text = event.delta.text;
-            fullResponse += text;
-            textBuffer += text;
-
-            if (!firstTokenTime) {
-              firstTokenTime = Date.now();
-              console.log(`[V1][${this.streamSid}] First token: ${firstTokenTime - startTime}ms`);
-            }
-
-            const { complete, remaining } = extractCompleteSentences(textBuffer);
-            textBuffer = remaining;
-
-            for (const sentence of complete) {
-              if (sentence.trim()) {
-                this.streamingTts.streamText(sentence + ' ');
-                sentencesSent++;
-                await new Promise(r => setTimeout(r, 200));
-              }
-            }
-          }
-        }
+        );
+      } catch (error) {
+        console.error(`[V1][${this.streamSid}] Streaming error:`, error.message);
       }
 
       // Send any remaining text
@@ -966,7 +787,7 @@ export class V1AdvancedSession {
       }
 
       const totalTime = Date.now() - startTime;
-      console.log(`[V1][${this.streamSid}] Claude (streaming): "${fullResponse}" [${sentencesSent} sentences, ${totalTime}ms total]`);
+      console.log(`[V1][${this.streamSid}] Response (streaming): "${fullResponse}" [${sentencesSent} sentences, ${totalTime}ms total]`);
 
       // Log to conversation
       if (fullResponse) {

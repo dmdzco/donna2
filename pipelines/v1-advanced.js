@@ -545,20 +545,20 @@ export class V1AdvancedSession {
         console.error(`[V1][${this.streamSid}] Streaming TTS error:`, error.message);
       };
 
-      // Connect TTS WebSocket
-      await this.streamingTts.connect();
-
       // Mark as speaking
       this.isSpeaking = true;
 
-      // Stream Claude response
+      // Start Claude stream AND TTS connection in parallel
       console.log(`[V1][${this.streamSid}] Calling Claude (streaming)...`);
-      const stream = anthropic.messages.stream({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 150,
-        system: systemPrompt,
-        messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
-      });
+      const [stream] = await Promise.all([
+        anthropic.messages.stream({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 150,
+          system: systemPrompt,
+          messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
+        }),
+        this.streamingTts.connect()
+      ]);
 
       let fullResponse = '';
       let textBuffer = '';

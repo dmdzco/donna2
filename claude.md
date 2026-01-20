@@ -167,7 +167,41 @@ The pipeline is selected:
 
 ## Roadmap
 
-See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
+See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work.
+
+### Next Up: Dynamic Model Routing (Observer-Driven)
+
+**Spec:** [docs/DYNAMIC_MODEL_ROUTING.md](docs/DYNAMIC_MODEL_ROUTING.md)
+
+**Concept:** Default to Haiku (fast, cheap). Observers explicitly request Sonnet when needed.
+
+```
+90% of turns: Haiku (~80ms, 100 tokens)
+ → Greetings, acknowledgments, casual chat
+
+10% of turns: Sonnet (~200ms, 200-400 tokens)
+ → Health concerns, emotional support, stories, complex questions
+```
+
+**Each observer outputs:**
+```javascript
+modelRecommendation: {
+  use_sonnet: true/false,
+  max_tokens: 100-400,
+  reason: 'health_safety' | 'emotional_support' | 're_engagement' | etc.
+}
+```
+
+**Files to modify:**
+- `pipelines/quick-observer.js` - Add modelRecommendation
+- `pipelines/fast-observer.js` - Haiku decides if Sonnet needed
+- `pipelines/observer-agent.js` - Add model_recommendation
+- `pipelines/model-selector.js` - NEW: Central routing logic
+- `pipelines/v1-advanced.js` - Use selectModel()
+
+**Philosophy:** Let the AI decide when it needs more AI.
+
+### Other Upcoming Work
 - ~~V1 Latency Optimization~~ ✓ Completed (streaming pipeline)
 - Caregiver Authentication
 - Observer Signal Storage

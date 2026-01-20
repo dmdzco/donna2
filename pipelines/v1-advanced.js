@@ -97,11 +97,30 @@ export class V1AdvancedSession {
     // Processing state
     this.isProcessing = false;
     this.pendingUtterances = [];
+    this.isSpeaking = false; // Track if Donna is currently speaking
 
     // Silence detection for turn-taking
     this.lastAudioTime = Date.now();
     this.silenceThreshold = 1500; // 1.5s of silence = end of turn
     this.silenceCheckInterval = null;
+  }
+
+  /**
+   * Stop current audio playback (barge-in support)
+   */
+  interruptSpeech() {
+    if (!this.isSpeaking) return;
+
+    console.log(`[V1][${this.streamSid}] Interrupting speech (barge-in)`);
+    this.isSpeaking = false;
+
+    // Send clear event to Twilio to stop audio playback
+    if (this.twilioWs.readyState === 1) {
+      this.twilioWs.send(JSON.stringify({
+        event: 'clear',
+        streamSid: this.streamSid
+      }));
+    }
   }
 
   async connect() {
@@ -154,6 +173,11 @@ export class V1AdvancedSession {
       this.dgConnection.on('Results', (data) => {
         const transcript = data.channel?.alternatives?.[0]?.transcript;
         if (transcript) {
+          // Barge-in: if user speaks while Donna is talking, interrupt
+          if (this.isSpeaking && transcript.length > 2) {
+            this.interruptSpeech();
+          }
+
           if (data.is_final) {
             console.log(`[V1][${this.streamSid}] User (final): "${transcript}"`);
             this.currentTranscript += ' ' + transcript;
@@ -292,9 +316,24 @@ export class V1AdvancedSession {
       // Convert to mulaw 8kHz for Twilio
       const mulawBuffer = pcm24kToMulaw8k(pcmBuffer);
 
+      // Mark as speaking before sending audio
+      this.isSpeaking = true;
+
       // Send to Twilio in chunks (Twilio expects small packets)
-      const chunkSize = 640; // ~80ms of audio at 8kHz
+      // Use larger chunks and async to allow barge-in detection
+      const chunkSize = 3200; // ~400ms of audio at 8kHz (larger chunks, fewer iterations)
+      let bytesSent = 0;
+
       for (let i = 0; i < mulawBuffer.length; i += chunkSize) {
+        // Allow event loop to process incoming Deepgram messages (barge-in detection)
+        await new Promise(resolve => setImmediate(resolve));
+
+        // Stop if interrupted by user (barge-in)
+        if (!this.isSpeaking) {
+          console.log(`[V1][${this.streamSid}] Speech interrupted after ${bytesSent} bytes`);
+          break;
+        }
+
         const chunk = mulawBuffer.slice(i, i + chunkSize);
         const base64Chunk = chunk.toString('base64');
 
@@ -306,13 +345,18 @@ export class V1AdvancedSession {
               payload: base64Chunk
             }
           }));
+          bytesSent += chunk.length;
         }
       }
 
-      console.log(`[V1][${this.streamSid}] Sent ${mulawBuffer.length} bytes of audio`);
+      if (this.isSpeaking) {
+        console.log(`[V1][${this.streamSid}] Sent ${bytesSent} bytes of audio`);
+      }
+      this.isSpeaking = false;
 
     } catch (error) {
       console.error(`[V1][${this.streamSid}] TTS failed:`, error.message);
+      this.isSpeaking = false;
     }
   }
 

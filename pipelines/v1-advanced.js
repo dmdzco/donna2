@@ -263,7 +263,7 @@ export class V1AdvancedSession {
 
       // Build messages array
       const messages = this.conversationLog
-        .slice(-10) // Keep last 10 exchanges for context
+        .slice(-20) // Keep last 20 exchanges for context
         .map(entry => ({
           role: entry.role,
           content: entry.content

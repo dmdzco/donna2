@@ -97,12 +97,22 @@ async function callGemini(systemPrompt, messages, maxTokens = 100) {
   });
 
   // Convert messages to Gemini format
-  const history = messages.slice(0, -1).map(m => ({
+  // Gemini requires first message to be from user, so skip leading assistant messages
+  let startIdx = 0;
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === 'user') {
+      startIdx = i;
+      break;
+    }
+  }
+
+  const relevantMessages = messages.slice(startIdx);
+  const history = relevantMessages.slice(0, -1).map(m => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }],
   }));
 
-  const lastMessage = messages[messages.length - 1];
+  const lastMessage = relevantMessages[relevantMessages.length - 1];
 
   const chat = model.startChat({
     history,
@@ -758,12 +768,22 @@ export class V1AdvancedSession {
         });
 
         // Convert messages to Gemini format
-        const history = messages.slice(0, -1).map(m => ({
+        // Gemini requires first message to be from user, so skip leading assistant messages
+        let startIdx = 0;
+        for (let i = 0; i < messages.length; i++) {
+          if (messages[i].role === 'user') {
+            startIdx = i;
+            break;
+          }
+        }
+
+        const relevantMessages = messages.slice(startIdx);
+        const history = relevantMessages.slice(0, -1).map(m => ({
           role: m.role === 'assistant' ? 'model' : 'user',
           parts: [{ text: m.content }],
         }));
 
-        const lastMessage = messages[messages.length - 1];
+        const lastMessage = relevantMessages[relevantMessages.length - 1];
         const chat = model.startChat({
           history,
           systemInstruction: systemPrompt,

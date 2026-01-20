@@ -145,6 +145,40 @@ Upgrade: Sonnet (~200ms, 200-400 tokens) - when observers say so
 
 ---
 
+### Latency Optimization Phase 2
+
+**Full spec:** [LATENCY_OPTIMIZATION_PLAN.md](LATENCY_OPTIMIZATION_PLAN.md)
+
+**Target:** Reduce response latency from ~600ms to ~300-400ms
+
+| Optimization | Effort | Impact | Status |
+|-------------|--------|--------|--------|
+| Pre-warm Claude connection | Low | ~50-100ms | Pending |
+| Pre-fetch senior memories | Medium | ~100ms | Pending |
+| Cache common responses | Medium | ~500ms (10-20% of turns) | Pending |
+| Parallel initialization | Low | ~50ms | Pending |
+| Speculative TTS | High | ~100-200ms | Future |
+
+**Pre-warm Claude Connection:**
+- [ ] Create HTTPS keep-alive agent
+- [ ] Pass agent to Anthropic client
+- [ ] Test connection reuse across utterances
+
+**Pre-fetch Senior Memories:**
+- [ ] Add `getTopMemories()` to `services/memory.js`
+- [ ] Call prefetch on session start (parallel with greeting)
+- [ ] Inject pre-fetched memories into system prompt
+
+**Cache Common Responses:**
+- [ ] Create `pipelines/response-cache.js`
+- [ ] Define patterns: "how are you", "good morning", "thank you"
+- [ ] Add personalization (senior name, variety)
+- [ ] Skip cache if observer signals present
+
+**Alternative TTS (Future Testing):**
+- [ ] Test Cartesia TTS (~50-100ms, native mulaw)
+- [ ] Test Deepgram TTS (~100-200ms)
+- [ ] Compare voice quality vs latency tradeoff
 ### Future Latency Improvements
 
 **Potential optimizations:**

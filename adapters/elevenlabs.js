@@ -45,11 +45,10 @@ export class ElevenLabsAdapter {
     }
 
     const response = await fetch(
-      `${ELEVENLABS_API_URL}/text-to-speech/${this.voiceId}`,
+      `${ELEVENLABS_API_URL}/text-to-speech/${this.voiceId}?output_format=pcm_24000`,
       {
         method: 'POST',
         headers: {
-          'Accept': 'audio/mpeg',
           'Content-Type': 'application/json',
           'xi-api-key': this.apiKey,
         },
@@ -62,7 +61,6 @@ export class ElevenLabsAdapter {
             style: 0.0,
             use_speaker_boost: true,
           },
-          output_format: 'pcm_24000', // 24kHz PCM for conversion to mulaw
         }),
       }
     );
@@ -88,11 +86,10 @@ export class ElevenLabsAdapter {
     }
 
     const response = await fetch(
-      `${ELEVENLABS_API_URL}/text-to-speech/${this.voiceId}/stream`,
+      `${ELEVENLABS_API_URL}/text-to-speech/${this.voiceId}/stream?output_format=pcm_24000`,
       {
         method: 'POST',
         headers: {
-          'Accept': 'audio/mpeg',
           'Content-Type': 'application/json',
           'xi-api-key': this.apiKey,
         },
@@ -105,7 +102,6 @@ export class ElevenLabsAdapter {
             style: 0.0,
             use_speaker_boost: true,
           },
-          output_format: 'pcm_24000',
         }),
       }
     );

@@ -33,7 +33,7 @@ async function analyzeSentimentWithHaiku(userMessage, conversationHistory = []) 
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-3-5-haiku-20241022',
+      model: 'claude-3-5-haiku-latest',
       max_tokens: 150,
       system: `You analyze elderly phone conversations quickly. Respond ONLY with JSON.
 {

@@ -166,12 +166,12 @@ Product-level features can also request model upgrades:
 
 ## Implementation Checklist
 
-- [ ] Add `modelRecommendation` output to `quick-observer.js`
-- [ ] Add `modelRecommendation` output to `fast-observer.js`
-- [ ] Add `modelRecommendation` output to `observer-agent.js`
-- [ ] Create `selectModelConfig()` function in `v1-advanced.js`
-- [ ] Integrate model selection into streaming path
-- [ ] Add logging for model selection decisions
+- [x] Add `modelRecommendation` output to `quick-observer.js`
+- [x] Add `modelRecommendation` output to `fast-observer.js`
+- [x] Add `modelRecommendation` output to `observer-agent.js`
+- [x] Create `selectModelConfig()` function in `v1-advanced.js`
+- [x] Integrate model selection into streaming path
+- [x] Add logging for model selection decisions
 - [ ] Test health mention → Sonnet upgrade
 - [ ] Test emotional support → Sonnet upgrade
 - [ ] Test normal conversation stays on Haiku

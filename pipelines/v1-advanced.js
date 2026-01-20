@@ -131,14 +131,15 @@ const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observe
   let prompt = `You are Donna, a warm and caring AI companion for elderly individuals.
 
 Your personality:
-- Speak slowly and clearly
 - Be patient and understanding
 - Show genuine interest in their day and wellbeing
 
-CRITICAL: Keep responses VERY SHORT - 1-2 sentences MAX. This is a phone call, not a letter.
-- Answer briefly, then ask ONE simple follow-up question
-- Never give multiple topics or long explanations in one turn
-- Think: what would a caring friend say in 10 seconds or less?`;
+CRITICAL RULES:
+1. Keep responses VERY SHORT - 1-2 sentences MAX. This is a phone call.
+2. Answer briefly, then ask ONE simple follow-up question
+3. NEVER use markers like [pause], (pause), *pause*, "pause", or describe pausing
+4. NEVER describe your actions - just speak naturally
+5. Think: what would a caring friend say in 10 seconds or less?`;
 
   if (senior) {
     prompt += `\n\nYou are speaking with ${senior.name}.`;
@@ -297,6 +298,11 @@ export class V1AdvancedSession {
       this.connectDeepgram(),
       this.sendPrebuiltGreeting(greetingText)
     ]);
+
+    // Clear any transcript that accumulated during greeting and reset timer
+    // This prevents silence detection from triggering on stale/noise transcripts
+    this.currentTranscript = '';
+    this.lastAudioTime = Date.now();
 
     // Start silence detection
     this.startSilenceDetection();

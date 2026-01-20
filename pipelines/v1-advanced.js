@@ -212,6 +212,9 @@ export class V1AdvancedSession {
     this.senior = senior;
     this.memoryContext = memoryContext;
     this.reminderPrompt = reminderPrompt;
+
+    // Log what context was received
+    console.log(`[V1][${streamSid}] Session created: senior=${senior?.name || 'none'}, memory=${memoryContext ? memoryContext.length + ' chars' : 'none'}, interests=${senior?.interests?.join(', ') || 'none'}`);
     this.isConnected = false;
     this.conversationLog = [];
     this.memoriesExtracted = false;
@@ -289,9 +292,26 @@ export class V1AdvancedSession {
 
     // Start Deepgram and greeting TTS in parallel for fastest startup
     const firstName = this.senior?.name?.split(' ')[0];
-    const greetingText = firstName
-      ? `Hello ${firstName}! It's Donna calling to check in on you. How are you doing today?`
-      : `Hello! It's Donna calling to check in. How are you doing today?`;
+
+    // Build personalized greeting based on interests
+    let greetingText;
+    if (firstName && this.senior?.interests?.length > 0) {
+      // Pick a random interest to ask about
+      const interest = this.senior.interests[Math.floor(Math.random() * this.senior.interests.length)];
+      const interestQuestions = {
+        'padel': `Have you played any padel lately?`,
+        'skiing': `Have you been thinking about your next ski trip?`,
+        'dogs': `How are your dogs doing?`,
+        'travel': `Any travel plans coming up?`,
+        'AI': `Learned anything interesting about AI recently?`,
+      };
+      const question = interestQuestions[interest] || `How's everything going with ${interest}?`;
+      greetingText = `Hello ${firstName}! It's Donna. ${question}`;
+    } else if (firstName) {
+      greetingText = `Hello ${firstName}! It's Donna calling to check in. How are you doing today?`;
+    } else {
+      greetingText = `Hello! It's Donna calling to check in. How are you doing today?`;
+    }
 
     // Log greeting to conversation
     this.conversationLog.push({
@@ -571,6 +591,7 @@ export class V1AdvancedSession {
         quickResult.guidance,
         null // fast guidance not used in non-streaming
       );
+      console.log(`[V1][${this.streamSid}] System prompt built: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, senior=${this.senior?.name || 'none'}`);
 
       // Build messages array
       const messages = this.conversationLog
@@ -678,6 +699,7 @@ export class V1AdvancedSession {
         quickResult.guidance,
         fastGuidance
       );
+      console.log(`[V1][${this.streamSid}] System prompt: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, senior=${this.senior?.name || 'none'}`);
 
       // Build messages array
       const messages = this.conversationLog

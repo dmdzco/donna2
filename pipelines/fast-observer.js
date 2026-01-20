@@ -32,30 +32,30 @@ async function analyzeSentiment(userMessage, conversationHistory = []) {
     .map(m => `${m.role}: ${m.content}`)
     .join('\n');
 
-  const systemPrompt = `You analyze elderly phone conversations quickly. Respond ONLY with valid JSON, no markdown.
-{
-  "sentiment": "positive|neutral|negative|concerned",
-  "engagement": "high|medium|low",
-  "topic_shift": "suggested topic if conversation stalling, null otherwise",
-  "needs_empathy": boolean,
-  "mentioned_names": ["any names mentioned"]
-}`;
+  const systemPrompt = `Analyze this elderly phone conversation. Return ONLY a JSON object with no other text:
+{"sentiment":"positive|neutral|negative|concerned","engagement":"high|medium|low","topic_shift":null,"needs_empathy":false,"mentioned_names":[]}`;
 
   const messages = [
     {
       role: 'user',
-      content: `Recent conversation:\n${recentContext}\n\nLatest message: "${userMessage}"\n\nAnalyze:`,
+      content: `Conversation:\n${recentContext}\n\nLatest: "${userMessage}"`,
     },
   ];
 
   try {
     const adapter = getAdapter(FAST_OBSERVER_MODEL);
-    const text = await adapter.generate(systemPrompt, messages, { maxTokens: 150, temperature: 0.3 });
+    const text = await adapter.generate(systemPrompt, messages, { maxTokens: 200, temperature: 0.1 });
 
-    // Handle potential markdown code blocks
-    const jsonText = text.includes('```')
-      ? text.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
-      : text;
+    // Extract JSON from response (handle markdown, extra text)
+    let jsonText = text;
+    if (text.includes('```')) {
+      jsonText = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+    }
+    // Try to find JSON object in response
+    const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      jsonText = jsonMatch[0];
+    }
     return JSON.parse(jsonText);
   } catch (error) {
     console.error('[FastObserver] Analysis error:', error.message);

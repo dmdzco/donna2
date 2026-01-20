@@ -824,8 +824,20 @@ wss.on('connection', async (twilioWs, req) => {
           callSid = data.start.callSid;
           console.log(`[${callSid}] Stream started: ${streamSid}`);
 
-          // Get metadata stored during /voice/answer
-          const metadata = callMetadata.get(callSid) || {};
+          // Wait for metadata from /voice/answer (may not be ready yet due to race condition)
+          let metadata = callMetadata.get(callSid);
+          if (!metadata) {
+            console.log(`[${callSid}] Waiting for call metadata...`);
+            for (let i = 0; i < 10; i++) { // Wait up to 1 second
+              await new Promise(resolve => setTimeout(resolve, 100));
+              metadata = callMetadata.get(callSid);
+              if (metadata) {
+                console.log(`[${callSid}] Metadata ready after ${(i + 1) * 100}ms`);
+                break;
+              }
+            }
+          }
+          metadata = metadata || {};
 
           // Get reminder context which now includes the delivery record
           const reminderContext = schedulerService.getReminderContext(callSid);

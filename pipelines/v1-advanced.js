@@ -225,7 +225,7 @@ RESPONSE FORMAT:
     prompt += `\n\nFrom previous conversations:\n${fastObserverGuidance.memories}`;
   }
 
-  // Always inject guidance
+  // Build guidance parts
   const guidanceParts = [];
 
   if (quickObserverGuidance) {
@@ -258,11 +258,13 @@ RESPONSE FORMAT:
     }
   }
 
-  if (guidanceParts.length > 0) {
+  // For Gemini: skip guidance in system prompt (XML tags break it) - goes in messages
+  // For Claude: include guidance with XML tags
+  if (!forGemini && guidanceParts.length > 0) {
     prompt += `\n\n<guidance>\n${guidanceParts.join('\n')}\n</guidance>`;
   }
 
-  return prompt;
+  return { prompt, guidance: guidanceParts.length > 0 ? guidanceParts.join('\n') : null };
 };
 
 /**
@@ -602,8 +604,8 @@ export class V1AdvancedSession {
       const useGemini = modelConfig.model === MODELS.FAST && geminiClient;
       console.log(`[V1][${this.streamSid}] Model: ${useGemini ? 'Gemini 3 Flash' : 'Claude Sonnet'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
 
-      // Build system prompt - for Gemini, memoryContext goes in messages instead
-      const systemPrompt = buildSystemPrompt(
+      // Build system prompt - for Gemini, context/guidance goes in messages instead
+      const { prompt: systemPrompt, guidance } = buildSystemPrompt(
         this.senior,
         this.memoryContext,
         this.reminderPrompt,
@@ -611,7 +613,7 @@ export class V1AdvancedSession {
         this.dynamicMemoryContext,
         quickResult.guidance,
         null, // fast guidance not used in non-streaming
-        useGemini // forGemini - skip memoryContext in system prompt
+        useGemini // forGemini - skip memoryContext and guidance in system prompt
       );
 
       // Build messages array
@@ -622,16 +624,22 @@ export class V1AdvancedSession {
           content: entry.content
         }));
 
-      // For Gemini: inject memoryContext (with news/URLs) as first user message
-      if (useGemini && this.memoryContext) {
-        messages.unshift({
-          role: 'user',
-          content: `Context for this call:\n${this.memoryContext}\n\nNow continue the conversation naturally.`
-        });
-        messages.splice(1, 0, {
-          role: 'assistant',
-          content: 'I understand the context. I will use this information naturally in our conversation.'
-        });
+      // For Gemini: inject context and guidance as messages (URLs/XML break systemInstruction)
+      if (useGemini) {
+        const contextParts = [];
+        if (this.memoryContext) contextParts.push(this.memoryContext);
+        if (guidance) contextParts.push(`Guidance for this response: ${guidance}`);
+
+        if (contextParts.length > 0) {
+          messages.unshift({
+            role: 'user',
+            content: `Context:\n${contextParts.join('\n\n')}\n\nUse this naturally.`
+          });
+          messages.splice(1, 0, {
+            role: 'assistant',
+            content: 'Understood.'
+          });
+        }
       }
 
       // Add current message if not from greeting
@@ -716,8 +724,8 @@ export class V1AdvancedSession {
       const useGemini = modelConfig.model === MODELS.FAST && geminiClient;
       console.log(`[V1][${this.streamSid}] Model: ${useGemini ? 'Gemini 3 Flash' : 'Claude Sonnet'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
 
-      // Build system prompt - for Gemini, memoryContext goes in messages instead
-      const systemPrompt = buildSystemPrompt(
+      // Build system prompt - for Gemini, context/guidance goes in messages instead
+      const { prompt: systemPrompt, guidance } = buildSystemPrompt(
         this.senior,
         this.memoryContext,
         this.reminderPrompt,
@@ -725,7 +733,7 @@ export class V1AdvancedSession {
         this.dynamicMemoryContext,
         quickResult.guidance,
         fastGuidance,
-        useGemini // forGemini - skip memoryContext in system prompt
+        useGemini // forGemini - skip memoryContext and guidance in system prompt
       );
 
       // Build messages array
@@ -736,16 +744,22 @@ export class V1AdvancedSession {
           content: entry.content
         }));
 
-      // For Gemini: inject memoryContext (with news/URLs) as first user message
-      if (useGemini && this.memoryContext) {
-        messages.unshift({
-          role: 'user',
-          content: `Context for this call:\n${this.memoryContext}\n\nNow continue the conversation naturally.`
-        });
-        messages.splice(1, 0, {
-          role: 'assistant',
-          content: 'I understand the context. I will use this information naturally in our conversation.'
-        });
+      // For Gemini: inject context and guidance as messages (URLs/XML break systemInstruction)
+      if (useGemini) {
+        const contextParts = [];
+        if (this.memoryContext) contextParts.push(this.memoryContext);
+        if (guidance) contextParts.push(`Guidance for this response: ${guidance}`);
+
+        if (contextParts.length > 0) {
+          messages.unshift({
+            role: 'user',
+            content: `Context:\n${contextParts.join('\n\n')}\n\nUse this naturally.`
+          });
+          messages.splice(1, 0, {
+            role: 'assistant',
+            content: 'Understood.'
+          });
+        }
       }
 
       if (userMessage && !userMessage.includes('Greet') && !userMessage.includes('greeting')) {

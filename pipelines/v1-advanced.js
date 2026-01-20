@@ -13,6 +13,8 @@ const anthropic = new Anthropic();
 // Feature flag for streaming - set to false for rollback
 const V1_STREAMING_ENABLED = process.env.V1_STREAMING_ENABLED !== 'false';
 
+console.log(`[V1] Streaming enabled: ${V1_STREAMING_ENABLED}, ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? 'set' : 'NOT SET'}`);
+
 /**
  * Detect sentence boundaries for TTS streaming
  * Returns true if the buffer ends with a complete sentence
@@ -350,7 +352,9 @@ export class V1AdvancedSession {
     this.runObserverAndMemorySearch(text);
 
     // Generate and send response (streaming or blocking based on feature flag)
-    if (V1_STREAMING_ENABLED && process.env.ELEVENLABS_API_KEY) {
+    const useStreaming = V1_STREAMING_ENABLED && process.env.ELEVENLABS_API_KEY;
+    console.log(`[V1][${this.streamSid}] Response mode: ${useStreaming ? 'STREAMING' : 'BLOCKING'}`);
+    if (useStreaming) {
       await this.generateAndSendResponseStreaming(text);
     } else {
       await this.generateAndSendResponse(text);

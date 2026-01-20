@@ -1,5 +1,6 @@
 import { createClient } from '@deepgram/sdk';
 import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ObserverAgent } from './observer-agent.js';
 import { ElevenLabsAdapter } from '../adapters/elevenlabs.js';
 import { ElevenLabsStreamingTTS } from '../adapters/elevenlabs-streaming.js';
@@ -11,18 +12,24 @@ import { runPostTurnTasks } from './post-turn-agent.js';
 
 const anthropic = new Anthropic();
 
+// Initialize Gemini client
+const geminiClient = process.env.GOOGLE_API_KEY
+  ? new GoogleGenerativeAI(process.env.GOOGLE_API_KEY)
+  : null;
+
 // Feature flag for streaming - set to false for rollback
 const V1_STREAMING_ENABLED = process.env.V1_STREAMING_ENABLED !== 'false';
 
 // Model configuration for dynamic routing
 const MODELS = {
-  FAST: 'claude-3-haiku-20240307',      // Default - quick, cheap (~300ms)
-  SMART: 'claude-sonnet-4-20250514'     // Upgraded - nuanced, deeper (~800ms)
+  FAST: 'gemini-3-flash-preview',       // Default - Gemini 3 Flash (fastest, handles instructions)
+  SMART: 'claude-sonnet-4-20250514'     // Upgraded - Claude Sonnet for complex situations
 };
 
-const DEFAULT_MAX_TOKENS = 75; // ~2 sentences for normal conversation
+const DEFAULT_MAX_TOKENS = 100; // Slightly more tokens for Gemini
 
 console.log(`[V1] Streaming enabled: ${V1_STREAMING_ENABLED}, ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? 'set' : 'NOT SET'}`);
+console.log(`[V1] Gemini: ${geminiClient ? 'enabled' : 'DISABLED (no GOOGLE_API_KEY)'}`);
 
 /**
  * Select model and token count based on observer recommendations
@@ -67,6 +74,43 @@ function selectModelConfig(quickResult, fastResult, deepResult) {
   }
 
   return config;
+}
+
+/**
+ * Call Gemini 3 Flash for fast responses
+ * @param {string} systemPrompt - System instructions
+ * @param {Array} messages - Conversation history
+ * @param {number} maxTokens - Max output tokens
+ * @returns {Promise<string>} Response text
+ */
+async function callGemini(systemPrompt, messages, maxTokens = 100) {
+  if (!geminiClient) {
+    throw new Error('Gemini client not initialized - missing GOOGLE_API_KEY');
+  }
+
+  const model = geminiClient.getGenerativeModel({
+    model: MODELS.FAST,
+    generationConfig: {
+      maxOutputTokens: maxTokens,
+      temperature: 0.7,
+    },
+  });
+
+  // Convert messages to Gemini format
+  const history = messages.slice(0, -1).map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }],
+  }));
+
+  const lastMessage = messages[messages.length - 1];
+
+  const chat = model.startChat({
+    history,
+    systemInstruction: systemPrompt,
+  });
+
+  const result = await chat.sendMessage(lastMessage?.content || 'Hello');
+  return result.response.text();
 }
 
 /**
@@ -127,14 +171,15 @@ function extractCompleteSentences(buffer) {
   return { complete: sentences, remaining };
 }
 
-const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null, useSonnet = false) => {
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null) => {
   let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
 
 RESPONSE FORMAT:
 - 1-2 sentences MAX
 - Answer briefly, then ask ONE follow-up question
 - Output ONLY what Donna says out loud - nothing else
-- NEVER say "dear" or "dearie" - this is forbidden`;
+- NEVER say "dear" or "dearie"
+- Follow any guidance in <guidance> tags but don't mention it`;
 
   if (senior) {
     prompt += `\n\nYou are speaking with ${senior.name}.`;
@@ -154,54 +199,51 @@ RESPONSE FORMAT:
     prompt += reminderPrompt;
   }
 
-  // Always inject memories (factual context) - works with Haiku
+  // Always inject memories
   if (dynamicMemoryContext) {
     prompt += `\n\n${dynamicMemoryContext}`;
   }
 
-  // Fast observer memories (from previous turn) - always inject
+  // Fast observer memories (from previous turn)
   if (fastObserverGuidance?.memories) {
     prompt += `\n\nFrom previous conversations:\n${fastObserverGuidance.memories}`;
   }
 
-  // Only inject guidance/instructions when using Sonnet (Haiku reads them aloud)
-  if (useSonnet) {
-    const guidanceParts = [];
+  // Always inject guidance - Gemini 3 Flash handles it well
+  const guidanceParts = [];
 
-    if (quickObserverGuidance) {
-      guidanceParts.push(quickObserverGuidance);
-    }
+  if (quickObserverGuidance) {
+    guidanceParts.push(quickObserverGuidance);
+  }
 
-    // Fast observer guidance (sentiment, engagement instructions)
-    if (fastObserverGuidance?.guidance) {
-      guidanceParts.push(fastObserverGuidance.guidance);
-    }
+  if (fastObserverGuidance?.guidance) {
+    guidanceParts.push(fastObserverGuidance.guidance);
+  }
 
-    if (observerSignal) {
-      const parts = [];
-      if (observerSignal.engagement_level === 'low') {
-        parts.push('User seems disengaged - ask about their interests');
-      }
-      if (observerSignal.emotional_state && observerSignal.emotional_state !== 'unknown') {
-        parts.push(`User feeling ${observerSignal.emotional_state}`);
-      }
-      if (observerSignal.should_deliver_reminder && observerSignal.reminder_to_deliver) {
-        parts.push(`Mention reminder: ${observerSignal.reminder_to_deliver}`);
-      }
-      if (observerSignal.suggested_topic) {
-        parts.push(`Good topic: ${observerSignal.suggested_topic}`);
-      }
-      if (observerSignal.should_end_call) {
-        parts.push('Wrap up the call naturally');
-      }
-      if (parts.length > 0) {
-        guidanceParts.push(parts.join('. '));
-      }
+  if (observerSignal) {
+    const parts = [];
+    if (observerSignal.engagement_level === 'low') {
+      parts.push('User seems disengaged - ask about their interests');
     }
+    if (observerSignal.emotional_state && observerSignal.emotional_state !== 'unknown') {
+      parts.push(`User feeling ${observerSignal.emotional_state}`);
+    }
+    if (observerSignal.should_deliver_reminder && observerSignal.reminder_to_deliver) {
+      parts.push(`Mention reminder: ${observerSignal.reminder_to_deliver}`);
+    }
+    if (observerSignal.suggested_topic) {
+      parts.push(`Good topic: ${observerSignal.suggested_topic}`);
+    }
+    if (observerSignal.should_end_call) {
+      parts.push('Wrap up the call naturally');
+    }
+    if (parts.length > 0) {
+      guidanceParts.push(parts.join('. '));
+    }
+  }
 
-    if (guidanceParts.length > 0) {
-      prompt += `\n\n<guidance>\n${guidanceParts.join('\n')}\n</guidance>`;
-    }
+  if (guidanceParts.length > 0) {
+    prompt += `\n\n<guidance>\n${guidanceParts.join('\n')}\n</guidance>`;
   }
 
   return prompt;
@@ -535,16 +577,16 @@ export class V1AdvancedSession {
       // Layer 1: Quick Observer (0ms) - for post-turn processing
       const quickResult = quickAnalyze(userMessage, this.conversationLog.slice(-6));
 
-      // Dynamic model selection based on observer recommendations (BEFORE building prompt)
+      // Dynamic model selection based on observer recommendations
       const modelConfig = selectModelConfig(
         quickResult,
         this.lastFastObserverResult,
         this.lastObserverSignal
       );
-      const useSonnet = modelConfig.model === MODELS.SMART;
-      console.log(`[V1][${this.streamSid}] Model: ${useSonnet ? 'Sonnet' : 'Haiku'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
+      const useGemini = modelConfig.model === MODELS.FAST && geminiClient;
+      console.log(`[V1][${this.streamSid}] Model: ${useGemini ? 'Gemini 3 Flash' : 'Claude Sonnet'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
 
-      // Build system prompt - only inject guidance if using Sonnet
+      // Build system prompt with guidance (Gemini handles it well)
       const systemPrompt = buildSystemPrompt(
         this.senior,
         this.memoryContext,
@@ -552,8 +594,7 @@ export class V1AdvancedSession {
         this.lastObserverSignal,
         this.dynamicMemoryContext,
         quickResult.guidance,
-        null, // fast guidance not used in non-streaming
-        useSonnet
+        null // fast guidance not used in non-streaming
       );
 
       // Build messages array
@@ -569,26 +610,31 @@ export class V1AdvancedSession {
         messages.push({ role: 'user', content: userMessage });
       }
 
-      // Generate response with Claude
-      console.log(`[V1][${this.streamSid}] Calling Claude...`);
-      const response = await anthropic.messages.create({
-        model: modelConfig.model,
-        max_tokens: modelConfig.max_tokens,
-        system: systemPrompt,
-        messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
-      });
+      let responseText;
 
-      // Check if interrupted during Claude call - skip TTS if so
+      if (useGemini) {
+        // Use Gemini 3 Flash for fast responses
+        console.log(`[V1][${this.streamSid}] Calling Gemini 3 Flash...`);
+        responseText = await callGemini(systemPrompt, messages, modelConfig.max_tokens);
+      } else {
+        // Use Claude Sonnet for complex situations
+        console.log(`[V1][${this.streamSid}] Calling Claude Sonnet...`);
+        const response = await anthropic.messages.create({
+          model: MODELS.SMART,
+          max_tokens: modelConfig.max_tokens,
+          system: systemPrompt,
+          messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
+        });
+        responseText = response.content[0].type === 'text' ? response.content[0].text : '';
+      }
+
+      // Check if interrupted during generation - skip TTS if so
       if (this.wasInterrupted) {
         console.log(`[V1][${this.streamSid}] Interrupted during generation, skipping TTS`);
         return;
       }
 
-      const responseText = response.content[0].type === 'text'
-        ? response.content[0].text
-        : '';
-
-      console.log(`[V1][${this.streamSid}] Claude: "${responseText}"`);
+      console.log(`[V1][${this.streamSid}] Response: "${responseText}"`);
 
       // Log to conversation
       this.conversationLog.push({
@@ -638,10 +684,10 @@ export class V1AdvancedSession {
         this.lastFastObserverResult,
         this.lastObserverSignal
       );
-      const useSonnet = modelConfig.model === MODELS.SMART;
-      console.log(`[V1][${this.streamSid}] Model: ${useSonnet ? 'Sonnet' : 'Haiku'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
+      const useGemini = modelConfig.model === MODELS.FAST && geminiClient;
+      console.log(`[V1][${this.streamSid}] Model: ${useGemini ? 'Gemini 3 Flash' : 'Claude Sonnet'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
 
-      // Build system prompt - only inject guidance if using Sonnet
+      // Build system prompt - Gemini handles guidance well
       const systemPrompt = buildSystemPrompt(
         this.senior,
         this.memoryContext,
@@ -649,8 +695,7 @@ export class V1AdvancedSession {
         this.lastObserverSignal,
         this.dynamicMemoryContext,
         quickResult.guidance,
-        fastGuidance,
-        useSonnet
+        fastGuidance
       );
 
       // Build messages array
@@ -692,53 +737,106 @@ export class V1AdvancedSession {
       // Mark as speaking
       this.isSpeaking = true;
 
-      // Start Claude stream AND TTS connection in parallel
-      console.log(`[V1][${this.streamSid}] Calling Claude (streaming)...`);
-      const [stream] = await Promise.all([
-        anthropic.messages.stream({
-          model: modelConfig.model,
-          max_tokens: modelConfig.max_tokens,
-          system: systemPrompt,
-          messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
-        }),
-        this.streamingTts.connect()
-      ]);
+      // Start TTS connection first
+      await this.streamingTts.connect();
 
       let fullResponse = '';
       let textBuffer = '';
       let firstTokenTime = null;
       let sentencesSent = 0;
 
-      // Process streaming tokens
-      for await (const event of stream) {
-        // Check for interruption
-        if (this.wasInterrupted) {
-          console.log(`[V1][${this.streamSid}] Interrupted during streaming`);
-          break;
-        }
+      if (useGemini) {
+        // Use Gemini 3 Flash streaming
+        console.log(`[V1][${this.streamSid}] Calling Gemini 3 Flash (streaming)...`);
 
-        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-          const text = event.delta.text;
-          fullResponse += text;
-          textBuffer += text;
+        const model = geminiClient.getGenerativeModel({
+          model: MODELS.FAST,
+          generationConfig: {
+            maxOutputTokens: modelConfig.max_tokens,
+            temperature: 0.7,
+          },
+        });
 
-          // Record first token time
-          if (!firstTokenTime) {
-            firstTokenTime = Date.now();
-            console.log(`[V1][${this.streamSid}] First token: ${firstTokenTime - startTime}ms`);
+        // Convert messages to Gemini format
+        const history = messages.slice(0, -1).map(m => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content }],
+        }));
+
+        const lastMessage = messages[messages.length - 1];
+        const chat = model.startChat({
+          history,
+          systemInstruction: systemPrompt,
+        });
+
+        // Stream from Gemini
+        const result = await chat.sendMessageStream(lastMessage?.content || userMessage);
+
+        for await (const chunk of result.stream) {
+          if (this.wasInterrupted) {
+            console.log(`[V1][${this.streamSid}] Interrupted during Gemini streaming`);
+            break;
           }
 
-          // Extract complete sentences and send to TTS
-          const { complete, remaining } = extractCompleteSentences(textBuffer);
-          textBuffer = remaining;
+          const text = chunk.text();
+          if (text) {
+            fullResponse += text;
+            textBuffer += text;
 
-          for (const sentence of complete) {
-            if (sentence.trim()) {
-              this.streamingTts.streamText(sentence + ' ');
-              sentencesSent++;
-              // Add natural pause after each sentence (200ms)
-              // This prevents rushed speech between sentences
-              await new Promise(r => setTimeout(r, 200));
+            if (!firstTokenTime) {
+              firstTokenTime = Date.now();
+              console.log(`[V1][${this.streamSid}] First token: ${firstTokenTime - startTime}ms`);
+            }
+
+            // Extract complete sentences and send to TTS
+            const { complete, remaining } = extractCompleteSentences(textBuffer);
+            textBuffer = remaining;
+
+            for (const sentence of complete) {
+              if (sentence.trim()) {
+                this.streamingTts.streamText(sentence + ' ');
+                sentencesSent++;
+                await new Promise(r => setTimeout(r, 200));
+              }
+            }
+          }
+        }
+      } else {
+        // Use Claude Sonnet streaming
+        console.log(`[V1][${this.streamSid}] Calling Claude Sonnet (streaming)...`);
+
+        const stream = await anthropic.messages.stream({
+          model: MODELS.SMART,
+          max_tokens: modelConfig.max_tokens,
+          system: systemPrompt,
+          messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
+        });
+
+        for await (const event of stream) {
+          if (this.wasInterrupted) {
+            console.log(`[V1][${this.streamSid}] Interrupted during Claude streaming`);
+            break;
+          }
+
+          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+            const text = event.delta.text;
+            fullResponse += text;
+            textBuffer += text;
+
+            if (!firstTokenTime) {
+              firstTokenTime = Date.now();
+              console.log(`[V1][${this.streamSid}] First token: ${firstTokenTime - startTime}ms`);
+            }
+
+            const { complete, remaining } = extractCompleteSentences(textBuffer);
+            textBuffer = remaining;
+
+            for (const sentence of complete) {
+              if (sentence.trim()) {
+                this.streamingTts.streamText(sentence + ' ');
+                sentencesSent++;
+                await new Promise(r => setTimeout(r, 200));
+              }
             }
           }
         }

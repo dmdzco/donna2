@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import twilio from 'twilio';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
@@ -20,6 +21,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
+
+// CORS - allow admin dashboard and local development
+app.use(cors({
+  origin: [
+    'https://donna-admin.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:3001',
+  ],
+  credentials: true,
+}));
+
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 

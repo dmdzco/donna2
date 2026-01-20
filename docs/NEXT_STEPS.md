@@ -38,7 +38,47 @@
 
 ---
 
+### ✅ Haiku Default Model (January 2026)
+
+**Achieved:** Switched main conversation model from Sonnet to Haiku for faster responses.
+
+- [x] Changed `v1-advanced.js` to use `claude-3-haiku-20240307`
+- [x] Reduced response latency by ~200-300ms
+- [x] Cost reduction (~10x cheaper per token)
+
+---
+
 ## Upcoming Work
+
+### Dynamic Model Routing (Next Priority)
+
+**Goal:** Upgrade from Haiku to Sonnet when observers detect situations needing more nuanced responses.
+
+**Philosophy:** The AI decides when it needs more AI. Default is Haiku (fast, cheap). Observers can request Sonnet upgrade for health/safety, emotional support, or creative re-engagement.
+
+**Full spec:** [DYNAMIC_MODEL_ROUTING.md](DYNAMIC_MODEL_ROUTING.md)
+
+**Implementation:**
+- [ ] Add `modelRecommendation` output to `quick-observer.js`
+- [ ] Add `modelRecommendation` output to `fast-observer.js`
+- [ ] Add `modelRecommendation` output to `observer-agent.js`
+- [ ] Create `selectModelConfig()` function in `v1-advanced.js`
+- [ ] Integrate model selection into streaming path
+- [ ] Add logging for model selection decisions
+- [ ] Test: health mention → Sonnet upgrade
+- [ ] Test: emotional support → Sonnet upgrade
+- [ ] Test: normal conversation stays Haiku
+
+**Upgrade Triggers:**
+| Situation | Model | max_tokens |
+|-----------|-------|------------|
+| Health mention (pain, fell) | Sonnet | 200 |
+| Negative emotion (lonely, sad) | Sonnet | 250 |
+| Low engagement (re-engage) | Sonnet | 200 |
+| Normal conversation | Haiku | 150 |
+| Simple question | Haiku | 100 |
+
+---
 
 ### Caregiver Authentication
 **Goal:** Secure multi-user access

@@ -717,6 +717,9 @@ export class V1AdvancedSession {
             if (sentence.trim()) {
               this.streamingTts.streamText(sentence + ' ');
               sentencesSent++;
+              // Add natural pause after each sentence (200ms)
+              // This prevents rushed speech between sentences
+              await new Promise(r => setTimeout(r, 200));
             }
           }
         }

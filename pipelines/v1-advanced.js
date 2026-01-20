@@ -286,32 +286,57 @@ export class V1AdvancedSession {
     }
   }
 
+  /**
+   * Generate personalized greeting using Claude with full context
+   */
+  async generateGreeting() {
+    const firstName = this.senior?.name?.split(' ')[0];
+
+    // If no senior context, use simple greeting
+    if (!this.senior) {
+      return `Hello! It's Donna calling to check in. How are you doing today?`;
+    }
+
+    // Run quick memory search for greeting context
+    let recentMemories = [];
+    if (this.senior?.id) {
+      try {
+        recentMemories = await memoryService.getRecent(this.senior.id, 5);
+        console.log(`[V1][${this.streamSid}] Greeting context: ${recentMemories.length} recent memories`);
+      } catch (e) {
+        console.error(`[V1][${this.streamSid}] Memory fetch error:`, e.message);
+      }
+    }
+
+    // Build greeting prompt with full context
+    const greetingPrompt = `You are Donna, calling ${firstName} to check in.
+
+CONTEXT:
+- Interests: ${this.senior.interests?.join(', ') || 'unknown'}
+${this.memoryContext ? `\n${this.memoryContext}` : ''}
+${recentMemories.length > 0 ? `\nRecent memories:\n${recentMemories.map(m => `- ${m.content}`).join('\n')}` : ''}
+
+Generate a warm, personalized greeting (1-2 sentences). Reference something specific from their life - a hobby, recent event, or something you remember about them. End with a question.
+
+RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
+
+    try {
+      const adapter = getAdapter(VOICE_MODEL);
+      const greeting = await adapter.generate(greetingPrompt, [], { maxTokens: 100, temperature: 0.8 });
+      console.log(`[V1][${this.streamSid}] Generated greeting: "${greeting.substring(0, 50)}..."`);
+      return greeting.trim();
+    } catch (error) {
+      console.error(`[V1][${this.streamSid}] Greeting generation error:`, error.message);
+      return `Hello ${firstName}! It's Donna calling to check in. How are you doing today?`;
+    }
+  }
+
   async connect() {
     console.log(`[V1][${this.streamSid}] Starting advanced pipeline for ${this.senior?.name || 'unknown'}`);
     this.isConnected = true;
 
-    // Start Deepgram and greeting TTS in parallel for fastest startup
-    const firstName = this.senior?.name?.split(' ')[0];
-
-    // Build personalized greeting based on interests
-    let greetingText;
-    if (firstName && this.senior?.interests?.length > 0) {
-      // Pick a random interest to ask about
-      const interest = this.senior.interests[Math.floor(Math.random() * this.senior.interests.length)];
-      const interestQuestions = {
-        'padel': `Have you played any padel lately?`,
-        'skiing': `Have you been thinking about your next ski trip?`,
-        'dogs': `How are your dogs doing?`,
-        'travel': `Any travel plans coming up?`,
-        'AI': `Learned anything interesting about AI recently?`,
-      };
-      const question = interestQuestions[interest] || `How's everything going with ${interest}?`;
-      greetingText = `Hello ${firstName}! It's Donna. ${question}`;
-    } else if (firstName) {
-      greetingText = `Hello ${firstName}! It's Donna calling to check in. How are you doing today?`;
-    } else {
-      greetingText = `Hello! It's Donna calling to check in. How are you doing today?`;
-    }
+    // Generate personalized greeting with Claude using full context
+    const greetingText = await this.generateGreeting();
 
     // Log greeting to conversation
     this.conversationLog.push({
@@ -469,7 +494,7 @@ export class V1AdvancedSession {
       timestamp: new Date().toISOString()
     });
 
-    console.log(`[V1][${this.streamSid}] Processing: "${text}"`);
+    console.log(`[V1][${this.streamSid}] Processing: "${text}" (seniorId: ${this.senior?.id || 'none'})`);
 
     // Start Layer 2 (fast observer) analysis in parallel - results used in NEXT turn
     // Don't await - this runs in background
@@ -479,7 +504,7 @@ export class V1AdvancedSession {
       this.senior?.id
     ).then(result => {
       this.lastFastObserverResult = result;
-      console.log(`[V1][${this.streamSid}] Fast observer complete: sentiment=${result.sentiment?.sentiment}, memories=${result.memories?.length || 0}`);
+      console.log(`[V1][${this.streamSid}] Fast observer complete: sentiment=${result.sentiment?.sentiment}, memories=${result.memories?.length || 0}, dynamicCtx=${this.dynamicMemoryContext ? 'yes' : 'no'}`);
     }).catch(e => {
       console.error(`[V1][${this.streamSid}] Fast observer error:`, e.message);
     });

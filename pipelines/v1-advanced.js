@@ -487,7 +487,7 @@ export class V1AdvancedSession {
       // Generate response with Claude
       console.log(`[V1][${this.streamSid}] Calling Claude...`);
       const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-3-haiku-20240307',
         max_tokens: 150, // Keep responses short for phone call
         system: systemPrompt,
         messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
@@ -599,7 +599,7 @@ export class V1AdvancedSession {
       console.log(`[V1][${this.streamSid}] Calling Claude (streaming)...`);
       const [stream] = await Promise.all([
         anthropic.messages.stream({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-3-haiku-20240307',
           max_tokens: 150,
           system: systemPrompt,
           messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],

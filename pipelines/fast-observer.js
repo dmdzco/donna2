@@ -211,46 +211,39 @@ function buildModelRecommendation(sentiment, memories) {
 
 /**
  * Format fast observer results for system prompt injection
+ * NOTE: Use only factual context, no instructions (model was reading them aloud)
  * @param {object} analysis - Results from fastAnalyzeWithTools
- * @returns {string|null} Formatted guidance string
+ * @returns {string|null} Formatted context string
  */
 export function formatFastObserverGuidance(analysis) {
-  const lines = [];
+  const context = [];
 
-  // Sentiment-based guidance
+  // Sentiment context (facts only, no instructions)
   if (analysis.sentiment) {
-    if (analysis.sentiment.sentiment === 'negative' || analysis.sentiment.sentiment === 'concerned') {
-      lines.push('[SENTIMENT: User seems concerned or negative. Respond with extra warmth and empathy.]');
-    }
-    if (analysis.sentiment.needs_empathy) {
-      lines.push('[EMPATHY: User may need emotional support. Acknowledge their feelings.]');
-    }
-    if (analysis.sentiment.engagement === 'low') {
-      lines.push('[ENGAGEMENT: Low engagement detected. Try asking about their interests.]');
-    }
-    if (analysis.sentiment.topic_shift) {
-      lines.push(`[TOPIC: Consider transitioning to: ${analysis.sentiment.topic_shift}]`);
+    if (analysis.sentiment.sentiment) {
+      context.push(`User mood: ${analysis.sentiment.sentiment}`);
     }
     if (analysis.sentiment.mentioned_names?.length > 0) {
-      lines.push(`[NAMES: User mentioned: ${analysis.sentiment.mentioned_names.join(', ')}. Ask about them.]`);
+      context.push(`Names mentioned: ${analysis.sentiment.mentioned_names.join(', ')}`);
     }
   }
 
-  // Memory-based guidance
+  // Memory context (facts only)
   if (analysis.memories?.length > 0) {
-    const memoryText = analysis.memories.map(m => `- ${m.content}`).join('\n');
-    lines.push(`[RELEVANT MEMORIES - use naturally]\n${memoryText}`);
+    const memoryText = analysis.memories.map(m => m.content).join('; ');
+    context.push(`Relevant memories: ${memoryText}`);
   }
 
-  // Current events
-  if (analysis.currentEvents) {
+  // Current events (facts only)
+  if (analysis.currentEvents?.items?.length > 0) {
     const newsText = analysis.currentEvents.items
-      .map(n => `- ${n.title || n.summary}`)
-      .join('\n');
-    lines.push(`[CURRENT EVENTS - share if asked]\n${newsText}`);
+      .slice(0, 2)
+      .map(n => n.title || n.summary)
+      .join('; ');
+    context.push(`Recent news: ${newsText}`);
   }
 
-  return lines.length > 0 ? lines.join('\n') : null;
+  return context.length > 0 ? context.join('. ') : null;
 }
 
 export default {

@@ -159,33 +159,37 @@ CRITICAL RULES:
     prompt += reminderPrompt;
   }
 
-  // Inject quick observer guidance (Layer 1 - instant regex analysis)
+  // Inject quick observer context (Layer 1 - instant regex analysis)
   if (quickObserverGuidance) {
-    prompt += `\n\n[INSTANT GUIDANCE - respond to this NOW]\n${quickObserverGuidance}`;
+    prompt += `\n\n${quickObserverGuidance}`;
   }
 
-  // Inject fast observer guidance (Layer 2 - Haiku analysis from previous turn)
+  // Inject fast observer context (Layer 2 - Haiku analysis from previous turn)
   if (fastObserverGuidance) {
-    prompt += `\n\n[CONTEXT FROM ANALYSIS]\n${fastObserverGuidance}`;
+    prompt += `\n\n${fastObserverGuidance}`;
   }
 
-  // Inject observer guidance if available (Layer 3 - deep analysis)
+  // Inject observer context if available (Layer 3 - deep analysis)
+  // NOTE: Only factual context, no instructions (model reads them aloud)
   if (observerSignal) {
-    prompt += `\n\n[OBSERVER GUIDANCE - use naturally, don't mention explicitly]`;
+    const contextParts = [];
     if (observerSignal.engagement_level === 'low') {
-      prompt += `\n- Senior seems less engaged. Try to draw them into conversation.`;
+      contextParts.push('engagement: low');
     }
     if (observerSignal.emotional_state && observerSignal.emotional_state !== 'unknown') {
-      prompt += `\n- Emotional state: ${observerSignal.emotional_state}`;
+      contextParts.push(`emotional state: ${observerSignal.emotional_state}`);
     }
     if (observerSignal.should_deliver_reminder && observerSignal.reminder_to_deliver) {
-      prompt += `\n- Now is a good time to mention their reminder: ${observerSignal.reminder_to_deliver}`;
+      contextParts.push(`pending reminder: ${observerSignal.reminder_to_deliver}`);
     }
     if (observerSignal.suggested_topic) {
-      prompt += `\n- Topic suggestion: ${observerSignal.suggested_topic}`;
+      contextParts.push(`suggested topic: ${observerSignal.suggested_topic}`);
     }
     if (observerSignal.should_end_call) {
-      prompt += `\n- Consider wrapping up the call naturally. ${observerSignal.end_call_reason || ''}`;
+      contextParts.push('call winding down');
+    }
+    if (contextParts.length > 0) {
+      prompt += `\n\nObserver context: ${contextParts.join(', ')}`;
     }
   }
 
@@ -193,8 +197,6 @@ CRITICAL RULES:
   if (dynamicMemoryContext) {
     prompt += dynamicMemoryContext;
   }
-
-  prompt += `\n\nUse this context naturally in conversation. Reference past topics when relevant but don't force it.`;
 
   return prompt;
 };

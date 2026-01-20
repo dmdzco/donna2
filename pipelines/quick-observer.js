@@ -207,31 +207,19 @@ function buildModelRecommendation(analysis) {
 
 /**
  * Build guidance string for injection into system prompt
+ * NOTE: These are internal context tags, NOT to be read aloud
  */
 function buildGuidance(analysis) {
-  const lines = [];
+  const tags = [];
 
   // Health signals - highest priority
   if (analysis.healthSignals.length > 0) {
-    const healthType = analysis.healthSignals[0];
-    const healthGuidance = {
-      dizziness: 'Express genuine concern about their dizziness. Ask if they need help or if this is new.',
-      pain: 'Show empathy about their discomfort. Ask where it hurts and if they\'ve told anyone.',
-      fall: 'This is important - ask if they\'re okay and if anyone knows. Express care.',
-      medication: 'If they mention medication, gently ask if they\'ve taken it today.',
-      medical_appointment: 'Ask about their appointment - when it is, if they need a ride.',
-      fatigue: 'Note they seem tired. Ask if they\'ve been sleeping okay.',
-      sleep_issues: 'Sleep issues can be concerning. Ask gently how long this has been happening.',
-      memory_concern: 'Be reassuring about memory. Everyone forgets things sometimes.',
-      cardiovascular: 'Heart/chest mentions need gentle follow-up. Ask if they\'re feeling okay now.',
-      appetite: 'Ask what they\'ve been eating. Meals are important conversation topics too.',
-    };
-    lines.push(`[HEALTH: ${healthGuidance[healthType] || 'Follow up on their health mention with care.'}]`);
+    tags.push(`health_topic:${analysis.healthSignals[0]}`);
   }
 
-  // Family signals - warm conversation opportunity
+  // Family signals
   if (analysis.familySignals.length > 0) {
-    lines.push('[FAMILY: They mentioned family - this is a warm topic. Ask a follow-up question about this person.]');
+    tags.push(`family_topic:${analysis.familySignals[0]}`);
   }
 
   // Emotion signals
@@ -239,30 +227,23 @@ function buildGuidance(analysis) {
   const positiveEmotions = analysis.emotionSignals.filter(e => e.valence === 'positive');
 
   if (negativeEmotions.length > 0) {
-    const emotion = negativeEmotions[0].signal;
-    const emotionGuidance = {
-      lonely: 'They may be feeling lonely. Be extra warm and engaging. Ask about their day.',
-      sad: 'Acknowledge their feelings. Ask what\'s on their mind.',
-      anxious: 'They seem worried. Ask what\'s concerning them and listen.',
-      frustrated: 'Acknowledge their frustration. Ask what happened.',
-      bored: 'They might need stimulation. Suggest an activity or ask about their interests.',
-    };
-    lines.push(`[EMOTION: ${emotionGuidance[emotion] || 'They expressed a difficult emotion. Acknowledge it warmly.'}]`);
+    tags.push(`emotion:${negativeEmotions[0].signal}`);
   } else if (positiveEmotions.length > 0) {
-    lines.push('[EMOTION: They seem positive - match their energy and share in their happiness.]');
+    tags.push(`emotion:positive`);
   }
 
   // Question handling
   if (analysis.isQuestion) {
-    lines.push('[QUESTION: They asked a question. Answer it directly first, then continue conversation.]');
+    tags.push('expects_answer');
   }
 
   // Low engagement
   if (analysis.engagementLevel === 'low') {
-    lines.push('[ENGAGEMENT: Short responses detected. Try asking an open-ended question about something they enjoy.]');
+    tags.push('low_engagement');
   }
 
-  return lines.length > 0 ? lines.join('\n') : null;
+  // Return as simple context line (not instructions)
+  return tags.length > 0 ? `Context: ${tags.join(', ')}` : null;
 }
 
 export default { quickAnalyze };

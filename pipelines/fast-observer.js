@@ -210,48 +210,52 @@ function buildModelRecommendation(sentiment, memories) {
 }
 
 /**
- * Format fast observer results for system prompt injection
+ * Format fast observer results - returns { guidance, memories }
+ * Guidance only for Sonnet, memories for all models
  * @param {object} analysis - Results from fastAnalyzeWithTools
- * @returns {string|null} Formatted guidance string
+ * @returns {object} { guidance: string|null, memories: string|null }
  */
 export function formatFastObserverGuidance(analysis) {
-  const lines = [];
+  const guidanceLines = [];
+  let memoriesText = null;
 
-  // Sentiment-based guidance
+  // Sentiment-based guidance (Sonnet only)
   if (analysis.sentiment) {
     if (analysis.sentiment.sentiment === 'negative' || analysis.sentiment.sentiment === 'concerned') {
-      lines.push('User seems worried - respond with warmth');
+      guidanceLines.push('User seems worried - respond with warmth');
     }
     if (analysis.sentiment.needs_empathy) {
-      lines.push('User needs emotional support - acknowledge feelings');
+      guidanceLines.push('User needs emotional support - acknowledge feelings');
     }
     if (analysis.sentiment.engagement === 'low') {
-      lines.push('Low engagement - ask about their interests');
+      guidanceLines.push('Low engagement - ask about their interests');
     }
     if (analysis.sentiment.topic_shift) {
-      lines.push(`Consider topic: ${analysis.sentiment.topic_shift}`);
+      guidanceLines.push(`Consider topic: ${analysis.sentiment.topic_shift}`);
     }
     if (analysis.sentiment.mentioned_names?.length > 0) {
-      lines.push(`They mentioned: ${analysis.sentiment.mentioned_names.join(', ')} - ask about them`);
+      guidanceLines.push(`They mentioned: ${analysis.sentiment.mentioned_names.join(', ')} - ask about them`);
     }
   }
 
-  // Memory-based guidance
+  // Memory-based context (all models)
   if (analysis.memories?.length > 0) {
-    const memoryText = analysis.memories.map(m => m.content).join('; ');
-    lines.push(`Past conversations: ${memoryText}`);
+    memoriesText = analysis.memories.map(m => `- ${m.content}`).join('\n');
   }
 
-  // Current events
+  // Current events (all models)
   if (analysis.currentEvents?.items?.length > 0) {
     const newsText = analysis.currentEvents.items
       .slice(0, 2)
       .map(n => n.title || n.summary)
       .join('; ');
-    lines.push(`News to share if asked: ${newsText}`);
+    guidanceLines.push(`News to share if asked: ${newsText}`);
   }
 
-  return lines.length > 0 ? lines.join('\n') : null;
+  return {
+    guidance: guidanceLines.length > 0 ? guidanceLines.join('\n') : null,
+    memories: memoriesText,
+  };
 }
 
 export default {

@@ -154,12 +154,17 @@ RESPONSE FORMAT:
     prompt += reminderPrompt;
   }
 
-  // Always inject memories (factual context)
+  // Always inject memories (factual context) - works with Haiku
   if (dynamicMemoryContext) {
     prompt += `\n\n${dynamicMemoryContext}`;
   }
 
-  // Only inject guidance when using Sonnet (Haiku reads instructions aloud)
+  // Fast observer memories (from previous turn) - always inject
+  if (fastObserverGuidance?.memories) {
+    prompt += `\n\nFrom previous conversations:\n${fastObserverGuidance.memories}`;
+  }
+
+  // Only inject guidance/instructions when using Sonnet (Haiku reads them aloud)
   if (useSonnet) {
     const guidanceParts = [];
 
@@ -167,8 +172,9 @@ RESPONSE FORMAT:
       guidanceParts.push(quickObserverGuidance);
     }
 
-    if (fastObserverGuidance) {
-      guidanceParts.push(fastObserverGuidance);
+    // Fast observer guidance (sentiment, engagement instructions)
+    if (fastObserverGuidance?.guidance) {
+      guidanceParts.push(fastObserverGuidance.guidance);
     }
 
     if (observerSignal) {
@@ -510,7 +516,7 @@ export class V1AdvancedSession {
       // Inject relevant memories into context
       if (memoryResults && memoryResults.length > 0) {
         const memoryText = memoryResults.map(m => `- ${m.content}`).join('\n');
-        this.dynamicMemoryContext = `\n\n[RELEVANT MEMORIES - use naturally]\n${memoryText}`;
+        this.dynamicMemoryContext = `\n\nFrom previous conversations:\n${memoryText}`;
         console.log(`[V1][${this.streamSid}] Found ${memoryResults.length} relevant memories`);
       } else {
         this.dynamicMemoryContext = null;

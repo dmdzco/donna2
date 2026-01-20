@@ -133,7 +133,8 @@ const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observe
 RESPONSE FORMAT:
 - 1-2 sentences MAX
 - Answer briefly, then ask ONE follow-up question
-- Output ONLY what Donna says out loud - nothing else`;
+- Output ONLY what Donna says out loud - nothing else
+- Do NOT say "dear" - use their name occasionally instead`;
 
   if (senior) {
     prompt += `\n\nYou are speaking with ${senior.name}.`;
@@ -281,7 +282,7 @@ export class V1AdvancedSession {
 
     // Start Deepgram and greeting TTS in parallel for fastest startup
     const greetingText = this.senior?.name
-      ? `Hello ${this.senior.name}! It's Donna calling to check in on you. How are you doing today, dear?`
+      ? `Hello ${this.senior.name}! It's Donna calling to check in on you. How are you doing today?`
       : `Hello! It's Donna calling to check in. How are you doing today?`;
 
     // Log greeting to conversation

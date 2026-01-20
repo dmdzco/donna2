@@ -98,6 +98,7 @@ export class V1AdvancedSession {
     this.isProcessing = false;
     this.pendingUtterances = [];
     this.isSpeaking = false; // Track if Donna is currently speaking
+    this.wasInterrupted = false; // Track if user interrupted during response generation
 
     // Silence detection for turn-taking
     this.lastAudioTime = Date.now();
@@ -109,10 +110,13 @@ export class V1AdvancedSession {
    * Stop current audio playback (barge-in support)
    */
   interruptSpeech() {
-    if (!this.isSpeaking) return;
-
     console.log(`[V1][${this.streamSid}] Interrupting speech (barge-in)`);
     this.isSpeaking = false;
+    this.wasInterrupted = true;
+
+    // Clear any pending utterances - user interrupted, start fresh
+    this.pendingUtterances = [];
+    this.currentTranscript = '';
 
     // Send clear event to Twilio to stop audio playback
     if (this.twilioWs.readyState === 1) {
@@ -173,8 +177,8 @@ export class V1AdvancedSession {
       this.dgConnection.on('Results', (data) => {
         const transcript = data.channel?.alternatives?.[0]?.transcript;
         if (transcript) {
-          // Barge-in: if user speaks while Donna is talking, interrupt
-          if (this.isSpeaking && transcript.length > 2) {
+          // Barge-in: if user speaks while Donna is talking or processing, interrupt
+          if ((this.isSpeaking || this.isProcessing) && transcript.length > 2) {
             this.interruptSpeech();
           }
 
@@ -246,6 +250,7 @@ export class V1AdvancedSession {
 
   async generateAndSendResponse(userMessage) {
     this.isProcessing = true;
+    this.wasInterrupted = false; // Reset interrupt flag
 
     try {
       // Build system prompt with observer signal
@@ -277,6 +282,12 @@ export class V1AdvancedSession {
         system: systemPrompt,
         messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
       });
+
+      // Check if interrupted during Claude call - skip TTS if so
+      if (this.wasInterrupted) {
+        console.log(`[V1][${this.streamSid}] Interrupted during generation, skipping TTS`);
+        return;
+      }
 
       const responseText = response.content[0].type === 'text'
         ? response.content[0].text

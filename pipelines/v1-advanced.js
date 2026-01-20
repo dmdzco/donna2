@@ -154,45 +154,10 @@ RESPONSE FORMAT:
     prompt += reminderPrompt;
   }
 
-  // Inject guidance in XML tags (models understand these as structural, not to verbalize)
-  const guidanceParts = [];
-
-  if (quickObserverGuidance) {
-    guidanceParts.push(quickObserverGuidance);
-  }
-
-  if (fastObserverGuidance) {
-    guidanceParts.push(fastObserverGuidance);
-  }
-
-  if (observerSignal) {
-    const parts = [];
-    if (observerSignal.engagement_level === 'low') {
-      parts.push('User seems disengaged - ask about their interests');
-    }
-    if (observerSignal.emotional_state && observerSignal.emotional_state !== 'unknown') {
-      parts.push(`User feeling ${observerSignal.emotional_state}`);
-    }
-    if (observerSignal.should_deliver_reminder && observerSignal.reminder_to_deliver) {
-      parts.push(`Mention reminder: ${observerSignal.reminder_to_deliver}`);
-    }
-    if (observerSignal.suggested_topic) {
-      parts.push(`Good topic: ${observerSignal.suggested_topic}`);
-    }
-    if (observerSignal.should_end_call) {
-      parts.push('Wrap up the call naturally');
-    }
-    if (parts.length > 0) {
-      guidanceParts.push(parts.join('. '));
-    }
-  }
-
+  // Only inject memories (factual context the model needs)
+  // Skip all guidance/instructions - Haiku reads them aloud
   if (dynamicMemoryContext) {
-    guidanceParts.push(dynamicMemoryContext);
-  }
-
-  if (guidanceParts.length > 0) {
-    prompt += `\n\n<guidance>\n${guidanceParts.join('\n')}\n</guidance>`;
+    prompt += `\n\n${dynamicMemoryContext}`;
   }
 
   return prompt;

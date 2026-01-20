@@ -107,17 +107,22 @@ async function callGemini(systemPrompt, messages, maxTokens = 100) {
   }
 
   const relevantMessages = messages.slice(startIdx);
-  const history = relevantMessages.slice(0, -1).map(m => ({
+
+  // Prepend system prompt as first user message (systemInstruction breaks on gemini-3-flash-preview)
+  const allMessages = [
+    { role: 'user', content: `Instructions: ${systemPrompt}\n\nAcknowledge and follow these.` },
+    { role: 'assistant', content: 'Understood. I will follow these instructions.' },
+    ...relevantMessages
+  ];
+
+  const history = allMessages.slice(0, -1).map(m => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }],
   }));
 
-  const lastMessage = relevantMessages[relevantMessages.length - 1];
+  const lastMessage = allMessages[allMessages.length - 1];
 
-  const chat = model.startChat({
-    history,
-    systemInstruction: systemPrompt,
-  });
+  const chat = model.startChat({ history });
 
   const result = await chat.sendMessage(lastMessage?.content || 'Hello');
   return result.response.text();
@@ -824,16 +829,21 @@ export class V1AdvancedSession {
         }
 
         const relevantMessages = messages.slice(startIdx);
-        const history = relevantMessages.slice(0, -1).map(m => ({
+
+        // Prepend system prompt as first user message (systemInstruction breaks on gemini-3-flash-preview)
+        const allMessages = [
+          { role: 'user', content: `Instructions: ${systemPrompt}\n\nAcknowledge and follow these.` },
+          { role: 'assistant', content: 'Understood. I will follow these instructions.' },
+          ...relevantMessages
+        ];
+
+        const history = allMessages.slice(0, -1).map(m => ({
           role: m.role === 'assistant' ? 'model' : 'user',
           parts: [{ text: m.content }],
         }));
 
-        const lastMessage = relevantMessages[relevantMessages.length - 1];
-        const chat = model.startChat({
-          history,
-          systemInstruction: systemPrompt,
-        });
+        const lastMessage = allMessages[allMessages.length - 1];
+        const chat = model.startChat({ history });
 
         // Stream from Gemini
         const result = await chat.sendMessageStream(lastMessage?.content || userMessage);

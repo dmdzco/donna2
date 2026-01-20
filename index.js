@@ -92,6 +92,7 @@ app.post('/voice/answer', async (req, res) => {
   let senior = null;
   let memoryContext = null;
   let reminderPrompt = null;
+  let preGeneratedGreeting = null;
 
   if (reminderContext) {
     // REMINDER CALL: Use pre-fetched context (no lag!)
@@ -101,9 +102,10 @@ app.post('/voice/answer', async (req, res) => {
     reminderPrompt = reminderContext.reminderPrompt;
   } else if (prefetchedContext) {
     // MANUAL OUTBOUND: Use pre-fetched context
-    console.log(`[${callSid}] Manual call with pre-fetched context`);
+    console.log(`[${callSid}] Manual call with pre-fetched context (greeting: ${prefetchedContext.preGeneratedGreeting ? 'ready' : 'none'})`);
     senior = prefetchedContext.senior;
     memoryContext = prefetchedContext.memoryContext;
+    preGeneratedGreeting = prefetchedContext.preGeneratedGreeting;
   } else {
     // INBOUND CALL: Fetch context now (can't pre-fetch unknown callers)
     try {
@@ -145,7 +147,7 @@ app.post('/voice/answer', async (req, res) => {
   console.log(`[${callSid}] Using pipeline: v1 (Claude + 4-layer observer)`);
 
   // Store metadata for when WebSocket connects
-  callMetadata.set(callSid, { senior, memoryContext, fromPhone, conversationId, reminderPrompt, pipeline });
+  callMetadata.set(callSid, { senior, memoryContext, fromPhone, conversationId, reminderPrompt, pipeline, preGeneratedGreeting });
 
   const twiml = new twilio.twiml.VoiceResponse();
 
@@ -844,7 +846,7 @@ wss.on('connection', async (twilioWs, req) => {
           const currentDelivery = reminderContext?.delivery || null;
 
           // V3.0: Always use V1 (Claude + 4-layer observer)
-          console.log(`[${callSid}] Creating V1 session (Claude + 4-layer observer)${currentDelivery ? ' with reminder tracking' : ''}`);
+          console.log(`[${callSid}] Creating V1 session (Claude + 4-layer observer)${currentDelivery ? ' with reminder tracking' : ''}${metadata.preGeneratedGreeting ? ' with pre-generated greeting' : ''}`);
           geminiSession = new V1AdvancedSession(
             twilioWs,
             streamSid,
@@ -852,7 +854,8 @@ wss.on('connection', async (twilioWs, req) => {
             metadata.memoryContext,
             metadata.reminderPrompt,
             [], // pendingReminders
-            currentDelivery // delivery record for acknowledgment tracking
+            currentDelivery, // delivery record for acknowledgment tracking
+            metadata.preGeneratedGreeting // pre-generated greeting (for instant response)
           );
           sessions.set(callSid, geminiSession);
 

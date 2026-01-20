@@ -206,15 +206,16 @@ RESPONSE FORMAT:
  * Uses: Deepgram STT → Claude + Observer → ElevenLabs TTS
  */
 export class V1AdvancedSession {
-  constructor(twilioWs, streamSid, senior = null, memoryContext = null, reminderPrompt = null, pendingReminders = [], currentDelivery = null) {
+  constructor(twilioWs, streamSid, senior = null, memoryContext = null, reminderPrompt = null, pendingReminders = [], currentDelivery = null, preGeneratedGreeting = null) {
     this.twilioWs = twilioWs;
     this.streamSid = streamSid;
     this.senior = senior;
     this.memoryContext = memoryContext;
     this.reminderPrompt = reminderPrompt;
+    this.preGeneratedGreeting = preGeneratedGreeting;
 
     // Log what context was received
-    console.log(`[V1][${streamSid}] Session created: senior=${senior?.name || 'none'}, memory=${memoryContext ? memoryContext.length + ' chars' : 'none'}, interests=${senior?.interests?.join(', ') || 'none'}`);
+    console.log(`[V1][${streamSid}] Session created: senior=${senior?.name || 'none'}, memory=${memoryContext ? memoryContext.length + ' chars' : 'none'}, greeting=${preGeneratedGreeting ? 'ready' : 'will generate'}`);
     this.isConnected = false;
     this.conversationLog = [];
     this.memoriesExtracted = false;
@@ -335,8 +336,11 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
     console.log(`[V1][${this.streamSid}] Starting advanced pipeline for ${this.senior?.name || 'unknown'}`);
     this.isConnected = true;
 
-    // Generate personalized greeting with Claude using full context
-    const greetingText = await this.generateGreeting();
+    // Use pre-generated greeting if available, otherwise generate now
+    const greetingText = this.preGeneratedGreeting || await this.generateGreeting();
+    if (this.preGeneratedGreeting) {
+      console.log(`[V1][${this.streamSid}] Using pre-generated greeting`);
+    }
 
     // Log greeting to conversation
     this.conversationLog.push({

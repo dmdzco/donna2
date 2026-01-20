@@ -258,16 +258,60 @@ export const schedulerService = {
       ? await memoryService.buildContext(senior.id, null, senior)
       : null;
 
+    // Pre-generate greeting with full context
+    let preGeneratedGreeting = null;
+    if (senior) {
+      preGeneratedGreeting = await this.generateGreeting(senior, memoryContext);
+    }
+
     // Normalize phone for consistent lookup
     const normalized = normalizePhone(phoneNumber);
     prefetchedContextByPhone.set(normalized, {
       senior,
       memoryContext,
+      preGeneratedGreeting,
       fetchedAt: new Date()
     });
 
-    console.log(`[Scheduler] Pre-fetch complete for ${normalized}`);
-    return { senior, memoryContext };
+    console.log(`[Scheduler] Pre-fetch complete for ${normalized} (greeting ready: ${!!preGeneratedGreeting})`);
+    return { senior, memoryContext, preGeneratedGreeting };
+  },
+
+  /**
+   * Generate personalized greeting using Claude with full context
+   */
+  async generateGreeting(senior, memoryContext) {
+    const { getAdapter } = await import('../adapters/llm/index.js');
+    const firstName = senior.name?.split(' ')[0];
+
+    // Get recent memories for extra context
+    let recentMemories = [];
+    try {
+      recentMemories = await memoryService.getRecent(senior.id, 5);
+    } catch (e) {
+      console.error('[Scheduler] Memory fetch error:', e.message);
+    }
+
+    const greetingPrompt = `You are Donna, calling ${firstName} to check in.
+
+CONTEXT:
+- Interests: ${senior.interests?.join(', ') || 'unknown'}
+${memoryContext ? `\n${memoryContext}` : ''}
+${recentMemories.length > 0 ? `\nRecent memories:\n${recentMemories.map(m => `- ${m.content}`).join('\n')}` : ''}
+
+Generate a warm, personalized greeting (1-2 sentences). Reference something specific from their life - a hobby, recent event, or something you remember about them. End with a question.
+
+RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
+
+    try {
+      const adapter = getAdapter(process.env.VOICE_MODEL || 'claude-sonnet');
+      const greeting = await adapter.generate(greetingPrompt, [], { maxTokens: 100, temperature: 0.8 });
+      console.log(`[Scheduler] Generated greeting: "${greeting.substring(0, 50)}..."`);
+      return greeting.trim();
+    } catch (error) {
+      console.error('[Scheduler] Greeting generation error:', error.message);
+      return `Hello ${firstName}! It's Donna calling to check in. How are you doing today?`;
+    }
   },
 
   /**

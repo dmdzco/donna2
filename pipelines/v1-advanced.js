@@ -134,7 +134,7 @@ RESPONSE FORMAT:
 - 1-2 sentences MAX
 - Answer briefly, then ask ONE follow-up question
 - Output ONLY what Donna says out loud - nothing else
-- Do NOT say "dear" - use their name occasionally instead`;
+- NEVER say "dear" or "dearie" - this is forbidden`;
 
   if (senior) {
     prompt += `\n\nYou are speaking with ${senior.name}.`;

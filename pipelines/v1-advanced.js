@@ -7,6 +7,7 @@ import { pcm24kToMulaw8k } from '../audio-utils.js';
 import { memoryService } from '../services/memory.js';
 import { quickAnalyze } from './quick-observer.js';
 import { fastAnalyzeWithTools, formatFastObserverGuidance } from './fast-observer.js';
+import { runPostTurnTasks } from './post-turn-agent.js';
 
 const anthropic = new Anthropic();
 
@@ -80,9 +81,11 @@ Your personality:
 - Speak slowly and clearly
 - Be patient and understanding
 - Show genuine interest in their day and wellbeing
-- Ask follow-up questions to keep the conversation going
-- Keep responses SHORT (1-2 sentences) - this is a phone call
-- Be conversational and natural`;
+
+CRITICAL: Keep responses VERY SHORT - 1-2 sentences MAX. This is a phone call, not a letter.
+- Answer briefly, then ask ONE simple follow-up question
+- Never give multiple topics or long explanations in one turn
+- Think: what would a caring friend say in 10 seconds or less?`;
 
   if (senior) {
     prompt += `\n\nYou are speaking with ${senior.name}.`;
@@ -462,6 +465,9 @@ export class V1AdvancedSession {
     this.wasInterrupted = false; // Reset interrupt flag
 
     try {
+      // Layer 1: Quick Observer (0ms) - for post-turn processing
+      const quickResult = quickAnalyze(userMessage, this.conversationLog.slice(-6));
+
       // Build system prompt with observer signal and dynamic memories
       const systemPrompt = buildSystemPrompt(
         this.senior,
@@ -488,7 +494,7 @@ export class V1AdvancedSession {
       console.log(`[V1][${this.streamSid}] Calling Claude...`);
       const response = await anthropic.messages.create({
         model: 'claude-3-haiku-20240307',
-        max_tokens: 150, // Keep responses short for phone call
+        max_tokens: 75, // ~2 sentences max for phone call
         system: systemPrompt,
         messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
       });
@@ -514,6 +520,9 @@ export class V1AdvancedSession {
 
       // Convert to speech and send to Twilio
       await this.textToSpeechAndSend(responseText);
+
+      // Layer 4: Post-turn tasks (fire and forget - don't await)
+      runPostTurnTasks(userMessage, responseText, quickResult, this.senior);
 
     } catch (error) {
       console.error(`[V1][${this.streamSid}] Response generation failed:`, error.message);
@@ -600,7 +609,7 @@ export class V1AdvancedSession {
       const [stream] = await Promise.all([
         anthropic.messages.stream({
           model: 'claude-3-haiku-20240307',
-          max_tokens: 150,
+          max_tokens: 75, // ~2 sentences max
           system: systemPrompt,
           messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
         }),
@@ -664,6 +673,9 @@ export class V1AdvancedSession {
           content: fullResponse,
           timestamp: new Date().toISOString()
         });
+
+        // Layer 4: Post-turn tasks (fire and forget - don't await)
+        runPostTurnTasks(userMessage, fullResponse, quickResult, this.senior);
       }
 
       // Wait a moment for final audio chunks before closing

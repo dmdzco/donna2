@@ -64,14 +64,13 @@ const callMetadata = new Map();
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    milestone: 8,
+    version: '2.4',
     activeSessions: sessions.size,
     pipelines: {
       v0: 'gemini-2.5-flash-native-audio',
       v1: 'claude-sonnet + observer + elevenlabs'
     },
     defaultPipeline: process.env.DEFAULT_PIPELINE || 'v0',
-    features: ['news-updates', 'scheduled-calls', 'browser-calling', 'dual-pipeline']
   });
 });
 
@@ -975,11 +974,11 @@ server.on('upgrade', (request, socket, head) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Donna listening on port ${PORT}`);
+  console.log(`Donna v2.4 listening on port ${PORT}`);
   console.log(`Voice webhook: ${BASE_URL}/voice/answer`);
   console.log(`Media stream: ${WS_URL}/media-stream`);
   console.log(`Browser call: ${WS_URL}/browser-call`);
-  console.log(`Milestone: 8 (Dual Pipeline - V0 Gemini / V1 Claude+Observer)`);
+  console.log(`Pipelines: V0 (Gemini) / V1 (Claude+Observer+ElevenLabs)`);
   console.log(`Default pipeline: ${process.env.DEFAULT_PIPELINE || 'v0'}`);
 
   // Start the reminder scheduler (check every minute)

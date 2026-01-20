@@ -2,21 +2,20 @@
 
 AI-powered companion that provides elderly individuals with friendly phone conversations via real-time voice AI.
 
-## Current Status: v2.4 (Dual Pipeline)
+## Features
 
-**Working Features:**
 - **Dual Pipeline Architecture** - Select V0 or V1 from admin UI
   - **V0**: Gemini 2.5 Native Audio (low latency, default)
-  - **V1**: Claude + Observer Agent + ElevenLabs (higher quality, more control)
+  - **V1**: Claude + Observer Agent + ElevenLabs (higher quality)
 - Real-time voice calls (Twilio Media Streams)
 - User speech transcription (Deepgram STT)
-- Mid-conversation memory retrieval (keyword triggers)
-- News updates (OpenAI web search, based on interests)
-- Scheduled reminder calls (auto-triggers when due)
-- Enhanced admin dashboard (4 tabs)
+- Mid-conversation memory retrieval
+- News updates (OpenAI web search)
+- Scheduled reminder calls
+- Admin dashboard (4 tabs)
 - Senior profile management
-- Memory system with semantic search (pgvector + OpenAI)
-- Memory extraction from conversations
+- Memory system with semantic search (pgvector)
+- **Observability Dashboard** - Call flow visualization
 
 ## Quick Start
 
@@ -31,6 +30,7 @@ curl http://localhost:3001/health
 ```
 
 Admin dashboard: `http://localhost:3001/admin.html`
+Observability: `http://localhost:5174` (run `npm run dev` in `apps/observability/`)
 
 ## Architecture
 
@@ -67,17 +67,6 @@ Admin dashboard: `http://localhost:3001/admin.html`
 | **Observer Agent** | No | Yes (every 30s) |
 | **Best For** | Quick responses | Quality + insights |
 
-## Tech Stack
-
-| Component | V0 | V1 | Shared |
-|-----------|----|----|--------|
-| **Voice AI** | Gemini 2.5 Flash | Claude Sonnet | - |
-| **STT** | Deepgram (parallel) | Deepgram | - |
-| **TTS** | Gemini Native | ElevenLabs | - |
-| **Phone** | - | - | Twilio Media Streams |
-| **Database** | - | - | Neon PostgreSQL + pgvector |
-| **Hosting** | - | - | Railway |
-
 ## Project Structure
 
 ```
@@ -99,14 +88,16 @@ donna/
 │   ├── client.js               # Database connection
 │   └── schema.js               # Drizzle ORM schema
 ├── public/
-│   └── admin.html              # Admin UI (4 tabs + pipeline selector)
+│   └── admin.html              # Admin UI
+├── apps/
+│   └── observability/          # React observability dashboard
 └── audio-utils.js              # Audio format conversion
 ```
 
 ## Environment Variables
 
 ```bash
-# ============ REQUIRED (Both Pipelines) ============
+# Required (Both Pipelines)
 PORT=3001
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
@@ -114,15 +105,15 @@ TWILIO_PHONE_NUMBER=+1...
 DATABASE_URL=postgresql://...
 OPENAI_API_KEY=...              # Embeddings + news search
 
-# ============ V0 PIPELINE ============
+# V0 Pipeline
 GOOGLE_API_KEY=...              # Gemini 2.5 Flash
 
-# ============ V1 PIPELINE ============
+# V1 Pipeline
 ANTHROPIC_API_KEY=...           # Claude Sonnet
 ELEVENLABS_API_KEY=...          # TTS
 DEEPGRAM_API_KEY=...            # STT (also used by V0)
 
-# ============ OPTIONAL ============
+# Optional
 DEFAULT_PIPELINE=v0             # v0 or v1
 ```
 
@@ -139,35 +130,7 @@ DEFAULT_PIPELINE=v0             # v0 or v1
 | `/api/seniors/:id/memories` | GET/POST | Manage memories |
 | `/api/conversations` | GET | View conversation history |
 | `/api/reminders` | GET/POST | Manage reminders |
-| `/api/reminders/:id` | PATCH/DELETE | Update/delete reminder |
-| `/api/stats` | GET | Dashboard statistics |
-
-## Admin Dashboard
-
-Access at `/admin.html` with 4 tabs:
-- **Dashboard** - Stats, recent calls, upcoming reminders
-- **Seniors** - Add/edit/delete seniors, manage memories
-- **Calls** - Call history with transcripts
-- **Reminders** - Create recurring/one-time reminders
-
-**Pipeline Selector**: Dropdown in header to switch between V0/V1
-
-## Memory System
-
-**Flow:**
-1. **Call Start**: Load relevant memories + news into system prompt
-2. **During Call**: Deepgram transcribes → keyword triggers → memory injection
-3. **Call End**: Extract facts/preferences, store with embeddings
-
-**Memory Types:** `fact`, `preference`, `event`, `concern`, `relationship`
-
-## Observer Agent (V1 Only)
-
-Analyzes conversation every 30 seconds:
-- **Engagement level** - high/medium/low
-- **Emotional state** - happy, confused, tired, etc.
-- **Reminder timing** - when to naturally deliver reminders
-- **Concerns** - issues to flag for caregivers
+| `/api/observability/*` | GET | Observability data |
 
 ## Deployment
 
@@ -177,21 +140,12 @@ Analyzes conversation every 30 seconds:
 3. Add environment variables
 4. Deploy (auto-deploys on push)
 
-## Version History
-
-- **v2.4** - Dual pipeline (V0 Gemini / V1 Claude+Observer+ElevenLabs)
-- **v2.3** - Scheduled reminder calls
-- **v2.2** - Enhanced admin dashboard (4 tabs)
-- **v2.1** - Deepgram STT, mid-call memory, news updates
-- **v2.0** - Full voice calls with memory
-- **v1.0** - Basic Twilio integration
-
 ## Documentation
 
-- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) - Comprehensive system architecture
+- [docs/architecture/OVERVIEW.md](./docs/architecture/OVERVIEW.md) - System architecture
+- [docs/NEXT_STEPS.md](./docs/NEXT_STEPS.md) - Roadmap
 - [CLAUDE.md](./CLAUDE.md) - AI assistant context
-- [docs/NEXT_STEPS.md](./docs/NEXT_STEPS.md) - Implementation roadmap
-- [docs/plans/](./docs/plans/) - Design documents and optimization plans
+- [docs/plans/](./docs/plans/) - Design documents
 
 ## License
 

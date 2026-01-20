@@ -182,9 +182,11 @@ function extractCompleteSentences(buffer) {
 }
 
 /**
- * Build system prompt - full context for both Gemini and Claude
+ * Build system prompt
+ * For Gemini: skip memoryContext (contains URLs that break systemInstruction)
+ * For Claude: include everything in system prompt
  */
-const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null) => {
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null, forGemini = false) => {
   let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
 
 RESPONSE FORMAT:
@@ -204,7 +206,8 @@ RESPONSE FORMAT:
     }
   }
 
-  if (memoryContext) {
+  // For Gemini: memoryContext goes in messages instead (has URLs that break systemInstruction)
+  if (!forGemini && memoryContext) {
     prompt += `\n\n${memoryContext}`;
   }
 
@@ -599,7 +602,7 @@ export class V1AdvancedSession {
       const useGemini = modelConfig.model === MODELS.FAST && geminiClient;
       console.log(`[V1][${this.streamSid}] Model: ${useGemini ? 'Gemini 3 Flash' : 'Claude Sonnet'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
 
-      // Build system prompt - full context for both models
+      // Build system prompt - for Gemini, memoryContext goes in messages instead
       const systemPrompt = buildSystemPrompt(
         this.senior,
         this.memoryContext,
@@ -607,7 +610,8 @@ export class V1AdvancedSession {
         this.lastObserverSignal,
         this.dynamicMemoryContext,
         quickResult.guidance,
-        null // fast guidance not used in non-streaming
+        null, // fast guidance not used in non-streaming
+        useGemini // forGemini - skip memoryContext in system prompt
       );
 
       // Build messages array
@@ -617,6 +621,18 @@ export class V1AdvancedSession {
           role: entry.role,
           content: entry.content
         }));
+
+      // For Gemini: inject memoryContext (with news/URLs) as first user message
+      if (useGemini && this.memoryContext) {
+        messages.unshift({
+          role: 'user',
+          content: `Context for this call:\n${this.memoryContext}\n\nNow continue the conversation naturally.`
+        });
+        messages.splice(1, 0, {
+          role: 'assistant',
+          content: 'I understand the context. I will use this information naturally in our conversation.'
+        });
+      }
 
       // Add current message if not from greeting
       if (userMessage && !userMessage.includes('Greet') && !userMessage.includes('greeting')) {
@@ -700,7 +716,7 @@ export class V1AdvancedSession {
       const useGemini = modelConfig.model === MODELS.FAST && geminiClient;
       console.log(`[V1][${this.streamSid}] Model: ${useGemini ? 'Gemini 3 Flash' : 'Claude Sonnet'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
 
-      // Build system prompt - full context for both models
+      // Build system prompt - for Gemini, memoryContext goes in messages instead
       const systemPrompt = buildSystemPrompt(
         this.senior,
         this.memoryContext,
@@ -708,7 +724,8 @@ export class V1AdvancedSession {
         this.lastObserverSignal,
         this.dynamicMemoryContext,
         quickResult.guidance,
-        fastGuidance
+        fastGuidance,
+        useGemini // forGemini - skip memoryContext in system prompt
       );
 
       // Build messages array
@@ -718,6 +735,18 @@ export class V1AdvancedSession {
           role: entry.role,
           content: entry.content
         }));
+
+      // For Gemini: inject memoryContext (with news/URLs) as first user message
+      if (useGemini && this.memoryContext) {
+        messages.unshift({
+          role: 'user',
+          content: `Context for this call:\n${this.memoryContext}\n\nNow continue the conversation naturally.`
+        });
+        messages.splice(1, 0, {
+          role: 'assistant',
+          content: 'I understand the context. I will use this information naturally in our conversation.'
+        });
+      }
 
       if (userMessage && !userMessage.includes('Greet') && !userMessage.includes('greeting')) {
         messages.push({ role: 'user', content: userMessage });

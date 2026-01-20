@@ -83,17 +83,28 @@ Respond ONLY with valid JSON matching this schema:
       ];
 
       const responseText = await adapter.generate(systemPrompt, messages, {
-        maxTokens: 500,
-        temperature: 0.3,
+        maxTokens: 800,
+        temperature: 0.1,
       });
 
-      // Parse JSON response (handle markdown code blocks)
-      let jsonText = responseText;
-      if (responseText.includes('```')) {
-        jsonText = responseText.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+      // Parse JSON response (handle markdown code blocks, extra text)
+      let jsonText = responseText.trim();
+      if (jsonText.includes('```')) {
+        jsonText = jsonText.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+      }
+      // Extract JSON object
+      const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonText = jsonMatch[0];
       }
 
-      const signal = JSON.parse(jsonText);
+      let signal;
+      try {
+        signal = JSON.parse(jsonText);
+      } catch (parseError) {
+        console.error('[ObserverAgent] JSON parse failed, raw:', responseText.substring(0, 300));
+        throw parseError;
+      }
 
       // Force end call if way over time
       if (callDurationMinutes > this.maxCallDuration * 1.2) {

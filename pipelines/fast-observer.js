@@ -44,19 +44,26 @@ async function analyzeSentiment(userMessage, conversationHistory = []) {
 
   try {
     const adapter = getAdapter(FAST_OBSERVER_MODEL);
-    const text = await adapter.generate(systemPrompt, messages, { maxTokens: 200, temperature: 0.1 });
+    const text = await adapter.generate(systemPrompt, messages, { maxTokens: 300, temperature: 0.1 });
 
     // Extract JSON from response (handle markdown, extra text)
-    let jsonText = text;
-    if (text.includes('```')) {
-      jsonText = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+    let jsonText = text.trim();
+    if (jsonText.includes('```')) {
+      jsonText = jsonText.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
     }
     // Try to find JSON object in response
-    const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+    const jsonMatch = jsonText.match(/\{[^{}]*\}/);
     if (jsonMatch) {
       jsonText = jsonMatch[0];
     }
-    return JSON.parse(jsonText);
+
+    // Try to parse, log on failure
+    try {
+      return JSON.parse(jsonText);
+    } catch (parseError) {
+      console.error('[FastObserver] JSON parse failed, raw:', text.substring(0, 200));
+      throw parseError;
+    }
   } catch (error) {
     console.error('[FastObserver] Analysis error:', error.message);
     return {

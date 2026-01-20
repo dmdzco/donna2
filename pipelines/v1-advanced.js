@@ -224,24 +224,71 @@ export class V1AdvancedSession {
     console.log(`[V1][${this.streamSid}] Starting advanced pipeline for ${this.senior?.name || 'unknown'}`);
     this.isConnected = true;
 
-    // Connect Deepgram STT
-    await this.connectDeepgram();
+    // Start Deepgram and greeting TTS in parallel for fastest startup
+    const greetingText = this.senior?.name
+      ? `Hello ${this.senior.name}! It's Donna calling to check in on you. How are you doing today, dear?`
+      : `Hello! It's Donna calling to check in. How are you doing today?`;
+
+    // Log greeting to conversation
+    this.conversationLog.push({
+      role: 'assistant',
+      content: greetingText,
+      timestamp: new Date().toISOString()
+    });
+
+    // Run Deepgram connection AND greeting TTS in parallel
+    await Promise.all([
+      this.connectDeepgram(),
+      this.sendPrebuiltGreeting(greetingText)
+    ]);
 
     // Start silence detection
     this.startSilenceDetection();
 
     // Backup observer check (every 60s) - main updates happen on each utterance
     this.observerCheckInterval = setInterval(() => this.runObserver(), 60000);
+  }
 
-    // Send initial greeting (use streaming if enabled)
-    const greetingPrompt = this.senior
-      ? `Greet ${this.senior.name} warmly by name. You're their AI companion Donna calling to check in. Keep it brief - just say hi.`
-      : 'Say a brief, warm greeting. You are Donna, an AI companion.';
+  /**
+   * Send a pre-built greeting without calling Claude - instant response
+   */
+  async sendPrebuiltGreeting(greetingText) {
+    if (!process.env.ELEVENLABS_API_KEY) {
+      console.log(`[V1][${this.streamSid}] ELEVENLABS_API_KEY not set, skipping greeting`);
+      return;
+    }
 
-    if (V1_STREAMING_ENABLED && process.env.ELEVENLABS_API_KEY) {
-      await this.generateAndSendResponseStreaming(greetingPrompt);
-    } else {
-      await this.generateAndSendResponse(greetingPrompt);
+    const startTime = Date.now();
+    console.log(`[V1][${this.streamSid}] Sending pre-built greeting...`);
+
+    try {
+      // Use the regular TTS adapter for the greeting (simpler, still fast)
+      const pcmBuffer = await this.tts.textToSpeech(greetingText);
+      const mulawBuffer = pcm24kToMulaw8k(pcmBuffer);
+
+      this.isSpeaking = true;
+
+      // Send to Twilio in chunks
+      const chunkSize = 3200;
+      for (let i = 0; i < mulawBuffer.length; i += chunkSize) {
+        if (!this.isSpeaking) break;
+
+        const chunk = mulawBuffer.slice(i, i + chunkSize);
+        if (this.twilioWs.readyState === 1) {
+          this.twilioWs.send(JSON.stringify({
+            event: 'media',
+            streamSid: this.streamSid,
+            media: { payload: chunk.toString('base64') }
+          }));
+        }
+        await new Promise(resolve => setImmediate(resolve));
+      }
+
+      this.isSpeaking = false;
+      console.log(`[V1][${this.streamSid}] Greeting sent in ${Date.now() - startTime}ms`);
+    } catch (error) {
+      console.error(`[V1][${this.streamSid}] Greeting failed:`, error.message);
+      this.isSpeaking = false;
     }
   }
 

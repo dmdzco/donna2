@@ -18,12 +18,18 @@
 
 ---
 
-## Current Status: v2.4 (Dual Pipeline)
+## Current Status: v2.5 (Streaming Pipeline)
 
 ### Working Features
 - **Dual Pipeline Architecture** - Select V0 or V1 from admin UI
-  - **V0**: Gemini 2.5 Native Audio (low latency, default)
-  - **V1**: Deepgram STT → Claude + Observer → ElevenLabs TTS
+  - **V0**: Gemini 2.5 Native Audio (low latency)
+  - **V1**: Streaming pipeline with multi-layer observers
+- **V1 Streaming Pipeline** (NEW)
+  - Pre-built greeting (no Claude call needed)
+  - Claude streaming responses
+  - WebSocket TTS (ElevenLabs)
+  - Sentence-by-sentence audio delivery
+  - Multi-layer observer architecture
 - Real-time voice calls (Twilio)
 - User speech transcription (Deepgram STT)
 - Mid-conversation memory retrieval (triggers on keywords)
@@ -42,14 +48,40 @@
 
 ### Pipeline Comparison
 
-| Feature | V0 (Gemini Native) | V1 (Claude + Observer) |
+| Feature | V0 (Gemini Native) | V1 (Claude + Streaming) |
 |---------|-------------------|------------------------|
-| **AI Model** | Gemini 2.5 Flash | Claude Sonnet |
+| **AI Model** | Gemini 2.5 Flash | Claude Sonnet (streaming) |
 | **STT** | Gemini built-in + Deepgram | Deepgram |
-| **TTS** | Gemini built-in | ElevenLabs |
-| **Latency** | ~500ms | ~1.5-2s |
-| **Observer Agent** | No | Yes (every 30s) |
+| **TTS** | Gemini built-in | ElevenLabs WebSocket |
+| **Greeting Latency** | ~500ms | ~400ms (pre-built) |
+| **Response Latency** | ~500ms | ~800ms (streaming) |
+| **Observer Layers** | No | 3 layers (0ms/300ms/800ms) |
 | **Best For** | Quick responses | Quality + insights |
+
+### V1 Streaming Architecture
+
+```
+User speaks → Deepgram STT → Process utterance
+                                    │
+                    ┌───────────────┼───────────────┐
+                    ▼               ▼               ▼
+              Layer 1 (0ms)   Layer 2 (~300ms)  Layer 3 (~800ms)
+              Quick Observer  Fast Observer     Deep Observer
+              (regex)         (Haiku+memory)    (Sonnet analysis)
+                    │               │               │
+                    └───────┬───────┘               │
+                            ▼                       │
+                    Claude Streaming ←──────────────┘
+                            │                 (next turn)
+                            ▼
+                    Sentence Buffer
+                            │
+                            ▼
+                    ElevenLabs WebSocket TTS
+                            │
+                            ▼
+                    Twilio (audio chunks)
+```
 
 ### Key Files
 
@@ -58,10 +90,13 @@
 ├── index.js                    ← Main server + pipeline router
 ├── gemini-live.js              ← V0: Gemini native audio session
 ├── pipelines/
-│   ├── v1-advanced.js          ← V1: Claude + Observer session
-│   └── observer-agent.js       ← Conversation analyzer
+│   ├── v1-advanced.js          ← V1: Streaming Claude + Observers
+│   ├── observer-agent.js       ← Layer 3: Deep conversation analyzer
+│   ├── quick-observer.js       ← Layer 1: Instant regex patterns (NEW)
+│   └── fast-observer.js        ← Layer 2: Haiku + memory search (NEW)
 ├── adapters/
-│   └── elevenlabs.js           ← ElevenLabs TTS adapter
+│   ├── elevenlabs.js           ← ElevenLabs REST TTS adapter
+│   └── elevenlabs-streaming.js ← ElevenLabs WebSocket TTS (NEW)
 ├── services/
 │   ├── memory.js               ← Memory storage + semantic search
 │   ├── seniors.js              ← Senior profile CRUD
@@ -87,9 +122,12 @@
 |------|---------------|
 | Change V0 (Gemini) behavior | `gemini-live.js` |
 | Change V1 (Claude) behavior | `pipelines/v1-advanced.js` |
-| Modify Observer Agent | `pipelines/observer-agent.js` |
-| Change TTS settings | `adapters/elevenlabs.js` |
-| Modify system prompts | `gemini-live.js` or `pipelines/v1-advanced.js` |
+| Modify streaming TTS | `adapters/elevenlabs-streaming.js` |
+| Add instant analysis patterns | `pipelines/quick-observer.js` |
+| Modify fast analysis (Haiku) | `pipelines/fast-observer.js` |
+| Modify deep Observer Agent | `pipelines/observer-agent.js` |
+| Change REST TTS settings | `adapters/elevenlabs.js` |
+| Modify system prompts | `pipelines/v1-advanced.js` |
 | Add new API endpoint | `index.js` |
 | Update admin UI | `public/admin.html` |
 | Database changes | `db/schema.js` |
@@ -114,7 +152,8 @@ ELEVENLABS_API_KEY=...
 DEEPGRAM_API_KEY=...        # Also used by V0 for memory triggers
 
 # Optional
-DEFAULT_PIPELINE=v0         # v0 or v1
+DEFAULT_PIPELINE=v1         # v0 or v1
+V1_STREAMING_ENABLED=true   # Set to 'false' to disable streaming
 ```
 
 ### Pipeline Selection
@@ -128,12 +167,46 @@ The pipeline is selected:
 
 ## Roadmap
 
-See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
-- V1 Latency Optimization
+See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work.
+
+### Next Up: Dynamic Model Routing (Observer-Driven)
+
+**Spec:** [docs/DYNAMIC_MODEL_ROUTING.md](docs/DYNAMIC_MODEL_ROUTING.md)
+
+**Concept:** Default to Haiku (fast, cheap). Observers explicitly request Sonnet when needed.
+
+```
+90% of turns: Haiku (~80ms, 100 tokens)
+ → Greetings, acknowledgments, casual chat
+
+10% of turns: Sonnet (~200ms, 200-400 tokens)
+ → Health concerns, emotional support, stories, complex questions
+```
+
+**Each observer outputs:**
+```javascript
+modelRecommendation: {
+  use_sonnet: true/false,
+  max_tokens: 100-400,
+  reason: 'health_safety' | 'emotional_support' | 're_engagement' | etc.
+}
+```
+
+**Files to modify:**
+- `pipelines/quick-observer.js` - Add modelRecommendation
+- `pipelines/fast-observer.js` - Haiku decides if Sonnet needed
+- `pipelines/observer-agent.js` - Add model_recommendation
+- `pipelines/model-selector.js` - NEW: Central routing logic
+- `pipelines/v1-advanced.js` - Use selectModel()
+
+**Philosophy:** Let the AI decide when it needs more AI.
+
+### Other Upcoming Work
+- ~~V1 Latency Optimization~~ ✓ Completed (streaming pipeline)
 - Caregiver Authentication
 - Observer Signal Storage
 - Analytics Dashboard
 
 ---
 
-*Last updated: January 2026 - v2.4 (Dual Pipeline)*
+*Last updated: January 2026 - v2.5 (Streaming Pipeline)*

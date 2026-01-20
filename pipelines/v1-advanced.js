@@ -181,7 +181,10 @@ function extractCompleteSentences(buffer) {
   return { complete: sentences, remaining };
 }
 
-const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null) => {
+/**
+ * Build system prompt - compact version for Gemini, full version for Claude
+ */
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null, forGemini = false) => {
   let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
 
 RESPONSE FORMAT:
@@ -201,7 +204,9 @@ RESPONSE FORMAT:
     }
   }
 
-  if (memoryContext) {
+  // For Gemini: skip memoryContext (contains news with URLs that break Gemini)
+  // For Claude: include full context
+  if (!forGemini && memoryContext) {
     prompt += `\n\n${memoryContext}`;
   }
 
@@ -209,7 +214,7 @@ RESPONSE FORMAT:
     prompt += reminderPrompt;
   }
 
-  // Always inject memories
+  // Always inject memories (short facts)
   if (dynamicMemoryContext) {
     prompt += `\n\n${dynamicMemoryContext}`;
   }
@@ -219,7 +224,7 @@ RESPONSE FORMAT:
     prompt += `\n\nFrom previous conversations:\n${fastObserverGuidance.memories}`;
   }
 
-  // Always inject guidance - Gemini 3 Flash handles it well
+  // Always inject guidance
   const guidanceParts = [];
 
   if (quickObserverGuidance) {
@@ -596,7 +601,7 @@ export class V1AdvancedSession {
       const useGemini = modelConfig.model === MODELS.FAST && geminiClient;
       console.log(`[V1][${this.streamSid}] Model: ${useGemini ? 'Gemini 3 Flash' : 'Claude Sonnet'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
 
-      // Build system prompt with guidance (Gemini handles it well)
+      // Build system prompt - compact for Gemini (no news URLs), full for Claude
       const systemPrompt = buildSystemPrompt(
         this.senior,
         this.memoryContext,
@@ -604,7 +609,8 @@ export class V1AdvancedSession {
         this.lastObserverSignal,
         this.dynamicMemoryContext,
         quickResult.guidance,
-        null // fast guidance not used in non-streaming
+        null, // fast guidance not used in non-streaming
+        useGemini // forGemini - skip news context that breaks Gemini
       );
 
       // Build messages array
@@ -697,7 +703,7 @@ export class V1AdvancedSession {
       const useGemini = modelConfig.model === MODELS.FAST && geminiClient;
       console.log(`[V1][${this.streamSid}] Model: ${useGemini ? 'Gemini 3 Flash' : 'Claude Sonnet'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
 
-      // Build system prompt - Gemini handles guidance well
+      // Build system prompt - compact for Gemini (no news URLs), full for Claude
       const systemPrompt = buildSystemPrompt(
         this.senior,
         this.memoryContext,
@@ -705,7 +711,8 @@ export class V1AdvancedSession {
         this.lastObserverSignal,
         this.dynamicMemoryContext,
         quickResult.guidance,
-        fastGuidance
+        fastGuidance,
+        useGemini // forGemini - skip news context that breaks Gemini
       );
 
       // Build messages array

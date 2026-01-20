@@ -59,6 +59,7 @@ Respond ONLY with valid JSON matching this schema:
 {
   "engagement_level": "high" | "medium" | "low",
   "emotional_state": "brief description",
+  "emotional_complexity": "simple" | "complex" (complex = multi-layered emotions needing nuance),
   "should_deliver_reminder": boolean,
   "reminder_to_deliver": "reminder id if applicable",
   "suggested_topic": "topic suggestion if conversation stalls",
@@ -102,6 +103,9 @@ Respond ONLY with valid JSON matching this schema:
         signal.end_call_reason = 'Call duration exceeded recommended time';
       }
 
+      // Build model recommendation based on deep analysis
+      signal.modelRecommendation = this.buildModelRecommendation(signal);
+
       return signal;
     } catch (error) {
       console.error('[ObserverAgent] Analysis error:', error.message);
@@ -137,5 +141,59 @@ Respond ONLY with valid JSON matching this schema:
    */
   getCallDuration() {
     return (Date.now() - this.callStartTime.getTime()) / 60000;
+  }
+
+  /**
+   * Build model recommendation based on deep observer analysis
+   * Returns upgrade to Sonnet + higher token count for complex situations
+   */
+  buildModelRecommendation(signal) {
+    // Complex emotional patterns need sophisticated handling
+    if (signal.emotional_complexity === 'complex') {
+      return {
+        use_sonnet: true,
+        max_tokens: 180,
+        reason: 'complex_emotional_pattern'
+      };
+    }
+
+    // Should end call - needs graceful wrap-up
+    if (signal.should_end_call) {
+      return {
+        use_sonnet: true,
+        max_tokens: 150,
+        reason: 'graceful_ending'
+      };
+    }
+
+    // Reminder delivery - needs natural integration
+    if (signal.should_deliver_reminder && signal.reminder_to_deliver) {
+      return {
+        use_sonnet: false, // Haiku can handle, just needs more tokens
+        max_tokens: 120,
+        reason: 'reminder_delivery'
+      };
+    }
+
+    // Low engagement - may need creative response
+    if (signal.engagement_level === 'low') {
+      return {
+        use_sonnet: true,
+        max_tokens: 120,
+        reason: 'low_engagement_recovery'
+      };
+    }
+
+    // Has concerns - need thoughtful response
+    if (signal.concerns?.length > 0) {
+      return {
+        use_sonnet: true,
+        max_tokens: 150,
+        reason: 'caregiver_concerns'
+      };
+    }
+
+    // Default - no recommendation
+    return null;
   }
 }

@@ -79,6 +79,7 @@ export function quickAnalyze(userMessage, recentHistory = []) {
     isQuestion: false,
     engagementLevel: 'normal',
     guidance: null,
+    modelRecommendation: null, // Dynamic model/token selection
   };
 
   if (!userMessage) return result;
@@ -141,7 +142,67 @@ export function quickAnalyze(userMessage, recentHistory = []) {
   // Build guidance string for system prompt
   result.guidance = buildGuidance(result);
 
+  // Build model recommendation for dynamic routing
+  result.modelRecommendation = buildModelRecommendation(result);
+
   return result;
+}
+
+/**
+ * Build model recommendation based on detected signals
+ * Returns upgrade to Sonnet + higher token count for sensitive situations
+ */
+function buildModelRecommendation(analysis) {
+  // Health mentions - safety requires thoughtful response
+  if (analysis.healthSignals.length > 0) {
+    const severeHealth = ['fall', 'dizziness', 'cardiovascular', 'pain'];
+    const isSevere = analysis.healthSignals.some(s => severeHealth.includes(s));
+    return {
+      use_sonnet: true,
+      max_tokens: isSevere ? 150 : 120,
+      reason: 'health_safety'
+    };
+  }
+
+  // Negative emotions - need nuanced empathy
+  const negativeEmotions = analysis.emotionSignals.filter(e => e.valence === 'negative');
+  if (negativeEmotions.length > 0) {
+    return {
+      use_sonnet: true,
+      max_tokens: 150,
+      reason: 'emotional_support'
+    };
+  }
+
+  // Low engagement - need creative re-engagement
+  if (analysis.engagementLevel === 'low') {
+    return {
+      use_sonnet: true,
+      max_tokens: 120,
+      reason: 'low_engagement'
+    };
+  }
+
+  // Simple question - quick answer is better
+  if (analysis.isQuestion && analysis.healthSignals.length === 0 && negativeEmotions.length === 0) {
+    return {
+      use_sonnet: false,
+      max_tokens: 60,
+      reason: 'simple_question'
+    };
+  }
+
+  // Family mention - Haiku handles warmth fine
+  if (analysis.familySignals.length > 0) {
+    return {
+      use_sonnet: false,
+      max_tokens: 75,
+      reason: 'family_warmth'
+    };
+  }
+
+  // Default - no recommendation, use pipeline defaults
+  return null;
 }
 
 /**

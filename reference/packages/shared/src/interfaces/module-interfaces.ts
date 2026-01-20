@@ -298,6 +298,14 @@ export interface IConversationManager {
   flagConcern(conversationId: string, concern: string): Promise<void>;
   markReminderDelivered(conversationId: string, reminderId: string): Promise<void>;
   getRecentContext(seniorId: string, limit?: number): Promise<ConversationContext>;
+
+  /**
+   * Get conversation continuity - last N turns across all calls for a senior.
+   * This persists across call endings/drops and provides context for the next call.
+   * @param seniorId - The senior to get continuity for
+   * @param limit - Number of recent turns to retrieve (default 10)
+   */
+  getContinuity(seniorId: string, limit?: number): Promise<ConversationContinuity>;
 }
 
 export interface ConversationData {
@@ -331,6 +339,35 @@ export interface ConversationContext {
   recentNews?: NewsItem[];
   observerSignals?: ObserverSignal;
   currentTime?: Date;
+  // Conversation continuity (persists across calls)
+  continuity?: ConversationContinuity;
+}
+
+/**
+ * Conversation continuity - tracks recent turns across phone calls.
+ * This persists even when calls end or drop, providing context for the next call.
+ */
+export interface ConversationContinuity {
+  /** Last 10 turns across all recent calls for this senior */
+  recentTurns: TurnWithMeta[];
+  /** The senior's most recent message - what they last said/wanted */
+  lastSeniorTurn?: TurnWithMeta;
+  /** Was the last call dropped unexpectedly? */
+  lastCallDropped: boolean;
+  /** When was the last interaction? */
+  lastInteractionAt?: Date;
+}
+
+/**
+ * A turn with metadata about which conversation it came from
+ */
+export interface TurnWithMeta extends Turn {
+  /** The conversation this turn belongs to */
+  conversationId: string;
+  /** When the conversation started */
+  conversationStartedAt: Date;
+  /** Observer signals at this turn (if available) */
+  observerSignals?: ObserverSignal;
 }
 
 // ============================================================================

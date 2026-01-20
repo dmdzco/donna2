@@ -1,7 +1,7 @@
 import type { NeonHttpDatabase } from 'drizzle-orm/neon-http';
-import { eq, desc, asc } from 'drizzle-orm';
+import { eq, desc, asc, sql } from 'drizzle-orm';
 import { conversations, conversationTurns } from '@donna/database';
-import type { Conversation, TurnData, Turn } from '@donna/shared/interfaces';
+import type { Conversation, TurnData, Turn, TurnWithMeta } from '@donna/shared/interfaces';
 
 export interface IConversationRepository {
   create(data: CreateConversationData): Promise<Conversation>;
@@ -10,6 +10,11 @@ export interface IConversationRepository {
   addTurn(conversationId: string, turn: TurnData): Promise<void>;
   getTurns(conversationId: string): Promise<Turn[]>;
   update(id: string, data: Partial<UpdateConversationData>): Promise<Conversation>;
+  /**
+   * Get recent turns across ALL conversations for a senior.
+   * This joins conversation_turns with conversations to get turns across multiple calls.
+   */
+  getRecentTurnsAcrossCalls(seniorId: string, limit?: number): Promise<TurnWithMeta[]>;
 }
 
 export interface CreateConversationData {
@@ -138,6 +143,44 @@ export class ConversationRepository implements IConversationRepository {
     }
 
     return this.mapToConversation(result[0]);
+  }
+
+  /**
+   * Get recent turns across ALL conversations for a senior.
+   * Joins conversation_turns with conversations to get turns across multiple calls,
+   * ordered by most recent first.
+   */
+  async getRecentTurnsAcrossCalls(seniorId: string, limit: number = 10): Promise<TurnWithMeta[]> {
+    // Join conversation_turns with conversations to get senior's turns across all calls
+    const result = await this.db
+      .select({
+        // Turn fields
+        id: conversationTurns.id,
+        speaker: conversationTurns.speaker,
+        content: conversationTurns.content,
+        audioSegmentUrl: conversationTurns.audioSegmentUrl,
+        observerSignals: conversationTurns.observerSignals,
+        createdAt: conversationTurns.createdAt,
+        // Conversation fields
+        conversationId: conversations.id,
+        conversationStartedAt: conversations.startedAt,
+      })
+      .from(conversationTurns)
+      .innerJoin(conversations, eq(conversationTurns.conversationId, conversations.id))
+      .where(eq(conversations.seniorId, seniorId))
+      .orderBy(desc(conversationTurns.createdAt))
+      .limit(limit);
+
+    // Map to TurnWithMeta and reverse to get chronological order
+    return result.reverse().map((row) => ({
+      speaker: row.speaker as 'donna' | 'senior',
+      content: row.content,
+      timestamp: new Date(row.createdAt!),
+      audioUrl: row.audioSegmentUrl || undefined,
+      conversationId: row.conversationId,
+      conversationStartedAt: new Date(row.conversationStartedAt),
+      observerSignals: row.observerSignals as any,
+    }));
   }
 
   private mapToConversation(row: any): Conversation {

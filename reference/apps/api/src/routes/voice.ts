@@ -4,14 +4,25 @@ import { db } from '../db/client.js';
 import { AppError } from '../middleware/error-handler.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import { callService } from '../services/call-service.js';
+import { loggers, withContext } from '@donna/logger';
+import { eventBus, createCallConnectedEvent, createCallEndedEvent } from '@donna/event-bus';
 
+const log = loggers.api;
 const VoiceResponse = twilio.twiml.VoiceResponse;
 
 export const voiceRouter = Router();
 
 // Initiate a call to a senior (authenticated)
 voiceRouter.post('/call/:seniorId', authenticate, async (req: AuthRequest, res, next) => {
+  const callLog = withContext({
+    service: 'voice-routes',
+    seniorId: req.params.seniorId,
+    caregiverId: req.caregiverId,
+  });
+
   try {
+    callLog.info('Initiating call to senior');
+
     // Verify senior belongs to caregiver
     const seniorResult = await db.query(
       'SELECT * FROM seniors WHERE id = $1 AND caregiver_id = $2',
@@ -32,12 +43,15 @@ voiceRouter.post('/call/:seniorId', authenticate, async (req: AuthRequest, res, 
 
     const call = await callService.initiateCall(senior, remindersResult.rows);
 
+    callLog.info({ callSid: call.sid, status: call.status }, 'Call initiated successfully');
+
     res.json({
       success: true,
       callSid: call.sid,
       status: call.status,
     });
   } catch (error) {
+    callLog.error({ error: (error as Error).message }, 'Failed to initiate call');
     next(error);
   }
 });
@@ -87,7 +101,31 @@ voiceRouter.post('/connect', async (req, res) => {
 voiceRouter.post('/status', async (req, res) => {
   const { CallSid, CallStatus, CallDuration } = req.body;
 
+  const statusLog = withContext({
+    service: 'voice-routes',
+    callId: CallSid, // Using callSid as callId for context
+  });
+
+  statusLog.info({ status: CallStatus, duration: CallDuration }, 'Call status update received');
+
   try {
+    // Get conversation details for event emission
+    const convResult = await db.query(
+      'SELECT id, senior_id FROM conversations WHERE call_sid = $1',
+      [CallSid]
+    );
+    const conversation = convResult.rows[0];
+
+    if (CallStatus === 'answered' && conversation) {
+      // Emit call connected event
+      eventBus.emit(createCallConnectedEvent({
+        callId: conversation.id,
+        callSid: CallSid,
+        seniorId: conversation.senior_id,
+      }));
+      statusLog.info('Call connected - senior answered');
+    }
+
     if (CallStatus === 'completed' || CallStatus === 'failed' || CallStatus === 'no-answer') {
       await db.query(
         `UPDATE conversations
@@ -95,9 +133,25 @@ voiceRouter.post('/status', async (req, res) => {
          WHERE call_sid = $3`,
         [CallStatus.replace('-', '_'), CallDuration || 0, CallSid]
       );
+
+      // Emit call ended event
+      if (conversation) {
+        const reason = CallStatus === 'completed' ? 'completed'
+          : CallStatus === 'no-answer' ? 'no_answer'
+          : 'failed';
+
+        eventBus.emit(createCallEndedEvent({
+          callId: conversation.id,
+          callSid: CallSid,
+          seniorId: conversation.senior_id,
+          durationSeconds: parseInt(CallDuration) || 0,
+          reason,
+        }));
+        statusLog.info({ reason, duration: CallDuration }, 'Call ended');
+      }
     }
   } catch (error) {
-    console.error('Error updating call status:', error);
+    statusLog.error({ error: (error as Error).message }, 'Error updating call status');
   }
 
   res.sendStatus(200);
@@ -107,13 +161,21 @@ voiceRouter.post('/status', async (req, res) => {
 voiceRouter.post('/recording', async (req, res) => {
   const { CallSid, RecordingUrl } = req.body;
 
+  const recordingLog = withContext({
+    service: 'voice-routes',
+    callId: CallSid, // Using callSid as callId for context
+  });
+
+  recordingLog.info({ recordingUrl: RecordingUrl }, 'Recording completed');
+
   try {
     await db.query(
       `UPDATE conversations SET audio_url = $1 WHERE call_sid = $2`,
       [RecordingUrl, CallSid]
     );
+    recordingLog.info('Recording URL saved to conversation');
   } catch (error) {
-    console.error('Error saving recording URL:', error);
+    recordingLog.error({ error: (error as Error).message }, 'Error saving recording URL');
   }
 
   res.sendStatus(200);

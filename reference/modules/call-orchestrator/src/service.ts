@@ -9,6 +9,16 @@ import type {
   CallEvent,
   CallEventHandler,
 } from '@donna/shared/interfaces';
+import { loggers, withContext } from '@donna/logger';
+import {
+  eventBus,
+  createCallInitiatedEvent,
+  createCallConnectedEvent,
+  createCallEndedEvent,
+  createErrorOccurredEvent,
+} from '@donna/event-bus';
+
+const log = loggers.callOrchestrator;
 
 export class CallOrchestratorService implements ICallOrchestrator {
   private eventHandlers: Map<string, Map<string, CallEventHandler[]>> = new Map();
@@ -22,6 +32,13 @@ export class CallOrchestratorService implements ICallOrchestrator {
   ) {}
 
   async initiateCall(request: CallRequest): Promise<Call> {
+    const callLog = withContext({
+      service: 'call-orchestrator',
+      seniorId: request.seniorId,
+    });
+
+    callLog.info({ type: request.type, reminderIds: request.reminderIds }, 'Initiating call');
+
     // Get senior profile to retrieve phone number
     const senior = await this.seniorProfiles.getById(request.seniorId);
 
@@ -61,6 +78,15 @@ export class CallOrchestratorService implements ICallOrchestrator {
 
     // Store in active calls
     this.activeCalls.set(conversation.id, call);
+
+    // Log and emit event
+    callLog.info({ callId: call.id, callSid }, 'Call initiated successfully');
+    eventBus.emit(createCallInitiatedEvent({
+      callId: call.id,
+      callSid,
+      seniorId: request.seniorId,
+      initiatedBy: request.type,
+    }));
 
     return call;
   }
@@ -117,33 +143,82 @@ export class CallOrchestratorService implements ICallOrchestrator {
   async handleCallEvent(event: CallEvent): Promise<void> {
     const call = this.activeCalls.get(event.callId);
     if (!call) {
-      console.warn(`Received event for unknown call: ${event.callId}`);
+      log.warn({ callId: event.callId, eventType: event.type }, 'Received event for unknown call');
       return;
     }
+
+    const callLog = withContext({
+      service: 'call-orchestrator',
+      callId: event.callId,
+      seniorId: call.seniorId,
+    });
 
     // Update call status based on event type
     switch (event.type) {
       case 'answered':
         call.status = 'answered';
         this.activeCalls.set(event.callId, call);
+
+        callLog.info({ callSid: call.callSid }, 'Call answered - senior picked up');
+        eventBus.emit(createCallConnectedEvent({
+          callId: call.id,
+          callSid: call.callSid,
+          seniorId: call.seniorId,
+        }));
+
         await this.triggerEventHandlers(event.callId, 'answered', call);
         break;
 
       case 'ended':
         call.status = 'completed';
         this.activeCalls.set(event.callId, call);
+
+        // Calculate duration
+        const durationSeconds = Math.floor(
+          (Date.now() - call.startedAt.getTime()) / 1000
+        );
+
+        callLog.info({ callSid: call.callSid, durationSeconds }, 'Call ended - completed');
+        eventBus.emit(createCallEndedEvent({
+          callId: call.id,
+          callSid: call.callSid,
+          seniorId: call.seniorId,
+          durationSeconds,
+          reason: 'completed',
+        }));
+
         await this.triggerEventHandlers(event.callId, 'ended', call);
         break;
 
       case 'failed':
         call.status = 'failed';
         this.activeCalls.set(event.callId, call);
+
+        callLog.warn({ callSid: call.callSid }, 'Call failed');
+        eventBus.emit(createCallEndedEvent({
+          callId: call.id,
+          callSid: call.callSid,
+          seniorId: call.seniorId,
+          durationSeconds: 0,
+          reason: 'failed',
+        }));
+
         await this.triggerEventHandlers(event.callId, 'failed', call);
         break;
 
       case 'no_answer':
         call.status = 'no_answer';
         this.activeCalls.set(event.callId, call);
+
+        callLog.info({ callSid: call.callSid }, 'Call not answered');
+        eventBus.emit(createCallEndedEvent({
+          callId: call.id,
+          callSid: call.callSid,
+          seniorId: call.seniorId,
+          durationSeconds: 0,
+          reason: 'no_answer',
+        }));
+
         await this.triggerEventHandlers(event.callId, 'failed', call);
         break;
     }
@@ -193,7 +268,11 @@ export class CallOrchestratorService implements ICallOrchestrator {
       try {
         await handler(call);
       } catch (error) {
-        console.error(`Error in ${eventType} event handler for call ${callId}:`, error);
+        const err = error as Error;
+        log.error(
+          { callId, eventType, error: err.message, stack: err.stack },
+          'Error in call event handler'
+        );
       }
     }
   }

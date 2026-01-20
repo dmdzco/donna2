@@ -157,3 +157,20 @@ export const analyticsEvents = pgTable('analytics_events', {
 
 export type AnalyticsEvent = typeof analyticsEvents.$inferSelect;
 export type NewAnalyticsEvent = typeof analyticsEvents.$inferInsert;
+
+// Observability Events table (for call flow, conversation, and observer tracking)
+export const observabilityEvents = pgTable('observability_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  eventType: varchar('event_type', { length: 100 }).notNull(), // call.initiated, turn.transcribed, observer.signal, etc.
+  callId: varchar('call_id', { length: 100 }), // Links to conversation.callSid
+  conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }),
+  seniorId: uuid('senior_id').references(() => seniors.id, { onDelete: 'cascade' }),
+  caregiverId: uuid('caregiver_id').references(() => caregivers.id, { onDelete: 'cascade' }),
+  timestamp: timestamp('timestamp').notNull().defaultNow(),
+  data: jsonb('data').notNull(), // Event-specific payload (observer signals, turn content, etc.)
+  metadata: jsonb('metadata'), // Additional context
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export type ObservabilityEvent = typeof observabilityEvents.$inferSelect;
+export type NewObservabilityEvent = typeof observabilityEvents.$inferInsert;

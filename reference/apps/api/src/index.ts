@@ -3,15 +3,18 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createServer } from 'http';
 import { authRouter } from './routes/auth.js';
 import { seniorsRouter } from './routes/seniors.js';
 import { remindersRouter } from './routes/reminders.js';
 import { conversationsRouter } from './routes/conversations.js';
 import { voiceRouter } from './routes/voice.js';
+import { observabilityRouter } from './routes/observability.js';
 import testPhase1Router from './routes/test-phase1.js';
 import testPhase2Router from './routes/test-phase2.js';
 import testPhase3Router from './routes/test-phase3.js';
 import { errorHandler } from './middleware/error-handler.js';
+import { observabilityService } from './services/observability-service.js';
 
 dotenv.config();
 
@@ -43,6 +46,7 @@ app.use('/api/seniors', seniorsRouter);
 app.use('/api/reminders', remindersRouter);
 app.use('/api/conversations', conversationsRouter);
 app.use('/api/voice', voiceRouter);
+app.use('/api/observability', observabilityRouter);
 
 // Test routes
 app.use('/api/test/phase1', testPhase1Router);
@@ -52,8 +56,13 @@ app.use('/api/test/phase3', testPhase3Router);
 // Error handling
 app.use(errorHandler);
 
-app.listen(PORT, () => {
+// Create HTTP server and initialize WebSocket
+const server = createServer(app);
+observabilityService.initialize(server);
+
+server.listen(PORT, () => {
   console.log(`Donna API server running on port ${PORT}`);
+  console.log(`WebSocket available at ws://localhost:${PORT}/api/observability/live`);
 });
 
 export default app;

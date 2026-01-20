@@ -4,6 +4,7 @@ import type {
   ConversationData,
   ConversationWithTurns,
   ConversationContext,
+  ConversationContinuity,
   TurnData,
   Turn,
   NotFoundError,
@@ -98,12 +99,51 @@ export class ConversationManagerService implements IConversationManager {
     // Extract topics from summaries (simple keyword extraction)
     const recentTopics: string[] = [];
 
+    // Get conversation continuity
+    const continuity = await this.getContinuity(seniorId);
+
     return {
       recentSummaries,
       importantMemories: [], // Would be populated by Memory module if implemented
       recentTopics,
       preferences: {} as any, // Would be populated by Senior Profiles module
       lastCallDate,
+      continuity,
+    };
+  }
+
+  /**
+   * Get conversation continuity - last N turns across all calls for a senior.
+   * This persists across call endings/drops and provides context for the next call.
+   */
+  async getContinuity(seniorId: string, limit: number = 10): Promise<ConversationContinuity> {
+    // Get recent turns across all conversations
+    const recentTurns = await this.repository.getRecentTurnsAcrossCalls(seniorId, limit);
+
+    // Find the senior's most recent turn (what they last said/wanted)
+    const lastSeniorTurn = [...recentTurns]
+      .reverse()
+      .find(turn => turn.speaker === 'senior');
+
+    // Check if the last conversation was dropped (ended without proper completion)
+    const conversations = await this.repository.findBySeniorId(seniorId, 1);
+    const lastConversation = conversations[0];
+    const lastCallDropped = lastConversation
+      ? lastConversation.status === 'failed' ||
+        (lastConversation.status === 'in_progress' &&
+         lastConversation.startedAt < new Date(Date.now() - 30 * 60 * 1000)) // stale > 30min
+      : false;
+
+    // Get the most recent interaction timestamp
+    const lastInteractionAt = recentTurns.length > 0
+      ? recentTurns[recentTurns.length - 1].timestamp
+      : undefined;
+
+    return {
+      recentTurns,
+      lastSeniorTurn,
+      lastCallDropped,
+      lastInteractionAt,
     };
   }
 }

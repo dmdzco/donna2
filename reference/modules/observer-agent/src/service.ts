@@ -18,6 +18,8 @@ import type {
   ObserverAnalysisRequest,
   ObserverSignal,
 } from '@donna/shared/interfaces';
+import { loggers, withContext } from '@donna/logger';
+import { eventBus, createObserverSignalEvent, createErrorOccurredEvent } from '@donna/event-bus';
 
 /**
  * ObserverAgentService
@@ -34,8 +36,14 @@ export class ObserverAgentService implements IObserverAgent {
 
   /**
    * Analyze conversation state and return guidance signals
+   *
+   * @param request - Analysis request with conversation history
+   * @param context - Optional observability context for logging/events
    */
-  async analyze(request: ObserverAnalysisRequest): Promise<ObserverSignal> {
+  async analyze(
+    request: ObserverAnalysisRequest,
+    context?: { callId?: string; conversationId?: string }
+  ): Promise<ObserverSignal> {
     const {
       senior,
       conversationHistory,
@@ -43,6 +51,16 @@ export class ObserverAgentService implements IObserverAgent {
       currentTopic,
       callDuration = 0,
     } = request;
+
+    const turnIndex = conversationHistory.length;
+    const log = withContext({
+      service: 'observer-agent',
+      callId: context?.callId,
+      conversationId: context?.conversationId,
+      seniorId: senior.id,
+    });
+
+    log.debug({ turnIndex, callDuration }, 'Starting conversation analysis');
 
     // Calculate time-based signals
     const maxDuration = this.DEFAULT_MAX_DURATION;
@@ -102,9 +120,44 @@ export class ObserverAgentService implements IObserverAgent {
         signal.endCallReason = 'Call duration exceeded recommended time';
       }
 
+      // Log the analysis result
+      log.info({
+        engagement: signal.engagementLevel,
+        emotion: signal.emotionalState,
+        confidence: signal.confidenceScore,
+        shouldEndCall: signal.shouldEndCall,
+        concernsCount: signal.concerns.length,
+        shouldDeliverReminder: signal.shouldDeliverReminder,
+      }, 'Observer analysis completed');
+
+      // Emit observability event
+      if (context?.callId && context?.conversationId) {
+        eventBus.emit(createObserverSignalEvent({
+          callId: context.callId,
+          conversationId: context.conversationId,
+          seniorId: senior.id,
+          signal,
+          turnIndex,
+        }));
+      }
+
       return signal;
     } catch (error) {
-      console.error('Observer agent analysis error:', error);
+      const err = error as Error;
+      log.error({ error: err.message, stack: err.stack }, 'Observer agent analysis failed');
+
+      // Emit error event
+      if (context?.callId) {
+        eventBus.emit(createErrorOccurredEvent({
+          callId: context.callId,
+          conversationId: context.conversationId,
+          seniorId: senior.id,
+          service: 'observer-agent',
+          errorCode: 'ANALYSIS_FAILED',
+          errorMessage: err.message,
+          stack: err.stack,
+        }));
+      }
 
       // Return safe defaults on error
       return this.getDefaultSignal(approachingEndTime);

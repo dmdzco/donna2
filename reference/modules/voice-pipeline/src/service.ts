@@ -9,6 +9,9 @@ import type {
   VoiceConfig,
   TTSOptions,
 } from '@donna/shared/interfaces';
+import { loggers } from '@donna/logger';
+
+const log = loggers.voicePipeline;
 
 export class VoicePipelineService implements IVoicePipeline {
   private readonly DEFAULT_VOICE_ID = 'default-elderly-friendly-voice';
@@ -23,13 +26,17 @@ export class VoicePipelineService implements IVoicePipeline {
   ) {}
 
   async *transcribeStream(audioStream: AudioStream): AsyncIterable<Transcript> {
+    log.debug({ format: audioStream.format }, 'Starting streaming transcription');
     // Delegate to STT adapter
     yield* this.sttAdapter.transcribeStream(audioStream);
   }
 
   async transcribeBuffer(audioBuffer: Buffer, options?: any): Promise<string> {
+    log.debug({ bufferSize: audioBuffer.length }, 'Transcribing audio buffer');
     // Delegate to STT adapter
-    return this.sttAdapter.transcribeBuffer(audioBuffer, options);
+    const result = await this.sttAdapter.transcribeBuffer(audioBuffer, options);
+    log.debug({ textLength: result.length }, 'Transcription completed');
+    return result;
   }
 
   async synthesize(text: string, config?: VoiceConfig): Promise<AudioBuffer> {
@@ -39,8 +46,11 @@ export class VoicePipelineService implements IVoicePipeline {
       speed: config?.speed ?? this.DEFAULT_SPEED,
     };
 
+    log.debug({ textLength: text.length, voiceId }, 'Synthesizing speech');
     // Delegate to TTS adapter
-    return this.ttsAdapter.synthesize(text, voiceId, options);
+    const result = await this.ttsAdapter.synthesize(text, voiceId, options);
+    log.debug({ audioSize: result.length }, 'Speech synthesis completed');
+    return result;
   }
 
   async *synthesizeStream(
@@ -53,6 +63,7 @@ export class VoicePipelineService implements IVoicePipeline {
       speed: config?.speed ?? this.DEFAULT_SPEED,
     };
 
+    log.debug({ textLength: text.length, voiceId }, 'Starting streaming speech synthesis');
     // Delegate to TTS adapter
     yield* this.ttsAdapter.synthesizeStream(text, voiceId, options);
   }

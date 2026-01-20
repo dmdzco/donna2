@@ -132,7 +132,8 @@ RESPONSE FORMAT:
 - Follow any guidance in <guidance> tags but don't mention it`;
 
   if (senior) {
-    prompt += `\n\nYou are speaking with ${senior.name}.`;
+    const firstName = senior.name?.split(' ')[0] || senior.name;
+    prompt += `\n\nYou are speaking with ${firstName}.`;
     if (senior.interests?.length) {
       prompt += ` They enjoy: ${senior.interests.join(', ')}.`;
     }
@@ -287,8 +288,9 @@ export class V1AdvancedSession {
     this.isConnected = true;
 
     // Start Deepgram and greeting TTS in parallel for fastest startup
-    const greetingText = this.senior?.name
-      ? `Hello ${this.senior.name}! It's Donna calling to check in on you. How are you doing today?`
+    const firstName = this.senior?.name?.split(' ')[0];
+    const greetingText = firstName
+      ? `Hello ${firstName}! It's Donna calling to check in on you. How are you doing today?`
       : `Hello! It's Donna calling to check in. How are you doing today?`;
 
     // Log greeting to conversation

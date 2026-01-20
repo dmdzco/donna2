@@ -7,13 +7,67 @@ import { pcm24kToMulaw8k } from '../audio-utils.js';
 import { memoryService } from '../services/memory.js';
 import { quickAnalyze } from './quick-observer.js';
 import { fastAnalyzeWithTools, formatFastObserverGuidance } from './fast-observer.js';
+import { runPostTurnTasks } from './post-turn-agent.js';
 
 const anthropic = new Anthropic();
 
 // Feature flag for streaming - set to false for rollback
 const V1_STREAMING_ENABLED = process.env.V1_STREAMING_ENABLED !== 'false';
 
+// Model configuration for dynamic routing
+const MODELS = {
+  FAST: 'claude-3-haiku-20240307',      // Default - quick, cheap (~300ms)
+  SMART: 'claude-sonnet-4-20250514'     // Upgraded - nuanced, deeper (~800ms)
+};
+
+const DEFAULT_MAX_TOKENS = 75; // ~2 sentences for normal conversation
+
 console.log(`[V1] Streaming enabled: ${V1_STREAMING_ENABLED}, ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? 'set' : 'NOT SET'}`);
+
+/**
+ * Select model and token count based on observer recommendations
+ * Priority: Quick (immediate) > Fast (this turn) > Deep (from last turn)
+ *
+ * @param {object|null} quickResult - Layer 1 quick observer result
+ * @param {object|null} fastResult - Layer 2 fast observer result (from previous turn)
+ * @param {object|null} deepResult - Layer 3 deep observer signal (from previous turn)
+ * @returns {object} { model, max_tokens, reason }
+ */
+function selectModelConfig(quickResult, fastResult, deepResult) {
+  let config = {
+    model: MODELS.FAST,
+    max_tokens: DEFAULT_MAX_TOKENS,
+    reason: 'default'
+  };
+
+  // Collect all recommendations (most urgent first)
+  const recommendations = [
+    quickResult?.modelRecommendation,
+    fastResult?.modelRecommendation,
+    deepResult?.modelRecommendation,
+  ].filter(Boolean);
+
+  if (recommendations.length === 0) {
+    return config;
+  }
+
+  // Process recommendations - first Sonnet upgrade wins, but collect max_tokens from all
+  for (const rec of recommendations) {
+    if (rec.use_sonnet && config.model !== MODELS.SMART) {
+      config.model = MODELS.SMART;
+      config.max_tokens = Math.max(config.max_tokens, rec.max_tokens || DEFAULT_MAX_TOKENS);
+      config.reason = rec.reason || 'observer_upgrade';
+    } else if (rec.max_tokens) {
+      // Allow token adjustment without model change
+      config.max_tokens = Math.max(config.max_tokens, rec.max_tokens);
+      if (config.reason === 'default') {
+        config.reason = rec.reason || 'token_adjustment';
+      }
+    }
+  }
+
+  return config;
+}
 
 /**
  * Detect sentence boundaries for TTS streaming
@@ -80,9 +134,11 @@ Your personality:
 - Speak slowly and clearly
 - Be patient and understanding
 - Show genuine interest in their day and wellbeing
-- Ask follow-up questions to keep the conversation going
-- Keep responses SHORT (1-2 sentences) - this is a phone call
-- Be conversational and natural`;
+
+CRITICAL: Keep responses VERY SHORT - 1-2 sentences MAX. This is a phone call, not a letter.
+- Answer briefly, then ask ONE simple follow-up question
+- Never give multiple topics or long explanations in one turn
+- Think: what would a caring friend say in 10 seconds or less?`;
 
   if (senior) {
     prompt += `\n\nYou are speaking with ${senior.name}.`;
@@ -462,6 +518,9 @@ export class V1AdvancedSession {
     this.wasInterrupted = false; // Reset interrupt flag
 
     try {
+      // Layer 1: Quick Observer (0ms) - for post-turn processing
+      const quickResult = quickAnalyze(userMessage, this.conversationLog.slice(-6));
+
       // Build system prompt with observer signal and dynamic memories
       const systemPrompt = buildSystemPrompt(
         this.senior,
@@ -484,11 +543,19 @@ export class V1AdvancedSession {
         messages.push({ role: 'user', content: userMessage });
       }
 
+      // Dynamic model selection based on observer recommendations
+      const modelConfig = selectModelConfig(
+        quickResult,
+        this.lastFastObserverResult,
+        this.lastObserverSignal
+      );
+      console.log(`[V1][${this.streamSid}] Model: ${modelConfig.model === MODELS.SMART ? 'Sonnet' : 'Haiku'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
+
       // Generate response with Claude
       console.log(`[V1][${this.streamSid}] Calling Claude...`);
       const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 150, // Keep responses short for phone call
+        model: modelConfig.model,
+        max_tokens: modelConfig.max_tokens,
         system: systemPrompt,
         messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
       });
@@ -514,6 +581,9 @@ export class V1AdvancedSession {
 
       // Convert to speech and send to Twilio
       await this.textToSpeechAndSend(responseText);
+
+      // Layer 4: Post-turn tasks (fire and forget - don't await)
+      runPostTurnTasks(userMessage, responseText, quickResult, this.senior);
 
     } catch (error) {
       console.error(`[V1][${this.streamSid}] Response generation failed:`, error.message);
@@ -595,12 +665,20 @@ export class V1AdvancedSession {
       // Mark as speaking
       this.isSpeaking = true;
 
+      // Dynamic model selection based on observer recommendations
+      const modelConfig = selectModelConfig(
+        quickResult,
+        this.lastFastObserverResult,
+        this.lastObserverSignal
+      );
+      console.log(`[V1][${this.streamSid}] Model: ${modelConfig.model === MODELS.SMART ? 'Sonnet' : 'Haiku'} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
+
       // Start Claude stream AND TTS connection in parallel
       console.log(`[V1][${this.streamSid}] Calling Claude (streaming)...`);
       const [stream] = await Promise.all([
         anthropic.messages.stream({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 150,
+          model: modelConfig.model,
+          max_tokens: modelConfig.max_tokens,
           system: systemPrompt,
           messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
         }),
@@ -664,6 +742,9 @@ export class V1AdvancedSession {
           content: fullResponse,
           timestamp: new Date().toISOString()
         });
+
+        // Layer 4: Post-turn tasks (fire and forget - don't await)
+        runPostTurnTasks(userMessage, fullResponse, quickResult, this.senior);
       }
 
       // Wait a moment for final audio chunks before closing

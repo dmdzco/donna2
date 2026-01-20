@@ -33,7 +33,7 @@ async function analyzeSentimentWithHaiku(userMessage, conversationHistory = []) 
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-3-5-haiku-latest',
+      model: 'claude-3-haiku-20240307',
       max_tokens: 150,
       system: `You analyze elderly phone conversations quickly. Respond ONLY with JSON.
 {
@@ -142,12 +142,71 @@ export async function fastAnalyzeWithTools(userMessage, conversationHistory = []
   const elapsed = Date.now() - startTime;
   console.log(`[FastObserver] Analysis completed in ${elapsed}ms`);
 
+  // Build model recommendation based on analysis
+  const modelRecommendation = buildModelRecommendation(sentiment, memories);
+
   return {
     sentiment,
     memories,
     currentEvents,
     elapsed,
+    modelRecommendation,
   };
+}
+
+/**
+ * Build model recommendation based on fast observer results
+ * Returns upgrade to Sonnet + higher token count for sensitive situations
+ */
+function buildModelRecommendation(sentiment, memories) {
+  // Needs empathy - requires sophistication
+  if (sentiment?.needs_empathy) {
+    return {
+      use_sonnet: true,
+      max_tokens: 150,
+      reason: 'needs_empathy'
+    };
+  }
+
+  // Concerned sentiment - careful, nuanced response needed
+  if (sentiment?.sentiment === 'concerned' || sentiment?.sentiment === 'negative') {
+    return {
+      use_sonnet: true,
+      max_tokens: 150,
+      reason: 'concerned_sentiment'
+    };
+  }
+
+  // Low engagement with topic shift - creative re-engagement
+  if (sentiment?.engagement === 'low' && sentiment?.topic_shift) {
+    return {
+      use_sonnet: true,
+      max_tokens: 120,
+      reason: 'creative_reengagement'
+    };
+  }
+
+  // High importance memory match - personalized response
+  const highImportanceMemory = memories?.find(m => m.importance >= 80);
+  if (highImportanceMemory) {
+    return {
+      use_sonnet: true,
+      max_tokens: 150,
+      reason: 'important_memory'
+    };
+  }
+
+  // Any memory match - slightly more tokens for personalization
+  if (memories?.length > 0) {
+    return {
+      use_sonnet: false,
+      max_tokens: 100,
+      reason: 'memory_personalization'
+    };
+  }
+
+  // Default - no recommendation
+  return null;
 }
 
 /**

@@ -18,27 +18,27 @@
 
 ---
 
-## Current Status: v2.5 (Streaming Pipeline)
+## Current Status: v3.0 (4-Layer Observer + Dynamic Routing)
 
 ### Working Features
-- **Dual Pipeline Architecture** - Select V0 or V1 from admin UI
-  - **V0**: Gemini 2.5 Native Audio (low latency)
-  - **V1**: Streaming pipeline with multi-layer observers
-- **V1 Streaming Pipeline** (NEW)
-  - Pre-built greeting (no Claude call needed)
+- **4-Layer Observer Architecture**
+  - Layer 1: Quick Observer (0ms) - Instant regex patterns
+  - Layer 2: Fast Observer (~300ms) - Haiku + memory search
+  - Layer 3: Deep Observer (~800ms) - Sonnet analysis (async)
+  - Layer 4: Post-Turn Agent - Background tasks after response
+- **Dynamic Model Routing** - Automatic Haiku/Sonnet selection
+- **Streaming Pipeline** (~400ms time-to-first-audio)
+  - Pre-built greeting
   - Claude streaming responses
   - WebSocket TTS (ElevenLabs)
   - Sentence-by-sentence audio delivery
-  - Multi-layer observer architecture
-- Real-time voice calls (Twilio)
-- User speech transcription (Deepgram STT)
-- Mid-conversation memory retrieval (triggers on keywords)
+- Real-time voice calls (Twilio Media Streams)
+- Speech transcription (Deepgram STT)
+- Memory system with semantic search (pgvector)
 - News updates via OpenAI web search
 - Scheduled reminder calls
-- Enhanced Admin Dashboard (4 tabs)
-- Senior profile management
-- Memory storage with semantic embeddings (pgvector)
-- **Observability Dashboard** - Call flow visualization and live monitoring
+- Admin dashboard
+- Observability dashboard
 
 ---
 
@@ -46,57 +46,61 @@
 
 **Full documentation**: [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md)
 
-### Pipeline Comparison
-
-| Feature | V0 (Gemini Native) | V1 (Claude + Streaming) |
-|---------|-------------------|------------------------|
-| **AI Model** | Gemini 2.5 Flash | Claude Sonnet (streaming) |
-| **STT** | Gemini built-in + Deepgram | Deepgram |
-| **TTS** | Gemini built-in | ElevenLabs WebSocket |
-| **Greeting Latency** | ~500ms | ~400ms (pre-built) |
-| **Response Latency** | ~500ms | ~800ms (streaming) |
-| **Observer Layers** | No | 3 layers (0ms/300ms/800ms) |
-| **Best For** | Quick responses | Quality + insights |
-
-### V1 Streaming Architecture
+### 4-Layer Observer Architecture
 
 ```
 User speaks → Deepgram STT → Process utterance
-                                    │
-                    ┌───────────────┼───────────────┐
-                    ▼               ▼               ▼
-              Layer 1 (0ms)   Layer 2 (~300ms)  Layer 3 (~800ms)
-              Quick Observer  Fast Observer     Deep Observer
-              (regex)         (Haiku+memory)    (Sonnet analysis)
-                    │               │               │
-                    └───────┬───────┘               │
-                            ▼                       │
-                    Claude Streaming ←──────────────┘
-                            │                 (next turn)
-                            ▼
-                    Sentence Buffer
-                            │
-                            ▼
-                    ElevenLabs WebSocket TTS
-                            │
-                            ▼
-                    Twilio (audio chunks)
+                                  │
+                  ┌───────────────┼───────────────┐
+                  ▼               ▼               ▼
+            Layer 1 (0ms)   Layer 2 (~300ms)  Layer 3 (~800ms)
+            Quick Observer  Fast Observer     Deep Observer
+            (regex)         (Haiku+memory)    (Sonnet analysis)
+                  │               │               │
+                  └───────┬───────┘               │
+                          ▼                       │
+              ┌─────────────────────┐             │
+              │ Dynamic Model Select│←────────────┘
+              │ (Haiku or Sonnet)   │         (next turn)
+              └──────────┬──────────┘
+                         ▼
+              Claude Streaming Response
+                         │
+                         ▼
+              Sentence Buffer → ElevenLabs WS → Twilio
+                         │
+                         ▼
+              Layer 4: Post-Turn Agent (background)
+              - Health concern extraction
+              - Memory storage
+              - Topic prefetching
 ```
+
+### Dynamic Model Selection
+
+| Situation | Model | Tokens | Reason |
+|-----------|-------|--------|--------|
+| Normal conversation | Haiku | 75 | Fast, efficient |
+| Health mention | Sonnet | 150 | Safety needs nuance |
+| Emotional support | Sonnet | 150 | Empathy needs depth |
+| Low engagement | Sonnet | 120 | Creative re-engagement |
+| Simple question | Haiku | 60 | Quick answers better |
+| Important memory | Sonnet | 150 | Personalized response |
 
 ### Key Files
 
 ```
 /
-├── index.js                    ← Main server + pipeline router
-├── gemini-live.js              ← V0: Gemini native audio session
+├── index.js                    ← Main server
 ├── pipelines/
-│   ├── v1-advanced.js          ← V1: Streaming Claude + Observers
+│   ├── v1-advanced.js          ← Main pipeline + dynamic routing
 │   ├── observer-agent.js       ← Layer 3: Deep conversation analyzer
-│   ├── quick-observer.js       ← Layer 1: Instant regex patterns (NEW)
-│   └── fast-observer.js        ← Layer 2: Haiku + memory search (NEW)
+│   ├── quick-observer.js       ← Layer 1: Instant regex patterns
+│   ├── fast-observer.js        ← Layer 2: Haiku + memory search
+│   └── post-turn-agent.js      ← Layer 4: Background tasks
 ├── adapters/
 │   ├── elevenlabs.js           ← ElevenLabs REST TTS adapter
-│   └── elevenlabs-streaming.js ← ElevenLabs WebSocket TTS (NEW)
+│   └── elevenlabs-streaming.js ← ElevenLabs WebSocket TTS
 ├── services/
 │   ├── memory.js               ← Memory storage + semantic search
 │   ├── seniors.js              ← Senior profile CRUD
@@ -120,14 +124,14 @@ User speaks → Deepgram STT → Process utterance
 
 | Task | Where to Look |
 |------|---------------|
-| Change V0 (Gemini) behavior | `gemini-live.js` |
-| Change V1 (Claude) behavior | `pipelines/v1-advanced.js` |
+| Change conversation behavior | `pipelines/v1-advanced.js` |
 | Modify streaming TTS | `adapters/elevenlabs-streaming.js` |
 | Add instant analysis patterns | `pipelines/quick-observer.js` |
 | Modify fast analysis (Haiku) | `pipelines/fast-observer.js` |
 | Modify deep Observer Agent | `pipelines/observer-agent.js` |
-| Change REST TTS settings | `adapters/elevenlabs.js` |
-| Modify system prompts | `pipelines/v1-advanced.js` |
+| Change background tasks | `pipelines/post-turn-agent.js` |
+| Change model selection logic | `pipelines/v1-advanced.js` (selectModelConfig) |
+| Modify system prompts | `pipelines/v1-advanced.js` (buildSystemPrompt) |
 | Add new API endpoint | `index.js` |
 | Update admin UI | `public/admin.html` |
 | Database changes | `db/schema.js` |
@@ -135,78 +139,34 @@ User speaks → Deepgram STT → Process utterance
 ### Environment Variables
 
 ```bash
-# Required (Both Pipelines)
+# Required
 PORT=3001
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=+1...
 DATABASE_URL=...
 OPENAI_API_KEY=...          # Embeddings + news
-
-# V0 Pipeline (Gemini)
-GOOGLE_API_KEY=...
-
-# V1 Pipeline (Claude + Observer + ElevenLabs)
-ANTHROPIC_API_KEY=...
-ELEVENLABS_API_KEY=...
-DEEPGRAM_API_KEY=...        # Also used by V0 for memory triggers
+ANTHROPIC_API_KEY=...       # Claude (Haiku + Sonnet)
+ELEVENLABS_API_KEY=...      # TTS
+DEEPGRAM_API_KEY=...        # STT
 
 # Optional
-DEFAULT_PIPELINE=v1         # v0 or v1
 V1_STREAMING_ENABLED=true   # Set to 'false' to disable streaming
 ```
-
-### Pipeline Selection
-
-The pipeline is selected:
-1. **Per-call**: Via `pipeline` parameter in `/api/call` body
-2. **Admin UI**: Dropdown in header persists to localStorage
-3. **Default**: Falls back to `DEFAULT_PIPELINE` env var or `v0`
 
 ---
 
 ## Roadmap
 
-See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work.
-
-### Next Up: Dynamic Model Routing (Observer-Driven)
-
-**Spec:** [docs/DYNAMIC_MODEL_ROUTING.md](docs/DYNAMIC_MODEL_ROUTING.md)
-
-**Concept:** Default to Haiku (fast, cheap). Observers explicitly request Sonnet when needed.
-
-```
-90% of turns: Haiku (~80ms, 100 tokens)
- → Greetings, acknowledgments, casual chat
-
-10% of turns: Sonnet (~200ms, 200-400 tokens)
- → Health concerns, emotional support, stories, complex questions
-```
-
-**Each observer outputs:**
-```javascript
-modelRecommendation: {
-  use_sonnet: true/false,
-  max_tokens: 100-400,
-  reason: 'health_safety' | 'emotional_support' | 're_engagement' | etc.
-}
-```
-
-**Files to modify:**
-- `pipelines/quick-observer.js` - Add modelRecommendation
-- `pipelines/fast-observer.js` - Haiku decides if Sonnet needed
-- `pipelines/observer-agent.js` - Add model_recommendation
-- `pipelines/model-selector.js` - NEW: Central routing logic
-- `pipelines/v1-advanced.js` - Use selectModel()
-
-**Philosophy:** Let the AI decide when it needs more AI.
-
-### Other Upcoming Work
-- ~~V1 Latency Optimization~~ ✓ Completed (streaming pipeline)
-- Caregiver Authentication
+See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
+- ~~V1 Latency Optimization~~ ✓ Completed
+- ~~Haiku Default Model~~ ✓ Completed
+- ~~Dynamic Model Routing~~ ✓ Completed
+- ~~Post-Turn Agent (Layer 4)~~ ✓ Completed
+- Caregiver Authentication (Clerk)
 - Observer Signal Storage
 - Analytics Dashboard
 
 ---
 
-*Last updated: January 2026 - v2.5 (Streaming Pipeline)*
+*Last updated: January 2026 - v3.0 (4-Layer Observer + Dynamic Routing)*

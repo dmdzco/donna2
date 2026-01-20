@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { db } from '../db/client.js';
 import { memories } from '../db/schema.js';
-import { eq, sql, desc, and } from 'drizzle-orm';
+import { eq, sql, desc, and, inArray } from 'drizzle-orm';
 import { newsService } from './news.js';
 
 let openai = null;
@@ -74,11 +74,9 @@ export const memoryService = {
     // Update last accessed time for retrieved memories
     if (results.rows.length > 0) {
       const ids = results.rows.map(r => r.id);
-      await db.execute(sql`
-        UPDATE memories
-        SET last_accessed_at = NOW()
-        WHERE id = ANY(${ids}::uuid[])
-      `);
+      await db.update(memories)
+        .set({ lastAccessedAt: new Date() })
+        .where(inArray(memories.id, ids));
     }
 
     return results.rows;

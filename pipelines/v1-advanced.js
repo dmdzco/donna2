@@ -1,19 +1,64 @@
 import { createClient } from '@deepgram/sdk';
-import Anthropic from '@anthropic-ai/sdk';
 import { ObserverAgent } from './observer-agent.js';
 import { ElevenLabsAdapter } from '../adapters/elevenlabs.js';
 import { ElevenLabsStreamingTTS } from '../adapters/elevenlabs-streaming.js';
 import { pcm24kToMulaw8k } from '../audio-utils.js';
 import { memoryService } from '../services/memory.js';
+import { schedulerService } from '../services/scheduler.js';
 import { quickAnalyze } from './quick-observer.js';
 import { fastAnalyzeWithTools, formatFastObserverGuidance } from './fast-observer.js';
-
-const anthropic = new Anthropic();
+import { runPostTurnTasks } from './post-turn-agent.js';
+import { getAdapter, isModelAvailable, MODELS as LLM_MODELS } from '../adapters/llm/index.js';
 
 // Feature flag for streaming - set to false for rollback
 const V1_STREAMING_ENABLED = process.env.V1_STREAMING_ENABLED !== 'false';
 
+// Model configuration
+const VOICE_MODEL = process.env.VOICE_MODEL || 'claude-sonnet';  // Main voice model
+const DEFAULT_MAX_TOKENS = 100;
+
+// Log available models
 console.log(`[V1] Streaming enabled: ${V1_STREAMING_ENABLED}, ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? 'set' : 'NOT SET'}`);
+console.log(`[V1] Voice model: ${VOICE_MODEL} (${isModelAvailable(VOICE_MODEL) ? 'available' : 'NOT AVAILABLE'})`);
+/**
+ * Select token count based on observer recommendations
+ * Always uses VOICE_MODEL, but adjusts tokens based on complexity
+ *
+ * @param {object|null} quickResult - Layer 1 quick observer result
+ * @param {object|null} fastResult - Layer 2 fast observer result (from previous turn)
+ * @param {object|null} deepResult - Layer 3 deep observer signal (from previous turn)
+ * @returns {object} { model, max_tokens, reason }
+ */
+function selectModelConfig(quickResult, fastResult, deepResult) {
+  let config = {
+    model: VOICE_MODEL,
+    max_tokens: DEFAULT_MAX_TOKENS,
+    reason: 'default'
+  };
+
+  // Collect all recommendations (most urgent first)
+  const recommendations = [
+    quickResult?.modelRecommendation,
+    fastResult?.modelRecommendation,
+    deepResult?.modelRecommendation,
+  ].filter(Boolean);
+
+  if (recommendations.length === 0) {
+    return config;
+  }
+
+  // Process recommendations - adjust tokens based on complexity
+  for (const rec of recommendations) {
+    if (rec.max_tokens) {
+      config.max_tokens = Math.max(config.max_tokens, rec.max_tokens);
+      if (config.reason === 'default') {
+        config.reason = rec.reason || 'observer_adjustment';
+      }
+    }
+  }
+
+  return config;
+}
 
 /**
  * Detect sentence boundaries for TTS streaming
@@ -73,19 +118,22 @@ function extractCompleteSentences(buffer) {
   return { complete: sentences, remaining };
 }
 
+/**
+ * Build system prompt - full context, adapters handle any quirks
+ */
 const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null) => {
-  let prompt = `You are Donna, a warm and caring AI companion for elderly individuals.
+  let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
 
-Your personality:
-- Speak slowly and clearly
-- Be patient and understanding
-- Show genuine interest in their day and wellbeing
-- Ask follow-up questions to keep the conversation going
-- Keep responses SHORT (1-2 sentences) - this is a phone call
-- Be conversational and natural`;
+RESPONSE FORMAT:
+- 1-2 sentences MAX
+- Answer briefly, then ask ONE follow-up question
+- Output ONLY what Donna says out loud - nothing else
+- NEVER say "dear" or "dearie"
+- Follow any guidance in <guidance> tags but don't mention it`;
 
   if (senior) {
-    prompt += `\n\nYou are speaking with ${senior.name}.`;
+    const firstName = senior.name?.split(' ')[0] || senior.name;
+    prompt += `\n\nYou are speaking with ${firstName}.`;
     if (senior.interests?.length) {
       prompt += ` They enjoy: ${senior.interests.join(', ')}.`;
     }
@@ -102,44 +150,55 @@ Your personality:
     prompt += reminderPrompt;
   }
 
-  // Inject quick observer guidance (Layer 1 - instant regex analysis)
+  // Always inject memories (short facts)
+  if (dynamicMemoryContext) {
+    prompt += `\n\n${dynamicMemoryContext}`;
+  }
+
+  // Fast observer memories (from previous turn)
+  if (fastObserverGuidance?.memories) {
+    prompt += `\n\nFrom previous conversations:\n${fastObserverGuidance.memories}`;
+  }
+
+  // Build guidance parts
+  const guidanceParts = [];
+
   if (quickObserverGuidance) {
-    prompt += `\n\n[INSTANT GUIDANCE - respond to this NOW]\n${quickObserverGuidance}`;
+    guidanceParts.push(quickObserverGuidance);
   }
 
-  // Inject fast observer guidance (Layer 2 - Haiku analysis from previous turn)
-  if (fastObserverGuidance) {
-    prompt += `\n\n[CONTEXT FROM ANALYSIS]\n${fastObserverGuidance}`;
+  if (fastObserverGuidance?.guidance) {
+    guidanceParts.push(fastObserverGuidance.guidance);
   }
 
-  // Inject observer guidance if available (Layer 3 - deep analysis)
   if (observerSignal) {
-    prompt += `\n\n[OBSERVER GUIDANCE - use naturally, don't mention explicitly]`;
+    const parts = [];
     if (observerSignal.engagement_level === 'low') {
-      prompt += `\n- Senior seems less engaged. Try to draw them into conversation.`;
+      parts.push('User seems disengaged - ask about their interests');
     }
     if (observerSignal.emotional_state && observerSignal.emotional_state !== 'unknown') {
-      prompt += `\n- Emotional state: ${observerSignal.emotional_state}`;
+      parts.push(`User feeling ${observerSignal.emotional_state}`);
     }
     if (observerSignal.should_deliver_reminder && observerSignal.reminder_to_deliver) {
-      prompt += `\n- Now is a good time to mention their reminder: ${observerSignal.reminder_to_deliver}`;
+      parts.push(`Mention reminder: ${observerSignal.reminder_to_deliver}`);
     }
     if (observerSignal.suggested_topic) {
-      prompt += `\n- Topic suggestion: ${observerSignal.suggested_topic}`;
+      parts.push(`Good topic: ${observerSignal.suggested_topic}`);
     }
     if (observerSignal.should_end_call) {
-      prompt += `\n- Consider wrapping up the call naturally. ${observerSignal.end_call_reason || ''}`;
+      parts.push('Wrap up the call naturally');
+    }
+    if (parts.length > 0) {
+      guidanceParts.push(parts.join('. '));
     }
   }
 
-  // Add dynamic memories found from user's current message
-  if (dynamicMemoryContext) {
-    prompt += dynamicMemoryContext;
+  // Always include guidance - adapters handle formatting
+  if (guidanceParts.length > 0) {
+    prompt += `\n\n<guidance>\n${guidanceParts.join('\n')}\n</guidance>`;
   }
 
-  prompt += `\n\nUse this context naturally in conversation. Reference past topics when relevant but don't force it.`;
-
-  return prompt;
+  return { prompt };
 };
 
 /**
@@ -147,15 +206,23 @@ Your personality:
  * Uses: Deepgram STT → Claude + Observer → ElevenLabs TTS
  */
 export class V1AdvancedSession {
-  constructor(twilioWs, streamSid, senior = null, memoryContext = null, reminderPrompt = null, pendingReminders = []) {
+  constructor(twilioWs, streamSid, senior = null, memoryContext = null, reminderPrompt = null, pendingReminders = [], currentDelivery = null, preGeneratedGreeting = null) {
     this.twilioWs = twilioWs;
     this.streamSid = streamSid;
     this.senior = senior;
     this.memoryContext = memoryContext;
     this.reminderPrompt = reminderPrompt;
+    this.preGeneratedGreeting = preGeneratedGreeting;
+
+    // Log what context was received
+    console.log(`[V1][${streamSid}] Session created: senior=${senior?.name || 'none'}, memory=${memoryContext ? memoryContext.length + ' chars' : 'none'}, greeting=${preGeneratedGreeting ? 'ready' : 'will generate'}`);
     this.isConnected = false;
     this.conversationLog = [];
     this.memoriesExtracted = false;
+
+    // Reminder acknowledgment tracking
+    this.currentDelivery = currentDelivery; // Delivery record for acknowledgment tracking
+    this.reminderAcknowledged = false;      // Track if acknowledgment was detected
 
     // STT (Deepgram)
     this.deepgram = null;
@@ -220,14 +287,60 @@ export class V1AdvancedSession {
     }
   }
 
+  /**
+   * Generate personalized greeting using Claude with full context
+   */
+  async generateGreeting() {
+    const firstName = this.senior?.name?.split(' ')[0];
+
+    // If no senior context, use simple greeting
+    if (!this.senior) {
+      return `Hello! It's Donna calling to check in. How are you doing today?`;
+    }
+
+    // Run quick memory search for greeting context
+    let recentMemories = [];
+    if (this.senior?.id) {
+      try {
+        recentMemories = await memoryService.getRecent(this.senior.id, 5);
+        console.log(`[V1][${this.streamSid}] Greeting context: ${recentMemories.length} recent memories`);
+      } catch (e) {
+        console.error(`[V1][${this.streamSid}] Memory fetch error:`, e.message);
+      }
+    }
+
+    // Build greeting prompt with full context
+    const greetingPrompt = `You are Donna, calling ${firstName} to check in.
+
+CONTEXT:
+- Interests: ${this.senior.interests?.join(', ') || 'unknown'}
+${this.memoryContext ? `\n${this.memoryContext}` : ''}
+${recentMemories.length > 0 ? `\nRecent memories:\n${recentMemories.map(m => `- ${m.content}`).join('\n')}` : ''}
+
+Generate a warm, personalized greeting (1-2 sentences). Reference something specific from their life - a hobby, recent event, or something you remember about them. End with a question.
+
+RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
+
+    try {
+      const adapter = getAdapter(VOICE_MODEL);
+      const greeting = await adapter.generate(greetingPrompt, [], { maxTokens: 100, temperature: 0.8 });
+      console.log(`[V1][${this.streamSid}] Generated greeting: "${greeting.substring(0, 50)}..."`);
+      return greeting.trim();
+    } catch (error) {
+      console.error(`[V1][${this.streamSid}] Greeting generation error:`, error.message);
+      return `Hello ${firstName}! It's Donna calling to check in. How are you doing today?`;
+    }
+  }
+
   async connect() {
     console.log(`[V1][${this.streamSid}] Starting advanced pipeline for ${this.senior?.name || 'unknown'}`);
     this.isConnected = true;
 
-    // Start Deepgram and greeting TTS in parallel for fastest startup
-    const greetingText = this.senior?.name
-      ? `Hello ${this.senior.name}! It's Donna calling to check in on you. How are you doing today, dear?`
-      : `Hello! It's Donna calling to check in. How are you doing today?`;
+    // Use pre-generated greeting if available, otherwise generate now
+    const greetingText = this.preGeneratedGreeting || await this.generateGreeting();
+    if (this.preGeneratedGreeting) {
+      console.log(`[V1][${this.streamSid}] Using pre-generated greeting`);
+    }
 
     // Log greeting to conversation
     this.conversationLog.push({
@@ -241,6 +354,11 @@ export class V1AdvancedSession {
       this.connectDeepgram(),
       this.sendPrebuiltGreeting(greetingText)
     ]);
+
+    // Clear any transcript that accumulated during greeting and reset timer
+    // This prevents silence detection from triggering on stale/noise transcripts
+    this.currentTranscript = '';
+    this.lastAudioTime = Date.now();
 
     // Start silence detection
     this.startSilenceDetection();
@@ -380,7 +498,7 @@ export class V1AdvancedSession {
       timestamp: new Date().toISOString()
     });
 
-    console.log(`[V1][${this.streamSid}] Processing: "${text}"`);
+    console.log(`[V1][${this.streamSid}] Processing: "${text}" (seniorId: ${this.senior?.id || 'none'})`);
 
     // Start Layer 2 (fast observer) analysis in parallel - results used in NEXT turn
     // Don't await - this runs in background
@@ -390,7 +508,7 @@ export class V1AdvancedSession {
       this.senior?.id
     ).then(result => {
       this.lastFastObserverResult = result;
-      console.log(`[V1][${this.streamSid}] Fast observer complete: sentiment=${result.sentiment?.sentiment}, memories=${result.memories?.length || 0}`);
+      console.log(`[V1][${this.streamSid}] Fast observer complete: sentiment=${result.sentiment?.sentiment}, memories=${result.memories?.length || 0}, dynamicCtx=${this.dynamicMemoryContext ? 'yes' : 'no'}`);
     }).catch(e => {
       console.error(`[V1][${this.streamSid}] Fast observer error:`, e.message);
     });
@@ -446,7 +564,7 @@ export class V1AdvancedSession {
       // Inject relevant memories into context
       if (memoryResults && memoryResults.length > 0) {
         const memoryText = memoryResults.map(m => `- ${m.content}`).join('\n');
-        this.dynamicMemoryContext = `\n\n[RELEVANT MEMORIES - use naturally]\n${memoryText}`;
+        this.dynamicMemoryContext = `\n\nFrom previous conversations:\n${memoryText}`;
         console.log(`[V1][${this.streamSid}] Found ${memoryResults.length} relevant memories`);
       } else {
         this.dynamicMemoryContext = null;
@@ -462,14 +580,47 @@ export class V1AdvancedSession {
     this.wasInterrupted = false; // Reset interrupt flag
 
     try {
-      // Build system prompt with observer signal and dynamic memories
-      const systemPrompt = buildSystemPrompt(
+      // Layer 1: Quick Observer (0ms) - for post-turn processing
+      const quickResult = quickAnalyze(userMessage, this.conversationLog.slice(-6));
+
+      // Check for reminder acknowledgment
+      if (this.currentDelivery && !this.reminderAcknowledged && quickResult.reminderResponse) {
+        const { type, confidence } = quickResult.reminderResponse;
+        console.log(`[V1][${this.streamSid}] Reminder response detected: ${type} (confidence: ${confidence})`);
+
+        if (confidence >= 0.7) {
+          this.reminderAcknowledged = true;
+          await schedulerService.markReminderAcknowledged(
+            this.currentDelivery.id,
+            type, // 'acknowledged' or 'confirmed'
+            userMessage
+          );
+          console.log(`[V1][${this.streamSid}] Marked reminder as ${type}`);
+        }
+      }
+
+      // Dynamic model selection based on observer recommendations
+      const modelConfig = selectModelConfig(
+        quickResult,
+        this.lastFastObserverResult,
+        this.lastObserverSignal
+      );
+
+      // Get the adapter for the selected model
+      const adapter = getAdapter(modelConfig.model);
+      console.log(`[V1][${this.streamSid}] Model: ${modelConfig.model} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
+
+      // Build system prompt (full context - adapter handles quirks)
+      const { prompt: systemPrompt } = buildSystemPrompt(
         this.senior,
         this.memoryContext,
         this.reminderPrompt,
         this.lastObserverSignal,
-        this.dynamicMemoryContext
+        this.dynamicMemoryContext,
+        quickResult.guidance,
+        null // fast guidance not used in non-streaming
       );
+      console.log(`[V1][${this.streamSid}] System prompt built: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, senior=${this.senior?.name || 'none'}`);
 
       // Build messages array
       const messages = this.conversationLog
@@ -484,26 +635,19 @@ export class V1AdvancedSession {
         messages.push({ role: 'user', content: userMessage });
       }
 
-      // Generate response with Claude
-      console.log(`[V1][${this.streamSid}] Calling Claude...`);
-      const response = await anthropic.messages.create({
-        model: 'claude-3-haiku-20240307',
-        max_tokens: 150, // Keep responses short for phone call
-        system: systemPrompt,
-        messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
+      // Generate response using adapter
+      console.log(`[V1][${this.streamSid}] Calling ${adapter.getModelName()}...`);
+      const responseText = await adapter.generate(systemPrompt, messages, {
+        maxTokens: modelConfig.max_tokens,
       });
 
-      // Check if interrupted during Claude call - skip TTS if so
+      // Check if interrupted during generation - skip TTS if so
       if (this.wasInterrupted) {
         console.log(`[V1][${this.streamSid}] Interrupted during generation, skipping TTS`);
         return;
       }
 
-      const responseText = response.content[0].type === 'text'
-        ? response.content[0].text
-        : '';
-
-      console.log(`[V1][${this.streamSid}] Claude: "${responseText}"`);
+      console.log(`[V1][${this.streamSid}] Response: "${responseText}"`);
 
       // Log to conversation
       this.conversationLog.push({
@@ -514,6 +658,9 @@ export class V1AdvancedSession {
 
       // Convert to speech and send to Twilio
       await this.textToSpeechAndSend(responseText);
+
+      // Layer 4: Post-turn tasks (fire and forget - don't await)
+      runPostTurnTasks(userMessage, responseText, quickResult, this.senior);
 
     } catch (error) {
       console.error(`[V1][${this.streamSid}] Response generation failed:`, error.message);
@@ -534,10 +681,25 @@ export class V1AdvancedSession {
     try {
       // Layer 1: Quick Observer (0ms) - affects THIS response
       const quickResult = quickAnalyze(userMessage, this.conversationLog.slice(-6));
-      const quickGuidance = quickResult.guidance;
 
-      if (quickGuidance) {
+      if (quickResult.guidance) {
         console.log(`[V1][${this.streamSid}] Quick observer: ${quickResult.healthSignals.length} health, ${quickResult.emotionSignals.length} emotion signals`);
+      }
+
+      // Check for reminder acknowledgment
+      if (this.currentDelivery && !this.reminderAcknowledged && quickResult.reminderResponse) {
+        const { type, confidence } = quickResult.reminderResponse;
+        console.log(`[V1][${this.streamSid}] Reminder response detected: ${type} (confidence: ${confidence})`);
+
+        if (confidence >= 0.7) {
+          this.reminderAcknowledged = true;
+          await schedulerService.markReminderAcknowledged(
+            this.currentDelivery.id,
+            type, // 'acknowledged' or 'confirmed'
+            userMessage
+          );
+          console.log(`[V1][${this.streamSid}] Marked reminder as ${type}`);
+        }
       }
 
       // Get Layer 2 results from PREVIOUS turn (if available)
@@ -545,16 +707,28 @@ export class V1AdvancedSession {
         ? formatFastObserverGuidance(this.lastFastObserverResult)
         : null;
 
-      // Build system prompt with all observer layers
-      const systemPrompt = buildSystemPrompt(
+      // Dynamic model selection FIRST (before building prompt)
+      const modelConfig = selectModelConfig(
+        quickResult,
+        this.lastFastObserverResult,
+        this.lastObserverSignal
+      );
+
+      // Get the adapter for the selected model
+      const adapter = getAdapter(modelConfig.model);
+      console.log(`[V1][${this.streamSid}] Model: ${modelConfig.model} (${modelConfig.reason}), tokens: ${modelConfig.max_tokens}`);
+
+      // Build system prompt (full context - adapter handles quirks)
+      const { prompt: systemPrompt } = buildSystemPrompt(
         this.senior,
         this.memoryContext,
         this.reminderPrompt,
         this.lastObserverSignal,
         this.dynamicMemoryContext,
-        quickGuidance,
+        quickResult.guidance,
         fastGuidance
       );
+      console.log(`[V1][${this.streamSid}] System prompt: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, senior=${this.senior?.name || 'none'}`);
 
       // Build messages array
       const messages = this.conversationLog
@@ -595,53 +769,54 @@ export class V1AdvancedSession {
       // Mark as speaking
       this.isSpeaking = true;
 
-      // Start Claude stream AND TTS connection in parallel
-      console.log(`[V1][${this.streamSid}] Calling Claude (streaming)...`);
-      const [stream] = await Promise.all([
-        anthropic.messages.stream({
-          model: 'claude-3-haiku-20240307',
-          max_tokens: 150,
-          system: systemPrompt,
-          messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
-        }),
-        this.streamingTts.connect()
-      ]);
+      // Start TTS connection first
+      await this.streamingTts.connect();
 
       let fullResponse = '';
       let textBuffer = '';
       let firstTokenTime = null;
       let sentencesSent = 0;
 
-      // Process streaming tokens
-      for await (const event of stream) {
-        // Check for interruption
-        if (this.wasInterrupted) {
-          console.log(`[V1][${this.streamSid}] Interrupted during streaming`);
-          break;
-        }
+      // Stream using adapter
+      console.log(`[V1][${this.streamSid}] Calling ${adapter.getModelName()} (streaming)...`);
 
-        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-          const text = event.delta.text;
-          fullResponse += text;
-          textBuffer += text;
+      const streamingTts = this.streamingTts;
+      const streamSid = this.streamSid;
+      const wasInterruptedRef = { value: false };
 
-          // Record first token time
-          if (!firstTokenTime) {
-            firstTokenTime = Date.now();
-            console.log(`[V1][${this.streamSid}] First token: ${firstTokenTime - startTime}ms`);
-          }
+      // Check for interruption periodically
+      const checkInterrupt = () => this.wasInterrupted;
 
-          // Extract complete sentences and send to TTS
-          const { complete, remaining } = extractCompleteSentences(textBuffer);
-          textBuffer = remaining;
+      try {
+        fullResponse = await adapter.stream(
+          systemPrompt,
+          messages,
+          { maxTokens: modelConfig.max_tokens },
+          async (text) => {
+            if (checkInterrupt()) return;
 
-          for (const sentence of complete) {
-            if (sentence.trim()) {
-              this.streamingTts.streamText(sentence + ' ');
-              sentencesSent++;
+            textBuffer += text;
+
+            if (!firstTokenTime) {
+              firstTokenTime = Date.now();
+              console.log(`[V1][${streamSid}] First token: ${firstTokenTime - startTime}ms`);
+            }
+
+            // Extract complete sentences and send to TTS
+            const { complete, remaining } = extractCompleteSentences(textBuffer);
+            textBuffer = remaining;
+
+            for (const sentence of complete) {
+              if (sentence.trim() && !checkInterrupt()) {
+                streamingTts.streamText(sentence + ' ');
+                sentencesSent++;
+                await new Promise(r => setTimeout(r, 200));
+              }
             }
           }
-        }
+        );
+      } catch (error) {
+        console.error(`[V1][${this.streamSid}] Streaming error:`, error.message);
       }
 
       // Send any remaining text
@@ -655,7 +830,7 @@ export class V1AdvancedSession {
       }
 
       const totalTime = Date.now() - startTime;
-      console.log(`[V1][${this.streamSid}] Claude (streaming): "${fullResponse}" [${sentencesSent} sentences, ${totalTime}ms total]`);
+      console.log(`[V1][${this.streamSid}] Response (streaming): "${fullResponse}" [${sentencesSent} sentences, ${totalTime}ms total]`);
 
       // Log to conversation
       if (fullResponse) {
@@ -664,6 +839,9 @@ export class V1AdvancedSession {
           content: fullResponse,
           timestamp: new Date().toISOString()
         });
+
+        // Layer 4: Post-turn tasks (fire and forget - don't await)
+        runPostTurnTasks(userMessage, fullResponse, quickResult, this.senior);
       }
 
       // Wait a moment for final audio chunks before closing
@@ -815,6 +993,12 @@ export class V1AdvancedSession {
 
     // Extract memories
     await this.extractMemories();
+
+    // Handle reminder delivery status if not acknowledged
+    if (this.currentDelivery && !this.reminderAcknowledged) {
+      console.log(`[V1][${this.streamSid}] Call ended without reminder acknowledgment`);
+      await schedulerService.markCallEndedWithoutAcknowledgment(this.currentDelivery.id);
+    }
 
     // Stop intervals
     if (this.observerCheckInterval) clearInterval(this.observerCheckInterval);

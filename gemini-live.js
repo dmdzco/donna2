@@ -2,6 +2,8 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import { createClient } from '@deepgram/sdk';
 import { base64MulawToBase64Pcm16k, base64Pcm24kToBase64Mulaw8k } from './audio-utils.js';
 import { memoryService } from './services/memory.js';
+import { schedulerService } from './services/scheduler.js';
+import { quickAnalyze } from './pipelines/quick-observer.js';
 
 const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null) => {
   let prompt = `You are Donna, a warm and caring AI companion for elderly individuals.
@@ -51,7 +53,7 @@ Keep the news mention brief and conversational. If they're not interested, move 
 const MEMORY_TRIGGERS = /\b(remember|forgot|last time|yesterday|doctor|medicine|son|daughter|grandchild|friend|family|birthday|visit|told you|mentioned|we talked)\b/i;
 
 export class GeminiLiveSession {
-  constructor(twilioWs, streamSid, senior = null, memoryContext = null, reminderPrompt = null) {
+  constructor(twilioWs, streamSid, senior = null, memoryContext = null, reminderPrompt = null, currentDelivery = null) {
     this.twilioWs = twilioWs;
     this.streamSid = streamSid;
     this.senior = senior;
@@ -62,6 +64,10 @@ export class GeminiLiveSession {
     this.isConnected = false;
     this.conversationLog = []; // Track conversation for memory extraction
     this.memoriesExtracted = false; // Prevent double extraction
+
+    // Reminder acknowledgment tracking
+    this.currentDelivery = currentDelivery; // Delivery record for acknowledgment tracking
+    this.reminderAcknowledged = false;      // Track if acknowledgment was detected
 
     // Mid-conversation memory retrieval state
     this.lastMemoryCheck = 0;
@@ -268,6 +274,29 @@ export class GeminiLiveSession {
           content: userText,
           timestamp: new Date().toISOString()
         });
+
+        // Check for reminder acknowledgment
+        if (this.currentDelivery && !this.reminderAcknowledged) {
+          const quickResult = quickAnalyze(userText, this.conversationLog.slice(-6));
+          if (quickResult.reminderResponse) {
+            const { type, confidence } = quickResult.reminderResponse;
+            console.log(`[${this.streamSid}] Reminder response detected: ${type} (confidence: ${confidence})`);
+
+            if (confidence >= 0.7) {
+              this.reminderAcknowledged = true;
+              schedulerService.markReminderAcknowledged(
+                this.currentDelivery.id,
+                type, // 'acknowledged' or 'confirmed'
+                userText
+              ).then(() => {
+                console.log(`[${this.streamSid}] Marked reminder as ${type}`);
+              }).catch(e => {
+                console.error(`[${this.streamSid}] Failed to mark acknowledgment:`, e.message);
+              });
+            }
+          }
+        }
+
         // Check for relevant memories
         this.checkForRelevantMemories(userText);
         this.inputBuffer = '';
@@ -412,6 +441,12 @@ export class GeminiLiveSession {
   async close() {
     // Extract memories before closing
     await this.extractMemories();
+
+    // Handle reminder delivery status if not acknowledged
+    if (this.currentDelivery && !this.reminderAcknowledged) {
+      console.log(`[${this.streamSid}] Call ended without reminder acknowledgment`);
+      await schedulerService.markCallEndedWithoutAcknowledgment(this.currentDelivery.id);
+    }
 
     // Close Deepgram connection
     if (this.dgConnection) {

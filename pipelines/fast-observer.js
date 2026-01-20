@@ -13,52 +13,59 @@
  * (or current response if Claude is slow enough)
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { getAdapter } from '../adapters/llm/index.js';
 import { memoryService } from '../services/memory.js';
 import { newsService } from '../services/news.js';
 
-const anthropic = new Anthropic();
+// Fast observer model (gemini-3-flash for speed)
+const FAST_OBSERVER_MODEL = process.env.FAST_OBSERVER_MODEL || 'gemini-3-flash';
 
 /**
- * Fast analysis using Haiku for sentiment/intent
+ * Fast analysis using Gemini 3 Flash for sentiment/intent
  * @param {string} userMessage - Current user message
  * @param {Array} conversationHistory - Recent conversation
  * @returns {Promise<object>} Quick AI analysis
  */
-async function analyzeSentimentWithHaiku(userMessage, conversationHistory = []) {
+async function analyzeSentiment(userMessage, conversationHistory = []) {
   const recentContext = conversationHistory
     .slice(-4)
     .map(m => `${m.role}: ${m.content}`)
     .join('\n');
 
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307',
-      max_tokens: 150,
-      system: `You analyze elderly phone conversations quickly. Respond ONLY with JSON.
-{
-  "sentiment": "positive|neutral|negative|concerned",
-  "engagement": "high|medium|low",
-  "topic_shift": "suggested topic if conversation stalling, null otherwise",
-  "needs_empathy": boolean,
-  "mentioned_names": ["any names mentioned"]
-}`,
-      messages: [
-        {
-          role: 'user',
-          content: `Recent conversation:\n${recentContext}\n\nLatest message: "${userMessage}"\n\nAnalyze:`,
-        },
-      ],
-    });
+  const systemPrompt = `Analyze this elderly phone conversation. Return ONLY a JSON object with no other text:
+{"sentiment":"positive|neutral|negative|concerned","engagement":"high|medium|low","topic_shift":null,"needs_empathy":false,"mentioned_names":[]}`;
 
-    const text = response.content[0].type === 'text' ? response.content[0].text : '{}';
-    // Handle potential markdown code blocks
-    const jsonText = text.includes('```')
-      ? text.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
-      : text;
-    return JSON.parse(jsonText);
+  const messages = [
+    {
+      role: 'user',
+      content: `Conversation:\n${recentContext}\n\nLatest: "${userMessage}"`,
+    },
+  ];
+
+  try {
+    const adapter = getAdapter(FAST_OBSERVER_MODEL);
+    const text = await adapter.generate(systemPrompt, messages, { maxTokens: 300, temperature: 0.1 });
+
+    // Extract JSON from response (handle markdown, extra text)
+    let jsonText = text.trim();
+    if (jsonText.includes('```')) {
+      jsonText = jsonText.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+    }
+    // Try to find JSON object in response
+    const jsonMatch = jsonText.match(/\{[^{}]*\}/);
+    if (jsonMatch) {
+      jsonText = jsonMatch[0];
+    }
+
+    // Try to parse, log on failure
+    try {
+      return JSON.parse(jsonText);
+    } catch (parseError) {
+      console.error('[FastObserver] JSON parse failed, raw:', text.substring(0, 200));
+      throw parseError;
+    }
   } catch (error) {
-    console.error('[FastObserver] Haiku analysis error:', error.message);
+    console.error('[FastObserver] Analysis error:', error.message);
     return {
       sentiment: 'neutral',
       engagement: 'medium',
@@ -134,7 +141,7 @@ export async function fastAnalyzeWithTools(userMessage, conversationHistory = []
 
   // Run all analyses in parallel
   const [sentiment, memories, currentEvents] = await Promise.all([
-    analyzeSentimentWithHaiku(userMessage, conversationHistory),
+    analyzeSentiment(userMessage, conversationHistory),
     searchRelevantMemories(seniorId, userMessage),
     checkCurrentEvents(userMessage),
   ]);
@@ -142,56 +149,120 @@ export async function fastAnalyzeWithTools(userMessage, conversationHistory = []
   const elapsed = Date.now() - startTime;
   console.log(`[FastObserver] Analysis completed in ${elapsed}ms`);
 
+  // Build model recommendation based on analysis
+  const modelRecommendation = buildModelRecommendation(sentiment, memories);
+
   return {
     sentiment,
     memories,
     currentEvents,
     elapsed,
+    modelRecommendation,
   };
 }
 
 /**
- * Format fast observer results for system prompt injection
+ * Build model recommendation based on fast observer results
+ * Returns upgrade to Sonnet + higher token count for sensitive situations
+ */
+function buildModelRecommendation(sentiment, memories) {
+  // Needs empathy - requires sophistication
+  if (sentiment?.needs_empathy) {
+    return {
+      use_sonnet: true,
+      max_tokens: 150,
+      reason: 'needs_empathy'
+    };
+  }
+
+  // Concerned sentiment - careful, nuanced response needed
+  if (sentiment?.sentiment === 'concerned' || sentiment?.sentiment === 'negative') {
+    return {
+      use_sonnet: true,
+      max_tokens: 150,
+      reason: 'concerned_sentiment'
+    };
+  }
+
+  // Low engagement with topic shift - creative re-engagement
+  if (sentiment?.engagement === 'low' && sentiment?.topic_shift) {
+    return {
+      use_sonnet: true,
+      max_tokens: 120,
+      reason: 'creative_reengagement'
+    };
+  }
+
+  // High importance memory match - personalized response
+  const highImportanceMemory = memories?.find(m => m.importance >= 80);
+  if (highImportanceMemory) {
+    return {
+      use_sonnet: true,
+      max_tokens: 150,
+      reason: 'important_memory'
+    };
+  }
+
+  // Any memory match - slightly more tokens for personalization
+  if (memories?.length > 0) {
+    return {
+      use_sonnet: false,
+      max_tokens: 100,
+      reason: 'memory_personalization'
+    };
+  }
+
+  // Default - no recommendation
+  return null;
+}
+
+/**
+ * Format fast observer results - returns { guidance, memories }
+ * Guidance only for Sonnet, memories for all models
  * @param {object} analysis - Results from fastAnalyzeWithTools
- * @returns {string|null} Formatted guidance string
+ * @returns {object} { guidance: string|null, memories: string|null }
  */
 export function formatFastObserverGuidance(analysis) {
-  const lines = [];
+  const guidanceLines = [];
+  let memoriesText = null;
 
-  // Sentiment-based guidance
+  // Sentiment-based guidance (Sonnet only)
   if (analysis.sentiment) {
     if (analysis.sentiment.sentiment === 'negative' || analysis.sentiment.sentiment === 'concerned') {
-      lines.push('[SENTIMENT: User seems concerned or negative. Respond with extra warmth and empathy.]');
+      guidanceLines.push('User seems worried - respond with warmth');
     }
     if (analysis.sentiment.needs_empathy) {
-      lines.push('[EMPATHY: User may need emotional support. Acknowledge their feelings.]');
+      guidanceLines.push('User needs emotional support - acknowledge feelings');
     }
     if (analysis.sentiment.engagement === 'low') {
-      lines.push('[ENGAGEMENT: Low engagement detected. Try asking about their interests.]');
+      guidanceLines.push('Low engagement - ask about their interests');
     }
     if (analysis.sentiment.topic_shift) {
-      lines.push(`[TOPIC: Consider transitioning to: ${analysis.sentiment.topic_shift}]`);
+      guidanceLines.push(`Consider topic: ${analysis.sentiment.topic_shift}`);
     }
     if (analysis.sentiment.mentioned_names?.length > 0) {
-      lines.push(`[NAMES: User mentioned: ${analysis.sentiment.mentioned_names.join(', ')}. Ask about them.]`);
+      guidanceLines.push(`They mentioned: ${analysis.sentiment.mentioned_names.join(', ')} - ask about them`);
     }
   }
 
-  // Memory-based guidance
+  // Memory-based context (all models)
   if (analysis.memories?.length > 0) {
-    const memoryText = analysis.memories.map(m => `- ${m.content}`).join('\n');
-    lines.push(`[RELEVANT MEMORIES - use naturally]\n${memoryText}`);
+    memoriesText = analysis.memories.map(m => `- ${m.content}`).join('\n');
   }
 
-  // Current events
-  if (analysis.currentEvents) {
+  // Current events (all models)
+  if (analysis.currentEvents?.items?.length > 0) {
     const newsText = analysis.currentEvents.items
-      .map(n => `- ${n.title || n.summary}`)
-      .join('\n');
-    lines.push(`[CURRENT EVENTS - share if asked]\n${newsText}`);
+      .slice(0, 2)
+      .map(n => n.title || n.summary)
+      .join('; ');
+    guidanceLines.push(`News to share if asked: ${newsText}`);
   }
 
-  return lines.length > 0 ? lines.join('\n') : null;
+  return {
+    guidance: guidanceLines.length > 0 ? guidanceLines.join('\n') : null,
+    memories: memoriesText,
+  };
 }
 
 export default {

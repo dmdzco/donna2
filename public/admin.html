@@ -29,40 +29,15 @@
     }
     header h1 { font-size: 24px; margin-bottom: 4px; }
     header p { opacity: 0.9; font-size: 13px; }
-    .pipeline-selector {
-      display: flex;
-      align-items: center;
-      gap: 10px;
+    /* Version badge in header */
+    .version-badge {
       background: rgba(255,255,255,0.15);
       padding: 8px 14px;
       border-radius: 8px;
-    }
-    .pipeline-selector label {
       font-size: 12px;
       font-weight: 600;
       color: rgba(255,255,255,0.9);
-      margin-bottom: 0;
     }
-    .pipeline-selector select {
-      background: white;
-      border: none;
-      padding: 6px 10px;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-    }
-    .pipeline-badge {
-      display: inline-block;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      margin-left: 6px;
-    }
-    .pipeline-badge.v0 { background: #27ae60; color: white; }
-    .pipeline-badge.v1 { background: #e67e22; color: white; }
 
     /* Tabs */
     .tabs {
@@ -348,13 +323,7 @@
         <h1>Donna Admin</h1>
         <p>Manage seniors, calls, and reminders</p>
       </div>
-      <div class="pipeline-selector">
-        <label>Pipeline:</label>
-        <select id="pipelineSelect" onchange="setPipeline(this.value)">
-          <option value="v0">V0 - Gemini Native</option>
-          <option value="v1">V1 - Claude + Observer</option>
-        </select>
-      </div>
+      <div class="version-badge">v3.0</div>
     </header>
 
     <!-- Tabs -->
@@ -719,9 +688,7 @@
             ` : ''}
           </div>
           <div class="actions">
-            <button class="small" onclick="callSenior('${s.phone}', '${esc(s.name)}')">
-              Call<span class="pipeline-badge ${currentPipeline}">${currentPipeline}</span>
-            </button>
+            <button class="small" onclick="callSenior('${s.phone}', '${esc(s.name)}')">Call</button>
             <button class="small secondary" onclick="editSenior('${s.id}')">Edit</button>
             <button class="small danger" onclick="deleteSenior('${s.id}')">Delete</button>
           </div>
@@ -868,32 +835,17 @@
       }
     }
 
-    // Pipeline selection
-    let currentPipeline = localStorage.getItem('donnaPipeline') || 'v0';
-
-    function setPipeline(value) {
-      currentPipeline = value;
-      localStorage.setItem('donnaPipeline', value);
-      showToast(`Pipeline set to ${value === 'v0' ? 'V0 (Gemini Native)' : 'V1 (Claude + Observer)'}`);
-      // Refresh seniors list to update call badges
-      loadSeniors();
-    }
-
-    function initPipelineSelector() {
-      document.getElementById('pipelineSelect').value = currentPipeline;
-    }
-
+    // Call senior (v3.0 - Claude + 4-layer observer)
     async function callSenior(phone, name) {
-      const pipelineLabel = currentPipeline === 'v0' ? 'Gemini' : 'Claude + Observer';
-      if (!confirm(`Call ${name} using ${pipelineLabel} pipeline?`)) return;
+      if (!confirm(`Call ${name}?`)) return;
       try {
         const res = await fetch(`${API}/api/call`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phoneNumber: phone, pipeline: currentPipeline })
+          body: JSON.stringify({ phoneNumber: phone })
         });
         if (!res.ok) throw new Error('Failed');
-        showToast(`Calling ${name} (${currentPipeline})...`);
+        showToast(`Calling ${name}...`);
         setTimeout(loadDashboard, 2000);
       } catch (e) {
         showToast('Failed to call', 'error');
@@ -1079,7 +1031,6 @@
     });
 
     // Initial load
-    initPipelineSelector();
     loadDashboard();
     loadSeniors();
     loadCalls();

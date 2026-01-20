@@ -63,6 +63,19 @@ const ENGAGEMENT_PATTERNS = [
   { pattern: /^.{1,30}$/i, signal: 'short' }, // Short responses
 ];
 
+// Reminder acknowledgment patterns - user confirming they will do/have done reminder
+const REMINDER_ACKNOWLEDGMENT_PATTERNS = [
+  // Acknowledgment (will do) - higher confidence
+  { pattern: /\b(ok(ay)?|sure|yes|will do|got it|i('ll| will) (take|do|remember)|sounds good|alright)\b/i, type: 'acknowledged', confidence: 0.8 },
+  { pattern: /\b(thank(s| you)|appreciate|good reminder|glad you called|thanks for reminding)\b/i, type: 'acknowledged', confidence: 0.7 },
+  { pattern: /\b(i('ll| will) get (to it|on it|it done)|going to (take|do) it|about to)\b/i, type: 'acknowledged', confidence: 0.9 },
+
+  // Confirmation (already done) - higher confidence
+  { pattern: /\b(already (took|did|done|finished|had|taken)|just (took|did|finished)|i('ve| have) (taken|done|had|finished))\b/i, type: 'confirmed', confidence: 0.95 },
+  { pattern: /\b(took (it|them|my|the)|did (it|that)|done( with)?( it)?|finished|completed)\b/i, type: 'confirmed', confidence: 0.85 },
+  { pattern: /\b(earlier|this morning|a (few )?minutes ago|before you called)\b/i, type: 'confirmed', confidence: 0.8 },
+];
+
 /**
  * Quick analysis of user message - runs in 0ms (synchronous regex)
  * Returns guidance to inject into system prompt for current response
@@ -79,6 +92,8 @@ export function quickAnalyze(userMessage, recentHistory = []) {
     isQuestion: false,
     engagementLevel: 'normal',
     guidance: null,
+    modelRecommendation: null, // Dynamic model/token selection
+    reminderResponse: null,    // Reminder acknowledgment detection
   };
 
   if (!userMessage) return result;
@@ -138,14 +153,88 @@ export function quickAnalyze(userMessage, recentHistory = []) {
     }
   }
 
+  // Check for reminder acknowledgment/confirmation
+  let bestReminderMatch = null;
+  for (const { pattern, type, confidence } of REMINDER_ACKNOWLEDGMENT_PATTERNS) {
+    if (pattern.test(text)) {
+      if (!bestReminderMatch || confidence > bestReminderMatch.confidence) {
+        bestReminderMatch = { type, confidence };
+      }
+    }
+  }
+  if (bestReminderMatch) {
+    result.reminderResponse = bestReminderMatch;
+  }
+
   // Build guidance string for system prompt
   result.guidance = buildGuidance(result);
+
+  // Build model recommendation for dynamic routing
+  result.modelRecommendation = buildModelRecommendation(result);
 
   return result;
 }
 
 /**
+ * Build model recommendation based on detected signals
+ * Returns upgrade to Sonnet + higher token count for sensitive situations
+ */
+function buildModelRecommendation(analysis) {
+  // Health mentions - safety requires thoughtful response
+  if (analysis.healthSignals.length > 0) {
+    const severeHealth = ['fall', 'dizziness', 'cardiovascular', 'pain'];
+    const isSevere = analysis.healthSignals.some(s => severeHealth.includes(s));
+    return {
+      use_sonnet: true,
+      max_tokens: isSevere ? 150 : 120,
+      reason: 'health_safety'
+    };
+  }
+
+  // Negative emotions - need nuanced empathy
+  const negativeEmotions = analysis.emotionSignals.filter(e => e.valence === 'negative');
+  if (negativeEmotions.length > 0) {
+    return {
+      use_sonnet: true,
+      max_tokens: 150,
+      reason: 'emotional_support'
+    };
+  }
+
+  // Low engagement - need creative re-engagement
+  if (analysis.engagementLevel === 'low') {
+    return {
+      use_sonnet: true,
+      max_tokens: 120,
+      reason: 'low_engagement'
+    };
+  }
+
+  // Simple question - quick answer is better
+  if (analysis.isQuestion && analysis.healthSignals.length === 0 && negativeEmotions.length === 0) {
+    return {
+      use_sonnet: false,
+      max_tokens: 60,
+      reason: 'simple_question'
+    };
+  }
+
+  // Family mention - Haiku handles warmth fine
+  if (analysis.familySignals.length > 0) {
+    return {
+      use_sonnet: false,
+      max_tokens: 75,
+      reason: 'family_warmth'
+    };
+  }
+
+  // Default - no recommendation, use pipeline defaults
+  return null;
+}
+
+/**
  * Build guidance string for injection into system prompt
+ * NOTE: Bracketed text is internal guidance - model instructed not to read aloud
  */
 function buildGuidance(analysis) {
   const lines = [];
@@ -154,23 +243,23 @@ function buildGuidance(analysis) {
   if (analysis.healthSignals.length > 0) {
     const healthType = analysis.healthSignals[0];
     const healthGuidance = {
-      dizziness: 'Express genuine concern about their dizziness. Ask if they need help or if this is new.',
-      pain: 'Show empathy about their discomfort. Ask where it hurts and if they\'ve told anyone.',
-      fall: 'This is important - ask if they\'re okay and if anyone knows. Express care.',
-      medication: 'If they mention medication, gently ask if they\'ve taken it today.',
-      medical_appointment: 'Ask about their appointment - when it is, if they need a ride.',
-      fatigue: 'Note they seem tired. Ask if they\'ve been sleeping okay.',
-      sleep_issues: 'Sleep issues can be concerning. Ask gently how long this has been happening.',
-      memory_concern: 'Be reassuring about memory. Everyone forgets things sometimes.',
-      cardiovascular: 'Heart/chest mentions need gentle follow-up. Ask if they\'re feeling okay now.',
-      appetite: 'Ask what they\'ve been eating. Meals are important conversation topics too.',
+      dizziness: 'Express concern about their dizziness. Ask if they need help.',
+      pain: 'Show empathy about their discomfort. Ask where it hurts.',
+      fall: 'Ask if they are okay and if anyone knows about this.',
+      medication: 'Gently ask if they have taken their medication today.',
+      medical_appointment: 'Ask about their appointment - when is it?',
+      fatigue: 'Ask if they have been sleeping okay.',
+      sleep_issues: 'Ask how long they have had trouble sleeping.',
+      memory_concern: 'Be reassuring. Everyone forgets things sometimes.',
+      cardiovascular: 'Ask if they are feeling okay right now.',
+      appetite: 'Ask what they have been eating lately.',
     };
-    lines.push(`[HEALTH: ${healthGuidance[healthType] || 'Follow up on their health mention with care.'}]`);
+    lines.push(`[HEALTH] ${healthGuidance[healthType] || 'Follow up on their health with care.'}`);
   }
 
-  // Family signals - warm conversation opportunity
+  // Family signals
   if (analysis.familySignals.length > 0) {
-    lines.push('[FAMILY: They mentioned family - this is a warm topic. Ask a follow-up question about this person.]');
+    lines.push('[FAMILY] They mentioned family. Ask a warm follow-up about this person.');
   }
 
   // Emotion signals
@@ -180,25 +269,25 @@ function buildGuidance(analysis) {
   if (negativeEmotions.length > 0) {
     const emotion = negativeEmotions[0].signal;
     const emotionGuidance = {
-      lonely: 'They may be feeling lonely. Be extra warm and engaging. Ask about their day.',
-      sad: 'Acknowledge their feelings. Ask what\'s on their mind.',
-      anxious: 'They seem worried. Ask what\'s concerning them and listen.',
+      lonely: 'Be extra warm. Ask about their day.',
+      sad: 'Acknowledge their feelings. Ask what is on their mind.',
+      anxious: 'Ask what is concerning them.',
       frustrated: 'Acknowledge their frustration. Ask what happened.',
-      bored: 'They might need stimulation. Suggest an activity or ask about their interests.',
+      bored: 'Ask about their interests or suggest an activity.',
     };
-    lines.push(`[EMOTION: ${emotionGuidance[emotion] || 'They expressed a difficult emotion. Acknowledge it warmly.'}]`);
+    lines.push(`[EMOTION] ${emotionGuidance[emotion] || 'Acknowledge their feelings warmly.'}`);
   } else if (positiveEmotions.length > 0) {
-    lines.push('[EMOTION: They seem positive - match their energy and share in their happiness.]');
+    lines.push('[EMOTION] They seem positive. Match their energy.');
   }
 
   // Question handling
   if (analysis.isQuestion) {
-    lines.push('[QUESTION: They asked a question. Answer it directly first, then continue conversation.]');
+    lines.push('[QUESTION] Answer their question directly first, then continue.');
   }
 
   // Low engagement
   if (analysis.engagementLevel === 'low') {
-    lines.push('[ENGAGEMENT: Short responses detected. Try asking an open-ended question about something they enjoy.]');
+    lines.push('[ENGAGEMENT] Short responses. Ask an open question about something they enjoy.');
   }
 
   return lines.length > 0 ? lines.join('\n') : null;

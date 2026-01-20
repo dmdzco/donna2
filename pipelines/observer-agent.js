@@ -1,6 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { getAdapter } from '../adapters/llm/index.js';
 
-const anthropic = new Anthropic();
+// Deep observer model (gemini-3-pro for thorough analysis)
+const DEEP_OBSERVER_MODEL = process.env.DEEP_OBSERVER_MODEL || 'gemini-3-pro';
 
 /**
  * Observer Agent - Analyzes conversation and provides guidance signals
@@ -59,6 +60,7 @@ Respond ONLY with valid JSON matching this schema:
 {
   "engagement_level": "high" | "medium" | "low",
   "emotional_state": "brief description",
+  "emotional_complexity": "simple" | "complex" (complex = multi-layered emotions needing nuance),
   "should_deliver_reminder": boolean,
   "reminder_to_deliver": "reminder id if applicable",
   "suggested_topic": "topic suggestion if conversation stalls",
@@ -72,35 +74,46 @@ Respond ONLY with valid JSON matching this schema:
       .join('\n');
 
     try {
-      const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 500,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: `Analyze this conversation:\n\n${conversationText}`,
-          },
-        ],
+      const adapter = getAdapter(DEEP_OBSERVER_MODEL);
+      const messages = [
+        {
+          role: 'user',
+          content: `Analyze this conversation:\n\n${conversationText}`,
+        },
+      ];
+
+      const responseText = await adapter.generate(systemPrompt, messages, {
+        maxTokens: 800,
+        temperature: 0.1,
       });
 
-      const responseText = response.content[0].type === 'text'
-        ? response.content[0].text
-        : '{}';
-
-      // Parse JSON response (handle markdown code blocks)
-      let jsonText = responseText;
-      if (responseText.includes('```')) {
-        jsonText = responseText.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+      // Parse JSON response (handle markdown code blocks, extra text)
+      let jsonText = responseText.trim();
+      if (jsonText.includes('```')) {
+        jsonText = jsonText.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+      }
+      // Extract JSON object
+      const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonText = jsonMatch[0];
       }
 
-      const signal = JSON.parse(jsonText);
+      let signal;
+      try {
+        signal = JSON.parse(jsonText);
+      } catch (parseError) {
+        console.error('[ObserverAgent] JSON parse failed, raw:', responseText.substring(0, 300));
+        throw parseError;
+      }
 
       // Force end call if way over time
       if (callDurationMinutes > this.maxCallDuration * 1.2) {
         signal.should_end_call = true;
         signal.end_call_reason = 'Call duration exceeded recommended time';
       }
+
+      // Build model recommendation based on deep analysis
+      signal.modelRecommendation = this.buildModelRecommendation(signal);
 
       return signal;
     } catch (error) {
@@ -137,5 +150,59 @@ Respond ONLY with valid JSON matching this schema:
    */
   getCallDuration() {
     return (Date.now() - this.callStartTime.getTime()) / 60000;
+  }
+
+  /**
+   * Build model recommendation based on deep observer analysis
+   * Returns upgrade to Sonnet + higher token count for complex situations
+   */
+  buildModelRecommendation(signal) {
+    // Complex emotional patterns need sophisticated handling
+    if (signal.emotional_complexity === 'complex') {
+      return {
+        use_sonnet: true,
+        max_tokens: 180,
+        reason: 'complex_emotional_pattern'
+      };
+    }
+
+    // Should end call - needs graceful wrap-up
+    if (signal.should_end_call) {
+      return {
+        use_sonnet: true,
+        max_tokens: 150,
+        reason: 'graceful_ending'
+      };
+    }
+
+    // Reminder delivery - needs natural integration
+    if (signal.should_deliver_reminder && signal.reminder_to_deliver) {
+      return {
+        use_sonnet: false, // Haiku can handle, just needs more tokens
+        max_tokens: 120,
+        reason: 'reminder_delivery'
+      };
+    }
+
+    // Low engagement - may need creative response
+    if (signal.engagement_level === 'low') {
+      return {
+        use_sonnet: true,
+        max_tokens: 120,
+        reason: 'low_engagement_recovery'
+      };
+    }
+
+    // Has concerns - need thoughtful response
+    if (signal.concerns?.length > 0) {
+      return {
+        use_sonnet: true,
+        max_tokens: 150,
+        reason: 'caregiver_concerns'
+      };
+    }
+
+    // Default - no recommendation
+    return null;
   }
 }

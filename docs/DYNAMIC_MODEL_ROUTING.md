@@ -113,81 +113,150 @@ function selectModelConfig(quickResult, fastResult, deepResult, productFeatures 
 }
 ```
 
-### Phase 3: Integration Points
-
-Modify the streaming call in `v1-advanced.js`:
+## Integration
 
 ```javascript
-// Before Claude call
-const modelConfig = selectModelConfig(
+// In v1-advanced.js generateAndSendResponseStreaming()
+
+import { selectModel } from './model-selector.js';
+
+// Quick observer runs synchronously
+const quickResult = quickAnalyze(userMessage, this.conversationLog.slice(-6));
+
+// Select model based on all observer signals
+const modelConfig = selectModel(
   quickResult,
-  this.lastFastObserverResult,
-  observerSignal,
-  {} // product features
+  this.lastFastObserverResult,  // From previous turn
+  this.lastObserverSignal,       // From previous turn
+  this.activeProductFeatures     // Storytelling mode, etc.
 );
 
-console.log(`[V1] Using ${modelConfig.model} (${modelConfig.reason}), max_tokens: ${modelConfig.max_tokens}`);
+console.log(`[V1] Model: ${modelConfig.model.includes('haiku') ? 'Haiku' : 'Sonnet'}, ` +
+            `tokens: ${modelConfig.max_tokens}, reason: ${modelConfig.reason}`);
 
-// In streaming call
-const stream = await anthropic.messages.stream({
+const stream = anthropic.messages.stream({
   model: modelConfig.model,
   max_tokens: modelConfig.max_tokens,
   system: systemPrompt,
-  messages: claudeMessages,
+  messages: messages,
 });
+```
+
+## Why This Approach is Better
+
+| Old Approach (Regex) | New Approach (Observer-Driven) |
+|---------------------|-------------------------------|
+| Hardcoded patterns | AI decides what's complex |
+| Brittle rules | Adaptive to context |
+| Can't learn | Observers can be tuned |
+| Same rules for everyone | Can personalize per senior |
+
+## Product Features That Can Request Sonnet
+
+| Feature | When Active | Max Tokens |
+|---------|-------------|------------|
+| **Storytelling Mode** | User asks for a story | 400 |
+| **News Discussion** | Discussing current events | 300 |
+| **Reminder Delivery** | Natural reminder weaving | 250 |
+| **Memory Lane** | Discussing past memories | 300 |
+| **Health Check-in** | Scheduled health questions | 200 |
+| **Re-engagement** | Low engagement detected | 200 |
+
+## Haiku Prompt for Complexity Detection
+
+Add to fast-observer's Haiku call:
+
+```javascript
+const complexityPrompt = `
+Analyze if this conversation turn requires a complex response.
+
+Set needs_complex_response: true if ANY of these apply:
+- User is emotionally distressed and needs empathy
+- User asked a detailed question requiring explanation
+- Topic is health/safety related
+- User wants a story or detailed memory
+- Conversation is going poorly and needs re-engagement
+- User is confused and needs careful clarification
+
+Set needs_complex_response: false for:
+- Simple greetings and acknowledgments
+- Casual back-and-forth
+- User gave a short, content response
+- Normal friendly conversation
+
+Also suggest max_tokens: 50-400 based on expected response length.
+`;
+```
+
+## Default Behavior
+
+```
+90% of turns: Haiku, 100 tokens, ~80ms
+ → "Hi!" "Yes" "That's nice" "Okay" "Thanks"
+
+10% of turns: Sonnet, 200-400 tokens, ~200ms
+ → Health concerns, emotional support, stories, complex questions
+```
+
+## Observability
+
+Log all routing decisions:
+
+```javascript
+this.conversationLog.push({
+  role: 'assistant',
+  content: fullResponse,
+  timestamp: new Date().toISOString(),
+  model_routing: {
+    model: modelConfig.model,
+    max_tokens: modelConfig.max_tokens,
+    reason: modelConfig.reason,
+    observer_recommendations: {
+      quick: quickResult?.modelRecommendation,
+      fast: this.lastFastObserverResult?.modelRecommendation,
+      deep: this.lastObserverSignal?.model_recommendation,
+    }
+  }
+});
+```
+
+## Implementation Steps
+
+1. **Update `quick-observer.js`** - Add `modelRecommendation` to output
+2. **Update `fast-observer.js`** - Add Haiku complexity detection
+3. **Update `observer-agent.js`** - Add `model_recommendation` to output
+4. **Create `model-selector.js`** - Central model selection logic
+5. **Update `v1-advanced.js`** - Use `selectModel()` for dynamic routing
+6. **Add product feature flags** - Storytelling mode, etc.
+
+## Future: Learning
+
+Track outcomes to improve observer recommendations:
+
+```javascript
+// After call ends
+{
+  model_used: 'haiku',
+  observer_recommended: 'haiku',
+  outcome: {
+    user_engagement: 'high',
+    call_duration: 480,
+    concerns_raised: 0,
+  }
+}
+// → Haiku was the right choice
+
+{
+  model_used: 'haiku',
+  observer_recommended: 'haiku',
+  outcome: {
+    user_engagement: 'low',
+    user_repeated_question: true,
+  }
+}
+// → Should have used Sonnet, tune observer
 ```
 
 ---
 
-## Product Features (Future)
-
-Product-level features can also request model upgrades:
-
-| Feature | Model | max_tokens | Trigger |
-|---------|-------|------------|---------|
-| Storytelling Mode | Sonnet | 400 | User asks for a story |
-| News Discussion | Sonnet | 300 | Complex current events |
-| Life Review | Sonnet | 500 | Deep personal memories |
-| Quick Check-in | Haiku | 100 | Simple daily hello |
-| Medication Reminder | Haiku | 150 | Straightforward reminder |
-
----
-
-## Files to Modify
-
-| File | Changes |
-|------|---------|
-| `pipelines/quick-observer.js` | Add `modelRecommendation` to output |
-| `pipelines/fast-observer.js` | Add `modelRecommendation` to output |
-| `pipelines/observer-agent.js` | Add `modelRecommendation` to output |
-| `pipelines/v1-advanced.js` | Add `selectModelConfig()`, use in streaming call |
-
----
-
-## Implementation Checklist
-
-- [ ] Add `modelRecommendation` output to `quick-observer.js`
-- [ ] Add `modelRecommendation` output to `fast-observer.js`
-- [ ] Add `modelRecommendation` output to `observer-agent.js`
-- [ ] Create `selectModelConfig()` function in `v1-advanced.js`
-- [ ] Integrate model selection into streaming path
-- [ ] Add logging for model selection decisions
-- [ ] Test health mention → Sonnet upgrade
-- [ ] Test emotional support → Sonnet upgrade
-- [ ] Test normal conversation stays on Haiku
-
----
-
-## Expected Impact
-
-| Metric | Before | After |
-|--------|--------|-------|
-| Default model | Haiku | Haiku (unchanged) |
-| Health/safety responses | Haiku (fast but brief) | Sonnet (thoughtful) |
-| Emotional support | Haiku | Sonnet (nuanced) |
-| Cost per call | ~$0.002 | ~$0.003 (10-20% increase) |
-| Response quality (sensitive) | Good | Excellent |
-
----
-
-*Last updated: January 2026*
+*Let the AI decide when it needs more AI.*

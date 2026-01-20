@@ -1,82 +1,118 @@
 # Donna - Roadmap
 
-## Current State (v2.5)
+## Current State (v3.0)
 
 **Working Features:**
-- Dual Pipeline Architecture (V0 Gemini / V1 Claude Streaming)
+- 4-Layer Observer Architecture
+- Dynamic Model Routing (Haiku ↔ Sonnet)
+- Streaming Pipeline (~400ms time-to-first-audio)
 - Real-time voice calls via Twilio
 - Admin dashboard with senior/reminder management
 - Memory system with semantic search (pgvector)
 - Scheduled reminder calls
 - News updates via OpenAI web search
 - Observability dashboard for call monitoring
-- **V1 Streaming Pipeline** with multi-layer observers
 
 ---
 
 ## Recently Completed
 
-### ✅ V1 Latency Optimization (January 2026)
+### ✅ Dynamic Model Routing (January 2026)
 
-**Achieved:** Reduced V1 greeting latency from ~1.5s to ~400ms
+**Achieved:** Automatic Haiku/Sonnet selection based on conversation context.
+
+**Implemented:**
+- [x] `modelRecommendation` output in all 3 observers
+- [x] `selectModelConfig()` function in v1-advanced.js
+- [x] Priority: Quick > Fast > Deep (most urgent first)
+- [x] Logging: `Model: Haiku/Sonnet (reason), tokens: N`
+
+**Triggers:**
+| Situation | Model | Tokens |
+|-----------|-------|--------|
+| Normal conversation | Haiku | 75 |
+| Health mention | Sonnet | 150 |
+| Emotional support | Sonnet | 150 |
+| Low engagement | Sonnet | 120 |
+| Simple question | Haiku | 60 |
+
+---
+
+### ✅ Post-Turn Agent - Layer 4 (January 2026)
+
+**Achieved:** Background processing after response is sent.
+
+**Implemented:**
+- [x] `pipelines/post-turn-agent.js`
+- [x] Health concern extraction for caregiver alerts
+- [x] Automatic memory extraction from conversations
+- [x] Topic prefetching for anticipated discussions
+- [x] Fire-and-forget execution (non-blocking)
+
+---
+
+### ✅ V1 Streaming Pipeline (January 2026)
+
+**Achieved:** Reduced greeting latency from ~1.5s to ~400ms
 
 **Implemented:**
 - [x] Pre-built greeting (skips Claude for initial hello)
 - [x] Claude streaming responses (sentence-by-sentence)
 - [x] ElevenLabs WebSocket TTS connection
 - [x] Parallel Claude + TTS connection startup
-- [x] Multi-layer observer architecture:
-  - Layer 1 (0ms): Quick Observer - regex patterns for health/emotion
-  - Layer 2 (~300ms): Fast Observer - Haiku + memory search
-  - Layer 3 (~800ms): Deep Observer - Sonnet analysis (async)
-- [x] `V1_STREAMING_ENABLED` feature flag for rollback
-
-**New Files:**
-- `adapters/elevenlabs-streaming.js` - WebSocket TTS
-- `pipelines/quick-observer.js` - Layer 1 regex patterns
-- `pipelines/fast-observer.js` - Layer 2 Haiku + tools
+- [x] 3-layer observer architecture
+- [x] `V1_STREAMING_ENABLED` feature flag
 
 ---
 
 ### ✅ Haiku Default Model (January 2026)
 
-**Achieved:** Switched main conversation model from Sonnet to Haiku for faster responses.
+**Achieved:** Switched main conversation model from Sonnet to Haiku.
 
-- [x] Changed `v1-advanced.js` to use `claude-3-haiku-20240307`
-- [x] Reduced response latency by ~200-300ms
+- [x] Faster responses (~300ms vs ~800ms first token)
 - [x] Cost reduction (~10x cheaper per token)
+- [x] Dynamic upgrade to Sonnet when needed
 
 ---
 
 ## Upcoming Work
 
-### Dynamic Model Routing (Next Priority)
+### Dynamic Model Routing (Observer-Driven)
+**Goal:** Use Haiku by default, upgrade to Sonnet only when observers request it
 
-**Goal:** Upgrade from Haiku to Sonnet when observers detect situations needing more nuanced responses.
+**Spec:** [docs/DYNAMIC_MODEL_ROUTING.md](./DYNAMIC_MODEL_ROUTING.md)
 
-**Philosophy:** The AI decides when it needs more AI. Default is Haiku (fast, cheap). Observers can request Sonnet upgrade for health/safety, emotional support, or creative re-engagement.
+**Philosophy:** Let the AI decide when it needs more AI.
 
-**Full spec:** [DYNAMIC_MODEL_ROUTING.md](DYNAMIC_MODEL_ROUTING.md)
+```
+Default: Haiku (~80ms, 100 tokens) - 90% of turns
+Upgrade: Sonnet (~200ms, 200-400 tokens) - when observers say so
+```
 
 **Implementation:**
-- [ ] Add `modelRecommendation` output to `quick-observer.js`
-- [ ] Add `modelRecommendation` output to `fast-observer.js`
-- [ ] Add `modelRecommendation` output to `observer-agent.js`
-- [ ] Create `selectModelConfig()` function in `v1-advanced.js`
-- [ ] Integrate model selection into streaming path
-- [ ] Add logging for model selection decisions
-- [ ] Test: health mention → Sonnet upgrade
-- [ ] Test: emotional support → Sonnet upgrade
-- [ ] Test: normal conversation stays Haiku
+- [ ] Add `modelRecommendation` output to quick-observer.js
+- [ ] Add complexity detection to fast-observer.js (Haiku decides if Sonnet needed)
+- [ ] Add `model_recommendation` to observer-agent.js output
+- [ ] Create `pipelines/model-selector.js` for central routing logic
+- [ ] Update v1-advanced.js to use dynamic model selection
+- [ ] Add product feature flags (storytelling_mode, news_discussion, etc.)
+- [ ] Log routing decisions to conversation log for observability
 
-**Upgrade Triggers:**
-| Situation | Model | max_tokens |
-|-----------|-------|------------|
-| Health mention (pain, fell) | Sonnet | 200 |
-| Negative emotion (lonely, sad) | Sonnet | 250 |
-| Low engagement (re-engage) | Sonnet | 200 |
-| Normal conversation | Haiku | 150 |
-| Simple question | Haiku | 100 |
+**Observer-driven triggers for Sonnet:**
+- Health/safety concerns detected
+- Emotional distress (strong negative emotion)
+- Complex question requiring detailed answer
+- Low engagement - needs re-engagement
+- Storytelling or memory discussion requested
+
+**Product features that request Sonnet:**
+| Feature | Max Tokens |
+|---------|------------|
+| Storytelling Mode | 400 |
+| News Discussion | 300 |
+| Reminder Delivery | 250 |
+| Memory Lane | 300 |
+| Health Check-in | 200 |
 
 ---
 
@@ -143,6 +179,17 @@
 - [ ] Test Cartesia TTS (~50-100ms, native mulaw)
 - [ ] Test Deepgram TTS (~100-200ms)
 - [ ] Compare voice quality vs latency tradeoff
+### Future Latency Improvements
+
+**Potential optimizations:**
+- [ ] **Dynamic Model Routing** - Use Haiku by default (~80ms vs Sonnet ~200ms)
+- [ ] Test Cartesia TTS (~50-100ms) as ElevenLabs alternative
+- [ ] Test Deepgram TTS (~100-200ms)
+- [ ] Reduce Deepgram endpointing (500ms → 300ms)
+- [ ] Keep TTS WebSocket open between utterances
+- [ ] Cache common responses
+
+**Target with all optimizations:** ~250ms time-to-first-audio (from current ~400ms)
 
 ---
 
@@ -150,17 +197,26 @@
 
 | Feature | Key Files |
 |---------|-----------|
-| V0 Pipeline | `gemini-live.js` |
-| V1 Pipeline | `pipelines/v1-advanced.js` |
+| Main Pipeline | `pipelines/v1-advanced.js` |
 | Streaming TTS | `adapters/elevenlabs-streaming.js` |
 | Quick Observer (L1) | `pipelines/quick-observer.js` |
 | Fast Observer (L2) | `pipelines/fast-observer.js` |
 | Deep Observer (L3) | `pipelines/observer-agent.js` |
+| Post-Turn Agent (L4) | `pipelines/post-turn-agent.js` |
+| Model Selection | `v1-advanced.js` (selectModelConfig) |
 | Memory System | `services/memory.js` |
 | Scheduler | `services/scheduler.js` |
 | Admin UI | `public/admin.html` |
 | Observability | `apps/observability/` |
 
+## Documentation
+
+| Doc | Purpose |
+|-----|---------|
+| [STREAMING_OBSERVER_SPEC.md](./STREAMING_OBSERVER_SPEC.md) | Streaming + multi-layer observer architecture |
+| [DYNAMIC_MODEL_ROUTING.md](./DYNAMIC_MODEL_ROUTING.md) | Observer-driven Haiku/Sonnet selection |
+| [architecture/OVERVIEW.md](./architecture/OVERVIEW.md) | System architecture overview |
+
 ---
 
-*Last updated: January 2026 - v2.5 (Streaming Pipeline)*
+*Last updated: January 2026 - v3.0 (4-Layer Observer + Dynamic Routing)*

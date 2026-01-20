@@ -63,6 +63,19 @@ const ENGAGEMENT_PATTERNS = [
   { pattern: /^.{1,30}$/i, signal: 'short' }, // Short responses
 ];
 
+// Reminder acknowledgment patterns - user confirming they will do/have done reminder
+const REMINDER_ACKNOWLEDGMENT_PATTERNS = [
+  // Acknowledgment (will do) - higher confidence
+  { pattern: /\b(ok(ay)?|sure|yes|will do|got it|i('ll| will) (take|do|remember)|sounds good|alright)\b/i, type: 'acknowledged', confidence: 0.8 },
+  { pattern: /\b(thank(s| you)|appreciate|good reminder|glad you called|thanks for reminding)\b/i, type: 'acknowledged', confidence: 0.7 },
+  { pattern: /\b(i('ll| will) get (to it|on it|it done)|going to (take|do) it|about to)\b/i, type: 'acknowledged', confidence: 0.9 },
+
+  // Confirmation (already done) - higher confidence
+  { pattern: /\b(already (took|did|done|finished|had|taken)|just (took|did|finished)|i('ve| have) (taken|done|had|finished))\b/i, type: 'confirmed', confidence: 0.95 },
+  { pattern: /\b(took (it|them|my|the)|did (it|that)|done( with)?( it)?|finished|completed)\b/i, type: 'confirmed', confidence: 0.85 },
+  { pattern: /\b(earlier|this morning|a (few )?minutes ago|before you called)\b/i, type: 'confirmed', confidence: 0.8 },
+];
+
 /**
  * Quick analysis of user message - runs in 0ms (synchronous regex)
  * Returns guidance to inject into system prompt for current response
@@ -80,6 +93,7 @@ export function quickAnalyze(userMessage, recentHistory = []) {
     engagementLevel: 'normal',
     guidance: null,
     modelRecommendation: null, // Dynamic model/token selection
+    reminderResponse: null,    // Reminder acknowledgment detection
   };
 
   if (!userMessage) return result;
@@ -137,6 +151,19 @@ export function quickAnalyze(userMessage, recentHistory = []) {
     if (shortCount >= 2) {
       result.engagementLevel = 'low';
     }
+  }
+
+  // Check for reminder acknowledgment/confirmation
+  let bestReminderMatch = null;
+  for (const { pattern, type, confidence } of REMINDER_ACKNOWLEDGMENT_PATTERNS) {
+    if (pattern.test(text)) {
+      if (!bestReminderMatch || confidence > bestReminderMatch.confidence) {
+        bestReminderMatch = { type, confidence };
+      }
+    }
+  }
+  if (bestReminderMatch) {
+    result.reminderResponse = bestReminderMatch;
   }
 
   // Build guidance string for system prompt

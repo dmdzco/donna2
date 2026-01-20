@@ -59,3 +59,18 @@ export const reminders = pgTable('reminders', {
   lastDeliveredAt: timestamp('last_delivered_at'),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+// Reminder Deliveries - tracks each delivery attempt for acknowledgment
+export const reminderDeliveries = pgTable('reminder_deliveries', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  reminderId: uuid('reminder_id').references(() => reminders.id),
+  scheduledFor: timestamp('scheduled_for').notNull(), // The target time this delivery is for
+  deliveredAt: timestamp('delivered_at'),             // When call was made
+  acknowledgedAt: timestamp('acknowledged_at'),       // When user acknowledged
+  userResponse: text('user_response'),                // What user said
+  // Status: pending, delivered, acknowledged, confirmed, retry_pending, max_attempts
+  status: varchar('status', { length: 50 }).default('pending'),
+  attemptCount: integer('attempt_count').default(0),  // Number of delivery attempts
+  callSid: varchar('call_sid', { length: 100 }),      // Twilio call ID
+  createdAt: timestamp('created_at').defaultNow(),
+});

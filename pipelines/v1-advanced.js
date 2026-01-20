@@ -6,6 +6,7 @@ import { ElevenLabsAdapter } from '../adapters/elevenlabs.js';
 import { ElevenLabsStreamingTTS } from '../adapters/elevenlabs-streaming.js';
 import { pcm24kToMulaw8k } from '../audio-utils.js';
 import { memoryService } from '../services/memory.js';
+import { schedulerService } from '../services/scheduler.js';
 import { quickAnalyze } from './quick-observer.js';
 import { fastAnalyzeWithTools, formatFastObserverGuidance } from './fast-observer.js';
 import { runPostTurnTasks } from './post-turn-agent.js';
@@ -277,7 +278,7 @@ RESPONSE FORMAT:
  * Uses: Deepgram STT → Claude + Observer → ElevenLabs TTS
  */
 export class V1AdvancedSession {
-  constructor(twilioWs, streamSid, senior = null, memoryContext = null, reminderPrompt = null, pendingReminders = []) {
+  constructor(twilioWs, streamSid, senior = null, memoryContext = null, reminderPrompt = null, pendingReminders = [], currentDelivery = null) {
     this.twilioWs = twilioWs;
     this.streamSid = streamSid;
     this.senior = senior;
@@ -286,6 +287,10 @@ export class V1AdvancedSession {
     this.isConnected = false;
     this.conversationLog = [];
     this.memoriesExtracted = false;
+
+    // Reminder acknowledgment tracking
+    this.currentDelivery = currentDelivery; // Delivery record for acknowledgment tracking
+    this.reminderAcknowledged = false;      // Track if acknowledgment was detected
 
     // STT (Deepgram)
     this.deepgram = null;
@@ -600,6 +605,22 @@ export class V1AdvancedSession {
       // Layer 1: Quick Observer (0ms) - for post-turn processing
       const quickResult = quickAnalyze(userMessage, this.conversationLog.slice(-6));
 
+      // Check for reminder acknowledgment
+      if (this.currentDelivery && !this.reminderAcknowledged && quickResult.reminderResponse) {
+        const { type, confidence } = quickResult.reminderResponse;
+        console.log(`[V1][${this.streamSid}] Reminder response detected: ${type} (confidence: ${confidence})`);
+
+        if (confidence >= 0.7) {
+          this.reminderAcknowledged = true;
+          await schedulerService.markReminderAcknowledged(
+            this.currentDelivery.id,
+            type, // 'acknowledged' or 'confirmed'
+            userMessage
+          );
+          console.log(`[V1][${this.streamSid}] Marked reminder as ${type}`);
+        }
+      }
+
       // Dynamic model selection based on observer recommendations
       const modelConfig = selectModelConfig(
         quickResult,
@@ -713,6 +734,22 @@ export class V1AdvancedSession {
 
       if (quickResult.guidance) {
         console.log(`[V1][${this.streamSid}] Quick observer: ${quickResult.healthSignals.length} health, ${quickResult.emotionSignals.length} emotion signals`);
+      }
+
+      // Check for reminder acknowledgment
+      if (this.currentDelivery && !this.reminderAcknowledged && quickResult.reminderResponse) {
+        const { type, confidence } = quickResult.reminderResponse;
+        console.log(`[V1][${this.streamSid}] Reminder response detected: ${type} (confidence: ${confidence})`);
+
+        if (confidence >= 0.7) {
+          this.reminderAcknowledged = true;
+          await schedulerService.markReminderAcknowledged(
+            this.currentDelivery.id,
+            type, // 'acknowledged' or 'confirmed'
+            userMessage
+          );
+          console.log(`[V1][${this.streamSid}] Marked reminder as ${type}`);
+        }
       }
 
       // Get Layer 2 results from PREVIOUS turn (if available)
@@ -1092,6 +1129,12 @@ export class V1AdvancedSession {
 
     // Extract memories
     await this.extractMemories();
+
+    // Handle reminder delivery status if not acknowledged
+    if (this.currentDelivery && !this.reminderAcknowledged) {
+      console.log(`[V1][${this.streamSid}] Call ended without reminder acknowledgment`);
+      await schedulerService.markCallEndedWithoutAcknowledgment(this.currentDelivery.id);
+    }
 
     // Stop intervals
     if (this.observerCheckInterval) clearInterval(this.observerCheckInterval);

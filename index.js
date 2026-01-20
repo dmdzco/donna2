@@ -827,15 +827,20 @@ wss.on('connection', async (twilioWs, req) => {
           // Get metadata stored during /voice/answer
           const metadata = callMetadata.get(callSid) || {};
 
+          // Get reminder context which now includes the delivery record
+          const reminderContext = schedulerService.getReminderContext(callSid);
+          const currentDelivery = reminderContext?.delivery || null;
+
           // V3.0: Always use V1 (Claude + 4-layer observer)
-          console.log(`[${callSid}] Creating V1 session (Claude + 4-layer observer)`);
+          console.log(`[${callSid}] Creating V1 session (Claude + 4-layer observer)${currentDelivery ? ' with reminder tracking' : ''}`);
           geminiSession = new V1AdvancedSession(
             twilioWs,
             streamSid,
             metadata.senior,
             metadata.memoryContext,
             metadata.reminderPrompt,
-            [] // TODO: Get pending reminders
+            [], // pendingReminders
+            currentDelivery // delivery record for acknowledgment tracking
           );
           sessions.set(callSid, geminiSession);
 

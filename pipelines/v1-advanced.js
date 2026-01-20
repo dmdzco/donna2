@@ -2,12 +2,76 @@ import { createClient } from '@deepgram/sdk';
 import Anthropic from '@anthropic-ai/sdk';
 import { ObserverAgent } from './observer-agent.js';
 import { ElevenLabsAdapter } from '../adapters/elevenlabs.js';
+import { ElevenLabsStreamingTTS } from '../adapters/elevenlabs-streaming.js';
 import { pcm24kToMulaw8k } from '../audio-utils.js';
 import { memoryService } from '../services/memory.js';
+import { quickAnalyze } from './quick-observer.js';
+import { fastAnalyzeWithTools, formatFastObserverGuidance } from './fast-observer.js';
 
 const anthropic = new Anthropic();
 
-const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null) => {
+// Feature flag for streaming - set to false for rollback
+const V1_STREAMING_ENABLED = process.env.V1_STREAMING_ENABLED !== 'false';
+
+/**
+ * Detect sentence boundaries for TTS streaming
+ * Returns true if the buffer ends with a complete sentence
+ */
+function isCompleteSentence(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  // Check for sentence-ending punctuation
+  const endsWithPunctuation = /[.!?]$/.test(trimmed);
+  if (!endsWithPunctuation) return false;
+
+  // Avoid splitting on abbreviations (Mr., Mrs., Dr., etc.)
+  const abbreviations = /\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|inc|ltd)\.\s*$/i;
+  if (abbreviations.test(trimmed)) return false;
+
+  // Avoid splitting on single letters followed by period (initials)
+  if (/\b[A-Z]\.\s*$/.test(trimmed)) return false;
+
+  return true;
+}
+
+/**
+ * Extract complete sentences from buffer
+ * Returns { complete: string[], remaining: string }
+ */
+function extractCompleteSentences(buffer) {
+  const sentences = [];
+  let remaining = buffer;
+
+  // Split on sentence boundaries while preserving the delimiter
+  const parts = buffer.split(/(?<=[.!?])\s+/);
+
+  // Check each part to see if it's a complete sentence
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (isCompleteSentence(parts[i])) {
+      sentences.push(parts[i]);
+    } else if (sentences.length > 0) {
+      // Append to previous sentence if not complete
+      sentences[sentences.length - 1] += ' ' + parts[i];
+    } else {
+      sentences.push(parts[i]);
+    }
+  }
+
+  // Last part is the remaining buffer
+  remaining = parts[parts.length - 1] || '';
+
+  // If we found complete sentences, update remaining
+  if (sentences.length > 0) {
+    remaining = parts[parts.length - 1] || '';
+  } else {
+    remaining = buffer;
+  }
+
+  return { complete: sentences, remaining };
+}
+
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null) => {
   let prompt = `You are Donna, a warm and caring AI companion for elderly individuals.
 
 Your personality:
@@ -36,7 +100,17 @@ Your personality:
     prompt += reminderPrompt;
   }
 
-  // Inject observer guidance if available
+  // Inject quick observer guidance (Layer 1 - instant regex analysis)
+  if (quickObserverGuidance) {
+    prompt += `\n\n[INSTANT GUIDANCE - respond to this NOW]\n${quickObserverGuidance}`;
+  }
+
+  // Inject fast observer guidance (Layer 2 - Haiku analysis from previous turn)
+  if (fastObserverGuidance) {
+    prompt += `\n\n[CONTEXT FROM ANALYSIS]\n${fastObserverGuidance}`;
+  }
+
+  // Inject observer guidance if available (Layer 3 - deep analysis)
   if (observerSignal) {
     prompt += `\n\n[OBSERVER GUIDANCE - use naturally, don't mention explicitly]`;
     if (observerSignal.engagement_level === 'low') {
@@ -89,6 +163,11 @@ export class V1AdvancedSession {
 
     // TTS (ElevenLabs)
     this.tts = new ElevenLabsAdapter();
+    this.streamingTts = null; // Streaming TTS instance (created per response)
+
+    // Fast observer cache (Layer 2 results from previous turn)
+    this.lastFastObserverResult = null;
+    this.pendingFastObserver = null; // Promise for in-flight analysis
 
     // Observer Agent
     this.observer = new ObserverAgent(
@@ -124,6 +203,12 @@ export class V1AdvancedSession {
     this.pendingUtterances = [];
     this.currentTranscript = '';
 
+    // Terminate streaming TTS if active
+    if (this.streamingTts) {
+      this.streamingTts.terminate();
+      this.streamingTts = null;
+    }
+
     // Send clear event to Twilio to stop audio playback
     if (this.twilioWs.readyState === 1) {
       this.twilioWs.send(JSON.stringify({
@@ -146,12 +231,16 @@ export class V1AdvancedSession {
     // Backup observer check (every 60s) - main updates happen on each utterance
     this.observerCheckInterval = setInterval(() => this.runObserver(), 60000);
 
-    // Send initial greeting
-    await this.generateAndSendResponse(
-      this.senior
-        ? `Greet ${this.senior.name} warmly by name. You're their AI companion Donna calling to check in. Keep it brief - just say hi.`
-        : 'Say a brief, warm greeting. You are Donna, an AI companion.'
-    );
+    // Send initial greeting (use streaming if enabled)
+    const greetingPrompt = this.senior
+      ? `Greet ${this.senior.name} warmly by name. You're their AI companion Donna calling to check in. Keep it brief - just say hi.`
+      : 'Say a brief, warm greeting. You are Donna, an AI companion.';
+
+    if (V1_STREAMING_ENABLED && process.env.ELEVENLABS_API_KEY) {
+      await this.generateAndSendResponseStreaming(greetingPrompt);
+    } else {
+      await this.generateAndSendResponse(greetingPrompt);
+    }
   }
 
   async connectDeepgram() {
@@ -244,11 +333,28 @@ export class V1AdvancedSession {
 
     console.log(`[V1][${this.streamSid}] Processing: "${text}"`);
 
-    // Run observer and memory search in parallel (non-blocking)
+    // Start Layer 2 (fast observer) analysis in parallel - results used in NEXT turn
+    // Don't await - this runs in background
+    this.pendingFastObserver = fastAnalyzeWithTools(
+      text,
+      this.conversationLog,
+      this.senior?.id
+    ).then(result => {
+      this.lastFastObserverResult = result;
+      console.log(`[V1][${this.streamSid}] Fast observer complete: sentiment=${result.sentiment?.sentiment}, memories=${result.memories?.length || 0}`);
+    }).catch(e => {
+      console.error(`[V1][${this.streamSid}] Fast observer error:`, e.message);
+    });
+
+    // Run Layer 3 observer and memory search in parallel (non-blocking, for deep analysis)
     this.runObserverAndMemorySearch(text);
 
-    // Generate and send response
-    await this.generateAndSendResponse(text);
+    // Generate and send response (streaming or blocking based on feature flag)
+    if (V1_STREAMING_ENABLED && process.env.ELEVENLABS_API_KEY) {
+      await this.generateAndSendResponseStreaming(text);
+    } else {
+      await this.generateAndSendResponse(text);
+    }
 
     // Process any pending utterances
     if (this.pendingUtterances.length > 0) {
@@ -361,6 +467,166 @@ export class V1AdvancedSession {
     } catch (error) {
       console.error(`[V1][${this.streamSid}] Response generation failed:`, error.message);
     } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Streaming response generation - reduces latency from ~1.5s to ~400ms
+   * Uses: Quick Observer (0ms) → Claude Streaming → Sentence Buffer → WebSocket TTS
+   */
+  async generateAndSendResponseStreaming(userMessage) {
+    this.isProcessing = true;
+    this.wasInterrupted = false;
+    const startTime = Date.now();
+
+    try {
+      // Layer 1: Quick Observer (0ms) - affects THIS response
+      const quickResult = quickAnalyze(userMessage, this.conversationLog.slice(-6));
+      const quickGuidance = quickResult.guidance;
+
+      if (quickGuidance) {
+        console.log(`[V1][${this.streamSid}] Quick observer: ${quickResult.healthSignals.length} health, ${quickResult.emotionSignals.length} emotion signals`);
+      }
+
+      // Get Layer 2 results from PREVIOUS turn (if available)
+      const fastGuidance = this.lastFastObserverResult
+        ? formatFastObserverGuidance(this.lastFastObserverResult)
+        : null;
+
+      // Build system prompt with all observer layers
+      const systemPrompt = buildSystemPrompt(
+        this.senior,
+        this.memoryContext,
+        this.reminderPrompt,
+        this.lastObserverSignal,
+        this.dynamicMemoryContext,
+        quickGuidance,
+        fastGuidance
+      );
+
+      // Build messages array
+      const messages = this.conversationLog
+        .slice(-20)
+        .map(entry => ({
+          role: entry.role,
+          content: entry.content
+        }));
+
+      if (userMessage && !userMessage.includes('Greet') && !userMessage.includes('greeting')) {
+        messages.push({ role: 'user', content: userMessage });
+      }
+
+      // Create streaming TTS connection
+      this.streamingTts = new ElevenLabsStreamingTTS();
+      this.streamingTts.onAudioChunk = (pcmBuffer) => {
+        if (this.wasInterrupted) return;
+
+        // Convert PCM 24kHz to mulaw 8kHz for Twilio
+        const mulawBuffer = pcm24kToMulaw8k(pcmBuffer);
+
+        // Send to Twilio
+        if (this.twilioWs.readyState === 1) {
+          this.twilioWs.send(JSON.stringify({
+            event: 'media',
+            streamSid: this.streamSid,
+            media: {
+              payload: mulawBuffer.toString('base64')
+            }
+          }));
+        }
+      };
+
+      this.streamingTts.onError = (error) => {
+        console.error(`[V1][${this.streamSid}] Streaming TTS error:`, error.message);
+      };
+
+      // Connect TTS WebSocket
+      await this.streamingTts.connect();
+
+      // Mark as speaking
+      this.isSpeaking = true;
+
+      // Stream Claude response
+      console.log(`[V1][${this.streamSid}] Calling Claude (streaming)...`);
+      const stream = anthropic.messages.stream({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 150,
+        system: systemPrompt,
+        messages: messages.length > 0 ? messages : [{ role: 'user', content: userMessage }],
+      });
+
+      let fullResponse = '';
+      let textBuffer = '';
+      let firstTokenTime = null;
+      let sentencesSent = 0;
+
+      // Process streaming tokens
+      for await (const event of stream) {
+        // Check for interruption
+        if (this.wasInterrupted) {
+          console.log(`[V1][${this.streamSid}] Interrupted during streaming`);
+          break;
+        }
+
+        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+          const text = event.delta.text;
+          fullResponse += text;
+          textBuffer += text;
+
+          // Record first token time
+          if (!firstTokenTime) {
+            firstTokenTime = Date.now();
+            console.log(`[V1][${this.streamSid}] First token: ${firstTokenTime - startTime}ms`);
+          }
+
+          // Extract complete sentences and send to TTS
+          const { complete, remaining } = extractCompleteSentences(textBuffer);
+          textBuffer = remaining;
+
+          for (const sentence of complete) {
+            if (sentence.trim()) {
+              this.streamingTts.streamText(sentence + ' ');
+              sentencesSent++;
+            }
+          }
+        }
+      }
+
+      // Send any remaining text
+      if (textBuffer.trim() && !this.wasInterrupted) {
+        this.streamingTts.streamText(textBuffer);
+      }
+
+      // Flush TTS to generate final audio
+      if (!this.wasInterrupted) {
+        this.streamingTts.flush();
+      }
+
+      const totalTime = Date.now() - startTime;
+      console.log(`[V1][${this.streamSid}] Claude (streaming): "${fullResponse}" [${sentencesSent} sentences, ${totalTime}ms total]`);
+
+      // Log to conversation
+      if (fullResponse) {
+        this.conversationLog.push({
+          role: 'assistant',
+          content: fullResponse,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // Wait a moment for final audio chunks before closing
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+    } catch (error) {
+      console.error(`[V1][${this.streamSid}] Streaming response failed:`, error.message);
+    } finally {
+      // Clean up streaming TTS
+      if (this.streamingTts) {
+        this.streamingTts.close();
+        this.streamingTts = null;
+      }
+      this.isSpeaking = false;
       this.isProcessing = false;
     }
   }
@@ -502,6 +768,12 @@ export class V1AdvancedSession {
     // Stop intervals
     if (this.observerCheckInterval) clearInterval(this.observerCheckInterval);
     if (this.silenceCheckInterval) clearInterval(this.silenceCheckInterval);
+
+    // Close streaming TTS if active
+    if (this.streamingTts) {
+      this.streamingTts.terminate();
+      this.streamingTts = null;
+    }
 
     // Close Deepgram
     if (this.dgConnection) {

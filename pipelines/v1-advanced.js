@@ -13,21 +13,16 @@ import { getAdapter, isModelAvailable, MODELS as LLM_MODELS } from '../adapters/
 // Feature flag for streaming - set to false for rollback
 const V1_STREAMING_ENABLED = process.env.V1_STREAMING_ENABLED !== 'false';
 
-// Model configuration for dynamic routing (can be overridden by env vars)
-const MODELS = {
-  FAST: process.env.FAST_MODEL || 'gemini-3-flash',    // Default - fast responses
-  SMART: process.env.SMART_MODEL || 'claude-sonnet'    // Upgraded - complex situations
-};
-
+// Model configuration
+const VOICE_MODEL = process.env.VOICE_MODEL || 'claude-sonnet';  // Main voice model
 const DEFAULT_MAX_TOKENS = 100;
 
 // Log available models
 console.log(`[V1] Streaming enabled: ${V1_STREAMING_ENABLED}, ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? 'set' : 'NOT SET'}`);
-console.log(`[V1] FAST model: ${MODELS.FAST} (${isModelAvailable(MODELS.FAST) ? 'available' : 'NOT AVAILABLE'})`);
-console.log(`[V1] SMART model: ${MODELS.SMART} (${isModelAvailable(MODELS.SMART) ? 'available' : 'NOT AVAILABLE'})`);
+console.log(`[V1] Voice model: ${VOICE_MODEL} (${isModelAvailable(VOICE_MODEL) ? 'available' : 'NOT AVAILABLE'})`);
 /**
- * Select model and token count based on observer recommendations
- * Priority: Quick (immediate) > Fast (this turn) > Deep (from last turn)
+ * Select token count based on observer recommendations
+ * Always uses VOICE_MODEL, but adjusts tokens based on complexity
  *
  * @param {object|null} quickResult - Layer 1 quick observer result
  * @param {object|null} fastResult - Layer 2 fast observer result (from previous turn)
@@ -36,7 +31,7 @@ console.log(`[V1] SMART model: ${MODELS.SMART} (${isModelAvailable(MODELS.SMART)
  */
 function selectModelConfig(quickResult, fastResult, deepResult) {
   let config = {
-    model: MODELS.FAST,
+    model: VOICE_MODEL,
     max_tokens: DEFAULT_MAX_TOKENS,
     reason: 'default'
   };
@@ -52,17 +47,12 @@ function selectModelConfig(quickResult, fastResult, deepResult) {
     return config;
   }
 
-  // Process recommendations - first Sonnet upgrade wins, but collect max_tokens from all
+  // Process recommendations - adjust tokens based on complexity
   for (const rec of recommendations) {
-    if (rec.use_sonnet && config.model !== MODELS.SMART) {
-      config.model = MODELS.SMART;
-      config.max_tokens = Math.max(config.max_tokens, rec.max_tokens || DEFAULT_MAX_TOKENS);
-      config.reason = rec.reason || 'observer_upgrade';
-    } else if (rec.max_tokens) {
-      // Allow token adjustment without model change
+    if (rec.max_tokens) {
       config.max_tokens = Math.max(config.max_tokens, rec.max_tokens);
       if (config.reason === 'default') {
-        config.reason = rec.reason || 'token_adjustment';
+        config.reason = rec.reason || 'observer_adjustment';
       }
     }
   }

@@ -13,52 +13,52 @@
  * (or current response if Claude is slow enough)
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { getAdapter } from '../adapters/llm/index.js';
 import { memoryService } from '../services/memory.js';
 import { newsService } from '../services/news.js';
 
-const anthropic = new Anthropic();
+// Fast observer model (gemini-3-flash for speed)
+const FAST_OBSERVER_MODEL = process.env.FAST_OBSERVER_MODEL || 'gemini-3-flash';
 
 /**
- * Fast analysis using Haiku for sentiment/intent
+ * Fast analysis using Gemini 3 Flash for sentiment/intent
  * @param {string} userMessage - Current user message
  * @param {Array} conversationHistory - Recent conversation
  * @returns {Promise<object>} Quick AI analysis
  */
-async function analyzeSentimentWithHaiku(userMessage, conversationHistory = []) {
+async function analyzeSentiment(userMessage, conversationHistory = []) {
   const recentContext = conversationHistory
     .slice(-4)
     .map(m => `${m.role}: ${m.content}`)
     .join('\n');
 
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307',
-      max_tokens: 150,
-      system: `You analyze elderly phone conversations quickly. Respond ONLY with JSON.
+  const systemPrompt = `You analyze elderly phone conversations quickly. Respond ONLY with valid JSON, no markdown.
 {
   "sentiment": "positive|neutral|negative|concerned",
   "engagement": "high|medium|low",
   "topic_shift": "suggested topic if conversation stalling, null otherwise",
   "needs_empathy": boolean,
   "mentioned_names": ["any names mentioned"]
-}`,
-      messages: [
-        {
-          role: 'user',
-          content: `Recent conversation:\n${recentContext}\n\nLatest message: "${userMessage}"\n\nAnalyze:`,
-        },
-      ],
-    });
+}`;
 
-    const text = response.content[0].type === 'text' ? response.content[0].text : '{}';
+  const messages = [
+    {
+      role: 'user',
+      content: `Recent conversation:\n${recentContext}\n\nLatest message: "${userMessage}"\n\nAnalyze:`,
+    },
+  ];
+
+  try {
+    const adapter = getAdapter(FAST_OBSERVER_MODEL);
+    const text = await adapter.generate(systemPrompt, messages, { maxTokens: 150, temperature: 0.3 });
+
     // Handle potential markdown code blocks
     const jsonText = text.includes('```')
       ? text.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
       : text;
     return JSON.parse(jsonText);
   } catch (error) {
-    console.error('[FastObserver] Haiku analysis error:', error.message);
+    console.error('[FastObserver] Analysis error:', error.message);
     return {
       sentiment: 'neutral',
       engagement: 'medium',
@@ -134,7 +134,7 @@ export async function fastAnalyzeWithTools(userMessage, conversationHistory = []
 
   // Run all analyses in parallel
   const [sentiment, memories, currentEvents] = await Promise.all([
-    analyzeSentimentWithHaiku(userMessage, conversationHistory),
+    analyzeSentiment(userMessage, conversationHistory),
     searchRelevantMemories(seniorId, userMessage),
     checkCurrentEvents(userMessage),
   ]);

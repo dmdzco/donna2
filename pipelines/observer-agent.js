@@ -1,6 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { getAdapter } from '../adapters/llm/index.js';
 
-const anthropic = new Anthropic();
+// Deep observer model (gemini-3-pro for thorough analysis)
+const DEEP_OBSERVER_MODEL = process.env.DEEP_OBSERVER_MODEL || 'gemini-3-pro';
 
 /**
  * Observer Agent - Analyzes conversation and provides guidance signals
@@ -73,21 +74,18 @@ Respond ONLY with valid JSON matching this schema:
       .join('\n');
 
     try {
-      const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 500,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: `Analyze this conversation:\n\n${conversationText}`,
-          },
-        ],
-      });
+      const adapter = getAdapter(DEEP_OBSERVER_MODEL);
+      const messages = [
+        {
+          role: 'user',
+          content: `Analyze this conversation:\n\n${conversationText}`,
+        },
+      ];
 
-      const responseText = response.content[0].type === 'text'
-        ? response.content[0].text
-        : '{}';
+      const responseText = await adapter.generate(systemPrompt, messages, {
+        maxTokens: 500,
+        temperature: 0.3,
+      });
 
       // Parse JSON response (handle markdown code blocks)
       let jsonText = responseText;

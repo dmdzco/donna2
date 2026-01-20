@@ -36,6 +36,10 @@ const MODEL_REGISTRY = {
     AdapterClass: GeminiAdapter,
     config: { modelName: 'gemini-1.5-pro' },
   },
+  'gemini-3-pro': {
+    AdapterClass: GeminiAdapter,
+    config: { modelName: 'gemini-3-pro-preview' },
+  },
 
   // Claude models
   'claude-sonnet': {
@@ -119,6 +123,7 @@ export function getAvailableModels() {
 export const MODELS = {
   // Gemini
   GEMINI_3_FLASH: 'gemini-3-flash',
+  GEMINI_3_PRO: 'gemini-3-pro',
   GEMINI_2_FLASH: 'gemini-2.0-flash',
   GEMINI_1_5_FLASH: 'gemini-1.5-flash',
   GEMINI_1_5_PRO: 'gemini-1.5-pro',

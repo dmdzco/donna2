@@ -9,6 +9,7 @@ import { runDirectorPipeline, formatDirectorGuidance } from './fast-observer.js'
 import { runPostTurnTasks } from './post-turn-agent.js';
 import { getAdapter, isModelAvailable } from '../adapters/llm/index.js';
 import { analyzeCompletedCall, saveCallAnalysis, getHighSeverityConcerns } from '../services/call-analysis.js';
+import { conversationService } from '../services/conversations.js';
 
 // Feature flag for streaming - set to false for rollback
 const V1_STREAMING_ENABLED = process.env.V1_STREAMING_ENABLED !== 'false';
@@ -311,6 +312,19 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
     console.log(`[V1][${this.streamSid}] Starting advanced pipeline for ${this.senior?.name || 'unknown'}`);
     this.isConnected = true;
 
+    // Load recent conversation history from previous calls (for continuity)
+    if (this.senior?.id) {
+      try {
+        const previousHistory = await conversationService.getRecentHistory(this.senior.id, 6);
+        if (previousHistory.length > 0) {
+          this.conversationLog = previousHistory;
+          console.log(`[V1][${this.streamSid}] Loaded ${previousHistory.length} messages from previous calls`);
+        }
+      } catch (e) {
+        console.log(`[V1][${this.streamSid}] Could not load previous history: ${e.message}`);
+      }
+    }
+
     // Use pre-generated greeting if available, otherwise generate now
     const greetingText = this.preGeneratedGreeting || await this.generateGreeting();
     if (this.preGeneratedGreeting) {
@@ -575,7 +589,7 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
 
       // Build messages array
       const messages = this.conversationLog
-        .slice(-20) // Keep last 20 exchanges for context
+        .slice(-10) // Keep last 20 exchanges for context
         .map(entry => ({
           role: entry.role,
           content: entry.content
@@ -679,7 +693,7 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
 
       // Build messages array
       const messages = this.conversationLog
-        .slice(-20)
+        .slice(-10)
         .map(entry => ({
           role: entry.role,
           content: entry.content

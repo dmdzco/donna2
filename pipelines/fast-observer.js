@@ -300,48 +300,36 @@ function getDefaultDirection() {
 export function formatDirectorGuidance(direction) {
   if (!direction) return null;
 
-  const lines = [];
+  // Compact format: phase|engagement|tone + action
+  const parts = [];
 
-  // Call phase and state
-  lines.push(`[CALL: ${direction.analysis.call_phase} phase, ${direction.analysis.turns_on_current_topic} turns on "${direction.analysis.current_topic}"]`);
+  // Core state (always include)
+  const phase = direction.analysis?.call_phase || 'main';
+  const engagement = direction.analysis?.engagement_level || 'medium';
+  const tone = direction.guidance?.tone || 'warm';
+  parts.push(`${phase}/${engagement}/${tone}`);
 
-  // Engagement alert
-  if (direction.analysis.engagement_level === 'low') {
-    lines.push(`[ALERT: Low engagement - need to re-engage]`);
+  // Priority action
+  if (direction.reminder?.should_deliver) {
+    parts.push(`REMIND: ${direction.reminder.which_reminder}`);
+  } else if (direction.analysis?.engagement_level === 'low') {
+    parts.push('RE-ENGAGE');
+  } else if (direction.direction?.stay_or_shift === 'transition' && direction.direction?.next_topic) {
+    parts.push(`SHIFT→${direction.direction.next_topic}`);
+  } else if (direction.direction?.stay_or_shift === 'wrap_up') {
+    parts.push('WRAP-UP');
+  } else if (direction.guidance?.specific_instruction) {
+    // Truncate long instructions
+    const instr = direction.guidance.specific_instruction;
+    parts.push(instr.length > 40 ? instr.substring(0, 40) + '...' : instr);
   }
 
-  // Emotional tone
-  if (direction.analysis.emotional_tone === 'sad' || direction.analysis.emotional_tone === 'concerned') {
-    lines.push(`[EMOTIONAL: Senior seems ${direction.analysis.emotional_tone} - be extra gentle]`);
+  // Emotional flag only if notable
+  if (direction.analysis?.emotional_tone === 'sad' || direction.analysis?.emotional_tone === 'concerned') {
+    parts.push(`(${direction.analysis.emotional_tone})`);
   }
 
-  // Direction
-  if (direction.direction.stay_or_shift === 'transition') {
-    lines.push(`[SHIFT TO: ${direction.direction.next_topic}]`);
-    if (direction.direction.transition_phrase) {
-      lines.push(`[TRY: "${direction.direction.transition_phrase}"]`);
-    }
-  } else if (direction.direction.stay_or_shift === 'wrap_up') {
-    lines.push(`[DIRECTION: Begin wrapping up naturally]`);
-  } else if (direction.direction.follow_up_opportunity) {
-    lines.push(`[EXPLORE: ${direction.direction.follow_up_opportunity}]`);
-  }
-
-  // Reminder
-  if (direction.reminder.should_deliver) {
-    lines.push(`[DELIVER REMINDER: ${direction.reminder.which_reminder}]`);
-    lines.push(`[APPROACH: ${direction.reminder.delivery_approach}]`);
-  }
-
-  // Guidance
-  lines.push(`[TONE: ${direction.guidance.tone}]`);
-  lines.push(`[DO: ${direction.guidance.specific_instruction}]`);
-
-  if (direction.guidance.things_to_avoid) {
-    lines.push(`[AVOID: ${direction.guidance.things_to_avoid}]`);
-  }
-
-  return lines.join('\n');
+  return parts.join(' | ');
 }
 
 /**

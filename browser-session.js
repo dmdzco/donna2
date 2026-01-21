@@ -187,7 +187,7 @@ export class BrowserSession {
       const systemPrompt = buildSystemPrompt(this.senior, this.memoryContext);
 
       // Build messages
-      const messages = this.conversationLog.slice(-20).map(entry => ({
+      const messages = this.conversationLog.slice(-10).map(entry => ({
         role: entry.role,
         content: entry.content
       }));

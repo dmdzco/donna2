@@ -1,6 +1,6 @@
 import { db } from '../db/client.js';
 import { conversations, seniors } from '../db/schema.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and, sql } from 'drizzle-orm';
 
 export const conversationService = {
   // Create a new conversation record
@@ -50,6 +50,50 @@ export const conversationService = {
       .where(eq(conversations.seniorId, seniorId))
       .orderBy(desc(conversations.startedAt))
       .limit(limit);
+  },
+
+  // Get recent conversation history for context (across calls)
+  async getRecentHistory(seniorId, messageLimit = 6) {
+    // Get last few completed conversations with transcripts
+    const recentCalls = await db.select({
+      transcript: conversations.transcript,
+      startedAt: conversations.startedAt,
+    })
+    .from(conversations)
+    .where(and(
+      eq(conversations.seniorId, seniorId),
+      eq(conversations.status, 'completed'),
+      sql`transcript IS NOT NULL`
+    ))
+    .orderBy(desc(conversations.startedAt))
+    .limit(2); // Last 2 calls
+
+    if (recentCalls.length === 0) return [];
+
+    // Extract messages from transcripts (most recent first)
+    const allMessages = [];
+    for (const call of recentCalls) {
+      try {
+        const transcript = typeof call.transcript === 'string'
+          ? JSON.parse(call.transcript)
+          : call.transcript;
+
+        if (Array.isArray(transcript)) {
+          // Take last few messages from each call
+          const messages = transcript.slice(-4).map(m => ({
+            role: m.role,
+            content: m.content,
+            fromPreviousCall: true
+          }));
+          allMessages.push(...messages);
+        }
+      } catch (e) {
+        // Skip malformed transcripts
+      }
+    }
+
+    // Return most recent messages up to limit
+    return allMessages.slice(-messageLimit);
   },
 
   // Get all recent conversations with senior names

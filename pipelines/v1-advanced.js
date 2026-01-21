@@ -4,6 +4,7 @@ import { ElevenLabsStreamingTTS } from '../adapters/elevenlabs-streaming.js';
 import { pcm24kToMulaw8k } from '../audio-utils.js';
 import { memoryService } from '../services/memory.js';
 import { schedulerService } from '../services/scheduler.js';
+import { contextCacheService } from '../services/context-cache.js';
 import { quickAnalyze } from './quick-observer.js';
 import { runDirectorPipeline, formatDirectorGuidance } from './fast-observer.js';
 import { getAdapter, isModelAvailable } from '../adapters/llm/index.js';
@@ -317,24 +318,42 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
     console.log(`[V1][${this.streamSid}] Starting advanced pipeline for ${this.senior?.name || 'unknown'}`);
     this.isConnected = true;
 
-    // Load summaries from previous calls (for continuity - more efficient than raw messages)
+    // Check for cached context first (pre-fetched at 5 AM local time)
     this.previousCallsSummary = null;
+    let cachedGreeting = null;
+
     if (this.senior?.id) {
-      try {
-        const summaries = await conversationService.getRecentSummaries(this.senior.id, 3);
-        if (summaries) {
-          this.previousCallsSummary = summaries;
-          console.log(`[V1][${this.streamSid}] Loaded previous call summaries`);
+      const cached = contextCacheService.getCache(this.senior.id);
+
+      if (cached) {
+        // Use cached data
+        this.previousCallsSummary = cached.summaries;
+        cachedGreeting = cached.greeting;
+        // Also use cached memory context if not already provided
+        if (!this.memoryContext && cached.memoryContext) {
+          this.memoryContext = cached.memoryContext;
         }
-      } catch (e) {
-        console.log(`[V1][${this.streamSid}] Could not load previous summaries: ${e.message}`);
+        console.log(`[V1][${this.streamSid}] Using cached context (age: ${Math.round((Date.now() - cached.cachedAt) / 60000)} min)`);
+      } else {
+        // Fall back to loading summaries fresh
+        try {
+          const summaries = await conversationService.getRecentSummaries(this.senior.id, 3);
+          if (summaries) {
+            this.previousCallsSummary = summaries;
+            console.log(`[V1][${this.streamSid}] Loaded previous call summaries (not cached)`);
+          }
+        } catch (e) {
+          console.log(`[V1][${this.streamSid}] Could not load previous summaries: ${e.message}`);
+        }
       }
     }
 
-    // Use pre-generated greeting if available, otherwise generate now
-    const greetingText = this.preGeneratedGreeting || await this.generateGreeting();
+    // Use pre-generated greeting > cached greeting > generate fresh
+    const greetingText = this.preGeneratedGreeting || cachedGreeting || await this.generateGreeting();
     if (this.preGeneratedGreeting) {
       console.log(`[V1][${this.streamSid}] Using pre-generated greeting`);
+    } else if (cachedGreeting) {
+      console.log(`[V1][${this.streamSid}] Using cached greeting`);
     }
 
     // Log greeting to conversation
@@ -631,9 +650,6 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
       // Convert to speech and send to Twilio
       await this.textToSpeechAndSend(responseText);
 
-      // Layer 4: Post-turn tasks (fire and forget - don't await)
-      runPostTurnTasks(userMessage, responseText, quickResult, this.senior);
-
     } catch (error) {
       console.error(`[V1][${this.streamSid}] Response generation failed:`, error.message);
     } finally {
@@ -808,9 +824,6 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
           content: fullResponse,
           timestamp: new Date().toISOString()
         });
-
-        // Layer 4: Post-turn tasks (fire and forget - don't await)
-        runPostTurnTasks(userMessage, fullResponse, quickResult, this.senior);
       }
 
       // Wait a moment for final audio chunks before closing
@@ -944,6 +957,11 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
 
     // Extract memories
     await this.extractMemories();
+
+    // Clear context cache so next call gets fresh data with new memories
+    if (this.senior?.id) {
+      contextCacheService.clearCache(this.senior.id);
+    }
 
     // Handle reminder delivery status if not acknowledged
     if (this.currentDelivery && !this.reminderAcknowledged) {

@@ -3,6 +3,7 @@ import { reminders, seniors, reminderDeliveries } from '../db/schema.js';
 import { eq, and, lte, isNull, or, sql, ne, lt } from 'drizzle-orm';
 import twilio from 'twilio';
 import { memoryService } from './memory.js';
+import { contextCacheService } from './context-cache.js';
 
 // Initialize Twilio client lazily
 let twilioClient = null;
@@ -250,18 +251,28 @@ export const schedulerService = {
 
   /**
    * Pre-fetch context for a manual outbound call (before Twilio connects)
+   * Uses cache if available, otherwise builds fresh context
    */
   async prefetchForPhone(phoneNumber, senior) {
     console.log(`[Scheduler] Pre-fetching context for manual call to ${senior?.name || phoneNumber}...`);
 
-    const memoryContext = senior
-      ? await memoryService.buildContext(senior.id, null, senior)
-      : null;
-
-    // Pre-generate greeting with full context
+    let memoryContext = null;
     let preGeneratedGreeting = null;
+
     if (senior) {
-      preGeneratedGreeting = await this.generateGreeting(senior, memoryContext);
+      // Check cache first
+      const cached = contextCacheService.getCache(senior.id);
+
+      if (cached) {
+        // Use cached context
+        memoryContext = cached.memoryContext;
+        preGeneratedGreeting = cached.greeting;
+        console.log(`[Scheduler] Using cached context for ${senior.name}`);
+      } else {
+        // Build fresh context
+        memoryContext = await memoryService.buildContext(senior.id, null, senior);
+        preGeneratedGreeting = await this.generateGreeting(senior, memoryContext);
+      }
     }
 
     // Normalize phone for consistent lookup
@@ -479,8 +490,25 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
   // Initial check
   checkReminders();
 
-  // Set up interval
-  const intervalId = setInterval(checkReminders, intervalMs);
+  // Set up interval for reminders (every minute)
+  const reminderIntervalId = setInterval(checkReminders, intervalMs);
 
-  return intervalId;
+  // Set up hourly interval for context pre-caching
+  // This runs daily pre-fetch for seniors whose local time is 5 AM
+  const prefetchIntervalId = setInterval(async () => {
+    try {
+      await contextCacheService.runDailyPrefetch();
+    } catch (error) {
+      console.error('[Scheduler] Context pre-fetch error:', error.message);
+    }
+  }, 60 * 60 * 1000); // Every hour
+
+  // Run initial pre-fetch check
+  contextCacheService.runDailyPrefetch().catch(err => {
+    console.error('[Scheduler] Initial pre-fetch error:', err.message);
+  });
+
+  console.log('[Scheduler] Context pre-caching enabled (hourly check for 5 AM local time)');
+
+  return { reminderIntervalId, prefetchIntervalId };
 }

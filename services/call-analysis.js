@@ -12,7 +12,7 @@
  */
 
 import { getAdapter } from '../adapters/llm/index.js';
-import { db } from '../db/index.js';
+import { db } from '../db/client.js';
 import { callAnalyses } from '../db/schema.js';
 
 // Use Gemini Flash for cost-efficient batch analysis

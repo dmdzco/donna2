@@ -1,7 +1,7 @@
 # Donna - Product Plan & Feature Log
 
 > **Last Updated:** January 20, 2026
-> **Version:** 2.5 (Dual Pipeline with Barge-In)
+> **Version:** 3.1 (Conversation Director Architecture)
 
 ---
 
@@ -72,16 +72,19 @@ Low-latency pipeline using Google's Gemini 2.5 Flash with native audio.
 - **Best for:** Quick, responsive conversations
 - **Files:** `gemini-live.js`
 
-#### 2.2 V1 Pipeline (Claude + Observer) ✅ **Implemented**
-Advanced pipeline with separate components for more control and quality.
+#### 2.2 V1 Pipeline (Claude + Conversation Director) ✅ **Implemented**
+Advanced pipeline with 3-layer architecture for real-time guidance and quality.
 - **Latency:** ~1.5s (target: <600ms after optimization)
 - **Components:**
   - STT: Deepgram (real-time transcription)
   - LLM: Claude Sonnet 4 (conversation)
   - TTS: ElevenLabs (Rachel voice)
-  - Observer: Claude analyzing conversation every 30s
-- **Best for:** Higher quality responses, conversation insights
-- **Files:** `pipelines/v1-advanced.js`, `pipelines/observer-agent.js`, `adapters/elevenlabs.js`
+  - **Layer 1 - Quick Observer:** Instant regex analysis (0ms)
+  - **Layer 2 - Conversation Director:** Gemini 3 Flash (~150ms)
+  - **Layer 3 - Post-Turn Agent:** Background execution
+  - **Post-Call:** Batch analysis for caregivers
+- **Best for:** Higher quality responses, proactive call management
+- **Files:** `pipelines/v1-advanced.js`, `pipelines/quick-observer.js`, `pipelines/fast-observer.js`, `adapters/elevenlabs.js`
 
 #### 2.3 Pipeline Selection ✅ **Implemented**
 Choose pipeline per-call from admin UI or API.
@@ -166,36 +169,64 @@ Reminders are woven naturally into conversation, not announced robotically.
 
 ---
 
-### 5. Observer Agent (V1 Only)
+### 5. Conversation Director (V1 Only) - 3-Layer Architecture
 
-#### 5.1 Conversation Analysis ✅ **Implemented**
-Parallel agent analyzes conversation quality every 30 seconds.
-- **Analyzes:**
-  - Engagement level (high/medium/low)
-  - Emotional state (happy, confused, tired, distressed)
-  - Reminder timing (is now a good moment?)
-  - Topic suggestions (if conversation stalls)
-  - End call signals (natural wrap-up points)
-  - Concerns (issues for caregiver)
-- **Files:** `pipelines/observer-agent.js`
+#### 5.1 Layer 1: Quick Observer ✅ **Implemented**
+Instant regex-based analysis that affects the CURRENT response (0ms latency).
+- **Health Detection:** 30+ patterns with severity levels (high/medium/low)
+  - Pain, dizziness, falls, cardiovascular, fatigue, cognitive, appetite, medications
+- **Family Patterns:** 25+ patterns covering all relationships + pets
+- **Emotion Detection:** 25+ patterns with valence (positive/negative) and intensity
+- **Safety Concerns:** Scams, strangers, emergencies, getting lost
+- **Social/Activity/Time Patterns:** Friends, hobbies, memories, future plans
+- **Token Recommendation:** Escalates max_tokens based on urgency
+- **Files:** `pipelines/quick-observer.js`
 
-#### 5.2 Guidance Injection ✅ **Implemented**
-Observer signals feed into main LLM as hints.
+#### 5.2 Layer 2: Conversation Director ✅ **Implemented**
+Gemini 3 Flash analyzes conversation and provides proactive guidance (~150ms).
+- **Call Phase Tracking:** opening → rapport → main → winding_down → closing
+- **Topic Management:** stay_or_shift decisions, topic suggestions
+- **Emotional Intelligence:** Tone detection, engagement monitoring
+- **Reminder Timing:** Determines optimal moments for delivery
+- **Token Recommendation:** 100-400 based on emotional needs
+- **Files:** `pipelines/fast-observer.js` (Conversation Director)
+
+#### 5.3 Layer 3: Post-Turn Agent ✅ **Implemented**
+Background execution after response is sent (non-blocking).
+- **Health Concern Logging:** Extracts and logs health mentions
+- **Context Prefetching:** Prepares context for predicted topics
+- **Memory Updates:** Schedules memory extraction
+- **Files:** `pipelines/post-turn-agent.js`, `pipelines/v1-advanced.js`
+
+#### 5.4 Post-Call Analysis ✅ **Implemented**
+Batch analysis after call ends using Gemini Flash.
+- **Generates:**
+  - Call summary (2-3 sentences)
+  - Topics discussed
+  - Engagement score (1-10)
+  - Concerns for caregivers (high/medium/low priority)
+  - Positive observations
+  - Follow-up suggestions
+  - Call quality rating
+- **Storage:** `call_analyses` database table
+- **Files:** `services/call-analysis.js`
+
+#### 5.5 Guidance Injection ✅ **Implemented**
+Layer signals feed into main LLM as hints.
 - **Not mentioned explicitly:** Donna never says "my observer detected..."
-- **Natural adaptation:** "You seem a bit tired today, shall we chat another time?"
+- **Natural adaptation:** Based on phase, emotion, engagement signals
 - **Files:** `pipelines/v1-advanced.js` → `buildSystemPrompt()`
 
-#### 5.3 Concern Flagging ✅ **Implemented** (Logging only)
-Observer detects potential issues and logs them.
-- **Current:** Logged to console for debugging
-- **Examples:** "Senior seems confused about date", "Mentioned feeling dizzy"
-- **Future:** Store in database for caregiver dashboard
+#### 5.6 Call State Tracking ✅ **Implemented**
+Tracks call progress for context-aware decisions.
+- **Tracks:** minutesElapsed, callType, pendingReminders, remindersDelivered
+- **Reminder Filtering:** Excludes already-delivered reminders
+- **Files:** `pipelines/v1-advanced.js`
 
-#### 5.4 Call Duration Management ✅ **Implemented**
-Enforce maximum call duration with graceful endings.
-- **Default max:** 15 minutes
-- **Warning:** At 80% (12 min), signal to wrap up
-- **Force end:** At 120% (18 min)
+#### 5.7 Call Duration Management ✅ **Implemented**
+Director recommends wrap-up timing based on conversation flow.
+- **Natural endings:** Based on conversation phase, not hard timeout
+- **Graceful:** Suggests wrap-up during `winding_down` phase
 
 ---
 
@@ -300,30 +331,32 @@ Bidirectional audio streaming via WebSocket.
 
 ## Planned Features
 
-### 11. V1 Latency Optimization 📋 **Planned**
+### 11. V1 Latency Optimization 🔄 **Partial**
 Reduce V1 pipeline latency from ~1.5s to <600ms.
 
-**Phase 1 (Quick Wins) - Target: ~800ms**
-- [ ] Switch Claude Sonnet → Haiku
-- [ ] Tune Deepgram endpointing (500ms → 300ms)
-- [ ] Implement streaming TTS
+**Phase 1 (Architecture) - ✅ COMPLETE**
+- [x] 3-Layer Observer Architecture (Quick → Director → Post-Turn)
+- [x] Non-blocking Director with Gemini 3 Flash (~150ms)
+- [x] Post-call batch analysis (removed from real-time)
+- [x] Dynamic token routing (100-400 based on context)
 
-**Phase 2 (Streaming Pipeline) - Target: ~500ms**
+**Phase 2 (Streaming Pipeline) - 📋 PLANNED**
 - [ ] Stream Claude responses sentence-by-sentence
-- [ ] ElevenLabs WebSocket connection
-- [ ] Make Observer fully non-blocking
+- [ ] ElevenLabs WebSocket streaming TTS
+- [ ] Sentence boundary detection for TTS chunks
+- **Target:** ~400ms time-to-first-audio
 
-**Phase 3 (Alternative Providers) - Target: ~350ms**
+**Phase 3 (Quick Wins) - 📋 PLANNED**
+- [ ] Tune Deepgram endpointing (500ms → 300ms)
+- [ ] Connection pooling for TTS
+
+**Phase 4 (Alternative Providers) - 💡 FUTURE**
 - [ ] Test Cartesia TTS (~50-100ms)
 - [ ] Test Deepgram TTS (~100-200ms)
-- [ ] Consider Gemini Flash text mode
-
-**Phase 4 (Advanced)**
 - [ ] Speculative execution
 - [ ] Filler words for instant feedback
-- [ ] Response caching for common phrases
 
-**Reference:** `docs/plans/2026-01-18-v1-latency-optimization.md`
+**Reference:** `docs/STREAMING_OBSERVER_SPEC.md`, `docs/plans/2026-01-18-v1-latency-optimization.md`
 
 ---
 
@@ -344,22 +377,29 @@ Secure multi-user access with login system.
 
 ---
 
-### 13. Observer Signal Storage 📋 **Planned**
-Persist observer analysis for caregiver review.
+### 13. Call Analysis Storage ✅ **Implemented**
+Persist post-call analysis for caregiver review.
 
 - **Database table:**
   ```sql
-  observer_signals (
-    id, conversation_id,
-    engagement_level, emotional_state,
-    concerns, created_at
+  call_analyses (
+    id, conversation_id, senior_id,
+    summary, topics, engagement_score,
+    concerns, positive_observations,
+    follow_up_suggestions, call_quality,
+    created_at
   )
   ```
 - **Features:**
-  - [ ] Store signals after each 30s analysis
-  - [ ] Display concerns in call transcript view
-  - [ ] Concerns summary on dashboard
-  - [ ] Trend analysis over time
+  - [x] Store comprehensive analysis after each call
+  - [x] Engagement score (1-10) with trend tracking
+  - [x] Concerns with priority levels (high/medium/low)
+  - [x] Positive observations for caregivers
+  - [x] Follow-up suggestions
+- **Planned Enhancements:**
+  - [ ] Display in caregiver dashboard
+  - [ ] Weekly summary emails
+  - [ ] Trend visualization over time
 
 ---
 
@@ -545,6 +585,7 @@ Connect with Alexa, Google Home, smart displays.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **3.1** | Jan 20, 2026 | Conversation Director architecture (3-layer + post-call), extensive Quick Observer regex, post-call analysis |
 | **2.5** | Jan 20, 2026 | Barge-in support, queue clearing, V1 as default |
 | **2.4** | Jan 18, 2026 | Dual pipeline (V0 Gemini / V1 Claude+Observer+ElevenLabs) |
 | **2.3** | Jan 16, 2026 | Scheduled reminder calls with auto-trigger |
@@ -558,53 +599,68 @@ Connect with Alexa, Google Home, smart displays.
 ## Technical Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        DONNA SYSTEM                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
-│  │   Senior's   │    │    Admin     │    │   Browser    │       │
-│  │    Phone     │    │  Dashboard   │    │  Test Call   │       │
-│  └──────┬───────┘    └──────┬───────┘    └──────┬───────┘       │
-│         │ PSTN              │ HTTP              │ WebSocket     │
-│         ▼                   ▼                   ▼               │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                    Express Server                        │    │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │    │
-│  │  │   Twilio    │  │   Pipeline  │  │  Scheduler  │      │    │
-│  │  │  Webhooks   │  │   Router    │  │   (60s)     │      │    │
-│  │  └─────────────┘  └──────┬──────┘  └─────────────┘      │    │
-│  └──────────────────────────┼──────────────────────────────┘    │
-│                             │                                    │
-│            ┌────────────────┴────────────────┐                  │
-│            ▼                                 ▼                  │
-│  ┌──────────────────────┐     ┌──────────────────────────────┐ │
-│  │    V0 PIPELINE       │     │       V1 PIPELINE            │ │
-│  │  (Gemini Native)     │     │  (Claude + Observer)         │ │
-│  │                      │     │                              │ │
-│  │  Audio → Gemini →    │     │  Audio → Deepgram → Claude   │ │
-│  │         Audio        │     │         → ElevenLabs → Audio │ │
-│  │                      │     │                              │ │
-│  │  Latency: ~400ms     │     │  Latency: ~1.5s (target 600) │ │
-│  └──────────────────────┘     └──────────────────────────────┘ │
-│                                        │                        │
-│                              ┌─────────┴─────────┐              │
-│                              │  Observer Agent   │              │
-│                              │  (every 30s)      │              │
-│                              │  Analyzes mood,   │              │
-│                              │  engagement,      │              │
-│                              │  concerns         │              │
-│                              └───────────────────┘              │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                    PostgreSQL (Neon)                     │    │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐    │    │
-│  │  │ seniors │  │memories │  │ conver- │  │reminders│    │    │
-│  │  │         │  │(pgvector│  │ sations │  │         │    │    │
-│  │  └─────────┘  └─────────┘  └─────────┘  └─────────┘    │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                        DONNA SYSTEM v3.1                             │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐           │
+│  │   Senior's   │    │    Admin     │    │   Browser    │           │
+│  │    Phone     │    │  Dashboard   │    │  Test Call   │           │
+│  └──────┬───────┘    └──────┬───────┘    └──────┬───────┘           │
+│         │ PSTN              │ HTTP              │ WebSocket         │
+│         ▼                   ▼                   ▼                   │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │                    Express Server                            │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │    │
+│  │  │   Twilio    │  │   Pipeline  │  │  Scheduler  │          │    │
+│  │  │  Webhooks   │  │   Router    │  │   (60s)     │          │    │
+│  │  └─────────────┘  └──────┬──────┘  └─────────────┘          │    │
+│  └──────────────────────────┼──────────────────────────────────┘    │
+│                             │                                        │
+│            ┌────────────────┴────────────────┐                      │
+│            ▼                                 ▼                      │
+│  ┌──────────────────────┐     ┌────────────────────────────────┐   │
+│  │    V0 PIPELINE       │     │       V1 PIPELINE              │   │
+│  │  (Gemini Native)     │     │  (Claude + Director)           │   │
+│  │                      │     │                                │   │
+│  │  Audio → Gemini →    │     │  ┌─────────────────────────┐   │   │
+│  │         Audio        │     │  │ LAYER 1: Quick Observer │   │   │
+│  │                      │     │  │ Regex patterns (0ms)    │   │   │
+│  │  Latency: ~400ms     │     │  └───────────┬─────────────┘   │   │
+│  └──────────────────────┘     │              ▼                 │   │
+│                               │  ┌─────────────────────────┐   │   │
+│                               │  │ LAYER 2: Director       │   │   │
+│                               │  │ Gemini 3 Flash (~150ms) │   │   │
+│                               │  │ Phase, emotion, timing  │   │   │
+│                               │  └───────────┬─────────────┘   │   │
+│                               │              ▼                 │   │
+│                               │  Audio → Deepgram → Claude     │   │
+│                               │         → ElevenLabs → Audio   │   │
+│                               │              │                 │   │
+│                               │              ▼                 │   │
+│                               │  ┌─────────────────────────┐   │   │
+│                               │  │ LAYER 3: Post-Turn      │   │   │
+│                               │  │ Background execution    │   │   │
+│                               │  └─────────────────────────┘   │   │
+│                               │                                │   │
+│                               │  Latency: ~1.5s (target 400ms) │   │
+│                               └────────────────────────────────┘   │
+│                                              │                      │
+│                               ┌──────────────┴──────────────┐      │
+│                               │   POST-CALL ANALYSIS        │      │
+│                               │   Gemini Flash (batch)      │      │
+│                               │   Summary, concerns, score  │      │
+│                               └─────────────────────────────┘      │
+│                                                                      │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │                    PostgreSQL (Neon)                           │  │
+│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌──────┐│  │
+│  │  │ seniors │  │memories │  │ conver- │  │reminders│  │ call ││  │
+│  │  │         │  │(pgvector│  │ sations │  │         │  │analys││  │
+│  │  └─────────┘  └─────────┘  └─────────┘  └─────────┘  └──────┘│  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -646,7 +702,10 @@ Connect with Alexa, Google Home, smart displays.
 | Main Server | `index.js` |
 | V0 Pipeline | `gemini-live.js` |
 | V1 Pipeline | `pipelines/v1-advanced.js` |
-| Observer | `pipelines/observer-agent.js` |
+| Layer 1: Quick Observer | `pipelines/quick-observer.js` |
+| Layer 2: Conversation Director | `pipelines/fast-observer.js` |
+| Layer 3: Post-Turn Agent | `pipelines/post-turn-agent.js` |
+| Post-Call Analysis | `services/call-analysis.js` |
 | ElevenLabs TTS | `adapters/elevenlabs.js` |
 | Audio Utils | `audio-utils.js` |
 | Memory | `services/memory.js` |

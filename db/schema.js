@@ -74,3 +74,18 @@ export const reminderDeliveries = pgTable('reminder_deliveries', {
   callSid: varchar('call_sid', { length: 100 }),      // Twilio call ID
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+// Call Analyses - post-call analysis results
+export const callAnalyses = pgTable('call_analyses', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  conversationId: varchar('conversation_id', { length: 100 }),   // streamSid or call identifier
+  seniorId: uuid('senior_id').references(() => seniors.id),
+  summary: text('summary'),                                       // 2-3 sentence summary
+  topics: text('topics').array(),                                 // Topics discussed
+  engagementScore: integer('engagement_score'),                   // 1-10 scale
+  concerns: json('concerns'),                                     // Array of concern objects
+  positiveObservations: text('positive_observations').array(),    // Good things noticed
+  followUpSuggestions: text('follow_up_suggestions').array(),     // For next call
+  callQuality: json('call_quality'),                              // {rapport, goals_achieved, duration_appropriate}
+  createdAt: timestamp('created_at').defaultNow(),
+});

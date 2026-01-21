@@ -1,14 +1,14 @@
 import { createClient } from '@deepgram/sdk';
-import { ObserverAgent } from './observer-agent.js';
 import { ElevenLabsAdapter } from '../adapters/elevenlabs.js';
 import { ElevenLabsStreamingTTS } from '../adapters/elevenlabs-streaming.js';
 import { pcm24kToMulaw8k } from '../audio-utils.js';
 import { memoryService } from '../services/memory.js';
 import { schedulerService } from '../services/scheduler.js';
 import { quickAnalyze } from './quick-observer.js';
-import { fastAnalyzeWithTools, formatFastObserverGuidance } from './fast-observer.js';
+import { runDirectorPipeline, formatDirectorGuidance } from './fast-observer.js';
 import { runPostTurnTasks } from './post-turn-agent.js';
-import { getAdapter, isModelAvailable, MODELS as LLM_MODELS } from '../adapters/llm/index.js';
+import { getAdapter, isModelAvailable } from '../adapters/llm/index.js';
+import { analyzeCompletedCall, saveCallAnalysis, getHighSeverityConcerns } from '../services/call-analysis.js';
 
 // Feature flag for streaming - set to false for rollback
 const V1_STREAMING_ENABLED = process.env.V1_STREAMING_ENABLED !== 'false';
@@ -21,39 +21,33 @@ const DEFAULT_MAX_TOKENS = 100;
 console.log(`[V1] Streaming enabled: ${V1_STREAMING_ENABLED}, ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? 'set' : 'NOT SET'}`);
 console.log(`[V1] Voice model: ${VOICE_MODEL} (${isModelAvailable(VOICE_MODEL) ? 'available' : 'NOT AVAILABLE'})`);
 /**
- * Select token count based on observer recommendations
- * Always uses VOICE_MODEL, but adjusts tokens based on complexity
+ * Select model and token count based on Director + Quick Observer
+ * Director provides comprehensive analysis; Quick Observer provides instant signals
  *
- * @param {object|null} quickResult - Layer 1 quick observer result
- * @param {object|null} fastResult - Layer 2 fast observer result (from previous turn)
- * @param {object|null} deepResult - Layer 3 deep observer signal (from previous turn)
+ * @param {object|null} quickResult - Layer 1 quick observer result (instant)
+ * @param {object|null} directorResult - Layer 2 director result (from parallel/previous turn)
  * @returns {object} { model, max_tokens, reason }
  */
-function selectModelConfig(quickResult, fastResult, deepResult) {
+function selectModelConfig(quickResult, directorResult) {
   let config = {
     model: VOICE_MODEL,
     max_tokens: DEFAULT_MAX_TOKENS,
     reason: 'default'
   };
 
-  // Collect all recommendations (most urgent first)
-  const recommendations = [
-    quickResult?.modelRecommendation,
-    fastResult?.modelRecommendation,
-    deepResult?.modelRecommendation,
-  ].filter(Boolean);
-
-  if (recommendations.length === 0) {
-    return config;
+  // Director's recommendation takes priority (most comprehensive)
+  if (directorResult?.model_recommendation || directorResult?.modelRecommendation) {
+    const rec = directorResult.model_recommendation || directorResult.modelRecommendation;
+    config.max_tokens = rec.max_tokens || DEFAULT_MAX_TOKENS;
+    config.reason = rec.reason || 'director';
+    // Note: We always use VOICE_MODEL, but director influences tokens
   }
 
-  // Process recommendations - adjust tokens based on complexity
-  for (const rec of recommendations) {
-    if (rec.max_tokens) {
-      config.max_tokens = Math.max(config.max_tokens, rec.max_tokens);
-      if (config.reason === 'default') {
-        config.reason = rec.reason || 'observer_adjustment';
-      }
+  // Quick observer can escalate tokens if it detects urgent signals
+  if (quickResult?.modelRecommendation?.max_tokens) {
+    config.max_tokens = Math.max(config.max_tokens, quickResult.modelRecommendation.max_tokens);
+    if (config.reason === 'default') {
+      config.reason = quickResult.modelRecommendation.reason || 'quick_observer';
     }
   }
 
@@ -121,7 +115,7 @@ function extractCompleteSentences(buffer) {
 /**
  * Build system prompt - full context, adapters handle any quirks
  */
-const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, fastObserverGuidance = null) => {
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, directorGuidance = null) => {
   let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
 
 RESPONSE FORMAT:
@@ -155,41 +149,21 @@ RESPONSE FORMAT:
     prompt += `\n\n${dynamicMemoryContext}`;
   }
 
-  // Fast observer memories (from previous turn)
-  if (fastObserverGuidance?.memories) {
-    prompt += `\n\nFrom previous conversations:\n${fastObserverGuidance.memories}`;
-  }
-
   // Build guidance parts
   const guidanceParts = [];
 
+  // Quick observer guidance (instant regex-based)
   if (quickObserverGuidance) {
     guidanceParts.push(quickObserverGuidance);
   }
 
-  if (fastObserverGuidance?.guidance) {
-    guidanceParts.push(fastObserverGuidance.guidance);
-  }
-
-  if (observerSignal) {
-    const parts = [];
-    if (observerSignal.engagement_level === 'low') {
-      parts.push('User seems disengaged - ask about their interests');
-    }
-    if (observerSignal.emotional_state && observerSignal.emotional_state !== 'unknown') {
-      parts.push(`User feeling ${observerSignal.emotional_state}`);
-    }
-    if (observerSignal.should_deliver_reminder && observerSignal.reminder_to_deliver) {
-      parts.push(`Mention reminder: ${observerSignal.reminder_to_deliver}`);
-    }
-    if (observerSignal.suggested_topic) {
-      parts.push(`Good topic: ${observerSignal.suggested_topic}`);
-    }
-    if (observerSignal.should_end_call) {
-      parts.push('Wrap up the call naturally');
-    }
-    if (parts.length > 0) {
-      guidanceParts.push(parts.join('. '));
+  // Director guidance (comprehensive AI-based from Layer 2)
+  // Can be a string (formatted guidance) or object with .guidance property
+  if (directorGuidance) {
+    if (typeof directorGuidance === 'string') {
+      guidanceParts.push(directorGuidance);
+    } else if (directorGuidance.guidance) {
+      guidanceParts.push(directorGuidance.guidance);
     }
   }
 
@@ -203,10 +177,10 @@ RESPONSE FORMAT:
 
 /**
  * V1 Advanced Pipeline Session
- * Uses: Deepgram STT → Claude + Observer → ElevenLabs TTS
+ * Uses: Deepgram STT → Quick Observer + Conversation Director → Claude → ElevenLabs TTS
  */
 export class V1AdvancedSession {
-  constructor(twilioWs, streamSid, senior = null, memoryContext = null, reminderPrompt = null, pendingReminders = [], currentDelivery = null, preGeneratedGreeting = null) {
+  constructor(twilioWs, streamSid, senior = null, memoryContext = null, reminderPrompt = null, pendingReminders = [], currentDelivery = null, preGeneratedGreeting = null, callType = 'check-in') {
     this.twilioWs = twilioWs;
     this.streamSid = streamSid;
     this.senior = senior;
@@ -219,6 +193,16 @@ export class V1AdvancedSession {
     this.isConnected = false;
     this.conversationLog = [];
     this.memoriesExtracted = false;
+
+    // Call state tracking (for Conversation Director)
+    this.callState = {
+      startTime: Date.now(),
+      minutesElapsed: 0,
+      maxDuration: 10, // Default 10 minutes
+      callType: callType, // 'check-in', 'reminder', 'scheduled'
+      pendingReminders: pendingReminders || [],
+      remindersDelivered: [],
+    };
 
     // Reminder acknowledgment tracking
     this.currentDelivery = currentDelivery; // Delivery record for acknowledgment tracking
@@ -234,18 +218,9 @@ export class V1AdvancedSession {
     this.tts = new ElevenLabsAdapter();
     this.streamingTts = null; // Streaming TTS instance (created per response)
 
-    // Fast observer cache (Layer 2 results from previous turn)
-    this.lastFastObserverResult = null;
-    this.pendingFastObserver = null; // Promise for in-flight analysis
-
-    // Observer Agent
-    this.observer = new ObserverAgent(
-      senior?.name || 'the senior',
-      pendingReminders,
-      15 // max call duration in minutes
-    );
-    this.lastObserverSignal = null;
-    this.observerCheckInterval = null;
+    // Conversation Director cache (Layer 2 results from previous turn)
+    this.lastDirectorResult = null;
+    this.pendingDirector = null; // Promise for in-flight analysis
 
     // Processing state
     this.isProcessing = false;
@@ -362,9 +337,13 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
 
     // Start silence detection
     this.startSilenceDetection();
+  }
 
-    // Backup observer check (every 60s) - main updates happen on each utterance
-    this.observerCheckInterval = setInterval(() => this.runObserver(), 60000);
+  /**
+   * Update call state timing
+   */
+  updateCallState() {
+    this.callState.minutesElapsed = (Date.now() - this.callState.startTime) / 60000;
   }
 
   /**
@@ -498,23 +477,37 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
       timestamp: new Date().toISOString()
     });
 
-    console.log(`[V1][${this.streamSid}] Processing: "${text}" (seniorId: ${this.senior?.id || 'none'})`);
+    // Update call state timing
+    this.updateCallState();
 
-    // Start Layer 2 (fast observer) analysis in parallel - results used in NEXT turn
-    // Don't await - this runs in background
-    this.pendingFastObserver = fastAnalyzeWithTools(
+    console.log(`[V1][${this.streamSid}] Processing: "${text}" (seniorId: ${this.senior?.id || 'none'}, ${this.callState.minutesElapsed.toFixed(1)}min)`);
+
+    // Start Conversation Director (Layer 2) in parallel - results used for guidance
+    // Don't await - this runs in background and results are used in NEXT turn or current if ready
+    this.pendingDirector = runDirectorPipeline(
       text,
       this.conversationLog,
-      this.senior?.id
+      this.senior?.id,
+      this.senior,
+      this.callState
     ).then(result => {
-      this.lastFastObserverResult = result;
-      console.log(`[V1][${this.streamSid}] Fast observer complete: sentiment=${result.sentiment?.sentiment}, memories=${result.memories?.length || 0}, dynamicCtx=${this.dynamicMemoryContext ? 'yes' : 'no'}`);
-    }).catch(e => {
-      console.error(`[V1][${this.streamSid}] Fast observer error:`, e.message);
-    });
+      this.lastDirectorResult = result;
+      const dir = result.direction;
+      console.log(`[V1][${this.streamSid}] Director: phase=${dir?.analysis?.call_phase}, engagement=${dir?.analysis?.engagement_level}, tone=${dir?.guidance?.tone}`);
 
-    // Run Layer 3 observer and memory search in parallel (non-blocking, for deep analysis)
-    this.runObserverAndMemorySearch(text);
+      // Update memories from director's semantic search
+      if (result.memories?.length > 0) {
+        const memoryText = result.memories.map(m => `- ${m.content}`).join('\n');
+        this.dynamicMemoryContext = `\n\nFrom previous conversations:\n${memoryText}`;
+      }
+
+      // Track reminder delivery if director said to deliver
+      if (dir?.reminder?.should_deliver && dir?.reminder?.which_reminder) {
+        this.callState.remindersDelivered.push(dir.reminder.which_reminder);
+      }
+    }).catch(e => {
+      console.error(`[V1][${this.streamSid}] Director error:`, e.message);
+    });
 
     // Generate and send response (streaming or blocking based on feature flag)
     const useStreaming = V1_STREAMING_ENABLED && process.env.ELEVENLABS_API_KEY;
@@ -529,49 +522,6 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
     if (this.pendingUtterances.length > 0) {
       const next = this.pendingUtterances.shift();
       await this.processUserUtterance(next);
-    }
-  }
-
-  /**
-   * Run observer analysis and memory search in parallel
-   * Results are stored for next response, doesn't block current response
-   */
-  async runObserverAndMemorySearch(userText) {
-    if (!this.senior?.id) return;
-
-    try {
-      // Run both in parallel
-      const [observerResult, memoryResults] = await Promise.all([
-        this.observer.analyze(this.conversationLog).catch(e => {
-          console.error(`[V1][${this.streamSid}] Observer error:`, e.message);
-          return null;
-        }),
-        memoryService.search(this.senior.id, userText, 3, 0.65).catch(e => {
-          console.error(`[V1][${this.streamSid}] Memory search error:`, e.message);
-          return [];
-        })
-      ]);
-
-      // Update observer signal
-      if (observerResult) {
-        this.lastObserverSignal = observerResult;
-        console.log(`[V1][${this.streamSid}] Observer: engagement=${observerResult.engagement_level}, emotion=${observerResult.emotional_state}`);
-        if (observerResult.concerns?.length > 0) {
-          console.log(`[V1][${this.streamSid}] CONCERNS:`, observerResult.concerns);
-        }
-      }
-
-      // Inject relevant memories into context
-      if (memoryResults && memoryResults.length > 0) {
-        const memoryText = memoryResults.map(m => `- ${m.content}`).join('\n');
-        this.dynamicMemoryContext = `\n\nFrom previous conversations:\n${memoryText}`;
-        console.log(`[V1][${this.streamSid}] Found ${memoryResults.length} relevant memories`);
-      } else {
-        this.dynamicMemoryContext = null;
-      }
-
-    } catch (error) {
-      console.error(`[V1][${this.streamSid}] Observer/memory error:`, error.message);
     }
   }
 
@@ -599,12 +549,13 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         }
       }
 
-      // Dynamic model selection based on observer recommendations
-      const modelConfig = selectModelConfig(
-        quickResult,
-        this.lastFastObserverResult,
-        this.lastObserverSignal
-      );
+      // Get Director guidance from previous turn (if available)
+      const directorGuidance = this.lastDirectorResult?.direction
+        ? formatDirectorGuidance(this.lastDirectorResult.direction)
+        : null;
+
+      // Dynamic model selection based on Director + Quick Observer
+      const modelConfig = selectModelConfig(quickResult, this.lastDirectorResult?.direction);
 
       // Get the adapter for the selected model
       const adapter = getAdapter(modelConfig.model);
@@ -615,10 +566,10 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         this.senior,
         this.memoryContext,
         this.reminderPrompt,
-        this.lastObserverSignal,
+        null, // observerSignal - replaced by Director
         this.dynamicMemoryContext,
         quickResult.guidance,
-        null // fast guidance not used in non-streaming
+        directorGuidance
       );
       console.log(`[V1][${this.streamSid}] System prompt built: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, senior=${this.senior?.name || 'none'}`);
 
@@ -702,17 +653,13 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         }
       }
 
-      // Get Layer 2 results from PREVIOUS turn (if available)
-      const fastGuidance = this.lastFastObserverResult
-        ? formatFastObserverGuidance(this.lastFastObserverResult)
+      // Get Director guidance from PREVIOUS turn (if available)
+      const directorGuidance = this.lastDirectorResult?.direction
+        ? formatDirectorGuidance(this.lastDirectorResult.direction)
         : null;
 
-      // Dynamic model selection FIRST (before building prompt)
-      const modelConfig = selectModelConfig(
-        quickResult,
-        this.lastFastObserverResult,
-        this.lastObserverSignal
-      );
+      // Dynamic model selection based on Director + Quick Observer
+      const modelConfig = selectModelConfig(quickResult, this.lastDirectorResult?.direction);
 
       // Get the adapter for the selected model
       const adapter = getAdapter(modelConfig.model);
@@ -723,10 +670,10 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         this.senior,
         this.memoryContext,
         this.reminderPrompt,
-        this.lastObserverSignal,
+        null, // observerSignal - replaced by Director
         this.dynamicMemoryContext,
         quickResult.guidance,
-        fastGuidance
+        directorGuidance
       );
       console.log(`[V1][${this.streamSid}] System prompt: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, senior=${this.senior?.name || 'none'}`);
 
@@ -935,24 +882,6 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
     }
   }
 
-  async runObserver() {
-    if (this.conversationLog.length < 2) return; // Need some conversation first
-
-    try {
-      console.log(`[V1][${this.streamSid}] Running observer analysis...`);
-      this.lastObserverSignal = await this.observer.analyze(this.conversationLog);
-      console.log(`[V1][${this.streamSid}] Observer signal:`, JSON.stringify(this.lastObserverSignal));
-
-      // Log concerns for caregiver
-      if (this.lastObserverSignal.concerns?.length > 0) {
-        console.log(`[V1][${this.streamSid}] CONCERNS:`, this.lastObserverSignal.concerns);
-      }
-
-    } catch (error) {
-      console.error(`[V1][${this.streamSid}] Observer error:`, error.message);
-    }
-  }
-
   getTranscript() {
     return this.conversationLog
       .map(entry => `${entry.role}: ${entry.content}`)
@@ -1000,8 +929,12 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
       await schedulerService.markCallEndedWithoutAcknowledgment(this.currentDelivery.id);
     }
 
+    // Run post-call analysis (async - don't block close)
+    this.runPostCallAnalysis().catch(err => {
+      console.error(`[V1][${this.streamSid}] Post-call analysis failed:`, err.message);
+    });
+
     // Stop intervals
-    if (this.observerCheckInterval) clearInterval(this.observerCheckInterval);
     if (this.silenceCheckInterval) clearInterval(this.silenceCheckInterval);
 
     // Close streaming TTS if active
@@ -1020,5 +953,48 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
 
     this.isConnected = false;
     console.log(`[V1][${this.streamSid}] Session closed. ${this.conversationLog.length} messages`);
+  }
+
+  /**
+   * Run post-call analysis (async batch job)
+   * Generates summary, alerts, and analytics using Gemini Flash
+   */
+  async runPostCallAnalysis() {
+    if (this.conversationLog.length < 4) {
+      console.log(`[V1][${this.streamSid}] Skipping post-call analysis (too few messages)`);
+      return;
+    }
+
+    console.log(`[V1][${this.streamSid}] Running post-call analysis...`);
+
+    try {
+      const analysis = await analyzeCompletedCall(
+        this.conversationLog,
+        this.senior
+      );
+
+      console.log(`[V1][${this.streamSid}] Post-call analysis: engagement=${analysis.engagement_score}/10, concerns=${analysis.concerns?.length || 0}`);
+
+      // Save to database (if table exists)
+      if (this.senior?.id) {
+        await saveCallAnalysis(
+          this.streamSid, // Use streamSid as conversation ID
+          this.senior.id,
+          analysis
+        );
+      }
+
+      // Check for high-severity concerns
+      const highSeverity = getHighSeverityConcerns(analysis);
+      if (highSeverity.length > 0) {
+        console.log(`[V1][${this.streamSid}] HIGH SEVERITY CONCERNS:`, highSeverity);
+        // TODO: Notify caregiver via SMS/email
+      }
+
+      return analysis;
+    } catch (error) {
+      console.error(`[V1][${this.streamSid}] Post-call analysis error:`, error.message);
+      throw error;
+    }
   }
 }

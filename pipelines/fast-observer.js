@@ -1,86 +1,351 @@
 /**
- * Fast Observer - Layer 2 (~300ms)
+ * Conversation Director - Layer 2
  *
+ * Proactively guides conversation flow using Gemini 3 Flash.
  * Runs in parallel with Claude's response generation.
- * Uses lightweight AI (Haiku) + tools for fast analysis.
+ * Results affect NEXT turn (or current if ready in time).
  *
- * Executes in parallel:
- * - Haiku sentiment/intent analysis (~100ms)
- * - Memory search (~100ms)
- * - Optional: News/current events lookup
- *
- * Results are cached for injection into NEXT response
- * (or current response if Claude is slow enough)
+ * The Director:
+ * 1. Tracks state - Topics covered, goals pending, call phase
+ * 2. Steers flow - When to transition topics, what to discuss next
+ * 3. Manages reminders - Finding natural moments to deliver reminders
+ * 4. Monitors pacing - Detecting if conversation is dragging or rushed
+ * 5. Recommends model - When to upgrade from Haiku to Sonnet
+ * 6. Provides guidance - Specific instructions for Claude's next response
  */
 
 import { getAdapter } from '../adapters/llm/index.js';
 import { memoryService } from '../services/memory.js';
 import { newsService } from '../services/news.js';
 
-// Fast observer model (gemini-3-flash for speed)
-const FAST_OBSERVER_MODEL = process.env.FAST_OBSERVER_MODEL || 'gemini-3-flash';
+// Conversation Director model (Gemini 3 Flash for speed ~100-150ms)
+const DIRECTOR_MODEL = process.env.FAST_OBSERVER_MODEL || 'gemini-3-flash';
 
 /**
- * Fast analysis using Gemini 3 Flash for sentiment/intent
- * @param {string} userMessage - Current user message
- * @param {Array} conversationHistory - Recent conversation
- * @returns {Promise<object>} Quick AI analysis
+ * Full system prompt for the Conversation Director
  */
-async function analyzeSentiment(userMessage, conversationHistory = []) {
-  const recentContext = conversationHistory
-    .slice(-4)
-    .map(m => `${m.role}: ${m.content}`)
-    .join('\n');
+const DIRECTOR_SYSTEM_PROMPT = `You are a Conversation Director for Donna, an AI companion that calls elderly individuals.
 
-  const systemPrompt = `Analyze this elderly phone conversation. Return ONLY a JSON object with no other text:
-{"sentiment":"positive|neutral|negative|concerned","engagement":"high|medium|low","topic_shift":null,"needs_empathy":false,"mentioned_names":[]}`;
+Your job is to GUIDE the conversation proactively - not just react to what was said, but steer where it should go next. You are like a director behind the scenes, giving the actor (Donna) stage directions.
 
-  const messages = [
-    {
-      role: 'user',
-      content: `Conversation:\n${recentContext}\n\nLatest: "${userMessage}"`,
-    },
-  ];
+## CALL CONTEXT
+
+Senior: {{SENIOR_NAME}}
+Call duration: {{MINUTES_ELAPSED}} minutes (max {{MAX_DURATION}} minutes)
+Call type: {{CALL_TYPE}}
+Pending reminders: {{PENDING_REMINDERS}}
+Senior's interests: {{INTERESTS}}
+Senior's family: {{FAMILY_MEMBERS}}
+Important memories: {{MEMORIES}}
+
+## CONVERSATION SO FAR
+
+{{CONVERSATION_HISTORY}}
+
+## DIRECTION PRINCIPLES
+
+### Call Phases
+
+1. **Opening (0-2 min)**:
+   - Warm greeting, ask how they're feeling
+   - Don't rush - let them settle into the conversation
+   - Listen for emotional cues in their initial response
+
+2. **Rapport (2-4 min)**:
+   - Explore what they shared in opening
+   - Connect to their interests or family
+   - Build warmth before any "business"
+
+3. **Main (4-8 min)**:
+   - Cover important topics (health check, reminders)
+   - Follow their lead while guiding toward goals
+   - Natural conversation flow with purpose
+
+4. **Closing (8-10 min)**:
+   - Wrap up warmly, don't abruptly end
+   - Confirm any action items (medication, appointments)
+   - Express looking forward to next call
+
+### Topic Transitions
+
+Never be abrupt. Use natural transition phrases:
+- "Speaking of..."
+- "That reminds me..."
+- "You know what I was thinking about?"
+- "By the way..."
+- "Oh, that's lovely! And how about..."
+
+### Reminder Delivery
+
+**DO:**
+- Connect to what they care about ("stay healthy for the grandkids")
+- Find natural pauses in positive conversation
+- Make it feel like caring, not nagging
+- Weave into context ("Speaking of your garden, don't forget your medication so you have energy for it!")
+
+**DON'T:**
+- Deliver during emotional moments (grief, sadness, worry)
+- Interrupt engaging conversation
+- Deliver when engagement is low (re-engage first)
+- Sound clinical or robotic
+
+### Re-engagement Strategies
+
+If they're giving short answers (low engagement):
+- Ask about something personal to them by name
+- Reference a specific memory ("Last time you mentioned...")
+- Ask open-ended questions, not yes/no
+- Share something interesting, then ask their opinion
+- Don't keep pushing the same topic
+
+### Emotional Moments
+
+When they share something emotional (grief, loneliness, worry):
+- **STAY on the topic** - don't rush past
+- Validate feelings before offering solutions
+- Ask them to share more if they want
+- Match your tone to theirs
+- **NEVER deliver reminders during grief/sadness**
+- Recommend Sonnet for these moments
+
+### Model Recommendations
+
+**Use Sonnet (use_sonnet: true) when:**
+- Emotional support needed (loneliness, sadness, grief)
+- Health concerns mentioned (pain, falls, symptoms)
+- Re-engagement needed (multiple short responses)
+- Complex family discussions
+- Delivering sensitive reminders
+- Storytelling or extended content
+
+**Use Haiku (use_sonnet: false) when:**
+- Normal chitchat flowing well
+- Simple questions and answers
+- Positive, light conversation
+- Routine check-ins going smoothly
+
+**Token recommendations:**
+- brief (100): Simple acknowledgments, quick answers
+- moderate (150): Normal conversation, standard responses
+- extended (200-250): Emotional support, re-engagement, stories
+- long (300-400): Deep emotional moments, detailed stories
+
+## OUTPUT FORMAT
+
+Respond with ONLY valid JSON matching this exact schema:
+
+{
+  "analysis": {
+    "call_phase": "opening|rapport|main|closing",
+    "engagement_level": "high|medium|low",
+    "current_topic": "string",
+    "topics_covered": ["string"],
+    "topics_pending": ["string"],
+    "emotional_tone": "positive|neutral|concerned|sad",
+    "turns_on_current_topic": number
+  },
+  "direction": {
+    "stay_or_shift": "stay|transition|wrap_up",
+    "next_topic": "string or null",
+    "transition_phrase": "string or null",
+    "follow_up_opportunity": "string or null",
+    "pacing_note": "good|too_fast|dragging|time_to_close"
+  },
+  "reminder": {
+    "should_deliver": boolean,
+    "which_reminder": "string or null",
+    "delivery_approach": "string or null",
+    "wait_reason": "string or null"
+  },
+  "guidance": {
+    "tone": "warm|empathetic|cheerful|gentle|serious",
+    "response_length": "brief|moderate|extended",
+    "priority_action": "string",
+    "specific_instruction": "string",
+    "things_to_avoid": "string or null"
+  },
+  "model_recommendation": {
+    "use_sonnet": boolean,
+    "max_tokens": number,
+    "reason": "string"
+  }
+}
+
+Now analyze the current conversation and provide direction:`;
+
+/**
+ * Get conversation direction from the Director
+ * @param {string} userMessage - Current user message
+ * @param {Array} conversationHistory - Full conversation history
+ * @param {object} seniorContext - Senior profile data
+ * @param {object} callState - Current call state
+ * @param {Array} memories - Pre-fetched memories
+ * @returns {Promise<object>} Director output
+ */
+export async function getConversationDirection(
+  userMessage,
+  conversationHistory,
+  seniorContext,
+  callState,
+  memories = []
+) {
+  const startTime = Date.now();
+
+  // Filter out reminders that have already been delivered
+  const deliveredSet = new Set(callState?.remindersDelivered || []);
+  const remainingReminders = (callState?.pendingReminders || []).filter(
+    r => !deliveredSet.has(r.title) && !deliveredSet.has(r.id)
+  );
+
+  // Build the prompt with context
+  const prompt = DIRECTOR_SYSTEM_PROMPT
+    .replace('{{SENIOR_NAME}}', seniorContext?.name?.split(' ')[0] || 'Friend')
+    .replace('{{MINUTES_ELAPSED}}', (callState?.minutesElapsed || 0).toFixed(1))
+    .replace('{{MAX_DURATION}}', callState?.maxDuration || 10)
+    .replace('{{CALL_TYPE}}', callState?.callType || 'check-in')
+    .replace('{{PENDING_REMINDERS}}', formatReminders(remainingReminders))
+    .replace('{{INTERESTS}}', seniorContext?.interests?.join(', ') || 'unknown')
+    .replace('{{FAMILY_MEMBERS}}', formatFamily(seniorContext?.family))
+    .replace('{{MEMORIES}}', formatMemories(memories))
+    .replace('{{CONVERSATION_HISTORY}}', formatHistory(conversationHistory));
 
   try {
-    const adapter = getAdapter(FAST_OBSERVER_MODEL);
-    const text = await adapter.generate(systemPrompt, messages, { maxTokens: 300, temperature: 0.1 });
+    const adapter = getAdapter(DIRECTOR_MODEL);
+    const messages = [
+      {
+        role: 'user',
+        content: `Current message from senior: "${userMessage}"`,
+      },
+    ];
 
-    // Extract JSON from response (handle markdown, extra text)
+    const text = await adapter.generate(prompt, messages, {
+      maxTokens: 600,
+      temperature: 0.2,
+    });
+
+    // Parse JSON response (handle markdown, extra text)
     let jsonText = text.trim();
     if (jsonText.includes('```')) {
       jsonText = jsonText.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
     }
-    // Try to find JSON object in response
-    const jsonMatch = jsonText.match(/\{[^{}]*\}/);
+    // Extract JSON object
+    const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       jsonText = jsonMatch[0];
     }
 
-    // Try to parse, log on failure
+    let direction;
     try {
-      return JSON.parse(jsonText);
+      direction = JSON.parse(jsonText);
     } catch (parseError) {
-      console.error('[FastObserver] JSON parse failed, raw:', text.substring(0, 200));
+      console.error('[ConversationDirector] JSON parse failed, raw:', text.substring(0, 300));
       throw parseError;
     }
+
+    const elapsed = Date.now() - startTime;
+    console.log(`[ConversationDirector] Analysis complete in ${elapsed}ms: phase=${direction.analysis?.call_phase}, engagement=${direction.analysis?.engagement_level}`);
+
+    return direction;
   } catch (error) {
-    console.error('[FastObserver] Analysis error:', error.message);
-    return {
-      sentiment: 'neutral',
-      engagement: 'medium',
-      topic_shift: null,
-      needs_empathy: false,
-      mentioned_names: [],
-    };
+    console.error('[ConversationDirector] Error:', error.message);
+    return getDefaultDirection();
   }
 }
 
 /**
+ * Default direction when analysis fails
+ */
+function getDefaultDirection() {
+  return {
+    analysis: {
+      call_phase: 'main',
+      engagement_level: 'medium',
+      current_topic: 'unknown',
+      topics_covered: [],
+      topics_pending: [],
+      emotional_tone: 'neutral',
+      turns_on_current_topic: 1
+    },
+    direction: {
+      stay_or_shift: 'stay',
+      next_topic: null,
+      transition_phrase: null,
+      follow_up_opportunity: null,
+      pacing_note: 'good'
+    },
+    reminder: {
+      should_deliver: false,
+      which_reminder: null,
+      delivery_approach: null,
+      wait_reason: 'Using default - no analysis available'
+    },
+    guidance: {
+      tone: 'warm',
+      response_length: 'moderate',
+      priority_action: 'Continue conversation naturally',
+      specific_instruction: 'Be warm and attentive',
+      things_to_avoid: null
+    },
+    model_recommendation: {
+      use_sonnet: false,
+      max_tokens: 150,
+      reason: 'default'
+    }
+  };
+}
+
+/**
+ * Format director output for injection into Claude's system prompt
+ */
+export function formatDirectorGuidance(direction) {
+  if (!direction) return null;
+
+  const lines = [];
+
+  // Call phase and state
+  lines.push(`[CALL: ${direction.analysis.call_phase} phase, ${direction.analysis.turns_on_current_topic} turns on "${direction.analysis.current_topic}"]`);
+
+  // Engagement alert
+  if (direction.analysis.engagement_level === 'low') {
+    lines.push(`[ALERT: Low engagement - need to re-engage]`);
+  }
+
+  // Emotional tone
+  if (direction.analysis.emotional_tone === 'sad' || direction.analysis.emotional_tone === 'concerned') {
+    lines.push(`[EMOTIONAL: Senior seems ${direction.analysis.emotional_tone} - be extra gentle]`);
+  }
+
+  // Direction
+  if (direction.direction.stay_or_shift === 'transition') {
+    lines.push(`[SHIFT TO: ${direction.direction.next_topic}]`);
+    if (direction.direction.transition_phrase) {
+      lines.push(`[TRY: "${direction.direction.transition_phrase}"]`);
+    }
+  } else if (direction.direction.stay_or_shift === 'wrap_up') {
+    lines.push(`[DIRECTION: Begin wrapping up naturally]`);
+  } else if (direction.direction.follow_up_opportunity) {
+    lines.push(`[EXPLORE: ${direction.direction.follow_up_opportunity}]`);
+  }
+
+  // Reminder
+  if (direction.reminder.should_deliver) {
+    lines.push(`[DELIVER REMINDER: ${direction.reminder.which_reminder}]`);
+    lines.push(`[APPROACH: ${direction.reminder.delivery_approach}]`);
+  }
+
+  // Guidance
+  lines.push(`[TONE: ${direction.guidance.tone}]`);
+  lines.push(`[DO: ${direction.guidance.specific_instruction}]`);
+
+  if (direction.guidance.things_to_avoid) {
+    lines.push(`[AVOID: ${direction.guidance.things_to_avoid}]`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Search memories relevant to current conversation
- * @param {string} seniorId - Senior's UUID
- * @param {string} userMessage - Current user message
- * @returns {Promise<Array>} Relevant memories
  */
 async function searchRelevantMemories(seniorId, userMessage) {
   if (!seniorId) return [];
@@ -93,15 +358,13 @@ async function searchRelevantMemories(seniorId, userMessage) {
       importance: m.importance,
     }));
   } catch (error) {
-    console.error('[FastObserver] Memory search error:', error.message);
+    console.error('[ConversationDirector] Memory search error:', error.message);
     return [];
   }
 }
 
 /**
  * Check for current events if user mentions news/weather/etc
- * @param {string} userMessage - Current user message
- * @returns {Promise<object|null>} News/weather info if relevant
  */
 async function checkCurrentEvents(userMessage) {
   const newsKeywords = /\b(news|weather|today|happening|world|president|election)\b/i;
@@ -111,7 +374,6 @@ async function checkCurrentEvents(userMessage) {
   }
 
   try {
-    // Extract topic from message
     const topicMatch = userMessage.match(/(?:about|the|what's)\s+(\w+(?:\s+\w+)?)/i);
     const topic = topicMatch ? topicMatch[1] : 'general news';
 
@@ -123,110 +385,89 @@ async function checkCurrentEvents(userMessage) {
       };
     }
   } catch (error) {
-    console.error('[FastObserver] News fetch error:', error.message);
+    console.error('[ConversationDirector] News fetch error:', error.message);
   }
 
   return null;
 }
 
 /**
- * Run fast analysis in parallel (~300ms total)
+ * Run the full Conversation Director pipeline
+ * Returns direction + memories + news for comprehensive context
+ *
  * @param {string} userMessage - Current user message
- * @param {Array} conversationHistory - Recent conversation
+ * @param {Array} conversationHistory - Full conversation history
  * @param {string|null} seniorId - Senior's UUID (optional)
+ * @param {object} seniorContext - Senior profile data
+ * @param {object} callState - Current call state
  * @returns {Promise<object>} Combined analysis results
  */
-export async function fastAnalyzeWithTools(userMessage, conversationHistory = [], seniorId = null) {
+export async function runDirectorPipeline(
+  userMessage,
+  conversationHistory = [],
+  seniorId = null,
+  seniorContext = null,
+  callState = null
+) {
   const startTime = Date.now();
 
   // Run all analyses in parallel
-  const [sentiment, memories, currentEvents] = await Promise.all([
-    analyzeSentiment(userMessage, conversationHistory),
+  const [direction, memories, currentEvents] = await Promise.all([
+    getConversationDirection(
+      userMessage,
+      conversationHistory,
+      seniorContext,
+      callState,
+      [] // We get memories separately for better control
+    ),
     searchRelevantMemories(seniorId, userMessage),
     checkCurrentEvents(userMessage),
   ]);
 
   const elapsed = Date.now() - startTime;
-  console.log(`[FastObserver] Analysis completed in ${elapsed}ms`);
-
-  // Build model recommendation based on analysis
-  const modelRecommendation = buildModelRecommendation(sentiment, memories);
+  console.log(`[ConversationDirector] Full pipeline: ${elapsed}ms`);
 
   return {
-    sentiment,
+    direction,
     memories,
     currentEvents,
     elapsed,
-    modelRecommendation,
+    // Map to legacy format for backwards compatibility
+    modelRecommendation: direction.model_recommendation ? {
+      use_sonnet: direction.model_recommendation.use_sonnet,
+      max_tokens: direction.model_recommendation.max_tokens,
+      reason: direction.model_recommendation.reason
+    } : null,
   };
 }
 
 /**
- * Build model recommendation based on fast observer results
- * Returns upgrade to Sonnet + higher token count for sensitive situations
+ * Legacy function for backwards compatibility
+ * @deprecated Use runDirectorPipeline instead
  */
-function buildModelRecommendation(sentiment, memories) {
-  // Needs empathy - requires sophistication
-  if (sentiment?.needs_empathy) {
-    return {
-      use_sonnet: true,
-      max_tokens: 150,
-      reason: 'needs_empathy'
-    };
-  }
-
-  // Concerned sentiment - careful, nuanced response needed
-  if (sentiment?.sentiment === 'concerned' || sentiment?.sentiment === 'negative') {
-    return {
-      use_sonnet: true,
-      max_tokens: 150,
-      reason: 'concerned_sentiment'
-    };
-  }
-
-  // Low engagement with topic shift - creative re-engagement
-  if (sentiment?.engagement === 'low' && sentiment?.topic_shift) {
-    return {
-      use_sonnet: true,
-      max_tokens: 120,
-      reason: 'creative_reengagement'
-    };
-  }
-
-  // High importance memory match - personalized response
-  const highImportanceMemory = memories?.find(m => m.importance >= 80);
-  if (highImportanceMemory) {
-    return {
-      use_sonnet: true,
-      max_tokens: 150,
-      reason: 'important_memory'
-    };
-  }
-
-  // Any memory match - slightly more tokens for personalization
-  if (memories?.length > 0) {
-    return {
-      use_sonnet: false,
-      max_tokens: 100,
-      reason: 'memory_personalization'
-    };
-  }
-
-  // Default - no recommendation
-  return null;
+export async function fastAnalyzeWithTools(userMessage, conversationHistory = [], seniorId = null) {
+  return runDirectorPipeline(userMessage, conversationHistory, seniorId, null, null);
 }
 
 /**
- * Format fast observer results - returns { guidance, memories }
- * Guidance only for Sonnet, memories for all models
- * @param {object} analysis - Results from fastAnalyzeWithTools
- * @returns {object} { guidance: string|null, memories: string|null }
+ * Legacy function for backwards compatibility
+ * @deprecated Use formatDirectorGuidance instead
  */
 export function formatFastObserverGuidance(analysis) {
+  // Handle both old format (has direction) and new format (has sentiment)
+  if (analysis.direction) {
+    return {
+      guidance: formatDirectorGuidance(analysis.direction),
+      memories: analysis.memories?.length > 0
+        ? analysis.memories.map(m => `- ${m.content}`).join('\n')
+        : null,
+    };
+  }
+
+  // Fallback for old sentiment-based format
   const guidanceLines = [];
   let memoriesText = null;
 
-  // Sentiment-based guidance (Sonnet only)
   if (analysis.sentiment) {
     if (analysis.sentiment.sentiment === 'negative' || analysis.sentiment.sentiment === 'concerned') {
       guidanceLines.push('User seems worried - respond with warmth');
@@ -237,26 +478,10 @@ export function formatFastObserverGuidance(analysis) {
     if (analysis.sentiment.engagement === 'low') {
       guidanceLines.push('Low engagement - ask about their interests');
     }
-    if (analysis.sentiment.topic_shift) {
-      guidanceLines.push(`Consider topic: ${analysis.sentiment.topic_shift}`);
-    }
-    if (analysis.sentiment.mentioned_names?.length > 0) {
-      guidanceLines.push(`They mentioned: ${analysis.sentiment.mentioned_names.join(', ')} - ask about them`);
-    }
   }
 
-  // Memory-based context (all models)
   if (analysis.memories?.length > 0) {
     memoriesText = analysis.memories.map(m => `- ${m.content}`).join('\n');
-  }
-
-  // Current events (all models)
-  if (analysis.currentEvents?.items?.length > 0) {
-    const newsText = analysis.currentEvents.items
-      .slice(0, 2)
-      .map(n => n.title || n.summary)
-      .join('; ');
-    guidanceLines.push(`News to share if asked: ${newsText}`);
   }
 
   return {
@@ -265,7 +490,34 @@ export function formatFastObserverGuidance(analysis) {
   };
 }
 
+// Helper functions
+function formatReminders(reminders) {
+  if (!reminders?.length) return 'None';
+  return reminders.map(r => `- ${r.title}: ${r.description || 'No details'}`).join('\n');
+}
+
+function formatFamily(family) {
+  if (!family?.length) return 'Unknown';
+  return family.join(', ');
+}
+
+function formatMemories(memories) {
+  if (!memories?.length) return 'None available';
+  return memories.slice(0, 5).map(m => `- ${m.content}`).join('\n');
+}
+
+function formatHistory(history) {
+  if (!history?.length) return 'Call just started';
+  return history
+    .slice(-10) // Last 10 turns for context
+    .map(m => `${m.role === 'assistant' ? 'DONNA' : 'SENIOR'}: ${m.content}`)
+    .join('\n');
+}
+
 export default {
+  getConversationDirection,
+  formatDirectorGuidance,
+  runDirectorPipeline,
   fastAnalyzeWithTools,
   formatFastObserverGuidance,
 };

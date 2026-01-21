@@ -1,15 +1,19 @@
 # Donna - Roadmap
 
-## Current State (v3.0)
+## Current State (v3.1)
 
 **Working Features:**
-- 4-Layer Observer Architecture
-- Dynamic Model Routing (Haiku ↔ Sonnet)
-- Streaming Pipeline (~400ms time-to-first-audio)
+- Conversation Director Architecture
+  - Layer 1: Quick Observer (0ms regex)
+  - Layer 2: Conversation Director (Gemini 3 Flash, ~150ms)
+  - Layer 3: Post-Turn Agent (background)
+  - Post-Call Analysis (async batch)
+- Dynamic Token Routing (100-400 tokens based on context)
+- Streaming Pipeline (~600ms time-to-first-audio)
 - Real-time voice calls via Twilio
 - Admin dashboard with senior/reminder management
 - Memory system with semantic search (pgvector)
-- Scheduled reminder calls
+- Scheduled reminder calls with tracking
 - News updates via OpenAI web search
 - Observability dashboard for call monitoring
 
@@ -17,28 +21,68 @@
 
 ## Recently Completed
 
-### ✅ Dynamic Model Routing (January 2026)
+### ✅ Conversation Director (January 2026)
 
-**Achieved:** Automatic Haiku/Sonnet selection based on conversation context.
+**Achieved:** Proactive call guidance that steers conversation flow, manages reminders, and monitors engagement.
 
 **Implemented:**
-- [x] `modelRecommendation` output in all 3 observers
-- [x] `selectModelConfig()` function in v1-advanced.js
-- [x] Priority: Quick > Fast > Deep (most urgent first)
-- [x] Logging: `Model: Haiku/Sonnet (reason), tokens: N`
+- [x] Rewrote `fast-observer.js` as Conversation Director
+- [x] Uses Gemini 3 Flash (~100-150ms latency)
+- [x] Call phase tracking (opening → rapport → main → closing)
+- [x] Topic transition suggestions with natural phrases
+- [x] Reminder delivery timing (won't deliver during emotional moments)
+- [x] Engagement monitoring with re-engagement strategies
+- [x] Token recommendations (100-400) based on context
+- [x] Filters out already-delivered reminders
 
-**Triggers:**
-| Situation | Model | Tokens |
-|-----------|-------|--------|
-| Normal conversation | Haiku | 75 |
-| Health mention | Sonnet | 150 |
-| Emotional support | Sonnet | 150 |
-| Low engagement | Sonnet | 120 |
-| Simple question | Haiku | 60 |
+**Director Output:**
+```javascript
+{
+  analysis: { call_phase, engagement_level, emotional_tone },
+  direction: { stay_or_shift, next_topic, transition_phrase },
+  reminder: { should_deliver, which_reminder, delivery_approach },
+  guidance: { tone, priority_action, specific_instruction },
+  model_recommendation: { max_tokens, reason }
+}
+```
 
 ---
 
-### ✅ Post-Turn Agent - Layer 4 (January 2026)
+### ✅ Post-Call Analysis (January 2026)
+
+**Achieved:** Async batch analysis when call ends.
+
+**Implemented:**
+- [x] Created `services/call-analysis.js`
+- [x] Uses Gemini Flash for cost efficiency (~$0.0005/call)
+- [x] Generates call summary, engagement score, concerns
+- [x] Detects health/cognitive/emotional/safety concerns
+- [x] Saves to `call_analyses` database table
+- [x] Flags high-severity concerns for caregiver notification
+
+---
+
+### ✅ Dynamic Model Routing (January 2026)
+
+**Achieved:** Automatic token adjustment based on conversation context.
+
+**Implemented:**
+- [x] `selectModelConfig()` uses Director + Quick Observer
+- [x] Token range: 100 (default) to 400 (emotional support)
+- [x] Simplified from Haiku/Sonnet switching to token-based
+
+**Token Selection:**
+| Situation | Tokens | Trigger |
+|-----------|--------|---------|
+| Normal conversation | 100 | Default |
+| Health mention | 150 | Quick Observer |
+| Emotional support | 200-250 | Director |
+| Low engagement | 200 | Director |
+| Reminder delivery | 150 | Director |
+
+---
+
+### ✅ Post-Turn Agent - Layer 3 (January 2026)
 
 **Achieved:** Background processing after response is sent.
 
@@ -53,68 +97,18 @@
 
 ### ✅ V1 Streaming Pipeline (January 2026)
 
-**Achieved:** Reduced greeting latency from ~1.5s to ~400ms
+**Achieved:** Reduced greeting latency from ~1.5s to ~600ms
 
 **Implemented:**
-- [x] Pre-built greeting (skips Claude for initial hello)
+- [x] Pre-generated greeting (skips Claude for initial hello)
 - [x] Claude streaming responses (sentence-by-sentence)
 - [x] ElevenLabs WebSocket TTS connection
 - [x] Parallel Claude + TTS connection startup
-- [x] 3-layer observer architecture
 - [x] `V1_STREAMING_ENABLED` feature flag
 
 ---
 
-### ✅ Haiku Default Model (January 2026)
-
-**Achieved:** Switched main conversation model from Sonnet to Haiku.
-
-- [x] Faster responses (~300ms vs ~800ms first token)
-- [x] Cost reduction (~10x cheaper per token)
-- [x] Dynamic upgrade to Sonnet when needed
-
----
-
 ## Upcoming Work
-
-### Dynamic Model Routing (Observer-Driven)
-**Goal:** Use Haiku by default, upgrade to Sonnet only when observers request it
-
-**Spec:** [docs/DYNAMIC_MODEL_ROUTING.md](./DYNAMIC_MODEL_ROUTING.md)
-
-**Philosophy:** Let the AI decide when it needs more AI.
-
-```
-Default: Haiku (~80ms, 100 tokens) - 90% of turns
-Upgrade: Sonnet (~200ms, 200-400 tokens) - when observers say so
-```
-
-**Implementation:**
-- [ ] Add `modelRecommendation` output to quick-observer.js
-- [ ] Add complexity detection to fast-observer.js (Haiku decides if Sonnet needed)
-- [ ] Add `model_recommendation` to observer-agent.js output
-- [ ] Create `pipelines/model-selector.js` for central routing logic
-- [ ] Update v1-advanced.js to use dynamic model selection
-- [ ] Add product feature flags (storytelling_mode, news_discussion, etc.)
-- [ ] Log routing decisions to conversation log for observability
-
-**Observer-driven triggers for Sonnet:**
-- Health/safety concerns detected
-- Emotional distress (strong negative emotion)
-- Complex question requiring detailed answer
-- Low engagement - needs re-engagement
-- Storytelling or memory discussion requested
-
-**Product features that request Sonnet:**
-| Feature | Max Tokens |
-|---------|------------|
-| Storytelling Mode | 400 |
-| News Discussion | 300 |
-| Reminder Delivery | 250 |
-| Memory Lane | 300 |
-| Health Check-in | 200 |
-
----
 
 ### Caregiver Authentication
 **Goal:** Secure multi-user access
@@ -126,70 +120,47 @@ Upgrade: Sonnet (~200ms, 200-400 tokens) - when observers say so
 
 ---
 
-### Observer Signal Storage
-**Goal:** Store observer analysis for caregiver review
+### Call Analysis Dashboard
+**Goal:** Display post-call analysis for caregivers
 
-- [ ] Add observer_signals table
-- [ ] Display concerns in call view
-- [ ] Add concerns summary to dashboard
+- [ ] Add call analysis view to admin dashboard
+- [ ] Show engagement scores over time
+- [ ] Display concerns with severity levels
+- [ ] Follow-up suggestions for next call
+- [ ] Alert notifications for high-severity concerns
 
 ---
 
-### Analytics Dashboard
-**Goal:** Insights for caregivers
+### Caregiver Notifications
+**Goal:** Alert caregivers about concerns
 
-- [ ] Call frequency per senior
-- [ ] Average call duration trends
-- [ ] Engagement metrics over time
-- [ ] Concern frequency tracking
+- [ ] SMS notifications via Twilio
+- [ ] Email notifications
+- [ ] Configurable alert thresholds
+- [ ] Daily/weekly summary digests
+
+---
+
+### Reminder Analytics
+**Goal:** Track reminder effectiveness
+
+- [ ] Reminder delivery success rate
+- [ ] Acknowledgment tracking
+- [ ] Missed reminder patterns
+- [ ] Optimal delivery time analysis
 
 ---
 
 ### Latency Optimization Phase 2
 
-**Full spec:** [LATENCY_OPTIMIZATION_PLAN.md](LATENCY_OPTIMIZATION_PLAN.md)
-
-**Target:** Reduce response latency from ~600ms to ~300-400ms
+**Target:** Reduce response latency from ~600ms to ~400ms
 
 | Optimization | Effort | Impact | Status |
 |-------------|--------|--------|--------|
 | Pre-warm Claude connection | Low | ~50-100ms | Pending |
 | Pre-fetch senior memories | Medium | ~100ms | Pending |
 | Cache common responses | Medium | ~500ms (10-20% of turns) | Pending |
-| Parallel initialization | Low | ~50ms | Pending |
-| Speculative TTS | High | ~100-200ms | Future |
-
-**Pre-warm Claude Connection:**
-- [ ] Create HTTPS keep-alive agent
-- [ ] Pass agent to Anthropic client
-- [ ] Test connection reuse across utterances
-
-**Pre-fetch Senior Memories:**
-- [ ] Add `getTopMemories()` to `services/memory.js`
-- [ ] Call prefetch on session start (parallel with greeting)
-- [ ] Inject pre-fetched memories into system prompt
-
-**Cache Common Responses:**
-- [ ] Create `pipelines/response-cache.js`
-- [ ] Define patterns: "how are you", "good morning", "thank you"
-- [ ] Add personalization (senior name, variety)
-- [ ] Skip cache if observer signals present
-
-**Alternative TTS (Future Testing):**
-- [ ] Test Cartesia TTS (~50-100ms, native mulaw)
-- [ ] Test Deepgram TTS (~100-200ms)
-- [ ] Compare voice quality vs latency tradeoff
-### Future Latency Improvements
-
-**Potential optimizations:**
-- [ ] **Dynamic Model Routing** - Use Haiku by default (~80ms vs Sonnet ~200ms)
-- [ ] Test Cartesia TTS (~50-100ms) as ElevenLabs alternative
-- [ ] Test Deepgram TTS (~100-200ms)
-- [ ] Reduce Deepgram endpointing (500ms → 300ms)
-- [ ] Keep TTS WebSocket open between utterances
-- [ ] Cache common responses
-
-**Target with all optimizations:** ~250ms time-to-first-audio (from current ~400ms)
+| Test Cartesia TTS | Medium | ~100-200ms | Future |
 
 ---
 
@@ -200,10 +171,10 @@ Upgrade: Sonnet (~200ms, 200-400 tokens) - when observers say so
 | Main Pipeline | `pipelines/v1-advanced.js` |
 | Streaming TTS | `adapters/elevenlabs-streaming.js` |
 | Quick Observer (L1) | `pipelines/quick-observer.js` |
-| Fast Observer (L2) | `pipelines/fast-observer.js` |
-| Deep Observer (L3) | `pipelines/observer-agent.js` |
-| Post-Turn Agent (L4) | `pipelines/post-turn-agent.js` |
-| Model Selection | `v1-advanced.js` (selectModelConfig) |
+| Conversation Director (L2) | `pipelines/fast-observer.js` |
+| Post-Turn Agent (L3) | `pipelines/post-turn-agent.js` |
+| Post-Call Analysis | `services/call-analysis.js` |
+| Token Selection | `v1-advanced.js` (selectModelConfig) |
 | Memory System | `services/memory.js` |
 | Scheduler | `services/scheduler.js` |
 | Admin UI | `public/admin.html` |
@@ -213,10 +184,10 @@ Upgrade: Sonnet (~200ms, 200-400 tokens) - when observers say so
 
 | Doc | Purpose |
 |-----|---------|
-| [STREAMING_OBSERVER_SPEC.md](./STREAMING_OBSERVER_SPEC.md) | Streaming + multi-layer observer architecture |
-| [DYNAMIC_MODEL_ROUTING.md](./DYNAMIC_MODEL_ROUTING.md) | Observer-driven Haiku/Sonnet selection |
+| [CONVERSATION_DIRECTOR_SPEC.md](./CONVERSATION_DIRECTOR_SPEC.md) | Director specification and examples |
 | [architecture/OVERVIEW.md](./architecture/OVERVIEW.md) | System architecture overview |
+| [STREAMING_OBSERVER_SPEC.md](./STREAMING_OBSERVER_SPEC.md) | Streaming + observer architecture |
 
 ---
 
-*Last updated: January 2026 - v3.0 (4-Layer Observer + Dynamic Routing)*
+*Last updated: January 2026 - v3.1 (Conversation Director)*

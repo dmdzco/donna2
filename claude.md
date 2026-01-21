@@ -18,17 +18,17 @@
 
 ---
 
-## Current Status: v3.0 (4-Layer Observer + Dynamic Routing)
+## Current Status: v3.1 (Conversation Director)
 
 ### Working Features
-- **4-Layer Observer Architecture**
+- **Conversation Director Architecture**
   - Layer 1: Quick Observer (0ms) - Instant regex patterns
-  - Layer 2: Fast Observer (~300ms) - Haiku + memory search
-  - Layer 3: Deep Observer (~800ms) - Sonnet analysis (async)
-  - Layer 4: Post-Turn Agent - Background tasks after response
-- **Dynamic Model Routing** - Automatic Haiku/Sonnet selection
-- **Streaming Pipeline** (~400ms time-to-first-audio)
-  - Pre-built greeting
+  - Layer 2: Conversation Director (~150ms) - Proactive call guidance (Gemini 3 Flash)
+  - Layer 3: Post-Turn Agent - Background tasks after response
+  - Post-Call Analysis - Async batch analysis when call ends
+- **Dynamic Token Routing** - Automatic token adjustment based on context
+- **Streaming Pipeline** (~600ms time-to-first-audio)
+  - Pre-generated greeting
   - Claude streaming responses
   - WebSocket TTS (ElevenLabs)
   - Sentence-by-sentence audio delivery
@@ -46,46 +46,60 @@
 
 **Full documentation**: [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md)
 
-### 4-Layer Observer Architecture
+### Conversation Director Architecture
 
 ```
 User speaks → Deepgram STT → Process utterance
                                   │
                   ┌───────────────┼───────────────┐
-                  ▼               ▼               ▼
-            Layer 1 (0ms)   Layer 2 (~300ms)  Layer 3 (~800ms)
-            Quick Observer  Fast Observer     Deep Observer
-            (regex)         (Haiku+memory)    (Sonnet analysis)
-                  │               │               │
-                  └───────┬───────┘               │
-                          ▼                       │
-              ┌─────────────────────┐             │
-              │ Dynamic Model Select│←────────────┘
-              │ (Haiku or Sonnet)   │         (next turn)
+                  ▼               ▼
+            Layer 1 (0ms)   Layer 2 (~150ms)
+            Quick Observer  Conversation Director
+            (regex)         (Gemini 3 Flash)
+                  │               │
+                  └───────┬───────┘
+                          ▼
+              ┌─────────────────────┐
+              │ Dynamic Token Select│
+              │   (100-400 tokens)  │
               └──────────┬──────────┘
                          ▼
-              Claude Streaming Response
+              Claude Sonnet Streaming
                          │
                          ▼
               Sentence Buffer → ElevenLabs WS → Twilio
                          │
                          ▼
-              Layer 4: Post-Turn Agent (background)
-              - Health concern extraction
-              - Memory storage
-              - Topic prefetching
+              Layer 3: Post-Turn Agent (background)
+                         │
+                         ▼ (on call end)
+              Post-Call Analysis (Gemini Flash)
+              - Summary, alerts, metrics
 ```
 
-### Dynamic Model Selection
+### Conversation Director
 
-| Situation | Model | Tokens | Reason |
-|-----------|-------|--------|--------|
-| Normal conversation | Haiku | 75 | Fast, efficient |
-| Health mention | Sonnet | 150 | Safety needs nuance |
-| Emotional support | Sonnet | 150 | Empathy needs depth |
-| Low engagement | Sonnet | 120 | Creative re-engagement |
-| Simple question | Haiku | 60 | Quick answers better |
-| Important memory | Sonnet | 150 | Personalized response |
+The Director proactively guides each call:
+
+| Feature | Description |
+|---------|-------------|
+| **Call Phase Tracking** | opening → rapport → main → closing |
+| **Topic Management** | When to stay, transition, or wrap up |
+| **Reminder Delivery** | Natural moments to deliver reminders |
+| **Engagement Monitoring** | Detect low engagement, suggest re-engagement |
+| **Emotional Detection** | Adjust tone for sad/concerned seniors |
+| **Token Recommendations** | 100-400 tokens based on context |
+
+### Dynamic Token Selection
+
+| Situation | Tokens | Trigger |
+|-----------|--------|---------|
+| Normal conversation | 100 | Default |
+| Health mention | 150 | Quick Observer |
+| Emotional support | 200-250 | Director |
+| Low engagement | 200 | Director |
+| Reminder delivery | 150 | Director |
+| Call closing | 150 | Director |
 
 ### Key Files
 
@@ -93,15 +107,17 @@ User speaks → Deepgram STT → Process utterance
 /
 ├── index.js                    ← Main server
 ├── pipelines/
-│   ├── v1-advanced.js          ← Main pipeline + dynamic routing
-│   ├── observer-agent.js       ← Layer 3: Deep conversation analyzer
+│   ├── v1-advanced.js          ← Main pipeline + call state tracking
 │   ├── quick-observer.js       ← Layer 1: Instant regex patterns
-│   ├── fast-observer.js        ← Layer 2: Haiku + memory search
-│   └── post-turn-agent.js      ← Layer 4: Background tasks
+│   ├── fast-observer.js        ← Layer 2: Conversation Director
+│   ├── post-turn-agent.js      ← Layer 3: Background tasks
+│   └── observer-agent.js       ← DEPRECATED (kept for reference)
 ├── adapters/
+│   ├── llm/index.js            ← Multi-provider LLM adapter
 │   ├── elevenlabs.js           ← ElevenLabs REST TTS adapter
 │   └── elevenlabs-streaming.js ← ElevenLabs WebSocket TTS
 ├── services/
+│   ├── call-analysis.js        ← Post-call batch analysis
 │   ├── memory.js               ← Memory storage + semantic search
 │   ├── seniors.js              ← Senior profile CRUD
 │   ├── conversations.js        ← Conversation history
@@ -127,10 +143,10 @@ User speaks → Deepgram STT → Process utterance
 | Change conversation behavior | `pipelines/v1-advanced.js` |
 | Modify streaming TTS | `adapters/elevenlabs-streaming.js` |
 | Add instant analysis patterns | `pipelines/quick-observer.js` |
-| Modify fast analysis (Haiku) | `pipelines/fast-observer.js` |
-| Modify deep Observer Agent | `pipelines/observer-agent.js` |
+| Modify Conversation Director | `pipelines/fast-observer.js` |
 | Change background tasks | `pipelines/post-turn-agent.js` |
-| Change model selection logic | `pipelines/v1-advanced.js` (selectModelConfig) |
+| Modify post-call analysis | `services/call-analysis.js` |
+| Change token selection logic | `pipelines/v1-advanced.js` (selectModelConfig) |
 | Modify system prompts | `pipelines/v1-advanced.js` (buildSystemPrompt) |
 | Add new API endpoint | `index.js` |
 | Update admin UI | `public/admin.html` |
@@ -146,12 +162,15 @@ TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=+1...
 DATABASE_URL=...
 OPENAI_API_KEY=...          # Embeddings + news
-ANTHROPIC_API_KEY=...       # Claude (Haiku + Sonnet)
+ANTHROPIC_API_KEY=...       # Claude Sonnet (voice)
+GOOGLE_API_KEY=...          # Gemini Flash (Director + Analysis)
 ELEVENLABS_API_KEY=...      # TTS
 DEEPGRAM_API_KEY=...        # STT
 
 # Optional
 V1_STREAMING_ENABLED=true   # Set to 'false' to disable streaming
+VOICE_MODEL=claude-sonnet   # Main voice model
+FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
 ```
 
 ---
@@ -160,13 +179,14 @@ V1_STREAMING_ENABLED=true   # Set to 'false' to disable streaming
 
 See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
 - ~~V1 Latency Optimization~~ ✓ Completed
-- ~~Haiku Default Model~~ ✓ Completed
 - ~~Dynamic Model Routing~~ ✓ Completed
-- ~~Post-Turn Agent (Layer 4)~~ ✓ Completed
+- ~~Post-Turn Agent~~ ✓ Completed
+- ~~Conversation Director~~ ✓ Completed
+- ~~Post-Call Analysis~~ ✓ Completed
 - Caregiver Authentication (Clerk)
-- Observer Signal Storage
-- Analytics Dashboard
+- Call Analysis Dashboard
+- Caregiver Notifications (SMS/Email)
 
 ---
 
-*Last updated: January 2026 - v3.0 (4-Layer Observer + Dynamic Routing)*
+*Last updated: January 2026 - v3.1 (Conversation Director)*

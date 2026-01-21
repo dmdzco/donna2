@@ -1,6 +1,11 @@
 # Donna V1 Pipeline: Streaming + Multi-Layer Observer Architecture
 
-> **Use this as context for Claude CLI or any AI assistant implementing this feature.**
+> **Status:** Historical reference. The current implementation uses the [Conversation Director](./CONVERSATION_DIRECTOR_SPEC.md) architecture which evolved from this design.
+>
+> Key changes in v3.1:
+> - Layer 2 (Fast Observer) → Conversation Director (Gemini 3 Flash)
+> - Layer 3 (Deep Observer) → Removed from real-time, replaced by post-call analysis
+> - 4-layer → 3-layer + post-call batch analysis
 
 ## Overview
 

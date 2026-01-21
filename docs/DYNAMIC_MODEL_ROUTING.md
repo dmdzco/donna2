@@ -1,262 +1,93 @@
-# Dynamic Model Routing (Observer-Driven)
+# Dynamic Token Routing
 
-## Current State
+> **Status:** Superseded by the [Conversation Director](./CONVERSATION_DIRECTOR_SPEC.md) architecture.
 
-**As of January 2026**: The V1 pipeline already uses **Haiku** as the default conversation model (`claude-3-haiku-20240307`) with `max_tokens: 150`.
+## Current Implementation (v3.1)
 
-This document outlines the plan to add **dynamic upgrades** to Sonnet when observers detect situations that warrant more sophisticated responses.
+The Conversation Director handles all dynamic token routing. Model selection is now based on Director + Quick Observer signals.
 
----
+### Token Selection
 
-## Philosophy
+| Situation | Tokens | Trigger |
+|-----------|--------|---------|
+| Normal conversation | 100 | Default |
+| Health mention | 150 | Quick Observer |
+| Emotional support | 200-250 | Director |
+| Low engagement | 200 | Director |
+| Reminder delivery | 150 | Director |
+| Call closing | 150 | Director |
 
-> "Let the AI decide when it needs more AI."
+### Implementation
 
-The 3-layer observer architecture already analyzes every conversation turn:
-- **Layer 1 (Quick Observer)**: Instant regex - health mentions, emotions, engagement
-- **Layer 2 (Fast Observer)**: Haiku analysis - sentiment, context, memories
-- **Layer 3 (Deep Observer)**: Sonnet analysis - complex patterns (async)
-
-Currently, observers only provide **guidance** to the conversation model. The enhancement is to also have observers recommend **which model** to use and **how much** it should say.
-
----
-
-## Implementation Plan
-
-### Phase 1: Add Model Recommendations to Observers
-
-Each observer will output an optional `modelRecommendation`:
+Token selection is handled by `selectModelConfig()` in `pipelines/v1-advanced.js`:
 
 ```javascript
-modelRecommendation: {
-  use_sonnet: true,        // Default: false (stick with Haiku)
-  max_tokens: 300,         // Default: 150
-  reason: 'health_safety'  // For logging/debugging
-}
-```
-
-#### Quick Observer Triggers (Layer 1)
-
-| Pattern | Upgrade to Sonnet? | max_tokens | Reason |
-|---------|-------------------|------------|--------|
-| Health mention (pain, fell, dizzy) | Yes | 200 | Safety requires thoughtful response |
-| Negative emotion (lonely, sad) | Yes | 250 | Emotional support needs nuance |
-| Low engagement (3+ short responses) | Yes | 200 | Re-engagement needs creativity |
-| Family mention | No | 150 | Haiku handles warmth fine |
-| Simple question | No | 100 | Quick answers are better |
-
-#### Fast Observer Triggers (Layer 2)
-
-| Sentiment Analysis | Upgrade to Sonnet? | max_tokens | Reason |
-|-------------------|-------------------|------------|--------|
-| `needs_empathy: true` | Yes | 250 | Empathy requires sophistication |
-| `engagement: low` + `topic_shift` suggested | Yes | 200 | Creative re-engagement |
-| Memory match (high importance) | Yes | 300 | Personalized story worth telling |
-| `sentiment: concerned` | Yes | 250 | Careful, nuanced response |
-
-#### Deep Observer Triggers (Layer 3)
-
-The Deep Observer runs async and affects the **next** turn:
-
-| Analysis | Upgrade to Sonnet? | max_tokens | Reason |
-|----------|-------------------|------------|--------|
-| `should_deliver_reminder: true` | Optional | 200 | Natural reminder delivery |
-| Complex emotional pattern | Yes | 300 | Multi-turn emotional support |
-| `should_end_call: true` | Yes | 250 | Graceful call wrap-up |
-
----
-
-### Phase 2: Model Selection Logic
-
-Add to `pipelines/v1-advanced.js`:
-
-```javascript
-const MODELS = {
-  FAST: 'claude-3-haiku-20240307',   // Default - quick, cheap
-  SMART: 'claude-3-5-sonnet-20241022' // Upgraded - nuanced, deeper
-};
-
-/**
- * Select model based on observer recommendations
- * Priority: Quick (immediate) > Fast (this turn) > Deep (from last turn)
- */
-function selectModelConfig(quickResult, fastResult, deepResult, productFeatures = {}) {
+function selectModelConfig(quickResult, directorResult) {
   let config = {
-    model: MODELS.FAST,
-    max_tokens: 150,
+    model: VOICE_MODEL,
+    max_tokens: DEFAULT_MAX_TOKENS, // 100
     reason: 'default'
   };
 
-  // Check observers in priority order (most urgent first)
-  const recommendations = [
-    quickResult?.modelRecommendation,
-    fastResult?.modelRecommendation,
-    deepResult?.modelRecommendation,
-    productFeatures?.modelOverride
-  ].filter(Boolean);
+  // Director's recommendation takes priority
+  if (directorResult?.model_recommendation) {
+    const rec = directorResult.model_recommendation;
+    config.max_tokens = rec.max_tokens || DEFAULT_MAX_TOKENS;
+    config.reason = rec.reason || 'director';
+  }
 
-  for (const rec of recommendations) {
-    if (rec.use_sonnet) {
-      config = {
-        model: MODELS.SMART,
-        max_tokens: Math.max(config.max_tokens, rec.max_tokens || 200),
-        reason: rec.reason || 'observer_upgrade'
-      };
-      break; // First upgrade wins
-    } else if (rec.max_tokens) {
-      // Allow token adjustment without model change
-      config.max_tokens = Math.max(config.max_tokens, rec.max_tokens);
-    }
+  // Quick observer can escalate tokens for urgent signals
+  if (quickResult?.modelRecommendation?.max_tokens) {
+    config.max_tokens = Math.max(
+      config.max_tokens,
+      quickResult.modelRecommendation.max_tokens
+    );
   }
 
   return config;
 }
 ```
 
-## Integration
+### Conversation Director Output
+
+The Director provides token recommendations based on comprehensive analysis:
 
 ```javascript
-// In v1-advanced.js generateAndSendResponseStreaming()
-
-import { selectModel } from './model-selector.js';
-
-// Quick observer runs synchronously
-const quickResult = quickAnalyze(userMessage, this.conversationLog.slice(-6));
-
-// Select model based on all observer signals
-const modelConfig = selectModel(
-  quickResult,
-  this.lastFastObserverResult,  // From previous turn
-  this.lastObserverSignal,       // From previous turn
-  this.activeProductFeatures     // Storytelling mode, etc.
-);
-
-console.log(`[V1] Model: ${modelConfig.model.includes('haiku') ? 'Haiku' : 'Sonnet'}, ` +
-            `tokens: ${modelConfig.max_tokens}, reason: ${modelConfig.reason}`);
-
-const stream = anthropic.messages.stream({
-  model: modelConfig.model,
-  max_tokens: modelConfig.max_tokens,
-  system: systemPrompt,
-  messages: messages,
-});
-```
-
-## Why This Approach is Better
-
-| Old Approach (Regex) | New Approach (Observer-Driven) |
-|---------------------|-------------------------------|
-| Hardcoded patterns | AI decides what's complex |
-| Brittle rules | Adaptive to context |
-| Can't learn | Observers can be tuned |
-| Same rules for everyone | Can personalize per senior |
-
-## Product Features That Can Request Sonnet
-
-| Feature | When Active | Max Tokens |
-|---------|-------------|------------|
-| **Storytelling Mode** | User asks for a story | 400 |
-| **News Discussion** | Discussing current events | 300 |
-| **Reminder Delivery** | Natural reminder weaving | 250 |
-| **Memory Lane** | Discussing past memories | 300 |
-| **Health Check-in** | Scheduled health questions | 200 |
-| **Re-engagement** | Low engagement detected | 200 |
-
-## Haiku Prompt for Complexity Detection
-
-Add to fast-observer's Haiku call:
-
-```javascript
-const complexityPrompt = `
-Analyze if this conversation turn requires a complex response.
-
-Set needs_complex_response: true if ANY of these apply:
-- User is emotionally distressed and needs empathy
-- User asked a detailed question requiring explanation
-- Topic is health/safety related
-- User wants a story or detailed memory
-- Conversation is going poorly and needs re-engagement
-- User is confused and needs careful clarification
-
-Set needs_complex_response: false for:
-- Simple greetings and acknowledgments
-- Casual back-and-forth
-- User gave a short, content response
-- Normal friendly conversation
-
-Also suggest max_tokens: 50-400 based on expected response length.
-`;
-```
-
-## Default Behavior
-
-```
-90% of turns: Haiku, 100 tokens, ~80ms
- → "Hi!" "Yes" "That's nice" "Okay" "Thanks"
-
-10% of turns: Sonnet, 200-400 tokens, ~200ms
- → Health concerns, emotional support, stories, complex questions
-```
-
-## Observability
-
-Log all routing decisions:
-
-```javascript
-this.conversationLog.push({
-  role: 'assistant',
-  content: fullResponse,
-  timestamp: new Date().toISOString(),
-  model_routing: {
-    model: modelConfig.model,
-    max_tokens: modelConfig.max_tokens,
-    reason: modelConfig.reason,
-    observer_recommendations: {
-      quick: quickResult?.modelRecommendation,
-      fast: this.lastFastObserverResult?.modelRecommendation,
-      deep: this.lastObserverSignal?.model_recommendation,
-    }
-  }
-});
-```
-
-## Implementation Steps
-
-1. **Update `quick-observer.js`** - Add `modelRecommendation` to output
-2. **Update `fast-observer.js`** - Add Haiku complexity detection
-3. **Update `observer-agent.js`** - Add `model_recommendation` to output
-4. **Create `model-selector.js`** - Central model selection logic
-5. **Update `v1-advanced.js`** - Use `selectModel()` for dynamic routing
-6. **Add product feature flags** - Storytelling mode, etc.
-
-## Future: Learning
-
-Track outcomes to improve observer recommendations:
-
-```javascript
-// After call ends
 {
-  model_used: 'haiku',
-  observer_recommended: 'haiku',
-  outcome: {
-    user_engagement: 'high',
-    call_duration: 480,
-    concerns_raised: 0,
+  model_recommendation: {
+    max_tokens: 100-400,
+    reason: "why this token count"
   }
 }
-// → Haiku was the right choice
-
-{
-  model_used: 'haiku',
-  observer_recommended: 'haiku',
-  outcome: {
-    user_engagement: 'low',
-    user_repeated_question: true,
-  }
-}
-// → Should have used Sonnet, tune observer
 ```
+
+**Director triggers for higher tokens:**
+- `emotional_tone: 'sad'` → 200-250 tokens
+- `engagement_level: 'low'` → 200 tokens
+- `stay_or_shift: 'wrap_up'` → 150 tokens
+- `should_deliver: true` (reminder) → 150 tokens
+
+### Quick Observer Triggers
+
+Instant regex-based signals that can escalate tokens:
+
+| Pattern | Tokens | Reason |
+|---------|--------|--------|
+| Health mention (pain, fell, dizzy) | 150 | Safety needs care |
+| Negative emotion (lonely, sad) | 200 | Empathy needs depth |
+| Low engagement (short responses) | 150 | Re-engagement |
 
 ---
 
-*Let the AI decide when it needs more AI.*
+## Historical Context
+
+Previously, the system used Haiku/Sonnet model switching. This was simplified to token-based routing with a single voice model (Claude Sonnet) because:
+
+1. Token adjustment achieves similar effect (brief vs. extended responses)
+2. Single model simplifies architecture
+3. Gemini handles Director duties more cost-effectively than Haiku
+4. Post-call analysis moved to async batch (not real-time)
+
+---
+
+*See [CONVERSATION_DIRECTOR_SPEC.md](./CONVERSATION_DIRECTOR_SPEC.md) for the full Director specification.*

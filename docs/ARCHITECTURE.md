@@ -1,6 +1,6 @@
 # Donna Architecture
 
-> Comprehensive technical architecture for the AI Senior Companion system.
+> Comprehensive technical architecture for the AI Senior Companion system (v3.1 - Conversation Director).
 
 ---
 
@@ -8,20 +8,20 @@
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                                    DONNA SYSTEM                                         │
+│                           DONNA v3.1 - CONVERSATION DIRECTOR                            │
 │                                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
 │  │                              CLIENT LAYER                                        │   │
 │  │                                                                                  │   │
 │  │   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                      │   │
-│  │   │   Senior's   │    │    Admin     │    │   Browser    │                      │   │
-│  │   │    Phone     │    │  Dashboard   │    │  Test Call   │                      │   │
-│  │   │  (Twilio)    │    │ /admin.html  │    │/browser-call │                      │   │
+│  │   │   Senior's   │    │    Admin     │    │ Observability│                      │   │
+│  │   │    Phone     │    │  Dashboard   │    │  Dashboard   │                      │   │
+│  │   │  (Twilio)    │    │ /admin.html  │    │ :5174        │                      │   │
 │  │   └──────┬───────┘    └──────┬───────┘    └──────┬───────┘                      │   │
 │  │          │                   │                   │                               │   │
 │  └──────────┼───────────────────┼───────────────────┼───────────────────────────────┘   │
 │             │                   │                   │                                    │
-│             │ PSTN/WebRTC       │ HTTP              │ WebSocket                         │
+│             │ PSTN/WebRTC       │ HTTP              │ HTTP                               │
 │             │                   │                   │                                    │
 │  ┌──────────┼───────────────────┼───────────────────┼───────────────────────────────┐   │
 │  │          ▼                   ▼                   ▼                                │   │
@@ -45,47 +45,49 @@
 │  │   │                     Express Server (index.js)                            │    │   │
 │  │   │                                                                          │    │   │
 │  │   │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │    │   │
-│  │   │  │   HTTP      │  │  WebSocket  │  │  Pipeline   │  │  Scheduler  │     │    │   │
+│  │   │  │   HTTP      │  │  WebSocket  │  │  V1 Session │  │  Scheduler  │     │    │   │
 │  │   │  │   Routes    │  │   Handler   │  │   Router    │  │   (60s)     │     │    │   │
 │  │   │  └─────────────┘  └─────────────┘  └──────┬──────┘  └─────────────┘     │    │   │
 │  │   │                                           │                              │    │   │
 │  │   └───────────────────────────────────────────┼──────────────────────────────┘    │   │
 │  │                                               │                                   │   │
-│  │                          ┌────────────────────┴────────────────────┐              │   │
-│  │                          ▼                                         ▼              │   │
-│  │   ┌──────────────────────────────────────┐  ┌──────────────────────────────────┐ │   │
-│  │   │         V0 PIPELINE                  │  │         V1 PIPELINE              │ │   │
-│  │   │      (GeminiLiveSession)             │  │     (V1AdvancedSession)          │ │   │
-│  │   │                                      │  │                                  │ │   │
-│  │   │  ┌────────────────────────────────┐  │  │  CRITICAL PATH:                  │ │   │
-│  │   │  │      Gemini 2.5 Flash          │  │  │  ┌────────────────────────────┐  │ │   │
-│  │   │  │      Native Audio              │  │  │  │       Deepgram STT         │  │ │   │
-│  │   │  │  • Audio in → Audio out        │  │  │  └─────────────┬──────────────┘  │ │   │
-│  │   │  │  • Built-in STT + TTS          │  │  │                │                 │ │   │
-│  │   │  │  • ~500ms latency              │  │  │                ▼                 │ │   │
-│  │   │  └────────────────────────────────┘  │  │  ┌────────────────────────────┐  │ │   │
-│  │   │                                      │  │  │     Claude Sonnet          │  │ │   │
-│  │   │  ┌────────────────────────────────┐  │  │  └─────────────┬──────────────┘  │ │   │
-│  │   │  │    Deepgram (Parallel)         │  │  │                │                 │ │   │
-│  │   │  │  • User speech transcription   │  │  │                ▼                 │ │   │
-│  │   │  │  • Memory trigger detection    │  │  │  ┌────────────────────────────┐  │ │   │
-│  │   │  └────────────────────────────────┘  │  │  │      ElevenLabs TTS        │  │ │   │
-│  │   │                                      │  │  └─────────────┬──────────────┘  │ │   │
-│  │   └──────────────────────────────────────┘  │                │                 │ │   │
-│  │                                             │                ▼                 │ │   │
-│  │   ┌──────────────────────────────────────┐  │        Audio to Twilio          │ │   │
-│  │   │    PARALLEL (not in critical path)   │  │        ~1.5s latency            │ │   │
-│  │   │                                      │  └──────────────────────────────────┘ │   │
-│  │   │  ┌────────────────────────────────┐  │                                       │   │
-│  │   │  │     Observer Agent             │  │  Listens to conversation history      │   │
-│  │   │  │     (Background, every 30s)    │◄─┼──Signals used by NEXT Claude turn     │   │
-│  │   │  │                                │  │  Never blocks current response        │   │
-│  │   │  │  • Engagement analysis         │  │                                       │   │
-│  │   │  │  • Emotional state detection   │  │                                       │   │
-│  │   │  │  • Reminder timing signals     │  │                                       │   │
-│  │   │  │  • Caregiver concern flags     │  │                                       │   │
-│  │   │  └────────────────────────────────┘  │                                       │   │
-│  │   └──────────────────────────────────────┘                                       │   │
+│  │   ┌───────────────────────────────────────────▼──────────────────────────────┐   │   │
+│  │   │                    V1 ADVANCED SESSION                                    │   │   │
+│  │   │                  (pipelines/v1-advanced.js)                               │   │   │
+│  │   │                                                                           │   │   │
+│  │   │   CRITICAL PATH:                                                          │   │   │
+│  │   │                                                                           │   │   │
+│  │   │   Audio In → Deepgram STT → Process Utterance                            │   │   │
+│  │   │                                   │                                       │   │   │
+│  │   │               ┌───────────────────┼───────────────────┐                  │   │   │
+│  │   │               ▼                   ▼                                       │   │   │
+│  │   │         Layer 1 (0ms)     Layer 2 (~150ms)                               │   │   │
+│  │   │         Quick Observer    Conversation Director                           │   │   │
+│  │   │         (regex patterns)  (Gemini 3 Flash)                               │   │   │
+│  │   │               │                   │                                       │   │   │
+│  │   │               └─────────┬─────────┘                                       │   │   │
+│  │   │                         ▼                                                 │   │   │
+│  │   │              ┌─────────────────────┐                                      │   │   │
+│  │   │              │ Dynamic Token Select│                                      │   │   │
+│  │   │              │   (100-400 tokens)  │                                      │   │   │
+│  │   │              └──────────┬──────────┘                                      │   │   │
+│  │   │                         ▼                                                 │   │   │
+│  │   │              Claude Sonnet Streaming                                      │   │   │
+│  │   │                         │                                                 │   │   │
+│  │   │                         ▼                                                 │   │   │
+│  │   │              Sentence Buffer → ElevenLabs WS → Twilio                    │   │   │
+│  │   │                         │                                                 │   │   │
+│  │   │                         ▼                                                 │   │   │
+│  │   │              Layer 3: Post-Turn Agent (background)                        │   │   │
+│  │   │              - Health concern extraction                                  │   │   │
+│  │   │              - Memory storage                                             │   │   │
+│  │   │              - Topic prefetching                                          │   │   │
+│  │   │                         │                                                 │   │   │
+│  │   │                         ▼ (on call end)                                   │   │   │
+│  │   │              Post-Call Analysis (Gemini Flash)                            │   │   │
+│  │   │              - Summary, alerts, engagement metrics                        │   │   │
+│  │   │                                                                           │   │   │
+│  │   └───────────────────────────────────────────────────────────────────────────┘   │   │
 │  │                                                                                   │   │
 │  └───────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                          │
@@ -103,25 +105,34 @@
 │  │   │   context   │  │             │  │             │  │             │             │   │
 │  │   └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘             │   │
 │  │          │                │                │                │                     │   │
-│  └──────────┼────────────────┼────────────────┼────────────────┼─────────────────────┘   │
-│             │                │                │                │                         │
-│             ▼                ▼                ▼                ▼                         │
+│  │   ┌─────────────┐  ┌─────────────┐                                               │   │
+│  │   │   Call      │  │  Scheduler  │                                               │   │
+│  │   │  Analysis   │  │   Service   │                                               │   │
+│  │   │             │  │             │                                               │   │
+│  │   │ • Post-call │  │ • Due check │                                               │   │
+│  │   │ • Summary   │  │ • Prefetch  │                                               │   │
+│  │   │ • Concerns  │  │ • Initiate  │                                               │   │
+│  │   │ • Metrics   │  │   calls     │                                               │   │
+│  │   └──────┬──────┘  └──────┬──────┘                                               │   │
+│  │          │                │                                                       │   │
+│  └──────────┼────────────────┼───────────────────────────────────────────────────────┘   │
+│             │                │                                                           │
+│             ▼                ▼                                                           │
 │  ┌───────────────────────────────────────────────────────────────────────────────────┐   │
 │  │                              DATA LAYER                                            │   │
 │  │                                                                                    │   │
 │  │   ┌─────────────────────────────────────────────────────────────────────────┐     │   │
-│  │   │                    PostgreSQL (Neon)                                     │     │   │
+│  │   │                    PostgreSQL (Neon + pgvector)                          │     │   │
 │  │   │                                                                          │     │   │
 │  │   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │     │   │
-│  │   │  │ seniors  │  │ memories │  │ conver-  │  │reminders │  │ (future) │  │     │   │
-│  │   │  │          │  │          │  │ sations  │  │          │  │caregivers│  │     │   │
-│  │   │  │• id      │  │• id      │  │• id      │  │• id      │  │          │  │     │   │
-│  │   │  │• name    │  │• seniorId│  │• seniorId│  │• seniorId│  │          │  │     │   │
-│  │   │  │• phone   │  │• type    │  │• callSid │  │• title   │  │          │  │     │   │
-│  │   │  │• interest│  │• content │  │• started │  │• type    │  │          │  │     │   │
-│  │   │  │• medical │  │• embedding│ │• duration│  │• schedule│  │          │  │     │   │
-│  │   │  │• family  │  │  (vector)│  │• status  │  │• recurring│ │          │  │     │   │
-│  │   │  │• isActive│  │• importance│• transcript│ │• lastDel │  │          │  │     │   │
+│  │   │  │ seniors  │  │ memories │  │ conver-  │  │reminders │  │  call_   │  │     │   │
+│  │   │  │          │  │          │  │ sations  │  │          │  │ analyses │  │     │   │
+│  │   │  │• id      │  │• id      │  │• id      │  │• id      │  │• id      │  │     │   │
+│  │   │  │• name    │  │• seniorId│  │• seniorId│  │• seniorId│  │• convId  │  │     │   │
+│  │   │  │• phone   │  │• type    │  │• callSid │  │• title   │  │• summary │  │     │   │
+│  │   │  │• interest│  │• content │  │• started │  │• schedule│  │• concerns│  │     │   │
+│  │   │  │• medical │  │• embedding│ │• duration│  │• recurring│ │• score   │  │     │   │
+│  │   │  │• family  │  │  (vector)│  │• status  │  │• lastDel │  │• quality │  │     │   │
 │  │   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │     │   │
 │  │   │                                                                          │     │   │
 │  │   │                        pgvector extension                                │     │   │
@@ -136,13 +147,13 @@
 │  │   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐            │  │
 │  │   │  Twilio  │  │  Gemini  │  │  Claude  │  │ElevenLabs│  │ Deepgram │            │  │
 │  │   │          │  │          │  │(Anthropic)│ │          │  │          │            │  │
-│  │   │ • Calls  │  │ • V0 AI  │  │ • V1 AI  │  │ • V1 TTS │  │ • STT    │            │  │
-│  │   │ • Media  │  │ • Native │  │ • Observer│ │ • Voices │  │ • Real-  │            │  │
-│  │   │   Stream │  │   Audio  │  │          │  │          │  │   time   │            │  │
+│  │   │ • Calls  │  │• Director│  │ • Voice  │  │ • TTS    │  │ • STT    │            │  │
+│  │   │ • Media  │  │• Analysis│  │ • Main   │  │ • Voices │  │ • Real-  │            │  │
+│  │   │   Stream │  │          │  │   Model  │  │ • WS API │  │   time   │            │  │
 │  │   └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘            │  │
 │  │                                                                                     │  │
 │  │   ┌──────────┐  ┌──────────┐                                                       │  │
-│  │   │  OpenAI  │  │  Neon    │                                                       │  │
+│  │   │  OpenAI  │  │   Neon   │                                                       │  │
 │  │   │          │  │          │                                                       │  │
 │  │   │• Embedding│ │• Postgres│                                                       │  │
 │  │   │• Web     │  │• pgvector│                                                       │  │
@@ -156,609 +167,164 @@
 
 ---
 
-## Component Details
+## Conversation Director Architecture
 
-### 1. Client Layer
-
-#### Senior's Phone
-- Any phone (landline or mobile)
-- Calls Twilio number or receives calls
-- Audio: PSTN telephony
-
-#### Admin Dashboard (`/admin.html`)
-- Single-page application
-- 4 tabs: Dashboard, Seniors, Calls, Reminders
-- Pipeline selector (V0/V1)
-- Pure HTML/CSS/JS (no build step)
-
-#### Browser Test Call (`/browser-call`)
-- WebSocket-based testing
-- Direct microphone → WebSocket → AI
-- For development/testing without phone
-
----
-
-### 2. Gateway Layer (Twilio)
+### Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                           TWILIO FLOW                                │
-│                                                                      │
-│   INBOUND CALL                        OUTBOUND CALL                  │
-│   ────────────                        ─────────────                  │
-│   Phone → Twilio                      API /api/call                  │
-│      │                                     │                         │
-│      ▼                                     ▼                         │
-│   POST /voice/answer              twilioClient.calls.create()        │
-│      │                                     │                         │
-│      │◄────────────────────────────────────┘                         │
-│      │                                                               │
-│      ▼                                                               │
-│   TwiML Response:                                                    │
-│   <Connect><Stream url="wss://.../media-stream"/></Connect>          │
-│      │                                                               │
-│      ▼                                                               │
-│   WebSocket /media-stream                                            │
-│      │                                                               │
-│      ├──► event: 'start'  → Create session, get callSid             │
-│      │                                                               │
-│      ├──► event: 'media'  → Audio chunk (base64 mulaw)              │
-│      │                       Forward to pipeline                     │
-│      │                                                               │
-│      ├──► event: 'stop'   → Stream ending                           │
-│      │                                                               │
-│      ▼                                                               │
-│   POST /voice/status                                                 │
-│      │                                                               │
-│      └──► completed/failed → Extract memories, save transcript       │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
+User speaks → Deepgram STT → Process Utterance
+                                  │
+                  ┌───────────────┼───────────────┐
+                  ▼               ▼
+            Layer 1 (0ms)   Layer 2 (~150ms)
+            Quick Observer  Conversation Director
+            (regex)         (Gemini 3 Flash)
+                  │               │
+                  └───────┬───────┘
+                          ▼
+              ┌─────────────────────┐
+              │ Dynamic Token Select│
+              │   (100-400 tokens)  │
+              └──────────┬──────────┘
+                         ▼
+              Claude Sonnet Streaming
+                         │
+                         ▼
+              Sentence Buffer → ElevenLabs WS → Twilio
+                         │
+                         ▼
+              Layer 3: Post-Turn Agent (background)
+                         │
+                         ▼ (on call end)
+              Post-Call Analysis (Gemini Flash)
 ```
 
-**Audio Format:**
-- Twilio sends: mulaw 8kHz mono (base64 encoded)
-- Gemini expects: PCM 16kHz
-- ElevenLabs returns: PCM 24kHz
-- Conversion: `audio-utils.js`
+### Layer Summary
 
----
+| Layer | Name | Model | Latency | Purpose |
+|-------|------|-------|---------|---------|
+| **1** | Quick Observer | Regex | 0ms | Instant pattern detection |
+| **2** | Conversation Director | Gemini 3 Flash | ~150ms | Proactive call guidance |
+| **3** | Post-Turn Agent | Various | After response | Background tasks |
+| **Post-Call** | Call Analysis | Gemini Flash | After call ends | Summary, alerts |
 
-### 3. Application Layer
+### Conversation Director Details
 
-#### HTTP Routes (`index.js`)
+The Director proactively guides each call:
 
-| Route | Method | Purpose |
-|-------|--------|---------|
-| `/health` | GET | Health check, pipeline info |
-| `/voice/answer` | POST | Twilio call webhook |
-| `/voice/status` | POST | Call status updates |
-| `/api/call` | POST | Initiate outbound call |
-| `/api/seniors` | GET/POST | List/create seniors |
-| `/api/seniors/:id` | GET/PATCH | Get/update senior |
-| `/api/seniors/:id/memories` | GET/POST | List/create memories |
-| `/api/seniors/:id/memories/search` | GET | Semantic search |
-| `/api/conversations` | GET | List conversations |
-| `/api/reminders` | GET/POST | List/create reminders |
-| `/api/reminders/:id` | PATCH/DELETE | Update/delete reminder |
-| `/api/stats` | GET | Dashboard statistics |
+1. **Call Phase Tracking** - opening → rapport → main → closing
+2. **Topic Management** - When to stay, transition, or wrap up
+3. **Reminder Delivery** - Natural moments to deliver reminders
+4. **Engagement Monitoring** - Detect low engagement, suggest re-engagement
+5. **Emotional Detection** - Adjust tone for sad/concerned seniors
+6. **Token Recommendations** - 100-400 tokens based on context
 
-#### WebSocket Endpoints
-
-| Endpoint | Purpose |
-|----------|---------|
-| `/media-stream` | Twilio Media Streams |
-| `/browser-call` | Browser-based testing |
-
-#### Pipeline Router
-
-```javascript
-// Simplified routing logic
-const pipeline = metadata.pipeline || 'v0';
-
-if (pipeline === 'v1') {
-  session = new V1AdvancedSession(ws, streamSid, senior, context);
-} else {
-  session = new GeminiLiveSession(ws, streamSid, senior, context);
-}
-```
-
----
-
-### 4. V0 Pipeline (Gemini Native)
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        V0 PIPELINE FLOW                              │
-│                                                                      │
-│   Twilio Audio (mulaw 8kHz)                                         │
-│        │                                                             │
-│        ├───────────────────────────┐                                 │
-│        │                           │                                 │
-│        ▼                           ▼                                 │
-│   ┌─────────────┐           ┌─────────────┐                         │
-│   │   Convert   │           │  Deepgram   │ (Parallel)              │
-│   │  mulaw →    │           │    STT      │                         │
-│   │  PCM 16kHz  │           │             │                         │
-│   └──────┬──────┘           └──────┬──────┘                         │
-│          │                         │                                 │
-│          ▼                         │                                 │
-│   ┌─────────────────────┐          │                                 │
-│   │   Gemini 2.5 Flash  │          │                                 │
-│   │   Native Audio API  │          ▼                                 │
-│   │                     │   ┌─────────────┐                         │
-│   │ • Audio in          │   │  Transcript │                         │
-│   │ • AI processing     │   │  Analysis   │                         │
-│   │ • Audio out         │   │             │                         │
-│   │                     │   │ Memory      │                         │
-│   └──────────┬──────────┘   │ triggers?   │                         │
-│              │              └──────┬──────┘                         │
-│              │                     │                                 │
-│              │                     ▼                                 │
-│              │              ┌─────────────┐                         │
-│              │              │  Memory     │                         │
-│              │              │  Injection  │ (If trigger detected)   │
-│              │              └──────┬──────┘                         │
-│              │                     │                                 │
-│              │◄────────────────────┘ (Context fed to Gemini)        │
-│              │                                                       │
-│              ▼                                                       │
-│   ┌─────────────┐                                                   │
-│   │   Convert   │                                                   │
-│   │  PCM 24kHz  │                                                   │
-│   │  → mulaw    │                                                   │
-│   └──────┬──────┘                                                   │
-│          │                                                           │
-│          ▼                                                           │
-│   Twilio (back to phone)                                            │
-│                                                                      │
-│   Latency: ~500ms                                                   │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-**Key Files:**
-- `gemini-live.js` - Session handler
-- `audio-utils.js` - Format conversion
-
-**Gemini Configuration:**
+**Director Output Schema:**
 ```javascript
 {
-  model: 'gemini-2.5-flash-native-audio-preview',
-  responseModalities: [Modality.AUDIO],
-  speechConfig: {
-    voiceConfig: {
-      prebuiltVoiceConfig: { voiceName: 'Aoede' }
-    }
+  analysis: {
+    call_phase: "opening|rapport|main|closing",
+    engagement_level: "high|medium|low",
+    current_topic: "string",
+    emotional_tone: "positive|neutral|concerned|sad"
   },
-  inputAudioTranscription: {},
-  outputAudioTranscription: {}
+  direction: {
+    stay_or_shift: "stay|transition|wrap_up",
+    next_topic: "string or null",
+    transition_phrase: "natural transition phrase"
+  },
+  reminder: {
+    should_deliver: boolean,
+    which_reminder: "string",
+    delivery_approach: "how to weave in naturally"
+  },
+  guidance: {
+    tone: "warm|empathetic|cheerful|gentle",
+    priority_action: "main thing to do",
+    specific_instruction: "concrete guidance"
+  },
+  model_recommendation: {
+    max_tokens: 100-400,
+    reason: "why this token count"
+  }
 }
 ```
 
 ---
 
-### 5. V1 Pipeline (Claude + Observer)
+## Dynamic Token Selection
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        V1 PIPELINE FLOW                              │
-│                                                                      │
-│   ════════════════════════════════════════════════════════════════  │
-│   CRITICAL PATH (adds to latency)          PARALLEL (no latency)    │
-│   ════════════════════════════════════════════════════════════════  │
-│                                                                      │
-│   Twilio Audio (mulaw 8kHz)                                         │
-│        │                                                             │
-│        ▼                                                             │
-│   ┌─────────────┐                                                   │
-│   │  Deepgram   │  ◄─── WebSocket connection                        │
-│   │    STT      │       model: nova-2                               │
-│   └──────┬──────┘                                                   │
-│          │                                                           │
-│          │ Transcript ─────────────────────┐                        │
-│          │                                 │                        │
-│          ▼                                 ▼                        │
-│   ┌─────────────┐                 ┌──────────────────┐              │
-│   │   Claude    │                 │  Observer Agent  │ PARALLEL     │
-│   │   Sonnet    │                 │  (every 30s)     │ (async)      │
-│   │             │                 │                  │              │
-│   │ Uses last   │◄── signals ────│ Analyzes full    │              │
-│   │ observer    │    (from       │ conversation     │              │
-│   │ signal      │    previous    │ history          │              │
-│   │             │    analysis)   │                  │              │
-│   └──────┬──────┘                 │ Outputs:         │              │
-│          │                        │ • Engagement     │              │
-│          │ Text response          │ • Emotion        │              │
-│          │                        │ • Reminder time  │              │
-│          ▼                        │ • Concerns       │              │
-│   ┌─────────────┐                 └──────────────────┘              │
-│   │ ElevenLabs  │                        │                          │
-│   │    TTS      │                        │                          │
-│   └──────┬──────┘                        ▼                          │
-│          │                        Stored for NEXT turn              │
-│          │                        (never blocks current)            │
-│          ▼                                                           │
-│   ┌─────────────┐                                                   │
-│   │   Convert   │                                                   │
-│   │  → mulaw    │                                                   │
-│   └──────┬──────┘                                                   │
-│          │                                                           │
-│          ▼                                                           │
-│   Twilio (back to phone)                                            │
-│                                                                      │
-│   ════════════════════════════════════════════════════════════════  │
-│   CRITICAL PATH LATENCY: ~1.5s (target: <600ms)                     │
-│   OBSERVER LATENCY: 0ms (runs in background, doesn't block)         │
-│   ════════════════════════════════════════════════════════════════  │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-```
+| Situation | Tokens | Trigger |
+|-----------|--------|---------|
+| Normal conversation | 100 | Default |
+| Health mention | 150 | Quick Observer |
+| Emotional support | 200-250 | Director |
+| Low engagement | 200 | Director |
+| Reminder delivery | 150 | Director |
+| Call closing | 150 | Director |
 
-**Observer Agent Design:**
-- Runs on a 30-second interval (configurable)
-- Analyzes the full conversation history
-- Results stored in `lastObserverSignal`
-- Used by the NEXT Claude response, not the current one
-- Never awaited in the response critical path
-- If analysis takes 2-3 seconds, it doesn't matter - user doesn't wait
+---
 
-**Key Files:**
-- `pipelines/v1-advanced.js` - Session handler
-- `pipelines/observer-agent.js` - Conversation analyzer
-- `adapters/elevenlabs.js` - TTS adapter
+## Post-Call Analysis
 
-**Observer Agent Output:**
+When a call ends, async batch analysis runs:
+
 ```javascript
 {
-  engagement_level: 'high' | 'medium' | 'low',
-  emotional_state: 'happy' | 'confused' | 'tired' | ...,
-  should_deliver_reminder: boolean,
-  reminder_to_deliver: 'reminder_id',
-  suggested_topic: 'topic suggestion',
-  should_end_call: boolean,
-  end_call_reason: 'reason',
-  concerns: ['concern1', 'concern2']
+  summary: "2-3 sentence call summary",
+  topics_discussed: ["greeting", "health", "family"],
+  engagement_score: 8,  // 1-10
+  concerns: [
+    {
+      type: "health|cognitive|emotional|safety",
+      severity: "low|medium|high",
+      description: "what was observed",
+      recommended_action: "what caregiver should do"
+    }
+  ],
+  positive_observations: ["good engagement", "positive mood"],
+  follow_up_suggestions: ["ask about doctor appointment"]
 }
 ```
 
 ---
 
-### 6. Service Layer
-
-#### Memory Service (`services/memory.js`)
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        MEMORY SYSTEM                                 │
-│                                                                      │
-│   STORE                          RETRIEVE                            │
-│   ─────                          ────────                            │
-│   Content                        Query                               │
-│      │                              │                                │
-│      ▼                              ▼                                │
-│   ┌─────────┐                 ┌─────────┐                           │
-│   │ OpenAI  │                 │ OpenAI  │                           │
-│   │Embedding│                 │Embedding│                           │
-│   │  API    │                 │  API    │                           │
-│   └────┬────┘                 └────┬────┘                           │
-│        │                           │                                 │
-│        │ 1536-dim vector           │ 1536-dim vector                │
-│        ▼                           ▼                                 │
-│   ┌─────────────────────────────────────┐                           │
-│   │         PostgreSQL + pgvector       │                           │
-│   │                                     │                           │
-│   │  INSERT INTO memories              │                           │
-│   │  (content, embedding, ...)         │                           │
-│   │                                     │                           │
-│   │  SELECT * FROM memories            │                           │
-│   │  WHERE senior_id = ?               │                           │
-│   │  ORDER BY embedding <=> query_vec  │  ◄── Cosine similarity    │
-│   │  LIMIT 5                           │                           │
-│   └─────────────────────────────────────┘                           │
-│                                                                      │
-│   MEMORY TYPES:                                                      │
-│   • fact        - General information                               │
-│   • preference  - Likes/dislikes                                    │
-│   • event       - Past events                                       │
-│   • concern     - Health/emotional                                  │
-│   • relationship- People in their life                              │
-│                                                                      │
-│   EXTRACTION (at call end):                                         │
-│   Transcript → OpenAI → Structured facts → Store with embeddings    │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-#### Scheduler Service (`services/scheduler.js`)
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                      SCHEDULER SYSTEM                                │
-│                                                                      │
-│   Server Start                                                       │
-│        │                                                             │
-│        ▼                                                             │
-│   startScheduler(baseUrl, 60000)  ◄── Check every 60 seconds        │
-│        │                                                             │
-│        ▼                                                             │
-│   ┌─────────────────┐                                               │
-│   │  getDueReminders │                                               │
-│   │                  │                                               │
-│   │  • Non-recurring │ scheduledTime <= now AND lastDeliveredAt NULL │
-│   │  • Recurring     │ Match time-of-day, >23h since last delivery  │
-│   └────────┬─────────┘                                               │
-│            │                                                         │
-│            ▼                                                         │
-│   For each due reminder:                                            │
-│        │                                                             │
-│        ▼                                                             │
-│   ┌─────────────────┐                                               │
-│   │ PRE-FETCH       │ ◄── Build context BEFORE calling Twilio       │
-│   │ • Senior profile│     (reduces lag when call connects)          │
-│   │ • Memory context│                                                │
-│   │ • Reminder prompt│                                               │
-│   └────────┬─────────┘                                               │
-│            │                                                         │
-│            ▼                                                         │
-│   twilioClient.calls.create()                                       │
-│        │                                                             │
-│        ▼                                                             │
-│   Store pre-fetched context in pendingReminderCalls Map             │
-│        │                                                             │
-│        ▼                                                             │
-│   markDelivered(reminderId)                                         │
-│                                                                      │
-│   When /voice/answer receives call:                                 │
-│   → Retrieve pre-fetched context from Map                           │
-│   → Inject reminder prompt into system prompt                       │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-#### News Service (`services/news.js`)
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        NEWS SYSTEM                                   │
-│                                                                      │
-│   Senior Profile (interests: ['gardening', 'baseball'])             │
-│        │                                                             │
-│        ▼                                                             │
-│   ┌─────────────────┐                                               │
-│   │  Check Cache    │ ◄── 1-hour TTL                                │
-│   │  (by seniorId)  │                                               │
-│   └────────┬────────┘                                               │
-│            │                                                         │
-│            │ Cache miss                                              │
-│            ▼                                                         │
-│   ┌─────────────────────────────────────┐                           │
-│   │     OpenAI Responses API            │                           │
-│   │     with web_search tool            │                           │
-│   │                                     │                           │
-│   │  "Find 2-3 positive, uplifting      │                           │
-│   │   news headlines about:             │                           │
-│   │   gardening, baseball               │                           │
-│   │   Suitable for elderly audience"    │                           │
-│   └────────────────┬────────────────────┘                           │
-│                    │                                                 │
-│                    ▼                                                 │
-│   Format as conversation context:                                   │
-│   "Recent news you might find interesting:                          │
-│    - Local garden show this weekend...                              │
-│    - Baseball team wins championship..."                            │
-│                                                                      │
-│   Store in cache, return for system prompt                          │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-### 7. Data Layer
-
-#### Database Schema (`db/schema.js`)
-
-```sql
--- Seniors table
-CREATE TABLE seniors (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name VARCHAR NOT NULL,
-  phone VARCHAR NOT NULL,
-  interests TEXT[],
-  medical_notes TEXT,
-  family_info JSONB,
-  is_active BOOLEAN DEFAULT true,
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Memories table (with vector embeddings)
-CREATE TABLE memories (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  senior_id UUID REFERENCES seniors(id),
-  type VARCHAR NOT NULL,           -- fact, preference, event, concern, relationship
-  content TEXT NOT NULL,
-  embedding VECTOR(1536),          -- OpenAI embedding
-  source VARCHAR,                  -- manual, extracted, observed
-  importance INTEGER DEFAULT 50,   -- 0-100
-  conversation_ref VARCHAR,        -- callSid if extracted from call
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Index for vector similarity search
-CREATE INDEX ON memories USING ivfflat (embedding vector_cosine_ops);
-
--- Conversations table
-CREATE TABLE conversations (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  senior_id UUID REFERENCES seniors(id),
-  call_sid VARCHAR,
-  started_at TIMESTAMP,
-  ended_at TIMESTAMP,
-  duration_seconds INTEGER,
-  status VARCHAR,                  -- completed, failed, no-answer
-  transcript JSONB,                -- [{role, content, timestamp}, ...]
-  summary TEXT,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Reminders table
-CREATE TABLE reminders (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  senior_id UUID REFERENCES seniors(id),
-  type VARCHAR DEFAULT 'custom',   -- medication, appointment, custom
-  title VARCHAR NOT NULL,
-  description TEXT,
-  scheduled_time TIMESTAMP,
-  is_recurring BOOLEAN DEFAULT false,
-  cron_expression VARCHAR,         -- For recurring: '0 9 * * *'
-  is_active BOOLEAN DEFAULT true,
-  last_delivered_at TIMESTAMP,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-```
-
----
-
-### 8. Call Flow Sequence
-
-```
-┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-│  Phone   │     │  Twilio  │     │  Server  │     │ Pipeline │     │    AI    │
-└────┬─────┘     └────┬─────┘     └────┬─────┘     └────┬─────┘     └────┬─────┘
-     │                │                │                │                │
-     │  Dial number   │                │                │                │
-     │───────────────>│                │                │                │
-     │                │                │                │                │
-     │                │ POST /voice/answer              │                │
-     │                │───────────────>│                │                │
-     │                │                │                │                │
-     │                │                │ Lookup senior  │                │
-     │                │                │ Build context  │                │
-     │                │                │                │                │
-     │                │ TwiML (Stream) │                │                │
-     │                │<───────────────│                │                │
-     │                │                │                │                │
-     │                │ WebSocket /media-stream         │                │
-     │                │───────────────>│                │                │
-     │                │                │                │                │
-     │                │                │ event: start   │                │
-     │                │                │───────────────>│                │
-     │                │                │                │                │
-     │                │                │                │ Connect to AI  │
-     │                │                │                │───────────────>│
-     │                │                │                │                │
-     │                │                │                │  Send greeting │
-     │                │                │                │<───────────────│
-     │                │                │                │                │
-     │                │                │  Audio out     │                │
-     │                │<───────────────│<───────────────│                │
-     │                │                │                │                │
-     │  Hear greeting │                │                │                │
-     │<───────────────│                │                │                │
-     │                │                │                │                │
-     │  Speak         │                │                │                │
-     │───────────────>│                │                │                │
-     │                │                │                │                │
-     │                │ event: media   │                │                │
-     │                │───────────────>│                │                │
-     │                │                │                │                │
-     │                │                │ Forward audio  │                │
-     │                │                │───────────────>│                │
-     │                │                │                │                │
-     │                │                │                │ Process audio  │
-     │                │                │                │───────────────>│
-     │                │                │                │                │
-     │                │                │                │ Generate resp  │
-     │                │                │                │<───────────────│
-     │                │                │                │                │
-     │                │                │  Audio out     │                │
-     │                │<───────────────│<───────────────│                │
-     │                │                │                │                │
-     │  Hear response │                │                │                │
-     │<───────────────│                │                │                │
-     │                │                │                │                │
-     │      ...       │      ...       │      ...       │      ...       │
-     │                │                │                │                │
-     │  Hang up       │                │                │                │
-     │───────────────>│                │                │                │
-     │                │                │                │                │
-     │                │ POST /voice/status (completed)  │                │
-     │                │───────────────>│                │                │
-     │                │                │                │                │
-     │                │                │ Extract memories                │
-     │                │                │ Save transcript                 │
-     │                │                │ Close session  │                │
-     │                │                │───────────────>│                │
-     │                │                │                │                │
-```
-
----
-
-### 9. File Structure
+## Key Files
 
 ```
 donna/
 ├── index.js                    # Main Express server
-│                               # - HTTP routes
-│                               # - WebSocket handlers
-│                               # - Pipeline routing
-│
-├── gemini-live.js              # V0 Pipeline session
-│                               # - Gemini native audio
-│                               # - Deepgram parallel STT
-│                               # - Memory triggers
-│
-├── browser-session.js          # Browser test call session
-│
-├── audio-utils.js              # Audio format conversion
-│                               # - mulaw ↔ PCM
-│                               # - Sample rate conversion
-│
 ├── pipelines/
-│   ├── v1-advanced.js          # V1 Pipeline session
-│   │                           # - Deepgram STT
-│   │                           # - Claude LLM
-│   │                           # - ElevenLabs TTS
-│   │
-│   └── observer-agent.js       # Conversation analyzer
-│                               # - Engagement tracking
-│                               # - Emotional analysis
-│                               # - Reminder timing
-│
+│   ├── v1-advanced.js          # Main pipeline + call state tracking
+│   ├── quick-observer.js       # Layer 1: Instant regex patterns
+│   ├── fast-observer.js        # Layer 2: Conversation Director
+│   ├── post-turn-agent.js      # Layer 3: Background tasks
+│   └── observer-agent.js       # DEPRECATED (kept for reference)
 ├── adapters/
-│   └── elevenlabs.js           # ElevenLabs TTS adapter
-│                               # - Text to speech
-│                               # - Streaming support
-│
+│   ├── llm/index.js            # Multi-provider LLM adapter
+│   ├── elevenlabs.js           # ElevenLabs REST TTS
+│   └── elevenlabs-streaming.js # ElevenLabs WebSocket TTS
 ├── services/
+│   ├── call-analysis.js        # Post-call batch analysis
 │   ├── seniors.js              # Senior CRUD operations
 │   ├── memory.js               # Memory storage + search
 │   ├── conversations.js        # Conversation records
 │   ├── scheduler.js            # Reminder scheduler
 │   └── news.js                 # News via OpenAI
-│
 ├── db/
 │   ├── client.js               # Database connection (Drizzle)
 │   └── schema.js               # Table definitions
-│
 ├── public/
 │   └── admin.html              # Admin dashboard UI
-│
-├── docs/
-│   ├── ARCHITECTURE.md         # This file
-│   ├── NEXT_STEPS.md           # Implementation roadmap
-│   └── plans/                  # Design documents
-│
-├── package.json
-├── railway.json                # Railway deployment config
-├── CLAUDE.md                   # AI assistant context
-└── README.md                   # Project overview
+├── apps/
+│   └── observability/          # React observability dashboard
+└── docs/
+    └── architecture/           # This file and related docs
 ```
 
 ---
 
-### 10. Environment Configuration
+## Environment Configuration
 
 ```bash
 # ═══════════════════════════════════════════════════════════════
@@ -778,95 +344,44 @@ TWILIO_PHONE_NUMBER=+1234567890
 # REQUIRED - AI Services
 # ═══════════════════════════════════════════════════════════════
 OPENAI_API_KEY=sk-...              # Embeddings + news search
-GOOGLE_API_KEY=...                  # V0: Gemini 2.5 Flash
-
-# ═══════════════════════════════════════════════════════════════
-# V1 PIPELINE - Required if using V1
-# ═══════════════════════════════════════════════════════════════
-ANTHROPIC_API_KEY=sk-ant-...        # Claude Sonnet
-ELEVENLABS_API_KEY=...              # Text-to-speech
-DEEPGRAM_API_KEY=...                # Speech-to-text
+ANTHROPIC_API_KEY=sk-ant-...       # Claude Sonnet (voice)
+GOOGLE_API_KEY=...                 # Gemini Flash (Director + Analysis)
+ELEVENLABS_API_KEY=...             # Text-to-speech
+DEEPGRAM_API_KEY=...               # Speech-to-text
 
 # ═══════════════════════════════════════════════════════════════
 # OPTIONAL - Configuration
 # ═══════════════════════════════════════════════════════════════
-DEFAULT_PIPELINE=v0                 # v0 or v1
-RAILWAY_PUBLIC_DOMAIN=...           # Auto-set by Railway
+V1_STREAMING_ENABLED=true          # Enable streaming pipeline
+VOICE_MODEL=claude-sonnet          # Main voice model
+FAST_OBSERVER_MODEL=gemini-3-flash # Director model
 ```
 
 ---
 
-### 11. Deployment Architecture
+## Latency Budget
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         RAILWAY                                      │
-│                                                                      │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │                    donna-api                                 │   │
-│   │                                                              │   │
-│   │   • Express server (Node.js 20)                             │   │
-│   │   • Auto-deploy from GitHub                                 │   │
-│   │   • Environment variables                                   │   │
-│   │   • Custom domain: donna-api-production-xxxx.up.railway.app │   │
-│   │                                                              │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-│                              │                                       │
-│                              │ DATABASE_URL                          │
-│                              ▼                                       │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │                    Neon PostgreSQL                           │   │
-│   │                                                              │   │
-│   │   • Serverless Postgres                                     │   │
-│   │   • pgvector extension                                      │   │
-│   │   • Auto-scaling                                            │   │
-│   │                                                              │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────┐
-│                         TWILIO                                       │
-│                                                                      │
-│   Phone Number: +1-XXX-XXX-XXXX                                     │
-│                                                                      │
-│   Webhook Configuration:                                            │
-│   • Voice URL: https://donna-api-xxx.up.railway.app/voice/answer   │
-│   • Status Callback: https://donna-api-xxx.up.railway.app/voice/status │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-```
+| Component | Target |
+|-----------|--------|
+| Deepgram utterance | ~500ms |
+| Quick Observer (L1) | 0ms |
+| Director (L2) | ~150ms (parallel) |
+| Claude first token | ~300ms |
+| TTS first audio | ~150ms |
+| **Total time-to-first-audio** | **~600ms** |
 
 ---
 
-### 12. Security Considerations
+## Cost Summary
 
-| Area | Current State | Recommendation |
-|------|---------------|----------------|
-| **API Auth** | None (open) | Add Clerk/Auth0 |
-| **Admin Access** | Public URL | Password protect |
-| **Database** | Neon managed | SSL enforced |
-| **API Keys** | Env vars | Rotate quarterly |
-| **Phone Numbers** | Verified | Twilio verified only |
-| **Data Encryption** | At rest (Neon) | Add field-level |
-| **Audit Logging** | Console only | Add to database |
+| Component | Model | Per Call |
+|-----------|-------|----------|
+| L1 Quick Observer | Regex | $0 |
+| L2 Director | Gemini 3 Flash | ~$0.0002 |
+| Voice | Claude Sonnet | ~$0.003 |
+| Post-Call Analysis | Gemini Flash | ~$0.0005 |
+| **Total** | | **~$0.004** |
 
 ---
 
-### 13. Monitoring & Observability
-
-**Current:**
-- Console logging (`[CallSid] message`)
-- Railway logs dashboard
-- Twilio call logs
-
-**Recommended Additions:**
-- Structured logging (JSON)
-- Latency metrics per component
-- Error rate tracking
-- Call quality scores
-- Observer signal history
-
----
-
-*Last updated: January 18, 2026*
+*Last updated: January 2026 - v3.1 (Conversation Director)*

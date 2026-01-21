@@ -4,14 +4,14 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ## Features
 
-- **4-Layer Observer Architecture** - Intelligent conversation analysis
+- **Conversation Director Architecture** - Proactive call guidance
   - Layer 1: Quick Observer (0ms) - Instant regex patterns
-  - Layer 2: Fast Observer (~300ms) - Haiku + memory search
-  - Layer 3: Deep Observer (~800ms) - Sonnet analysis (async)
-  - Layer 4: Post-Turn Agent - Background tasks after response
-- **Dynamic Model Routing** - Automatic Haiku/Sonnet selection based on context
-- **Streaming Pipeline** - ~400ms time-to-first-audio
-  - Pre-built greeting
+  - Layer 2: Conversation Director (~150ms) - Gemini 3 Flash for call guidance
+  - Layer 3: Post-Turn Agent - Background tasks after response
+  - Post-Call Analysis - Async summary, concerns, engagement metrics
+- **Dynamic Token Routing** - 100-400 tokens based on context
+- **Streaming Pipeline** - ~600ms time-to-first-audio
+  - Pre-generated greeting
   - Claude streaming responses
   - WebSocket TTS (ElevenLabs)
   - Sentence-by-sentence audio delivery
@@ -19,7 +19,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Speech transcription (Deepgram STT)
 - Memory system with semantic search (pgvector)
 - News updates (OpenAI web search)
-- Scheduled reminder calls
+- Scheduled reminder calls with delivery tracking
 - Admin dashboard
 - Observability dashboard
 
@@ -44,50 +44,62 @@ Observability: `http://localhost:5174` (run `npm run dev` in `apps/observability
 Phone Call → Twilio → WebSocket → Donna Pipeline
                                        │
                     ┌──────────────────┴──────────────────┐
-                    │         4-LAYER OBSERVERS           │
+                    │    CONVERSATION DIRECTOR ARCH       │
                     ├─────────────────────────────────────┤
                     │                                     │
 User speaks → Deepgram STT → Process utterance            │
                                   │                       │
                   ┌───────────────┼───────────────┐       │
-                  ▼               ▼               ▼       │
-            Layer 1 (0ms)   Layer 2 (~300ms)  Layer 3     │
-            Quick Observer  Fast Observer     Deep Observer
-            (regex)         (Haiku+memory)    (Sonnet)    │
-                  │               │               │       │
-                  └───────┬───────┘               │       │
-                          ▼                       │       │
-              ┌─────────────────────┐             │       │
-              │ Dynamic Model Select│←────────────┘       │
-              │ (Haiku or Sonnet)   │         (next turn) │
+                  ▼               ▼                       │
+            Layer 1 (0ms)   Layer 2 (~150ms)              │
+            Quick Observer  Conversation Director         │
+            (regex)         (Gemini 3 Flash)              │
+                  │               │                       │
+                  └───────┬───────┘                       │
+                          ▼                               │
+              ┌─────────────────────┐                     │
+              │ Dynamic Token Select│                     │
+              │   (100-400 tokens)  │                     │
               └──────────┬──────────┘                     │
                          ▼                                │
-              Claude Streaming Response                   │
+              Claude Sonnet Streaming                     │
                          │                                │
                          ▼                                │
               Sentence Buffer → ElevenLabs WS → Twilio    │
                          │                                │
                          ▼                                │
-              Layer 4: Post-Turn Agent (background)       │
-              - Health concern extraction                 │
-              - Memory storage                            │
-              - Topic prefetching                         │
+              Layer 3: Post-Turn Agent (background)       │
+                         │                                │
+                         ▼ (on call end)                  │
+              Post-Call Analysis (Gemini Flash)           │
+              - Summary, alerts, engagement metrics       │
                                                           │
                     └─────────────────────────────────────┘
 ```
 
-## Dynamic Model Routing
+## Conversation Director
 
-The system automatically selects the best model based on conversation context:
+The Director proactively guides each call:
 
-| Situation | Model | Tokens | Reason |
-|-----------|-------|--------|--------|
-| Normal conversation | Haiku | 75 | Fast, efficient |
-| Health mention | Sonnet | 150 | Safety needs nuance |
-| Emotional support | Sonnet | 150 | Empathy needs depth |
-| Low engagement | Sonnet | 120 | Creative re-engagement |
-| Simple question | Haiku | 60 | Quick answers better |
-| Important memory | Sonnet | 150 | Personalized response |
+| Feature | Description |
+|---------|-------------|
+| **Call Phase Tracking** | opening → rapport → main → closing |
+| **Topic Management** | When to stay, transition, or wrap up |
+| **Reminder Delivery** | Natural moments to deliver reminders |
+| **Engagement Monitoring** | Detect low engagement, suggest re-engagement |
+| **Emotional Detection** | Adjust tone for sad/concerned seniors |
+| **Token Recommendations** | 100-400 tokens based on context |
+
+## Dynamic Token Selection
+
+| Situation | Tokens | Trigger |
+|-----------|--------|---------|
+| Normal conversation | 100 | Default |
+| Health mention | 150 | Quick Observer |
+| Emotional support | 200-250 | Director |
+| Low engagement | 200 | Director |
+| Reminder delivery | 150 | Director |
+| Call closing | 150 | Director |
 
 ## Project Structure
 
@@ -95,15 +107,17 @@ The system automatically selects the best model based on conversation context:
 donna/
 ├── index.js                    # Main server
 ├── pipelines/
-│   ├── v1-advanced.js          # Main pipeline + dynamic routing
-│   ├── observer-agent.js       # Layer 3: Deep conversation analyzer
+│   ├── v1-advanced.js          # Main pipeline + call state tracking
 │   ├── quick-observer.js       # Layer 1: Instant regex patterns
-│   ├── fast-observer.js        # Layer 2: Haiku + memory search
-│   └── post-turn-agent.js      # Layer 4: Background tasks
+│   ├── fast-observer.js        # Layer 2: Conversation Director
+│   ├── post-turn-agent.js      # Layer 3: Background tasks
+│   └── observer-agent.js       # DEPRECATED
 ├── adapters/
+│   ├── llm/index.js            # Multi-provider LLM adapter
 │   ├── elevenlabs.js           # ElevenLabs REST TTS
 │   └── elevenlabs-streaming.js # ElevenLabs WebSocket TTS
 ├── services/
+│   ├── call-analysis.js        # Post-call batch analysis
 │   ├── memory.js               # Memory storage + semantic search
 │   ├── seniors.js              # Senior profile CRUD
 │   ├── conversations.js        # Conversation history
@@ -129,12 +143,15 @@ TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=+1...
 DATABASE_URL=postgresql://...
 OPENAI_API_KEY=...              # Embeddings + news search
-ANTHROPIC_API_KEY=...           # Claude (Haiku + Sonnet)
+ANTHROPIC_API_KEY=...           # Claude Sonnet (voice)
+GOOGLE_API_KEY=...              # Gemini Flash (Director + Analysis)
 ELEVENLABS_API_KEY=...          # TTS
 DEEPGRAM_API_KEY=...            # STT
 
 # Optional
 V1_STREAMING_ENABLED=true       # Set to 'false' to disable streaming
+VOICE_MODEL=claude-sonnet       # Main voice model
+FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
 ```
 
 ## API Endpoints
@@ -168,9 +185,8 @@ railway up
 ## Documentation
 
 - [docs/architecture/OVERVIEW.md](./docs/architecture/OVERVIEW.md) - System architecture
+- [docs/CONVERSATION_DIRECTOR_SPEC.md](./docs/CONVERSATION_DIRECTOR_SPEC.md) - Director specification
 - [docs/NEXT_STEPS.md](./docs/NEXT_STEPS.md) - Roadmap
-- [docs/DYNAMIC_MODEL_ROUTING.md](./docs/DYNAMIC_MODEL_ROUTING.md) - Model selection logic
-- [docs/STREAMING_OBSERVER_SPEC.md](./docs/STREAMING_OBSERVER_SPEC.md) - Streaming pipeline design
 - [CLAUDE.md](./CLAUDE.md) - AI assistant context
 
 ## License

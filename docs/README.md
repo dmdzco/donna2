@@ -2,36 +2,55 @@
 
 AI-powered senior companion assistant with voice calls.
 
-## Quick Start
-
-See [INCREMENTAL_BUILD_GUIDE.md](INCREMENTAL_BUILD_GUIDE.md) for the complete build roadmap.
+## Current Version: v3.1 (Conversation Director)
 
 ## Documentation Index
 
-### Main Guide
+### Architecture
 
-- **[Incremental Build Guide](INCREMENTAL_BUILD_GUIDE.md)** - Complete milestone-based roadmap from simple to complex
+- **[Architecture Overview](architecture/OVERVIEW.md)** - Complete system architecture with diagrams
+- **[Conversation Director Spec](CONVERSATION_DIRECTOR_SPEC.md)** - Proactive call guidance system
+- **[Architecture Details](ARCHITECTURE.md)** - Technical deep-dive
 
-### Deployment
+### Roadmap
 
-- [Deployment Guide](guides/DEPLOYMENT_PLAN.md) - Deploy to Railway
+- **[Next Steps](NEXT_STEPS.md)** - Roadmap and recently completed features
 
-### Architecture (Future Reference)
+### Configuration
 
-- [Architecture Overview](architecture/OVERVIEW.md) - Full system design (for later milestones)
-- [Module Reference](architecture/MODULES.md) - Detailed module documentation
+- **[Dynamic Token Routing](DYNAMIC_MODEL_ROUTING.md)** - Token selection based on context
 
-## Milestones Overview
+### Historical Reference
 
-| Phase | Milestones | Features |
-|-------|------------|----------|
-| **A** | 1-6 | Gemini native voice |
-| **B** | 7-10 | Database + Reminders |
-| **C** | 11-15 | Claude + Full Architecture |
+- [Streaming Observer Spec](STREAMING_OBSERVER_SPEC.md) - Original streaming + 4-layer design
+- [Module Reference](architecture/MODULES.md) - Future modular architecture
+
+## Quick Reference
+
+### Key Files
+
+| Feature | File |
+|---------|------|
+| Main pipeline | `pipelines/v1-advanced.js` |
+| Conversation Director | `pipelines/fast-observer.js` |
+| Quick Observer | `pipelines/quick-observer.js` |
+| Post-Turn Agent | `pipelines/post-turn-agent.js` |
+| Post-Call Analysis | `services/call-analysis.js` |
+| Token Selection | `v1-advanced.js` (selectModelConfig) |
+
+### Architecture Layers
+
+| Layer | Name | Model | Latency |
+|-------|------|-------|---------|
+| 1 | Quick Observer | Regex | 0ms |
+| 2 | Conversation Director | Gemini 3 Flash | ~150ms |
+| 3 | Post-Turn Agent | Various | After response |
+| Post-Call | Analysis | Gemini Flash | After call |
 
 ## External Resources
 
 - [Twilio Docs](https://www.twilio.com/docs)
-- [Google AI Studio](https://aistudio.google.com)
+- [Anthropic Claude Docs](https://docs.anthropic.com)
+- [Google AI Docs](https://ai.google.dev/docs)
 - [Railway Docs](https://docs.railway.app)
 - [Neon Database Docs](https://neon.tech/docs)

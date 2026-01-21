@@ -44,11 +44,11 @@ const MODEL_REGISTRY = {
   // Claude models
   'claude-sonnet': {
     AdapterClass: ClaudeAdapter,
-    config: { modelName: 'claude-sonnet-4-5-20241022' },
+    config: { modelName: 'claude-sonnet-4-5-20250929' },
   },
   'claude-sonnet-4-5': {
     AdapterClass: ClaudeAdapter,
-    config: { modelName: 'claude-sonnet-4-5-20241022' },
+    config: { modelName: 'claude-sonnet-4-5-20250929' },
   },
   // Legacy Sonnet 4
   'claude-sonnet-4': {
@@ -57,11 +57,11 @@ const MODEL_REGISTRY = {
   },
   'claude-haiku': {
     AdapterClass: ClaudeAdapter,
-    config: { modelName: 'claude-haiku-4-5-20241022' },
+    config: { modelName: 'claude-haiku-4-5-20251001' },
   },
   'claude-haiku-4-5': {
     AdapterClass: ClaudeAdapter,
-    config: { modelName: 'claude-haiku-4-5-20241022' },
+    config: { modelName: 'claude-haiku-4-5-20251001' },
   },
   // Legacy Haiku versions
   'claude-3-5-haiku': {
@@ -74,11 +74,11 @@ const MODEL_REGISTRY = {
   },
   'claude-opus': {
     AdapterClass: ClaudeAdapter,
-    config: { modelName: 'claude-opus-4-5-20241022' },
+    config: { modelName: 'claude-opus-4-5-20251101' },
   },
   'claude-opus-4-5': {
     AdapterClass: ClaudeAdapter,
-    config: { modelName: 'claude-opus-4-5-20241022' },
+    config: { modelName: 'claude-opus-4-5-20251101' },
   },
 };
 

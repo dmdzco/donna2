@@ -22,6 +22,44 @@ import { newsService } from '../services/news.js';
 const DIRECTOR_MODEL = process.env.FAST_OBSERVER_MODEL || 'gemini-3-flash';
 
 /**
+ * Repair common JSON issues from truncated/malformed LLM responses
+ */
+function repairJson(jsonText) {
+  let repaired = jsonText;
+
+  // Remove trailing commas in arrays and objects (common LLM issue)
+  repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+
+  // Try to close unclosed strings, arrays, and objects
+  const openBraces = (repaired.match(/\{/g) || []).length;
+  const closeBraces = (repaired.match(/\}/g) || []).length;
+  const openBrackets = (repaired.match(/\[/g) || []).length;
+  const closeBrackets = (repaired.match(/\]/g) || []).length;
+
+  // Check for unterminated string at end
+  const lastQuote = repaired.lastIndexOf('"');
+  const afterLastQuote = repaired.substring(lastQuote + 1);
+  if (lastQuote > 0 && !afterLastQuote.match(/["\]},:]/)) {
+    // Unterminated string - close it
+    repaired = repaired.substring(0, lastQuote + 1) + '"';
+  }
+
+  // Close unclosed brackets
+  for (let i = 0; i < openBrackets - closeBrackets; i++) {
+    repaired += ']';
+  }
+  // Close unclosed braces
+  for (let i = 0; i < openBraces - closeBraces; i++) {
+    repaired += '}';
+  }
+
+  // Remove any trailing commas again after repairs
+  repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+
+  return repaired;
+}
+
+/**
  * Full system prompt for the Conversation Director
  */
 const DIRECTOR_SYSTEM_PROMPT = `You are a Conversation Director for Donna, an AI companion that calls elderly individuals.
@@ -219,7 +257,7 @@ export async function getConversationDirection(
     ];
 
     const text = await adapter.generate(prompt, messages, {
-      maxTokens: 1000, // Increased to avoid JSON truncation
+      maxTokens: 1200, // Increased to avoid JSON truncation
       temperature: 0.2,
     });
 
@@ -233,6 +271,9 @@ export async function getConversationDirection(
     if (jsonMatch) {
       jsonText = jsonMatch[0];
     }
+
+    // Repair common JSON issues from truncated/malformed responses
+    jsonText = repairJson(jsonText);
 
     let direction;
     try {

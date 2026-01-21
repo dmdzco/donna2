@@ -153,6 +153,78 @@
 
 ---
 
+### Prompt Caching (Anthropic)
+**Goal:** Reduce Claude input token costs by ~90%
+
+Cache static parts of system prompt, pay only 10% for cached reads.
+
+| Component | Tokens | Cache? | Savings |
+|-----------|--------|--------|---------|
+| Base instructions | ~100 | Yes | 90 tokens/turn |
+| Senior profile | ~100 | Yes | 90 tokens/turn |
+| Static memories | ~400 | Yes | 360 tokens/turn |
+| Director guidance | ~20 | No (dynamic) | - |
+| Messages | ~500 | Partial | ~200 tokens/turn |
+
+**Implementation:**
+- [ ] Add `cache_control: { type: "ephemeral" }` to static system prompt parts
+- [ ] Structure prompt as array of content blocks (cacheable + dynamic)
+- [ ] Test cache hit rates in production
+- [ ] Monitor cost reduction
+
+**Estimated savings:** ~$0.04/call → **$1.20/mo per senior**
+
+---
+
+### Memory & Context Improvements
+**Goal:** Smarter, more efficient context injection
+
+**Current Issues:**
+- Static + dynamic memories may overlap (duplicate injection)
+- Raw transcript messages from previous calls (no summarization)
+- No memory deduplication or relevance decay
+- All memories treated equally regardless of recency/relevance
+
+**Proposed Improvements:**
+
+#### 1. Cross-Call Summary (not raw messages)
+Instead of loading 6 raw messages from previous calls:
+```
+Current: "Hi Sarah!" / "I'm good, Tommy visited" / "That's nice!" / ...
+Better:  "Last call (2 days ago): Discussed grandson Tommy's soccer game,
+          mentioned knee feeling better. Mood: positive."
+```
+- [ ] Generate 1-2 sentence call summary at end of each call
+- [ ] Store in `conversations.summary` (already exists)
+- [ ] Inject summary instead of raw messages
+
+#### 2. Memory Deduplication
+- [ ] Hash memory content to detect duplicates
+- [ ] Skip injecting memories already in static context
+- [ ] Merge similar memories ("Tommy plays soccer" + "Tommy scored a goal" → combined)
+
+#### 3. Tiered Memory Injection
+| Tier | Type | Inject When |
+|------|------|-------------|
+| 1 - Critical | Health concerns, active reminders | Always |
+| 2 - Contextual | Relevant to current topic | Semantic match > 0.7 |
+| 3 - Background | General facts | First turn only |
+
+- [ ] Add `tier` field to memories or compute from type/importance
+- [ ] Only inject Tier 1 every turn, Tier 2-3 selectively
+
+#### 4. Memory Decay
+- [ ] Reduce effective importance based on age: `importance * decay(days_old)`
+- [ ] Boost memories that get accessed frequently
+- [ ] Archive old, unaccessed memories (don't delete, just exclude from search)
+
+#### 5. Semantic Clustering
+- [ ] Group related memories (all "Tommy" memories together)
+- [ ] Inject cluster summary instead of individual entries
+- [ ] "Family: Grandson Tommy (8, plays soccer), daughter Sarah (visits monthly)"
+
+---
+
 ### Latency Optimization Phase 2
 
 **Target:** Reduce response latency from ~600ms to ~400ms

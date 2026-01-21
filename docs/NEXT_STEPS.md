@@ -176,52 +176,40 @@ Cache static parts of system prompt, pay only 10% for cached reads.
 
 ---
 
-### Memory & Context Improvements
+### Memory & Context Improvements ✅ **Implemented**
 **Goal:** Smarter, more efficient context injection
 
-**Current Issues:**
-- Static + dynamic memories may overlap (duplicate injection)
-- Raw transcript messages from previous calls (no summarization)
-- No memory deduplication or relevance decay
-- All memories treated equally regardless of recency/relevance
+**Implemented:**
 
-**Proposed Improvements:**
+#### 1. Cross-Call Summary (not raw messages) ✅
+- [x] Post-call analysis generates summary and saves to `conversations.summary`
+- [x] `getRecentSummaries()` returns formatted summaries for injection
+- [x] Format: "- Yesterday (5 min): Discussed grandson Tommy's soccer game..."
 
-#### 1. Cross-Call Summary (not raw messages)
-Instead of loading 6 raw messages from previous calls:
-```
-Current: "Hi Sarah!" / "I'm good, Tommy visited" / "That's nice!" / ...
-Better:  "Last call (2 days ago): Discussed grandson Tommy's soccer game,
-          mentioned knee feeling better. Mood: positive."
-```
-- [ ] Generate 1-2 sentence call summary at end of each call
-- [ ] Store in `conversations.summary` (already exists)
-- [ ] Inject summary instead of raw messages
+#### 2. Memory Deduplication ✅
+- [x] Check cosine similarity > 0.9 before storing new memories
+- [x] If duplicate found, update importance if new memory is more important
+- [x] Prevents redundant memory entries in database
 
-#### 2. Memory Deduplication
-- [ ] Hash memory content to detect duplicates
-- [ ] Skip injecting memories already in static context
-- [ ] Merge similar memories ("Tommy plays soccer" + "Tommy scored a goal" → combined)
-
-#### 3. Tiered Memory Injection
+#### 3. Tiered Memory Injection ✅
 | Tier | Type | Inject When |
 |------|------|-------------|
-| 1 - Critical | Health concerns, active reminders | Always |
+| 1 - Critical | Health concerns, importance >= 80 | Always |
 | 2 - Contextual | Relevant to current topic | Semantic match > 0.7 |
 | 3 - Background | General facts | First turn only |
 
-- [ ] Add `tier` field to memories or compute from type/importance
-- [ ] Only inject Tier 1 every turn, Tier 2-3 selectively
+- [x] `getCritical()` returns concern-type and high-importance memories
+- [x] `includedIds` tracking prevents duplicate injection
 
-#### 4. Memory Decay
-- [ ] Reduce effective importance based on age: `importance * decay(days_old)`
-- [ ] Boost memories that get accessed frequently
-- [ ] Archive old, unaccessed memories (don't delete, just exclude from search)
+#### 4. Memory Decay ✅
+- [x] Effective importance: `base * 0.5^(days/30)` (30-day half-life)
+- [x] Recent access boost: +10 importance if accessed in last week
+- [x] `getImportant()` filters by effective importance
 
-#### 5. Semantic Clustering
-- [ ] Group related memories (all "Tommy" memories together)
-- [ ] Inject cluster summary instead of individual entries
-- [ ] "Family: Grandson Tommy (8, plays soccer), daughter Sarah (visits monthly)"
+#### 5. Semantic Clustering (Simplified) ✅
+- [x] `groupByType()` clusters memories by type
+- [x] `formatGroupedMemories()` creates compact display
+- [x] Format: "Family/Friends: grandson Tommy; daughter Sarah"
 
 ---
 

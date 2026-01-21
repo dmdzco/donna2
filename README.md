@@ -4,17 +4,15 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ## Features
 
-- **Conversation Director Architecture** - Proactive call guidance
+- **Conversation Director Architecture (2-Layer + Post-Call)**
   - Layer 1: Quick Observer (0ms) - Instant regex patterns
   - Layer 2: Conversation Director (~150ms) - Gemini 3 Flash for call guidance
-  - Layer 3: Post-Turn Agent - Background tasks after response
   - Post-Call Analysis - Async summary, concerns, engagement metrics
 - **Dynamic Token Routing** - 100-400 tokens based on context
-- **Streaming Pipeline** - ~600ms time-to-first-audio
-  - Pre-generated greeting
-  - Claude streaming responses
-  - WebSocket TTS (ElevenLabs)
-  - Sentence-by-sentence audio delivery
+- **Streaming Pipeline** - ~400ms time-to-first-audio
+  - Claude streaming responses (sentence-by-sentence)
+  - ElevenLabs WebSocket TTS
+  - Parallel connection startup
 - Real-time voice calls (Twilio Media Streams)
 - Speech transcription (Deepgram STT)
 - Memory system with semantic search (pgvector)
@@ -67,9 +65,6 @@ User speaks → Deepgram STT → Process utterance            │
                          ▼                                │
               Sentence Buffer → ElevenLabs WS → Twilio    │
                          │                                │
-                         ▼                                │
-              Layer 3: Post-Turn Agent (background)       │
-                         │                                │
                          ▼ (on call end)                  │
               Post-Call Analysis (Gemini Flash)           │
               - Summary, alerts, engagement metrics       │
@@ -107,11 +102,9 @@ The Director proactively guides each call:
 donna/
 ├── index.js                    # Main server
 ├── pipelines/
-│   ├── v1-advanced.js          # Main pipeline + call state tracking
+│   ├── v1-advanced.js          # Main voice pipeline + call state
 │   ├── quick-observer.js       # Layer 1: Instant regex patterns
-│   ├── fast-observer.js        # Layer 2: Conversation Director
-│   ├── post-turn-agent.js      # Layer 3: Background tasks
-│   └── observer-agent.js       # DEPRECATED
+│   └── fast-observer.js        # Layer 2: Conversation Director
 ├── adapters/
 │   ├── llm/index.js            # Multi-provider LLM adapter
 │   ├── elevenlabs.js           # ElevenLabs REST TTS

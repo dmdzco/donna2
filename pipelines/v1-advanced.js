@@ -427,7 +427,10 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
     }
   }
 
-  async connectDeepgram() {
+  async connectDeepgram(retryCount = 0) {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1000;
+
     if (!process.env.DEEPGRAM_API_KEY) {
       console.log(`[V1][${this.streamSid}] DEEPGRAM_API_KEY not set, STT disabled`);
       return;
@@ -449,7 +452,7 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
       });
 
       this.dgConnection.on('open', () => {
-        console.log(`[V1][${this.streamSid}] Deepgram connected`);
+        console.log(`[V1][${this.streamSid}] Deepgram connected${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
         this.dgConnected = true;
       });
 
@@ -476,9 +479,16 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         }
       });
 
-      this.dgConnection.on('error', (error) => {
+      this.dgConnection.on('error', async (error) => {
         console.error(`[V1][${this.streamSid}] Deepgram error:`, error.message);
         this.dgConnected = false;
+
+        // Retry on connection errors
+        if (retryCount < MAX_RETRIES && error.message.includes('non-101')) {
+          console.log(`[V1][${this.streamSid}] Retrying Deepgram connection (${retryCount + 1}/${MAX_RETRIES})...`);
+          await new Promise(r => setTimeout(r, RETRY_DELAY));
+          this.connectDeepgram(retryCount + 1);
+        }
       });
 
       this.dgConnection.on('close', () => {

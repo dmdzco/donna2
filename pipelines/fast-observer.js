@@ -219,7 +219,7 @@ export async function getConversationDirection(
     ];
 
     const text = await adapter.generate(prompt, messages, {
-      maxTokens: 600,
+      maxTokens: 800, // Increased from 600 to avoid truncation
       temperature: 0.2,
     });
 

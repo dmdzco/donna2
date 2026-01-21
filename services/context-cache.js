@@ -176,7 +176,7 @@ async function runDailyPrefetch() {
 
   try {
     // Get all seniors
-    const seniors = await seniorService.getAll();
+    const seniors = await seniorService.list();
 
     let prefetchedCount = 0;
     for (const senior of seniors) {

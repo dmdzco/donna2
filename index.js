@@ -6,8 +6,6 @@ import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-// V0 imports commented out - preparing for removal
-// import { GeminiLiveSession } from './gemini-live.js';
 import { V1AdvancedSession } from './pipelines/v1-advanced.js';
 import { seniorService } from './services/seniors.js';
 import { memoryService } from './services/memory.js';
@@ -140,14 +138,10 @@ app.post('/voice/answer', async (req, res) => {
     }
   }
 
-  // V1 is now the only pipeline (V0 Gemini removed)
-  const pipeline = 'v1';
-  pendingPipelines.delete(callSid); // Clean up
-
-  console.log(`[${callSid}] Using pipeline: v1 (Claude + 4-layer observer)`);
+  console.log(`[${callSid}] Using V1 pipeline (Claude + Conversation Director)`);
 
   // Store metadata for when WebSocket connects
-  callMetadata.set(callSid, { senior, memoryContext, fromPhone, conversationId, reminderPrompt, pipeline, preGeneratedGreeting });
+  callMetadata.set(callSid, { senior, memoryContext, fromPhone, conversationId, reminderPrompt, preGeneratedGreeting });
 
   const twiml = new twilio.twiml.VoiceResponse();
 
@@ -205,13 +199,9 @@ app.post('/voice/status', async (req, res) => {
   }
 });
 
-// Store pipeline preference for pending calls (callSid -> pipeline)
-const pendingPipelines = new Map();
-
 // API: Initiate outbound call
 app.post('/api/call', async (req, res) => {
   const { phoneNumber } = req.body;
-  // Note: 'pipeline' param ignored - V1 is now the only pipeline
 
   if (!phoneNumber) {
     return res.status(400).json({ error: 'phoneNumber required' });
@@ -232,11 +222,8 @@ app.post('/api/call', async (req, res) => {
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
     });
 
-    // V1 is the only pipeline now
-    pendingPipelines.set(call.sid, 'v1');
-
-    console.log(`Initiated v1 call ${call.sid} to ${phoneNumber}`);
-    res.json({ success: true, callSid: call.sid, pipeline: 'v1' });
+    console.log(`Initiated call ${call.sid} to ${phoneNumber}`);
+    res.json({ success: true, callSid: call.sid });
 
   } catch (error) {
     console.error('Failed to initiate call:', error);

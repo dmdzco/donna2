@@ -21,17 +21,15 @@
 ## Current Status: v3.1 (Conversation Director)
 
 ### Working Features
-- **Conversation Director Architecture**
+- **Conversation Director Architecture (2-Layer + Post-Call)**
   - Layer 1: Quick Observer (0ms) - Instant regex patterns
   - Layer 2: Conversation Director (~150ms) - Proactive call guidance (Gemini 3 Flash)
-  - Layer 3: Post-Turn Agent - Background tasks after response
   - Post-Call Analysis - Async batch analysis when call ends
-- **Dynamic Token Routing** - Automatic token adjustment based on context
-- **Streaming Pipeline** (~600ms time-to-first-audio)
-  - Pre-generated greeting
-  - Claude streaming responses
-  - WebSocket TTS (ElevenLabs)
-  - Sentence-by-sentence audio delivery
+- **Dynamic Token Routing** - Automatic token adjustment (100-400 tokens)
+- **Streaming Pipeline** (~400ms time-to-first-audio)
+  - Claude streaming responses (sentence-by-sentence)
+  - ElevenLabs WebSocket TTS
+  - Parallel connection startup
 - Real-time voice calls (Twilio Media Streams)
 - Speech transcription (Deepgram STT)
 - Memory system with semantic search (pgvector)
@@ -69,12 +67,9 @@ User speaks → Deepgram STT → Process utterance
                          ▼
               Sentence Buffer → ElevenLabs WS → Twilio
                          │
-                         ▼
-              Layer 3: Post-Turn Agent (background)
-                         │
                          ▼ (on call end)
               Post-Call Analysis (Gemini Flash)
-              - Summary, alerts, metrics
+              - Summary, concerns, engagement score
 ```
 
 ### Conversation Director
@@ -107,11 +102,9 @@ The Director proactively guides each call:
 /
 ├── index.js                    ← Main server
 ├── pipelines/
-│   ├── v1-advanced.js          ← Main pipeline + call state tracking
+│   ├── v1-advanced.js          ← Main voice pipeline + call state
 │   ├── quick-observer.js       ← Layer 1: Instant regex patterns
-│   ├── fast-observer.js        ← Layer 2: Conversation Director
-│   ├── post-turn-agent.js      ← Layer 3: Background tasks
-│   └── observer-agent.js       ← DEPRECATED (kept for reference)
+│   └── fast-observer.js        ← Layer 2: Conversation Director
 ├── adapters/
 │   ├── llm/index.js            ← Multi-provider LLM adapter
 │   ├── elevenlabs.js           ← ElevenLabs REST TTS adapter
@@ -144,7 +137,6 @@ The Director proactively guides each call:
 | Modify streaming TTS | `adapters/elevenlabs-streaming.js` |
 | Add instant analysis patterns | `pipelines/quick-observer.js` |
 | Modify Conversation Director | `pipelines/fast-observer.js` |
-| Change background tasks | `pipelines/post-turn-agent.js` |
 | Modify post-call analysis | `services/call-analysis.js` |
 | Change token selection logic | `pipelines/v1-advanced.js` (selectModelConfig) |
 | Modify system prompts | `pipelines/v1-advanced.js` (buildSystemPrompt) |
@@ -178,14 +170,14 @@ FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
 ## Roadmap
 
 See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
-- ~~V1 Latency Optimization~~ ✓ Completed
-- ~~Dynamic Model Routing~~ ✓ Completed
-- ~~Post-Turn Agent~~ ✓ Completed
+- ~~Streaming Pipeline~~ ✓ Completed (~400ms latency)
+- ~~Dynamic Token Routing~~ ✓ Completed
 - ~~Conversation Director~~ ✓ Completed
 - ~~Post-Call Analysis~~ ✓ Completed
+- Prompt Caching (Anthropic)
+- Memory Context Improvements
 - Caregiver Authentication (Clerk)
-- Call Analysis Dashboard
-- Caregiver Notifications (SMS/Email)
+- Telnyx Migration (65% cost savings)
 
 ---
 

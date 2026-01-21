@@ -59,12 +59,6 @@ This document describes the Donna v3.1 system architecture with the **Conversati
 │   │                         │                                            │   │
 │   │                         ▼                                            │   │
 │   │              Audio Out → Twilio                                      │   │
-│   │                         │                                            │   │
-│   │                         ▼                                            │   │
-│   │              Layer 3: Post-Turn Agent (background)                   │   │
-│   │              - Health concern extraction                             │   │
-│   │              - Memory storage                                        │   │
-│   │              - Topic prefetching                                     │   │
 │   │                                                                      │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                        │                                                     │
@@ -96,15 +90,14 @@ This document describes the Donna v3.1 system architecture with the **Conversati
 
 ---
 
-## Real-Time Observer Architecture
+## Real-Time Observer Architecture (2-Layer)
 
 | Layer | File | Model | Latency | Purpose | Affects |
 |-------|------|-------|---------|---------|---------|
 | **1** | `quick-observer.js` | Regex | 0ms | Instant pattern detection | Current response |
 | **2** | `fast-observer.js` | Gemini 3 Flash | ~100-150ms | Conversation Director | Current/Next response |
-| **3** | `post-turn-agent.js` | - | After response | Background tasks | Storage/prefetch |
 
-### Post-Call Analysis (Async)
+### Post-Call Analysis (Async Batch)
 
 | Process | File | Model | Trigger | Output |
 |---------|------|-------|---------|--------|
@@ -218,11 +211,9 @@ When a call ends, async batch analysis runs:
 /
 ├── index.js                    ← Main server
 ├── pipelines/
-│   ├── v1-advanced.js          ← Main pipeline + call state tracking
+│   ├── v1-advanced.js          ← Main voice pipeline + call state
 │   ├── quick-observer.js       ← Layer 1: Instant regex patterns
-│   ├── fast-observer.js        ← Layer 2: Conversation Director (Gemini Flash)
-│   ├── post-turn-agent.js      ← Layer 3: Background tasks
-│   └── observer-agent.js       ← DEPRECATED (kept for reference)
+│   └── fast-observer.js        ← Layer 2: Conversation Director (Gemini Flash)
 ├── adapters/
 │   ├── llm/index.js            ← Multi-provider LLM adapter
 │   ├── elevenlabs.js           ← REST TTS (fallback)
@@ -264,16 +255,16 @@ Uses pgvector for semantic search:
 
 ---
 
-## Latency Budget
+## Latency Budget (Streaming Pipeline)
 
 | Component | Target |
 |-----------|--------|
-| Deepgram utterance detection | ~500ms |
+| Deepgram utterance detection | ~300ms |
 | Quick Observer (L1) | 0ms |
 | Conversation Director (L2) | ~150ms (parallel) |
-| Claude first token | ~300ms |
-| TTS first audio | ~150ms |
-| **Total time-to-first-audio** | **~600ms** |
+| Claude first token | ~200ms |
+| TTS first audio | ~100ms |
+| **Total time-to-first-audio** | **~400ms** |
 
 ---
 

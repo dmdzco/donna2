@@ -62,36 +62,21 @@ Test calls directly from browser without needing a phone.
 
 ---
 
-### 2. Dual Pipeline Architecture
+### 2. Voice Pipeline Architecture
 
-#### 2.1 V0 Pipeline (Gemini Native) ✅ **Implemented**
-Low-latency pipeline using Google's Gemini 2.5 Flash with native audio.
-- **Latency:** ~300-500ms
-- **Components:** Gemini handles STT + LLM + TTS in one API
-- **Voice:** Aoede (warm female)
-- **Best for:** Quick, responsive conversations
-- **Files:** `gemini-live.js`
-
-#### 2.2 V1 Pipeline (Claude + Conversation Director) ✅ **Implemented**
-Advanced pipeline with 2-layer architecture for real-time guidance and quality.
-- **Latency:** ~1.5s (target: <600ms after optimization)
+#### 2.1 V1 Pipeline (Claude + Conversation Director) ✅ **Implemented**
+Production pipeline with 2-layer observer architecture and streaming.
+- **Latency:** ~400ms time-to-first-audio (streaming)
 - **Components:**
   - STT: Deepgram (real-time transcription)
-  - LLM: Claude Sonnet 4 (conversation)
-  - TTS: ElevenLabs (Rachel voice)
+  - LLM: Claude Sonnet 4 (streaming responses)
+  - TTS: ElevenLabs WebSocket (streaming audio)
   - **Layer 1 - Quick Observer:** Instant regex analysis (0ms)
   - **Layer 2 - Conversation Director:** Gemini 3 Flash (~150ms)
   - **Post-Call:** Batch analysis for caregivers
-- **Best for:** Higher quality responses, proactive call management
-- **Files:** `pipelines/v1-advanced.js`, `pipelines/quick-observer.js`, `pipelines/fast-observer.js`, `adapters/elevenlabs.js`
+- **Files:** `pipelines/v1-advanced.js`, `pipelines/quick-observer.js`, `pipelines/fast-observer.js`, `adapters/elevenlabs-streaming.js`
 
-#### 2.3 Pipeline Selection ✅ **Implemented**
-Choose pipeline per-call from admin UI or API.
-- **Default:** Configurable via `DEFAULT_PIPELINE` env var (currently v1)
-- **Override:** Pass `pipeline: "v0"` or `pipeline: "v1"` in API call
-- **UI:** Dropdown selector in admin dashboard header
-
-#### 2.4 Barge-In Support (V1) ✅ **Implemented**
+#### 2.2 Barge-In Support ✅ **Implemented**
 User can interrupt Donna mid-sentence.
 - **How it works:** Detects user speech → Stops audio playback → Clears queue → Processes new input
 - **Prevents:** Backlog of responses, unnatural flow
@@ -130,11 +115,11 @@ Inject relevant memories into AI system prompt.
 - **Includes:** Top 3 important, top 3 recent, topic-relevant if available
 - **Files:** `services/memory.js` → `buildContext()`
 
-#### 3.5 Mid-Call Memory Retrieval ✅ **Implemented** (V0 only)
-Retrieve memories during active conversation based on keywords.
-- **Triggers:** "remember", "forgot", "last time", "doctor", "medicine", family names
+#### 3.5 Mid-Call Memory Retrieval ✅ **Implemented**
+Retrieve memories during active conversation via Conversation Director.
+- **Triggers:** Semantic search on user's message each turn
 - **Cooldown:** 20 seconds between retrievals
-- **Files:** `gemini-live.js` → memory trigger system
+- **Files:** `pipelines/fast-observer.js` → memory search
 
 #### 3.6 Manual Memory Entry ✅ **Implemented**
 Caregivers can add memories manually via API or admin UI.
@@ -236,7 +221,7 @@ Fetch relevant news articles based on senior's interests.
 Dynamic prompts built from senior profile data.
 - **Includes:** Name, interests, medical notes, family info, memories, news, reminders
 - **Tone:** Warm, patient, clear speech
-- **Files:** `gemini-live.js`, `pipelines/v1-advanced.js`
+- **Files:** `pipelines/v1-advanced.js`
 
 ---
 
@@ -261,7 +246,7 @@ Identify seniors automatically by incoming phone number.
 #### 8.1 Transcript Storage ✅ **Implemented**
 Store complete conversation transcripts.
 - **Format:** JSON array of {role, content, timestamp}
-- **Source:** V0 (Gemini transcription), V1 (Deepgram + Claude)
+- **Source:** Deepgram STT + Claude responses
 - **Viewing:** Call detail modal in admin dashboard
 
 #### 8.2 Call Metadata ✅ **Implemented**
@@ -298,10 +283,10 @@ View call history and transcripts.
 Manage scheduled reminders.
 - **Features:** Add/edit/delete reminders, recurring options, last delivered time
 
-#### 9.5 Pipeline Selector ✅ **Implemented**
-Switch between V0 and V1 pipelines.
-- **Location:** Header dropdown
-- **Persistence:** Saved to localStorage
+#### 9.5 Call Controls ✅ **Implemented**
+Quick call buttons and call management.
+- **Location:** Seniors tab, dashboard
+- **Features:** One-click calling, status display
 
 ---
 
@@ -577,9 +562,9 @@ Connect with Alexa, Google Home, smart displays.
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **3.1** | Jan 20, 2026 | Conversation Director architecture (3-layer + post-call), extensive Quick Observer regex, post-call analysis |
-| **2.5** | Jan 20, 2026 | Barge-in support, queue clearing, V1 as default |
-| **2.4** | Jan 18, 2026 | Dual pipeline (V0 Gemini / V1 Claude+Observer+ElevenLabs) |
+| **3.1** | Jan 20, 2026 | Conversation Director architecture (2-layer + post-call), extensive Quick Observer regex, post-call analysis |
+| **2.5** | Jan 20, 2026 | Barge-in support, queue clearing, streaming pipeline |
+| **2.4** | Jan 18, 2026 | Claude + Observer + ElevenLabs pipeline |
 | **2.3** | Jan 16, 2026 | Scheduled reminder calls with auto-trigger |
 | **2.2** | Jan 15, 2026 | Enhanced admin dashboard (4 tabs) |
 | **2.1** | Jan 14, 2026 | Deepgram STT, mid-call memory, news updates |
@@ -604,39 +589,37 @@ Connect with Alexa, Google Home, smart displays.
 │  ┌─────────────────────────────────────────────────────────────┐    │
 │  │                    Express Server                            │    │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │    │
-│  │  │   Twilio    │  │   Pipeline  │  │  Scheduler  │          │    │
-│  │  │  Webhooks   │  │   Router    │  │   (60s)     │          │    │
+│  │  │   Twilio    │  │  Pipeline   │  │  Scheduler  │          │    │
+│  │  │  Webhooks   │  │             │  │   (60s)     │          │    │
 │  │  └─────────────┘  └──────┬──────┘  └─────────────┘          │    │
 │  └──────────────────────────┼──────────────────────────────────┘    │
 │                             │                                        │
-│            ┌────────────────┴────────────────┐                      │
-│            ▼                                 ▼                      │
-│  ┌──────────────────────┐     ┌────────────────────────────────┐   │
-│  │    V0 PIPELINE       │     │       V1 PIPELINE              │   │
-│  │  (Gemini Native)     │     │  (Claude + Director)           │   │
-│  │                      │     │                                │   │
-│  │  Audio → Gemini →    │     │  ┌─────────────────────────┐   │   │
-│  │         Audio        │     │  │ LAYER 1: Quick Observer │   │   │
-│  │                      │     │  │ Regex patterns (0ms)    │   │   │
-│  │  Latency: ~400ms     │     │  └───────────┬─────────────┘   │   │
-│  └──────────────────────┘     │              ▼                 │   │
-│                               │  ┌─────────────────────────┐   │   │
-│                               │  │ LAYER 2: Director       │   │   │
-│                               │  │ Gemini 3 Flash (~150ms) │   │   │
-│                               │  │ Phase, emotion, timing  │   │   │
-│                               │  └───────────┬─────────────┘   │   │
-│                               │              ▼                 │   │
-│                               │  Deepgram → Claude (streaming) │   │
-│                               │         → ElevenLabs WebSocket │   │
-│                               │                                │   │
-│                               │  Latency: ~400ms (streaming)   │   │
-│                               └────────────────────────────────┘   │
-│                                              │                      │
-│                               ┌──────────────┴──────────────┐      │
-│                               │   POST-CALL ANALYSIS        │      │
-│                               │   Gemini Flash (batch)      │      │
-│                               │   Summary, concerns, score  │      │
-│                               └─────────────────────────────┘      │
+│                             ▼                                        │
+│       ┌────────────────────────────────────────────────────┐        │
+│       │           VOICE PIPELINE (Claude + Director)       │        │
+│       │                                                    │        │
+│       │  ┌─────────────────────────────────────────────┐   │        │
+│       │  │ LAYER 1: Quick Observer                     │   │        │
+│       │  │ Regex patterns (0ms) - health, emotion, etc │   │        │
+│       │  └───────────────────┬─────────────────────────┘   │        │
+│       │                      ▼                             │        │
+│       │  ┌─────────────────────────────────────────────┐   │        │
+│       │  │ LAYER 2: Conversation Director              │   │        │
+│       │  │ Gemini 3 Flash (~150ms)                     │   │        │
+│       │  │ Call phase, emotion, reminder timing        │   │        │
+│       │  └───────────────────┬─────────────────────────┘   │        │
+│       │                      ▼                             │        │
+│       │  Deepgram STT → Claude Sonnet (streaming)          │        │
+│       │              → ElevenLabs WebSocket TTS            │        │
+│       │                                                    │        │
+│       │  Latency: ~400ms time-to-first-audio               │        │
+│       └────────────────────────────────────────────────────┘        │
+│                             │                                        │
+│              ┌──────────────┴──────────────┐                        │
+│              │   POST-CALL ANALYSIS        │                        │
+│              │   Gemini Flash (batch)      │                        │
+│              │   Summary, concerns, score  │                        │
+│              └─────────────────────────────┘                        │
 │                                                                      │
 │  ┌───────────────────────────────────────────────────────────────┐  │
 │  │                    PostgreSQL (Neon)                           │  │
@@ -665,16 +648,6 @@ Connect with Alexa, Google Home, smart displays.
 
 **Assumptions:** 15-min call, ~20 conversational exchanges, ~1,000 chars TTS output
 
-#### V0 Pipeline (Gemini Native Audio)
-| Component | Calculation | Cost |
-|-----------|-------------|------|
-| Twilio Voice | 15 min × $0.02/min | $0.30 |
-| Gemini 2.5 Flash | ~900 sec audio I/O | ~$0.05 |
-| OpenAI Embeddings | Memory search + storage | ~$0.01 |
-| **Total V0 per call** | | **~$0.36** |
-| **Monthly (30 calls)** | | **~$10.80** |
-
-#### V1 Pipeline (Claude + Director + Streaming TTS)
 | Component | Calculation | Cost |
 |-----------|-------------|------|
 | Twilio Voice | 15 min × $0.02/min | $0.30 |
@@ -684,16 +657,11 @@ Connect with Alexa, Google Home, smart displays.
 | Gemini 3 Flash (Director) | ~20 calls × ~1.2k tokens | ~$0.01 |
 | Gemini Flash (Post-Call) | 1 analysis, ~5k tokens | ~$0.005 |
 | OpenAI Embeddings | Memory search + storage | ~$0.01 |
-| **Total V1 per call** | | **~$0.65** |
+| **Total per call** | | **~$0.65** |
 | **Monthly (30 calls)** | | **~$19.50** |
+| **Monthly (10 seniors)** | | **~$195** |
 
-#### Cost Comparison
-| Metric | V0 | V1 |
-|--------|----|----|
-| Per call | $0.36 | $0.65 |
-| Per month (1 senior) | $10.80 | $19.50 |
-| Per month (10 seniors) | $108 | $195 |
-| Primary cost driver | Twilio (83%) | Twilio + TTS (74%) |
+**Primary cost drivers:** Twilio (46%) + ElevenLabs TTS (28%)
 
 ### Key Metrics to Track
 - **Engagement:** Average call duration, calls per senior per week
@@ -708,8 +676,7 @@ Connect with Alexa, Google Home, smart displays.
 | Feature Area | Key Files |
 |--------------|-----------|
 | Main Server | `index.js` |
-| V0 Pipeline | `gemini-live.js` |
-| V1 Pipeline | `pipelines/v1-advanced.js` |
+| Voice Pipeline | `pipelines/v1-advanced.js` |
 | Layer 1: Quick Observer | `pipelines/quick-observer.js` |
 | Layer 2: Conversation Director | `pipelines/fast-observer.js` |
 | Post-Call Analysis | `services/call-analysis.js` |

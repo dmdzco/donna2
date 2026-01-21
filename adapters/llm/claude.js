@@ -53,6 +53,8 @@ export class ClaudeAdapter extends LLMAdapter {
       temperature,
       system: systemPrompt,
       messages: claudeMessages.length > 0 ? claudeMessages : [{ role: 'user', content: 'Hello' }],
+      // Explicitly disable extended thinking for voice (lower latency)
+      thinking: { type: 'disabled' },
     });
 
     // Filter out thinking blocks, only return text content
@@ -75,6 +77,8 @@ export class ClaudeAdapter extends LLMAdapter {
       temperature,
       system: systemPrompt,
       messages: claudeMessages.length > 0 ? claudeMessages : [{ role: 'user', content: 'Hello' }],
+      // Explicitly disable extended thinking for voice (lower latency)
+      thinking: { type: 'disabled' },
     });
 
     let fullResponse = '';

@@ -41,6 +41,7 @@ function selectModelConfig(quickResult, directorResult) {
     const rec = directorResult.model_recommendation || directorResult.modelRecommendation;
     config.max_tokens = rec.max_tokens || DEFAULT_MAX_TOKENS;
     config.reason = rec.reason || 'director';
+    // Note: We always use VOICE_MODEL, but director influences tokens
   }
 
   // Quick observer can escalate tokens if it detects urgent signals
@@ -427,10 +428,7 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
     }
   }
 
-  async connectDeepgram(retryCount = 0) {
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY = 1000;
-
+  async connectDeepgram() {
     if (!process.env.DEEPGRAM_API_KEY) {
       console.log(`[V1][${this.streamSid}] DEEPGRAM_API_KEY not set, STT disabled`);
       return;
@@ -447,12 +445,12 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         channels: 1,
         punctuate: true,
         interim_results: true,
-        endpointing: 250, // Reduced from 500ms for faster turn detection
-        utterance_end_ms: 600, // Reduced from 1000ms for faster response
+        endpointing: 500, // Faster turn detection
+        utterance_end_ms: 1000,
       });
 
       this.dgConnection.on('open', () => {
-        console.log(`[V1][${this.streamSid}] Deepgram connected${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
+        console.log(`[V1][${this.streamSid}] Deepgram connected`);
         this.dgConnected = true;
       });
 
@@ -479,16 +477,9 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         }
       });
 
-      this.dgConnection.on('error', async (error) => {
+      this.dgConnection.on('error', (error) => {
         console.error(`[V1][${this.streamSid}] Deepgram error:`, error.message);
         this.dgConnected = false;
-
-        // Retry on connection errors
-        if (retryCount < MAX_RETRIES && error.message.includes('non-101')) {
-          console.log(`[V1][${this.streamSid}] Retrying Deepgram connection (${retryCount + 1}/${MAX_RETRIES})...`);
-          await new Promise(r => setTimeout(r, RETRY_DELAY));
-          this.connectDeepgram(retryCount + 1);
-        }
       });
 
       this.dgConnection.on('close', () => {
@@ -498,13 +489,6 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
 
     } catch (error) {
       console.error(`[V1][${this.streamSid}] Deepgram connection failed:`, error.message);
-
-      // Retry on initial connection failure
-      if (retryCount < MAX_RETRIES) {
-        console.log(`[V1][${this.streamSid}] Retrying Deepgram connection (${retryCount + 1}/${MAX_RETRIES})...`);
-        await new Promise(r => setTimeout(r, RETRY_DELAY));
-        return this.connectDeepgram(retryCount + 1);
-      }
     }
   }
 
@@ -811,7 +795,7 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
               if (sentence.trim() && !checkInterrupt()) {
                 streamingTts.streamText(sentence + ' ');
                 sentencesSent++;
-                await new Promise(r => setTimeout(r, 100));
+                await new Promise(r => setTimeout(r, 200));
               }
             }
           }

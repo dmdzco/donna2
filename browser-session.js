@@ -1,21 +1,11 @@
 import { createClient } from '@deepgram/sdk';
 import Anthropic from '@anthropic-ai/sdk';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ElevenLabsAdapter } from './adapters/elevenlabs.js';
 import { memoryService } from './services/memory.js';
-import { quickAnalyze } from './pipelines/quick-observer.js';
 
 const anthropic = new Anthropic();
 
-// Initialize Gemini client (for fast responses)
-const geminiClient = process.env.GOOGLE_API_KEY
-  ? new GoogleGenerativeAI(process.env.GOOGLE_API_KEY)
-  : null;
-
-const MODELS = {
-  FAST: 'gemini-2.0-flash',
-  SMART: 'claude-sonnet-4-20250514'
-};
+const MODEL = 'claude-sonnet-4-20250514';
 
 const buildSystemPrompt = (senior, memoryContext) => {
   let prompt = `You are Donna, a warm and caring AI companion for elderly individuals.
@@ -50,7 +40,7 @@ CRITICAL: Keep responses VERY SHORT - 1-2 sentences MAX. This is a phone call, n
 };
 
 /**
- * Browser Session using V1 pipeline (Claude + Deepgram + ElevenLabs)
+ * Browser Session using V1 pipeline (Claude Sonnet + Deepgram + ElevenLabs)
  * Audio format: Browser sends PCM 16-bit 16kHz, receives PCM 24kHz
  */
 export class BrowserSession {
@@ -81,7 +71,7 @@ export class BrowserSession {
   }
 
   async connect() {
-    console.log(`[Browser] Starting V1 session for ${this.senior?.name || 'unknown'}`);
+    console.log(`[Browser] Starting session for ${this.senior?.name || 'unknown'} (Claude Sonnet + Deepgram + ElevenLabs)`);
     this.isConnected = true;
 
     // Connect Deepgram for STT
@@ -193,12 +183,6 @@ export class BrowserSession {
     });
 
     try {
-      // Quick observer for model selection
-      const quickResult = quickAnalyze(text, this.conversationLog.slice(-6));
-
-      // Decide model based on quick analysis
-      const useGemini = !quickResult.modelRecommendation?.use_sonnet && geminiClient;
-
       // Build system prompt
       const systemPrompt = buildSystemPrompt(this.senior, this.memoryContext);
 
@@ -208,16 +192,16 @@ export class BrowserSession {
         content: entry.content
       }));
 
-      let responseText;
+      // Call Claude Sonnet
+      console.log('[Browser] Calling Claude Sonnet');
+      const response = await anthropic.messages.create({
+        model: MODEL,
+        max_tokens: 100,
+        system: systemPrompt,
+        messages: messages,
+      });
 
-      if (useGemini) {
-        console.log('[Browser] Using Gemini 2.0 Flash');
-        responseText = await this.callGemini(systemPrompt, messages);
-      } else {
-        console.log('[Browser] Using Claude Sonnet');
-        responseText = await this.callClaude(systemPrompt, messages);
-      }
-
+      const responseText = response.content[0].type === 'text' ? response.content[0].text : '';
       console.log(`[Browser] Response: "${responseText}"`);
 
       // Log assistant response
@@ -238,49 +222,6 @@ export class BrowserSession {
     } finally {
       this.isProcessing = false;
     }
-  }
-
-  async callGemini(systemPrompt, messages) {
-    const model = geminiClient.getGenerativeModel({
-      model: MODELS.FAST,
-      generationConfig: {
-        maxOutputTokens: 100,
-        temperature: 0.7,
-      },
-    });
-
-    // Convert to Gemini format
-    const geminiMessages = messages.map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }]
-    }));
-
-    // Inject system prompt
-    if (geminiMessages.length > 0 && geminiMessages[0].role === 'user') {
-      geminiMessages[0].parts[0].text = `${systemPrompt}\n\n${geminiMessages[0].parts[0].text}`;
-    } else {
-      geminiMessages.unshift({
-        role: 'user',
-        parts: [{ text: systemPrompt }]
-      });
-    }
-
-    const chat = model.startChat({ history: geminiMessages.slice(0, -1) });
-    const lastMessage = geminiMessages[geminiMessages.length - 1];
-    const result = await chat.sendMessage(lastMessage.parts[0].text);
-
-    return result.response.text();
-  }
-
-  async callClaude(systemPrompt, messages) {
-    const response = await anthropic.messages.create({
-      model: MODELS.SMART,
-      max_tokens: 100,
-      system: systemPrompt,
-      messages: messages,
-    });
-
-    return response.content[0].type === 'text' ? response.content[0].text : '';
   }
 
   async speakText(text) {
@@ -334,7 +275,7 @@ export class BrowserSession {
   }
 
   async close() {
-    console.log('[Browser] Closing V1 session');
+    console.log('[Browser] Closing session');
     this.isConnected = false;
 
     // Stop intervals

@@ -73,7 +73,7 @@ Low-latency pipeline using Google's Gemini 2.5 Flash with native audio.
 - **Files:** `gemini-live.js`
 
 #### 2.2 V1 Pipeline (Claude + Conversation Director) ✅ **Implemented**
-Advanced pipeline with 3-layer architecture for real-time guidance and quality.
+Advanced pipeline with 2-layer architecture for real-time guidance and quality.
 - **Latency:** ~1.5s (target: <600ms after optimization)
 - **Components:**
   - STT: Deepgram (real-time transcription)
@@ -81,7 +81,6 @@ Advanced pipeline with 3-layer architecture for real-time guidance and quality.
   - TTS: ElevenLabs (Rachel voice)
   - **Layer 1 - Quick Observer:** Instant regex analysis (0ms)
   - **Layer 2 - Conversation Director:** Gemini 3 Flash (~150ms)
-  - **Layer 3 - Post-Turn Agent:** Background execution
   - **Post-Call:** Batch analysis for caregivers
 - **Best for:** Higher quality responses, proactive call management
 - **Files:** `pipelines/v1-advanced.js`, `pipelines/quick-observer.js`, `pipelines/fast-observer.js`, `adapters/elevenlabs.js`
@@ -169,7 +168,7 @@ Reminders are woven naturally into conversation, not announced robotically.
 
 ---
 
-### 5. Conversation Director (V1 Only) - 3-Layer Architecture
+### 5. Conversation Director (V1 Only) - 2-Layer + Post-Call Architecture
 
 #### 5.1 Layer 1: Quick Observer ✅ **Implemented**
 Instant regex-based analysis that affects the CURRENT response (0ms latency).
@@ -191,15 +190,8 @@ Gemini 3 Flash analyzes conversation and provides proactive guidance (~150ms).
 - **Token Recommendation:** 100-400 based on emotional needs
 - **Files:** `pipelines/fast-observer.js` (Conversation Director)
 
-#### 5.3 Layer 3: Post-Turn Agent ✅ **Implemented**
-Background execution after response is sent (non-blocking).
-- **Health Concern Logging:** Extracts and logs health mentions
-- **Context Prefetching:** Prepares context for predicted topics
-- **Memory Updates:** Schedules memory extraction
-- **Files:** `pipelines/post-turn-agent.js`, `pipelines/v1-advanced.js`
-
-#### 5.4 Post-Call Analysis ✅ **Implemented**
-Batch analysis after call ends using Gemini Flash.
+#### 5.3 Post-Call Analysis ✅ **Implemented**
+Batch analysis after call ends using Gemini Flash (replaces real-time deep observer).
 - **Generates:**
   - Call summary (2-3 sentences)
   - Topics discussed
@@ -211,19 +203,19 @@ Batch analysis after call ends using Gemini Flash.
 - **Storage:** `call_analyses` database table
 - **Files:** `services/call-analysis.js`
 
-#### 5.5 Guidance Injection ✅ **Implemented**
+#### 5.4 Guidance Injection ✅ **Implemented**
 Layer signals feed into main LLM as hints.
 - **Not mentioned explicitly:** Donna never says "my observer detected..."
 - **Natural adaptation:** Based on phase, emotion, engagement signals
 - **Files:** `pipelines/v1-advanced.js` → `buildSystemPrompt()`
 
-#### 5.6 Call State Tracking ✅ **Implemented**
+#### 5.5 Call State Tracking ✅ **Implemented**
 Tracks call progress for context-aware decisions.
 - **Tracks:** minutesElapsed, callType, pendingReminders, remindersDelivered
 - **Reminder Filtering:** Excludes already-delivered reminders
 - **Files:** `pipelines/v1-advanced.js`
 
-#### 5.7 Call Duration Management ✅ **Implemented**
+#### 5.6 Call Duration Management ✅ **Implemented**
 Director recommends wrap-up timing based on conversation flow.
 - **Natural endings:** Based on conversation phase, not hard timeout
 - **Graceful:** Suggests wrap-up during `winding_down` phase
@@ -331,22 +323,22 @@ Bidirectional audio streaming via WebSocket.
 
 ## Planned Features
 
-### 11. V1 Latency Optimization 🔄 **Partial**
-Reduce V1 pipeline latency from ~1.5s to <600ms.
+### 11. V1 Latency Optimization ✅ **Implemented**
+Reduced V1 pipeline latency from ~1.5s to ~400ms time-to-first-audio.
 
 **Phase 1 (Architecture) - ✅ COMPLETE**
-- [x] 3-Layer Observer Architecture (Quick → Director → Post-Turn)
+- [x] 2-Layer Observer Architecture (Quick → Director)
 - [x] Non-blocking Director with Gemini 3 Flash (~150ms)
 - [x] Post-call batch analysis (removed from real-time)
 - [x] Dynamic token routing (100-400 based on context)
 
-**Phase 2 (Streaming Pipeline) - 📋 PLANNED**
-- [ ] Stream Claude responses sentence-by-sentence
-- [ ] ElevenLabs WebSocket streaming TTS
-- [ ] Sentence boundary detection for TTS chunks
-- **Target:** ~400ms time-to-first-audio
+**Phase 2 (Streaming Pipeline) - ✅ COMPLETE**
+- [x] Stream Claude responses sentence-by-sentence (`anthropic.messages.stream()`)
+- [x] ElevenLabs WebSocket streaming TTS (`adapters/elevenlabs-streaming.js`)
+- [x] Sentence boundary detection for TTS chunks
+- [x] ~400ms time-to-first-audio achieved
 
-**Phase 3 (Quick Wins) - 📋 PLANNED**
+**Phase 3 (Fine-Tuning) - 📋 PLANNED**
 - [ ] Tune Deepgram endpointing (500ms → 300ms)
 - [ ] Connection pooling for TTS
 
@@ -356,7 +348,7 @@ Reduce V1 pipeline latency from ~1.5s to <600ms.
 - [ ] Speculative execution
 - [ ] Filler words for instant feedback
 
-**Reference:** `docs/STREAMING_OBSERVER_SPEC.md`, `docs/plans/2026-01-18-v1-latency-optimization.md`
+**Reference:** `docs/STREAMING_OBSERVER_SPEC.md`, `adapters/elevenlabs-streaming.js`
 
 ---
 
@@ -634,16 +626,10 @@ Connect with Alexa, Google Home, smart displays.
 │                               │  │ Phase, emotion, timing  │   │   │
 │                               │  └───────────┬─────────────┘   │   │
 │                               │              ▼                 │   │
-│                               │  Audio → Deepgram → Claude     │   │
-│                               │         → ElevenLabs → Audio   │   │
-│                               │              │                 │   │
-│                               │              ▼                 │   │
-│                               │  ┌─────────────────────────┐   │   │
-│                               │  │ LAYER 3: Post-Turn      │   │   │
-│                               │  │ Background execution    │   │   │
-│                               │  └─────────────────────────┘   │   │
+│                               │  Deepgram → Claude (streaming) │   │
+│                               │         → ElevenLabs WebSocket │   │
 │                               │                                │   │
-│                               │  Latency: ~1.5s (target 400ms) │   │
+│                               │  Latency: ~400ms (streaming)   │   │
 │                               └────────────────────────────────┘   │
 │                                              │                      │
 │                               ┌──────────────┴──────────────┐      │
@@ -704,9 +690,9 @@ Connect with Alexa, Google Home, smart displays.
 | V1 Pipeline | `pipelines/v1-advanced.js` |
 | Layer 1: Quick Observer | `pipelines/quick-observer.js` |
 | Layer 2: Conversation Director | `pipelines/fast-observer.js` |
-| Layer 3: Post-Turn Agent | `pipelines/post-turn-agent.js` |
 | Post-Call Analysis | `services/call-analysis.js` |
-| ElevenLabs TTS | `adapters/elevenlabs.js` |
+| ElevenLabs TTS (REST) | `adapters/elevenlabs.js` |
+| ElevenLabs TTS (Streaming) | `adapters/elevenlabs-streaming.js` |
 | Audio Utils | `audio-utils.js` |
 | Memory | `services/memory.js` |
 | Seniors | `services/seniors.js` |

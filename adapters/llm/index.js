@@ -44,13 +44,14 @@ const MODEL_REGISTRY = {
   // Claude models
   'claude-sonnet': {
     AdapterClass: ClaudeAdapter,
-    config: { modelName: 'claude-sonnet-4-20250514' },
+    config: { modelName: 'claude-sonnet-4-5-20241022' },
   },
-  'claude-sonnet-4': {
+  'claude-sonnet-4-5': {
     AdapterClass: ClaudeAdapter,
-    config: { modelName: 'claude-sonnet-4-20250514' },
+    config: { modelName: 'claude-sonnet-4-5-20241022' },
   },
-  'claude-sonnet-4-20250514': {
+  // Legacy Sonnet 4
+  'claude-sonnet-4': {
     AdapterClass: ClaudeAdapter,
     config: { modelName: 'claude-sonnet-4-20250514' },
   },
@@ -73,7 +74,11 @@ const MODEL_REGISTRY = {
   },
   'claude-opus': {
     AdapterClass: ClaudeAdapter,
-    config: { modelName: 'claude-3-opus-20240229' },
+    config: { modelName: 'claude-opus-4-5-20241022' },
+  },
+  'claude-opus-4-5': {
+    AdapterClass: ClaudeAdapter,
+    config: { modelName: 'claude-opus-4-5-20241022' },
   },
 };
 

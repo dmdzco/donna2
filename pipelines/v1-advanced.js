@@ -498,6 +498,13 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
 
     } catch (error) {
       console.error(`[V1][${this.streamSid}] Deepgram connection failed:`, error.message);
+
+      // Retry on initial connection failure
+      if (retryCount < MAX_RETRIES) {
+        console.log(`[V1][${this.streamSid}] Retrying Deepgram connection (${retryCount + 1}/${MAX_RETRIES})...`);
+        await new Promise(r => setTimeout(r, RETRY_DELAY));
+        return this.connectDeepgram(retryCount + 1);
+      }
     }
   }
 

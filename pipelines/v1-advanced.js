@@ -795,7 +795,7 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
               if (sentence.trim() && !checkInterrupt()) {
                 streamingTts.streamText(sentence + ' ');
                 sentencesSent++;
-                await new Promise(r => setTimeout(r, 200));
+                await new Promise(r => setTimeout(r, 100));
               }
             }
           }

@@ -52,7 +52,56 @@ export const conversationService = {
       .limit(limit);
   },
 
-  // Get recent conversation history for context (across calls)
+  // Update conversation summary (called after post-call analysis)
+  async updateSummary(callSid, summary) {
+    try {
+      const [conversation] = await db.update(conversations)
+        .set({ summary })
+        .where(eq(conversations.callSid, callSid))
+        .returning();
+
+      if (conversation) {
+        console.log(`[Conversation] Updated summary for ${callSid}`);
+      }
+      return conversation;
+    } catch (error) {
+      console.error(`[Conversation] Error updating summary:`, error.message);
+      return null;
+    }
+  },
+
+  // Get recent call summaries for context (instead of raw messages)
+  async getRecentSummaries(seniorId, limit = 3) {
+    const recentCalls = await db.select({
+      summary: conversations.summary,
+      startedAt: conversations.startedAt,
+      durationSeconds: conversations.durationSeconds,
+    })
+    .from(conversations)
+    .where(and(
+      eq(conversations.seniorId, seniorId),
+      eq(conversations.status, 'completed'),
+      sql`summary IS NOT NULL`,
+      sql`summary != ''`
+    ))
+    .orderBy(desc(conversations.startedAt))
+    .limit(limit);
+
+    if (recentCalls.length === 0) return null;
+
+    // Format as context string
+    const summaries = recentCalls.map(call => {
+      const daysAgo = Math.floor((Date.now() - new Date(call.startedAt).getTime()) / (1000 * 60 * 60 * 24));
+      const timeAgo = daysAgo === 0 ? 'Earlier today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo} days ago`;
+      const duration = call.durationSeconds ? `(${Math.round(call.durationSeconds / 60)} min)` : '';
+      return `- ${timeAgo} ${duration}: ${call.summary}`;
+    });
+
+    return summaries.join('\n');
+  },
+
+  // Legacy: Get recent conversation history for context (across calls)
+  // Deprecated: Use getRecentSummaries instead
   async getRecentHistory(seniorId, messageLimit = 6) {
     // Get last few completed conversations with transcripts
     const recentCalls = await db.select({

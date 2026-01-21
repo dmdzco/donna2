@@ -832,8 +832,8 @@ wss.on('connection', async (twilioWs, req) => {
           const reminderContext = schedulerService.getReminderContext(callSid);
           const currentDelivery = reminderContext?.delivery || null;
 
-          // V3.0: Always use V1 (Claude + 4-layer observer)
-          console.log(`[${callSid}] Creating V1 session (Claude + 4-layer observer)${currentDelivery ? ' with reminder tracking' : ''}${metadata.preGeneratedGreeting ? ' with pre-generated greeting' : ''}`);
+          // V3.1: Always use V1 (Claude + 2-layer observer)
+          console.log(`[${callSid}] Creating V1 session (Claude + 2-layer observer)${currentDelivery ? ' with reminder tracking' : ''}${metadata.preGeneratedGreeting ? ' with pre-generated greeting' : ''}`);
           geminiSession = new V1AdvancedSession(
             twilioWs,
             streamSid,
@@ -842,7 +842,9 @@ wss.on('connection', async (twilioWs, req) => {
             metadata.reminderPrompt,
             [], // pendingReminders
             currentDelivery, // delivery record for acknowledgment tracking
-            metadata.preGeneratedGreeting // pre-generated greeting (for instant response)
+            metadata.preGeneratedGreeting, // pre-generated greeting (for instant response)
+            'check-in', // callType
+            callSid // Twilio call SID for database lookups
           );
           sessions.set(callSid, geminiSession);
 

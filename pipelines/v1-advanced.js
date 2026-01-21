@@ -6,7 +6,6 @@ import { memoryService } from '../services/memory.js';
 import { schedulerService } from '../services/scheduler.js';
 import { quickAnalyze } from './quick-observer.js';
 import { runDirectorPipeline, formatDirectorGuidance } from './fast-observer.js';
-import { runPostTurnTasks } from './post-turn-agent.js';
 import { getAdapter, isModelAvailable } from '../adapters/llm/index.js';
 import { analyzeCompletedCall, saveCallAnalysis, getHighSeverityConcerns } from '../services/call-analysis.js';
 import { conversationService } from '../services/conversations.js';
@@ -116,7 +115,7 @@ function extractCompleteSentences(buffer) {
 /**
  * Build system prompt - full context, adapters handle any quirks
  */
-const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, directorGuidance = null) => {
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, directorGuidance = null, previousCallsSummary = null) => {
   let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
 
 RESPONSE FORMAT:
@@ -135,6 +134,11 @@ RESPONSE FORMAT:
     if (senior.medicalNotes) {
       prompt += ` Health notes: ${senior.medicalNotes}`;
     }
+  }
+
+  // Previous call summaries for continuity
+  if (previousCallsSummary) {
+    prompt += `\n\nRecent calls:\n${previousCallsSummary}`;
   }
 
   if (memoryContext) {
@@ -181,9 +185,10 @@ RESPONSE FORMAT:
  * Uses: Deepgram STT → Quick Observer + Conversation Director → Claude → ElevenLabs TTS
  */
 export class V1AdvancedSession {
-  constructor(twilioWs, streamSid, senior = null, memoryContext = null, reminderPrompt = null, pendingReminders = [], currentDelivery = null, preGeneratedGreeting = null, callType = 'check-in') {
+  constructor(twilioWs, streamSid, senior = null, memoryContext = null, reminderPrompt = null, pendingReminders = [], currentDelivery = null, preGeneratedGreeting = null, callType = 'check-in', callSid = null) {
     this.twilioWs = twilioWs;
     this.streamSid = streamSid;
+    this.callSid = callSid; // Twilio call SID for database lookups
     this.senior = senior;
     this.memoryContext = memoryContext;
     this.reminderPrompt = reminderPrompt;
@@ -312,16 +317,17 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
     console.log(`[V1][${this.streamSid}] Starting advanced pipeline for ${this.senior?.name || 'unknown'}`);
     this.isConnected = true;
 
-    // Load recent conversation history from previous calls (for continuity)
+    // Load summaries from previous calls (for continuity - more efficient than raw messages)
+    this.previousCallsSummary = null;
     if (this.senior?.id) {
       try {
-        const previousHistory = await conversationService.getRecentHistory(this.senior.id, 6);
-        if (previousHistory.length > 0) {
-          this.conversationLog = previousHistory;
-          console.log(`[V1][${this.streamSid}] Loaded ${previousHistory.length} messages from previous calls`);
+        const summaries = await conversationService.getRecentSummaries(this.senior.id, 3);
+        if (summaries) {
+          this.previousCallsSummary = summaries;
+          console.log(`[V1][${this.streamSid}] Loaded previous call summaries`);
         }
       } catch (e) {
-        console.log(`[V1][${this.streamSid}] Could not load previous history: ${e.message}`);
+        console.log(`[V1][${this.streamSid}] Could not load previous summaries: ${e.message}`);
       }
     }
 
@@ -583,7 +589,8 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         null, // observerSignal - replaced by Director
         this.dynamicMemoryContext,
         quickResult.guidance,
-        directorGuidance
+        directorGuidance,
+        this.previousCallsSummary
       );
       console.log(`[V1][${this.streamSid}] System prompt built: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, senior=${this.senior?.name || 'none'}`);
 
@@ -687,7 +694,8 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         null, // observerSignal - replaced by Director
         this.dynamicMemoryContext,
         quickResult.guidance,
-        directorGuidance
+        directorGuidance,
+        this.previousCallsSummary
       );
       console.log(`[V1][${this.streamSid}] System prompt: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, senior=${this.senior?.name || 'none'}`);
 
@@ -989,13 +997,18 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
 
       console.log(`[V1][${this.streamSid}] Post-call analysis: engagement=${analysis.engagement_score}/10, concerns=${analysis.concerns?.length || 0}`);
 
-      // Save to database (if table exists)
+      // Save analysis to database (if table exists)
       if (this.senior?.id) {
         await saveCallAnalysis(
           this.streamSid, // Use streamSid as conversation ID
           this.senior.id,
           analysis
         );
+      }
+
+      // Save summary to conversation record for cross-call context
+      if (analysis.summary && this.callSid) {
+        await conversationService.updateSummary(this.callSid, analysis.summary);
       }
 
       // Check for high-severity concerns

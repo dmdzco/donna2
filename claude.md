@@ -144,6 +144,21 @@ The Director proactively guides each call:
 | Update admin UI | `public/admin.html` |
 | Database changes | `db/schema.js` |
 
+### Deployment
+
+**IMPORTANT**: Always deploy after committing and pushing changes:
+
+```bash
+git add . && git commit -m "your message" && git push && git push origin main:master && railway up
+```
+
+Or use the alias after committing:
+```bash
+git pushall && railway up
+```
+
+Railway's GitHub webhook is unreliable - always run `railway up` manually to deploy.
+
 ### Environment Variables
 
 ```bash

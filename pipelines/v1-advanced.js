@@ -114,18 +114,52 @@ function extractCompleteSentences(buffer) {
 }
 
 /**
+ * Strip <guidance> tags and their content from text
+ * These are private instructions that should not be spoken aloud
+ */
+function stripGuidanceTags(text) {
+  // Remove complete guidance blocks
+  let cleaned = text.replace(/<guidance>[\s\S]*?<\/guidance>/gi, '');
+
+  // Also remove any partial opening tag at the end (streaming edge case)
+  cleaned = cleaned.replace(/<guidance>[\s\S]*$/gi, '');
+
+  // Remove any orphaned closing tags
+  cleaned = cleaned.replace(/<\/guidance>/gi, '');
+
+  // Clean up extra whitespace left behind
+  cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+
+  return cleaned;
+}
+
+/**
+ * Check if text contains an unclosed guidance tag (still streaming)
+ */
+function hasUnclosedGuidanceTag(text) {
+  const openCount = (text.match(/<guidance>/gi) || []).length;
+  const closeCount = (text.match(/<\/guidance>/gi) || []).length;
+  return openCount > closeCount;
+}
+
+/**
  * Build system prompt - full context, adapters handle any quirks
  */
 const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, directorGuidance = null, previousCallsSummary = null) => {
   let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
 
+CRITICAL - YOUR OUTPUT IS SPOKEN ALOUD:
+- Output ONLY the exact words Donna speaks
+- NEVER include <guidance> tags, thinking, reasoning, or XML tags in your output
+- NEVER include stage directions like "laughs", "pauses", "speaks with empathy"
+- NEVER include action descriptions or internal thoughts
+- Your entire response will be converted to audio - every character will be spoken
+
 RESPONSE FORMAT:
 - 1-2 sentences MAX
 - Answer briefly, then ask ONE follow-up question
-- Output ONLY the exact words Donna speaks - no stage directions, actions, or descriptions
-- NEVER output things like "laughs", "pauses", "speaks with empathy", or any action descriptions
 - NEVER say "dear" or "dearie"
-- <guidance> tags are PRIVATE instructions - follow them but NEVER speak them aloud`;
+- Just speak naturally as Donna would`;
 
   if (senior) {
     const firstName = senior.name?.split(' ')[0] || senior.name;
@@ -788,8 +822,16 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
               console.log(`[V1][${streamSid}] First token: ${firstTokenTime - startTime}ms`);
             }
 
+            // Don't process while inside an unclosed guidance tag (wait for it to complete)
+            if (hasUnclosedGuidanceTag(textBuffer)) {
+              return;
+            }
+
+            // Strip any guidance tags before extracting sentences
+            const cleanedBuffer = stripGuidanceTags(textBuffer);
+
             // Extract complete sentences and send to TTS
-            const { complete, remaining } = extractCompleteSentences(textBuffer);
+            const { complete, remaining } = extractCompleteSentences(cleanedBuffer);
             textBuffer = remaining;
 
             for (const sentence of complete) {
@@ -805,9 +847,10 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         console.error(`[V1][${this.streamSid}] Streaming error:`, error.message);
       }
 
-      // Send any remaining text
-      if (textBuffer.trim() && !this.wasInterrupted) {
-        this.streamingTts.streamText(textBuffer);
+      // Send any remaining text (after stripping guidance tags)
+      const cleanedRemaining = stripGuidanceTags(textBuffer);
+      if (cleanedRemaining.trim() && !this.wasInterrupted) {
+        this.streamingTts.streamText(cleanedRemaining);
       }
 
       // Flush TTS to generate final audio

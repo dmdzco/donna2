@@ -1,5 +1,21 @@
-import { GoogleGenAI, Modality } from '@google/genai';
+import { createClient } from '@deepgram/sdk';
+import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { ElevenLabsAdapter } from './adapters/elevenlabs.js';
 import { memoryService } from './services/memory.js';
+import { quickAnalyze } from './pipelines/quick-observer.js';
+
+const anthropic = new Anthropic();
+
+// Initialize Gemini client (for fast responses)
+const geminiClient = process.env.GOOGLE_API_KEY
+  ? new GoogleGenerativeAI(process.env.GOOGLE_API_KEY)
+  : null;
+
+const MODELS = {
+  FAST: 'gemini-2.0-flash',
+  SMART: 'claude-sonnet-4-20250514'
+};
 
 const buildSystemPrompt = (senior, memoryContext) => {
   let prompt = `You are Donna, a warm and caring AI companion for elderly individuals.
@@ -9,8 +25,10 @@ Your personality:
 - Be patient and understanding
 - Show genuine interest in their day and wellbeing
 - Ask follow-up questions to keep the conversation going
-- Keep responses SHORT (1-2 sentences) - this is a phone call
-- Be conversational and natural`;
+
+CRITICAL: Keep responses VERY SHORT - 1-2 sentences MAX. This is a phone call, not a letter.
+- Answer briefly, then ask ONE simple follow-up question
+- Never give multiple topics or long explanations in one turn`;
 
   if (senior) {
     prompt += `\n\nYou are speaking with ${senior.name}.`;
@@ -26,170 +44,307 @@ Your personality:
     prompt += `\n\n${memoryContext}`;
   }
 
-  prompt += `\n\nUse this context naturally in conversation. Reference past topics when relevant but don't force it.
-
-CONVERSATION FLOW:
-1. Start with a warm greeting using their name
-2. Ask how they're doing today
-3. After they respond, share ONE interesting news item from the context (if available)
-   Example: "I heard something interesting today - [brief news]. What do you think about that?"
-4. Let the conversation flow naturally from there
-
-Keep the news mention brief and conversational. If they're not interested, move on gracefully.`;
+  prompt += `\n\nUse this context naturally in conversation. Reference past topics when relevant but don't force it.`;
 
   return prompt;
 };
 
+/**
+ * Browser Session using V1 pipeline (Claude + Deepgram + ElevenLabs)
+ * Audio format: Browser sends PCM 16-bit 16kHz, receives PCM 24kHz
+ */
 export class BrowserSession {
   constructor(browserWs, senior = null, memoryContext = null) {
     this.browserWs = browserWs;
     this.senior = senior;
     this.memoryContext = memoryContext;
-    this.geminiSession = null;
-    this.ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
     this.isConnected = false;
     this.conversationLog = [];
+
+    // Deepgram STT
+    this.deepgram = null;
+    this.dgConnection = null;
+    this.dgConnected = false;
+    this.currentTranscript = '';
+
+    // ElevenLabs TTS
+    this.tts = new ElevenLabsAdapter();
+
+    // Processing state
+    this.isProcessing = false;
+    this.isSpeaking = false;
+
+    // Silence detection
+    this.lastAudioTime = Date.now();
+    this.silenceThreshold = 1500;
+    this.silenceCheckInterval = null;
   }
 
   async connect() {
-    const systemPrompt = buildSystemPrompt(this.senior, this.memoryContext);
-    console.log(`[Browser] System prompt built for ${this.senior?.name || 'unknown caller'}`);
+    console.log(`[Browser] Starting V1 session for ${this.senior?.name || 'unknown'}`);
+    this.isConnected = true;
+
+    // Connect Deepgram for STT
+    await this.connectDeepgram();
+
+    // Start silence detection
+    this.startSilenceDetection();
+
+    // Send greeting
+    const greetingText = this.senior?.name
+      ? `Hello ${this.senior.name}! It's Donna. How are you doing today?`
+      : `Hello! It's Donna. How are you doing today?`;
+
+    this.sendToBrowser({ type: 'status', message: 'Connected to Donna!', state: 'ready' });
+
+    // Log and speak greeting
+    this.conversationLog.push({
+      role: 'assistant',
+      content: greetingText,
+      timestamp: new Date().toISOString()
+    });
+
+    await this.speakText(greetingText);
+    this.sendToBrowser({ type: 'transcript', speaker: 'donna', text: greetingText });
+    this.sendToBrowser({ type: 'status', message: 'Your turn to speak...', state: 'listening' });
+  }
+
+  async connectDeepgram() {
+    if (!process.env.DEEPGRAM_API_KEY) {
+      console.log('[Browser] DEEPGRAM_API_KEY not set, STT disabled');
+      return;
+    }
 
     try {
-      this.geminiSession = await this.ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
-        config: {
-          responseModalities: [Modality.AUDIO],
-          systemInstruction: {
-            parts: [{ text: systemPrompt }],
-          },
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Aoede' }
-            }
-          },
-          inputAudioTranscription: {},
-          outputAudioTranscription: {}
-        },
-        callbacks: {
-          onopen: () => {
-            console.log('[Browser] Connected to Gemini Live API');
-            this.isConnected = true;
-            this.sendToBrowser({ type: 'status', message: 'Connected to Donna!', state: 'ready' });
-          },
-          onmessage: (message) => {
-            this.handleGeminiMessage(message);
-          },
-          onerror: (error) => {
-            console.error('[Browser] Gemini error:', error.message);
-            this.sendToBrowser({ type: 'status', message: 'Connection error', state: 'error' });
-          },
-          onclose: (event) => {
-            console.log('[Browser] Gemini connection closed:', event?.reason || 'unknown');
-            this.isConnected = false;
+      this.deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+
+      this.dgConnection = this.deepgram.listen.live({
+        model: 'nova-2',
+        language: 'en-US',
+        encoding: 'linear16',  // PCM 16-bit from browser
+        sample_rate: 16000,    // Browser sends 16kHz
+        channels: 1,
+        punctuate: true,
+        interim_results: true,
+        endpointing: 500,
+        utterance_end_ms: 1000,
+      });
+
+      this.dgConnection.on('open', () => {
+        console.log('[Browser] Deepgram connected');
+        this.dgConnected = true;
+      });
+
+      this.dgConnection.on('Results', (data) => {
+        const transcript = data.channel?.alternatives?.[0]?.transcript;
+        if (transcript) {
+          if (data.is_final) {
+            console.log(`[Browser] User (final): "${transcript}"`);
+            this.currentTranscript += ' ' + transcript;
+            this.sendToBrowser({ type: 'transcript', speaker: 'user', text: transcript });
           }
         }
       });
 
-      // Send greeting prompt to start the conversation
-      const greetingPrompt = this.senior
-        ? `Greet ${this.senior.name} warmly by name. You're their AI companion Donna calling to check in. Keep it brief - just say hi.`
-        : 'Say a brief, warm greeting. You are Donna, an AI companion.';
-
-      this.geminiSession.sendClientContent({
-        turns: [{
-          role: 'user',
-          parts: [{ text: greetingPrompt }]
-        }],
-        turnComplete: true
+      this.dgConnection.on('UtteranceEnd', () => {
+        if (this.currentTranscript.trim()) {
+          this.processUserUtterance(this.currentTranscript.trim());
+          this.currentTranscript = '';
+        }
       });
-      console.log(`[Browser] Sent greeting prompt for ${this.senior?.name || 'unknown'}`);
+
+      this.dgConnection.on('error', (error) => {
+        console.error('[Browser] Deepgram error:', error.message);
+        this.dgConnected = false;
+      });
+
+      this.dgConnection.on('close', () => {
+        console.log('[Browser] Deepgram closed');
+        this.dgConnected = false;
+      });
 
     } catch (error) {
-      console.error('[Browser] Failed to connect to Gemini:', error);
-      this.sendToBrowser({ type: 'status', message: 'Failed to connect', state: 'error' });
-      throw error;
+      console.error('[Browser] Deepgram connection failed:', error.message);
     }
   }
 
-  handleGeminiMessage(msg) {
-    // Log message for debugging
-    console.log('[Browser] Gemini message:', JSON.stringify(msg).substring(0, 300));
-
-    // Handle audio response - check various possible structures (like gemini-live.js)
-    const parts = msg.serverContent?.modelTurn?.parts ||
-                  msg.modelTurn?.parts ||
-                  msg.parts;
-
-    if (parts) {
-      for (const part of parts) {
-        const audioData = part.inlineData?.data || part.audio?.data || part.data;
-        const mimeType = part.inlineData?.mimeType || part.audio?.mimeType || part.mimeType;
-
-        if (audioData && mimeType?.includes('audio')) {
-          // Convert base64 PCM to binary and send to browser
-          const buffer = Buffer.from(audioData, 'base64');
-          console.log(`[Browser] Sending audio chunk: ${buffer.length} bytes`);
-          this.browserWs.send(buffer);
-        }
+  startSilenceDetection() {
+    this.silenceCheckInterval = setInterval(() => {
+      const silenceDuration = Date.now() - this.lastAudioTime;
+      if (silenceDuration > this.silenceThreshold && this.currentTranscript.trim()) {
+        this.processUserUtterance(this.currentTranscript.trim());
+        this.currentTranscript = '';
       }
-    }
+    }, 500);
+  }
 
-    // Handle transcription - check various structures
-    const outputText = msg.serverContent?.outputTranscription?.text ||
-                       msg.outputTranscription?.text;
-    if (outputText) {
-      this.conversationLog.push({ role: 'donna', text: outputText });
-      this.sendToBrowser({ type: 'transcript', speaker: 'donna', text: outputText });
-    }
+  async processUserUtterance(text) {
+    if (this.isProcessing || !text) return;
+    this.isProcessing = true;
 
-    const inputText = msg.serverContent?.inputTranscription?.text ||
-                      msg.inputTranscription?.text;
-    if (inputText) {
-      this.conversationLog.push({ role: 'user', text: inputText });
-      this.sendToBrowser({ type: 'transcript', speaker: 'user', text: inputText });
-    }
+    console.log(`[Browser] Processing: "${text}"`);
+    this.sendToBrowser({ type: 'status', message: 'Thinking...', state: 'processing' });
 
-    // Handle turn complete
-    if (msg.serverContent?.turnComplete || msg.turnComplete) {
+    // Log user message
+    this.conversationLog.push({
+      role: 'user',
+      content: text,
+      timestamp: new Date().toISOString()
+    });
+
+    try {
+      // Quick observer for model selection
+      const quickResult = quickAnalyze(text, this.conversationLog.slice(-6));
+
+      // Decide model based on quick analysis
+      const useGemini = !quickResult.modelRecommendation?.use_sonnet && geminiClient;
+
+      // Build system prompt
+      const systemPrompt = buildSystemPrompt(this.senior, this.memoryContext);
+
+      // Build messages
+      const messages = this.conversationLog.slice(-20).map(entry => ({
+        role: entry.role,
+        content: entry.content
+      }));
+
+      let responseText;
+
+      if (useGemini) {
+        console.log('[Browser] Using Gemini 2.0 Flash');
+        responseText = await this.callGemini(systemPrompt, messages);
+      } else {
+        console.log('[Browser] Using Claude Sonnet');
+        responseText = await this.callClaude(systemPrompt, messages);
+      }
+
+      console.log(`[Browser] Response: "${responseText}"`);
+
+      // Log assistant response
+      this.conversationLog.push({
+        role: 'assistant',
+        content: responseText,
+        timestamp: new Date().toISOString()
+      });
+
+      // Speak response
+      await this.speakText(responseText);
+      this.sendToBrowser({ type: 'transcript', speaker: 'donna', text: responseText });
       this.sendToBrowser({ type: 'status', message: 'Your turn to speak...', state: 'listening' });
+
+    } catch (error) {
+      console.error('[Browser] Response generation failed:', error.message);
+      this.sendToBrowser({ type: 'status', message: 'Sorry, I had trouble with that.', state: 'error' });
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  async callGemini(systemPrompt, messages) {
+    const model = geminiClient.getGenerativeModel({
+      model: MODELS.FAST,
+      generationConfig: {
+        maxOutputTokens: 100,
+        temperature: 0.7,
+      },
+    });
+
+    // Convert to Gemini format
+    const geminiMessages = messages.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }]
+    }));
+
+    // Inject system prompt
+    if (geminiMessages.length > 0 && geminiMessages[0].role === 'user') {
+      geminiMessages[0].parts[0].text = `${systemPrompt}\n\n${geminiMessages[0].parts[0].text}`;
+    } else {
+      geminiMessages.unshift({
+        role: 'user',
+        parts: [{ text: systemPrompt }]
+      });
+    }
+
+    const chat = model.startChat({ history: geminiMessages.slice(0, -1) });
+    const lastMessage = geminiMessages[geminiMessages.length - 1];
+    const result = await chat.sendMessage(lastMessage.parts[0].text);
+
+    return result.response.text();
+  }
+
+  async callClaude(systemPrompt, messages) {
+    const response = await anthropic.messages.create({
+      model: MODELS.SMART,
+      max_tokens: 100,
+      system: systemPrompt,
+      messages: messages,
+    });
+
+    return response.content[0].type === 'text' ? response.content[0].text : '';
+  }
+
+  async speakText(text) {
+    if (!process.env.ELEVENLABS_API_KEY) {
+      console.log('[Browser] ELEVENLABS_API_KEY not set, TTS disabled');
+      return;
+    }
+
+    try {
+      this.isSpeaking = true;
+      this.sendToBrowser({ type: 'status', message: 'Speaking...', state: 'speaking' });
+
+      // Get PCM audio from ElevenLabs (24kHz)
+      const pcmBuffer = await this.tts.textToSpeech(text);
+
+      // Send raw PCM to browser (it can play 24kHz)
+      // Send in chunks for streaming feel
+      const chunkSize = 4800; // ~100ms at 24kHz
+      for (let i = 0; i < pcmBuffer.length; i += chunkSize) {
+        if (!this.isSpeaking) break;
+        const chunk = pcmBuffer.slice(i, i + chunkSize);
+        this.browserWs.send(chunk);
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      this.isSpeaking = false;
+    } catch (error) {
+      console.error('[Browser] TTS failed:', error.message);
+      this.isSpeaking = false;
     }
   }
 
   sendToBrowser(data) {
-    if (this.browserWs.readyState === 1) { // WebSocket.OPEN
+    if (this.browserWs.readyState === 1) {
       this.browserWs.send(JSON.stringify(data));
     }
   }
 
   // Receive audio from browser (16-bit PCM at 16kHz)
   sendAudio(pcmBuffer) {
-    if (!this.geminiSession || !this.isConnected) return;
+    if (!this.dgConnected || !this.dgConnection) return;
+
+    this.lastAudioTime = Date.now();
 
     try {
-      // Convert Int16 PCM to base64
-      const base64Audio = Buffer.from(pcmBuffer).toString('base64');
-
-      this.geminiSession.sendRealtimeInput({
-        audio: {
-          data: base64Audio,
-          mimeType: 'audio/pcm;rate=16000'
-        }
-      });
+      // Send directly to Deepgram (configured for linear16 @ 16kHz)
+      this.dgConnection.send(Buffer.from(pcmBuffer));
     } catch (error) {
-      console.error('[Browser] Error sending audio:', error);
+      console.error('[Browser] Error sending audio to Deepgram:', error);
     }
   }
 
   async close() {
-    console.log('[Browser] Closing session');
+    console.log('[Browser] Closing V1 session');
     this.isConnected = false;
 
-    // Extract memories if we have a senior
-    if (this.senior && this.conversationLog.length > 0) {
+    // Stop intervals
+    if (this.silenceCheckInterval) clearInterval(this.silenceCheckInterval);
+
+    // Extract memories
+    if (this.senior && this.conversationLog.length > 2) {
       try {
         const transcript = this.conversationLog
-          .map(m => `${m.role === 'donna' ? 'Donna' : 'User'}: ${m.text}`)
+          .map(m => `${m.role === 'assistant' ? 'Donna' : 'User'}: ${m.content}`)
           .join('\n');
 
         await memoryService.extractFromConversation(
@@ -202,12 +357,14 @@ export class BrowserSession {
       }
     }
 
-    if (this.geminiSession) {
+    // Close Deepgram
+    if (this.dgConnection) {
       try {
-        this.geminiSession.close();
-      } catch (error) {
-        console.error('[Browser] Error closing Gemini:', error);
-      }
+        this.dgConnection.finish();
+      } catch (e) { /* ignore */ }
+      this.dgConnection = null;
     }
+
+    console.log(`[Browser] Session closed. ${this.conversationLog.length} messages`);
   }
 }

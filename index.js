@@ -902,53 +902,58 @@ wss.on('connection', async (twilioWs, req) => {
   });
 });
 
-// === BROWSER CALL WebSocket (V0 - disabled in v3.0) ===
-// Browser calls used V0 Gemini sessions - commented out for now
-// const browserWss = new WebSocketServer({ noServer: true });
-//
-// browserWss.on('connection', async (browserWs, req) => {
-//   console.log('[Browser] New browser call connection');
-//   const { query } = parseUrl(req.url, true);
-//   const seniorId = query.seniorId;
-//   let senior = null;
-//   let memoryContext = null;
-//   let browserSession = null;
-//   if (seniorId) {
-//     try {
-//       senior = await seniorService.getById(seniorId);
-//       if (senior) {
-//         console.log(`[Browser] Found senior: ${senior.name}`);
-//         memoryContext = await memoryService.buildContext(senior.id, null, senior);
-//       }
-//     } catch (error) {
-//       console.error('[Browser] Error fetching senior:', error);
-//     }
-//   }
-//   browserSession = new BrowserSession(browserWs, senior, memoryContext);
-//   try {
-//     await browserSession.connect();
-//   } catch (error) {
-//     console.error('[Browser] Failed to start session:', error);
-//     browserWs.close();
-//     return;
-//   }
-//   browserWs.on('message', (message) => {
-//     if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
-//       browserSession.sendAudio(message);
-//     }
-//   });
-//   browserWs.on('close', async () => {
-//     console.log('[Browser] Connection closed');
-//     if (browserSession) {
-//       await browserSession.close();
-//     }
-//   });
-//   browserWs.on('error', (error) => {
-//     console.error('[Browser] WebSocket error:', error);
-//   });
-// });
+// === BROWSER CALL WebSocket (V1 pipeline) ===
+const browserWss = new WebSocketServer({ noServer: true });
 
-// Handle WebSocket upgrade for Twilio media stream
+browserWss.on('connection', async (browserWs, req) => {
+  console.log('[Browser] New browser call connection');
+  const { query } = parseUrl(req.url, true);
+  const seniorId = query.seniorId;
+  let senior = null;
+  let memoryContext = null;
+  let browserSession = null;
+
+  if (seniorId) {
+    try {
+      senior = await seniorService.getById(seniorId);
+      if (senior) {
+        console.log(`[Browser] Found senior: ${senior.name}`);
+        memoryContext = await memoryService.buildContext(senior.id, null, senior);
+      }
+    } catch (error) {
+      console.error('[Browser] Error fetching senior:', error);
+    }
+  }
+
+  browserSession = new BrowserSession(browserWs, senior, memoryContext);
+
+  try {
+    await browserSession.connect();
+  } catch (error) {
+    console.error('[Browser] Failed to start session:', error);
+    browserWs.close();
+    return;
+  }
+
+  browserWs.on('message', (message) => {
+    if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
+      browserSession.sendAudio(message);
+    }
+  });
+
+  browserWs.on('close', async () => {
+    console.log('[Browser] Connection closed');
+    if (browserSession) {
+      await browserSession.close();
+    }
+  });
+
+  browserWs.on('error', (error) => {
+    console.error('[Browser] WebSocket error:', error);
+  });
+});
+
+// Handle WebSocket upgrade for Twilio media stream and browser calls
 server.on('upgrade', (request, socket, head) => {
   const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
 
@@ -956,11 +961,10 @@ server.on('upgrade', (request, socket, head) => {
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit('connection', ws, request);
     });
-  // Browser call disabled in v3.0 (was V0 Gemini)
-  // } else if (pathname === '/browser-call') {
-  //   browserWss.handleUpgrade(request, socket, head, (ws) => {
-  //     browserWss.emit('connection', ws, request);
-  //   });
+  } else if (pathname === '/browser-call') {
+    browserWss.handleUpgrade(request, socket, head, (ws) => {
+      browserWss.emit('connection', ws, request);
+    });
   } else {
     socket.destroy();
   }
@@ -970,6 +974,7 @@ server.listen(PORT, () => {
   console.log(`Donna v3.0 listening on port ${PORT}`);
   console.log(`Voice webhook: ${BASE_URL}/voice/answer`);
   console.log(`Media stream: ${WS_URL}/media-stream`);
+  console.log(`Browser call: ${WS_URL}/browser-call`);
   console.log(`Pipeline: Claude + 4-layer observer + ElevenLabs streaming`);
   console.log(`Features: Dynamic model routing, Post-turn agent, Streaming TTS`);
 

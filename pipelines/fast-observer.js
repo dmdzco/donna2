@@ -409,11 +409,11 @@ async function checkCurrentEvents(userMessage) {
     const topicMatch = userMessage.match(/(?:about|the|what's)\s+(\w+(?:\s+\w+)?)/i);
     const topic = topicMatch ? topicMatch[1] : 'general news';
 
-    const news = await newsService.getRelevantNews(topic);
-    if (news && news.length > 0) {
+    const news = await newsService.getNewsForSenior([topic], 2);
+    if (news) {
       return {
         type: 'news',
-        items: news.slice(0, 2),
+        content: news,
       };
     }
   } catch (error) {

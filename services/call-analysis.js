@@ -18,6 +18,41 @@ import { callAnalyses } from '../db/schema.js';
 // Use Gemini Flash for cost-efficient batch analysis
 const ANALYSIS_MODEL = process.env.CALL_ANALYSIS_MODEL || 'gemini-3-flash';
 
+/**
+ * Repair malformed JSON from LLM responses
+ */
+function repairJson(jsonText) {
+  let repaired = jsonText;
+
+  // Remove trailing commas in arrays and objects
+  repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+
+  // Try to close unclosed structures
+  const openBraces = (repaired.match(/\{/g) || []).length;
+  const closeBraces = (repaired.match(/\}/g) || []).length;
+  const openBrackets = (repaired.match(/\[/g) || []).length;
+  const closeBrackets = (repaired.match(/\]/g) || []).length;
+
+  // Check for unterminated string at end
+  const lastQuote = repaired.lastIndexOf('"');
+  const afterLastQuote = repaired.substring(lastQuote + 1);
+  if (lastQuote > 0 && !afterLastQuote.match(/["\]},:]/)) {
+    repaired = repaired.substring(0, lastQuote + 1) + '"';
+  }
+
+  // Close unclosed brackets
+  for (let i = 0; i < openBrackets - closeBrackets; i++) {
+    repaired += ']';
+  }
+  for (let i = 0; i < openBraces - closeBraces; i++) {
+    repaired += '}';
+  }
+
+  // Final cleanup of trailing commas
+  repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+  return repaired;
+}
+
 const ANALYSIS_PROMPT = `You are analyzing a completed phone call between Donna (an AI companion) and an elderly individual.
 
 ## SENIOR CONTEXT
@@ -107,7 +142,7 @@ export async function analyzeCompletedCall(transcript, seniorContext) {
     ];
 
     const text = await adapter.generate(prompt, messages, {
-      maxTokens: 1000,
+      maxTokens: 1500,
       temperature: 0.2,
     });
 
@@ -122,7 +157,15 @@ export async function analyzeCompletedCall(transcript, seniorContext) {
       jsonText = jsonMatch[0];
     }
 
-    const analysis = JSON.parse(jsonText);
+    // Try parsing, repair if needed
+    let analysis;
+    try {
+      analysis = JSON.parse(jsonText);
+    } catch (parseError) {
+      console.log('[CallAnalysis] JSON parse failed, attempting repair...');
+      const repaired = repairJson(jsonText);
+      analysis = JSON.parse(repaired);
+    }
     console.log(`[CallAnalysis] Analysis complete: engagement=${analysis.engagement_score}/10, concerns=${analysis.concerns?.length || 0}`);
     return analysis;
   } catch (error) {

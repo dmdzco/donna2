@@ -1,8 +1,14 @@
 import OpenAI from 'openai';
 import { db } from '../db/client.js';
 import { memories } from '../db/schema.js';
-import { eq, sql, desc, and, inArray } from 'drizzle-orm';
+import { eq, sql, desc, and, inArray, lt } from 'drizzle-orm';
 import { newsService } from './news.js';
+
+// Memory decay constants
+const DECAY_HALF_LIFE_DAYS = 30; // Importance halves every 30 days
+const ACCESS_BOOST = 10; // Boost importance by 10 per access
+const MAX_IMPORTANCE = 100;
+const ARCHIVE_THRESHOLD_DAYS = 90; // Consider archiving after 90 days without access
 
 let openai = null;
 const getOpenAI = () => {
@@ -16,6 +22,28 @@ const getOpenAI = () => {
   return openai;
 };
 
+// Calculate effective importance with decay
+function calculateEffectiveImportance(baseImportance, createdAt, lastAccessedAt) {
+  const now = Date.now();
+  const ageMs = now - new Date(createdAt).getTime();
+  const daysSinceCreation = ageMs / (1000 * 60 * 60 * 24);
+
+  // Apply exponential decay: importance * 0.5^(days/half_life)
+  const decayFactor = Math.pow(0.5, daysSinceCreation / DECAY_HALF_LIFE_DAYS);
+  let effective = baseImportance * decayFactor;
+
+  // Boost for recent access (reduces decay effect)
+  if (lastAccessedAt) {
+    const daysSinceAccess = (now - new Date(lastAccessedAt).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSinceAccess < 7) {
+      // Accessed in last week - significant boost
+      effective = Math.min(MAX_IMPORTANCE, effective + ACCESS_BOOST * (1 - daysSinceAccess / 7));
+    }
+  }
+
+  return Math.round(effective);
+}
+
 export const memoryService = {
   // Generate embedding for text using OpenAI
   async generateEmbedding(text) {
@@ -28,12 +56,37 @@ export const memoryService = {
     return response.data[0].embedding;
   },
 
-  // Store a new memory with embedding
+  // Store a new memory with embedding (with deduplication)
   async store(seniorId, type, content, source = null, importance = 50, metadata = null) {
     const embedding = await this.generateEmbedding(content);
     if (!embedding) {
       console.log('[Memory] Skipping store - OpenAI not configured');
       return null;
+    }
+
+    // Deduplication: Check if similar memory already exists (cosine similarity > 0.9)
+    const duplicates = await db.execute(sql`
+      SELECT id, content, importance,
+        1 - (embedding <=> ${JSON.stringify(embedding)}::vector) as similarity
+      FROM memories
+      WHERE senior_id = ${seniorId}
+        AND 1 - (embedding <=> ${JSON.stringify(embedding)}::vector) > 0.9
+      ORDER BY similarity DESC
+      LIMIT 1
+    `);
+
+    if (duplicates.rows.length > 0) {
+      const existing = duplicates.rows[0];
+      console.log(`[Memory] Dedup: "${content.substring(0, 30)}..." similar to existing (${(existing.similarity * 100).toFixed(0)}% match)`);
+
+      // If new memory is more important, update the existing one
+      if (importance > existing.importance) {
+        await db.update(memories)
+          .set({ importance, lastAccessedAt: new Date() })
+          .where(eq(memories.id, existing.id));
+        console.log(`[Memory] Updated importance: ${existing.importance} -> ${importance}`);
+      }
+      return null; // Don't store duplicate
     }
 
     const [memory] = await db.insert(memories).values({
@@ -90,52 +143,127 @@ export const memoryService = {
       .limit(limit);
   },
 
-  // Get important memories for a senior
+  // Get important memories for a senior (with decay applied)
   async getImportant(seniorId, limit = 5) {
+    // Get more memories and filter by effective importance
+    const allImportant = await db.select().from(memories)
+      .where(and(
+        eq(memories.seniorId, seniorId),
+        sql`importance >= 50` // Lower threshold, will filter by effective
+      ))
+      .orderBy(desc(memories.importance))
+      .limit(limit * 3); // Get more to account for decay filtering
+
+    // Calculate effective importance and filter/sort
+    const withEffective = allImportant.map(m => ({
+      ...m,
+      effectiveImportance: calculateEffectiveImportance(m.importance, m.createdAt, m.lastAccessedAt)
+    }));
+
+    return withEffective
+      .filter(m => m.effectiveImportance >= 50) // Min 50 effective importance
+      .sort((a, b) => b.effectiveImportance - a.effectiveImportance)
+      .slice(0, limit);
+  },
+
+  // Get critical memories (health concerns, high importance) - Tier 1
+  async getCritical(seniorId, limit = 3) {
     return db.select().from(memories)
       .where(and(
         eq(memories.seniorId, seniorId),
-        sql`importance >= 70`
+        sql`(type = 'concern' OR importance >= 80)`
       ))
       .orderBy(desc(memories.importance))
       .limit(limit);
   },
 
-  // Build context string for conversation
-  async buildContext(seniorId, currentTopic = null, senior = null) {
-    const contextParts = [];
+  // Group memories by type for compact display
+  groupByType(memories) {
+    const groups = {};
+    for (const m of memories) {
+      const type = m.type || 'fact';
+      if (!groups[type]) groups[type] = [];
+      groups[type].push(m.content);
+    }
+    return groups;
+  },
 
-    // Get relevant memories if there's a topic
+  // Format grouped memories compactly
+  formatGroupedMemories(groups) {
+    const typeLabels = {
+      relationship: 'Family/Friends',
+      concern: 'Concerns',
+      preference: 'Preferences',
+      event: 'Recent events',
+      fact: 'Facts'
+    };
+
+    const lines = [];
+    for (const [type, contents] of Object.entries(groups)) {
+      const label = typeLabels[type] || type;
+      // For relationships, join with semicolon. Others with comma.
+      const separator = type === 'relationship' ? '; ' : ', ';
+      lines.push(`${label}: ${contents.join(separator)}`);
+    }
+    return lines.join('\n');
+  },
+
+  // Build context string for conversation using tiered injection
+  // Tier 1 (Critical): Health concerns, high importance - always included
+  // Tier 2 (Contextual): Relevant to current topic - included when topic provided
+  // Tier 3 (Background): General facts - included on first turn only
+  async buildContext(seniorId, currentTopic = null, senior = null, isFirstTurn = true) {
+    const contextParts = [];
+    const includedIds = new Set(); // Track included memories to avoid duplicates
+
+    // Tier 1: Critical memories (always include)
+    const critical = await this.getCritical(seniorId, 3);
+    if (critical.length > 0) {
+      contextParts.push('Critical to know:');
+      critical.forEach(m => {
+        contextParts.push(`- ${m.content}`);
+        includedIds.add(m.id);
+      });
+    }
+
+    // Tier 2: Contextual memories (when topic provided)
     if (currentTopic) {
-      const relevant = await this.search(seniorId, currentTopic, 3, 0.6);
-      if (relevant.length > 0) {
-        contextParts.push('Relevant memories:');
-        relevant.forEach(m => {
-          contextParts.push(`- [${m.type}] ${m.content}`);
+      const relevant = await this.search(seniorId, currentTopic, 3, 0.7);
+      const newRelevant = relevant.filter(m => !includedIds.has(m.id));
+      if (newRelevant.length > 0) {
+        contextParts.push('\nRelevant:');
+        newRelevant.forEach(m => {
+          contextParts.push(`- ${m.content}`);
+          includedIds.add(m.id);
         });
       }
     }
 
-    // Get important memories
-    const important = await this.getImportant(seniorId, 3);
-    if (important.length > 0) {
-      contextParts.push('\nImportant to remember:');
-      important.forEach(m => {
-        contextParts.push(`- [${m.type}] ${m.content}`);
-      });
+    // Tier 3: Background memories (first turn only) - grouped by type for compactness
+    if (isFirstTurn) {
+      const backgroundMemories = [];
+
+      // Get important memories not already included
+      const important = await this.getImportant(seniorId, 5);
+      const newImportant = important.filter(m => !includedIds.has(m.id));
+      backgroundMemories.push(...newImportant);
+      newImportant.forEach(m => includedIds.add(m.id));
+
+      // Get recent memories not already included
+      const recent = await this.getRecent(seniorId, 5);
+      const newRecent = recent.filter(m => !includedIds.has(m.id));
+      backgroundMemories.push(...newRecent);
+
+      // Group and format compactly
+      if (backgroundMemories.length > 0) {
+        const groups = this.groupByType(backgroundMemories);
+        const formatted = this.formatGroupedMemories(groups);
+        contextParts.push('\nBackground:\n' + formatted);
+      }
     }
 
-    // Get recent memories
-    const recent = await this.getRecent(seniorId, 3);
-    if (recent.length > 0) {
-      contextParts.push('\nRecent context:');
-      recent.forEach(m => {
-        contextParts.push(`- [${m.type}] ${m.content}`);
-      });
-    }
-
-    // Fetch news based on senior's interests
-    if (senior?.interests?.length) {
+    // Fetch news based on senior's interests (first turn only)
+    if (isFirstTurn && senior?.interests?.length) {
       try {
         const newsContext = await newsService.getNewsForSenior(senior.interests);
         if (newsContext) {

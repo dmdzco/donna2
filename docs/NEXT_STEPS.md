@@ -6,7 +6,6 @@
 - Conversation Director Architecture
   - Layer 1: Quick Observer (0ms regex)
   - Layer 2: Conversation Director (Gemini 3 Flash, ~150ms)
-  - Layer 3: Post-Turn Agent (background)
   - Post-Call Analysis (async batch)
 - Dynamic Token Routing (100-400 tokens based on context)
 - Streaming Pipeline (~600ms time-to-first-audio)
@@ -82,19 +81,6 @@
 
 ---
 
-### ✅ Post-Turn Agent - Layer 3 (January 2026)
-
-**Achieved:** Background processing after response is sent.
-
-**Implemented:**
-- [x] `pipelines/post-turn-agent.js`
-- [x] Health concern extraction for caregiver alerts
-- [x] Automatic memory extraction from conversations
-- [x] Topic prefetching for anticipated discussions
-- [x] Fire-and-forget execution (non-blocking)
-
----
-
 ### ✅ V1 Streaming Pipeline (January 2026)
 
 **Achieved:** Reduced greeting latency from ~1.5s to ~600ms
@@ -109,6 +95,22 @@
 ---
 
 ## Upcoming Work
+
+### Cost Optimization: Telnyx Migration
+**Goal:** Reduce telephony costs by ~65%
+
+| Provider | Cost/min | Monthly (10 seniors) | Savings |
+|----------|----------|---------------------|---------|
+| Twilio | $0.02 | $90 | - |
+| Telnyx | $0.007 | $31.50 | **$58.50/mo** |
+
+- [ ] Evaluate Telnyx Media Streams API compatibility
+- [ ] Test Telnyx WebSocket audio streaming
+- [ ] Update webhook handlers for Telnyx format
+- [ ] Migrate phone numbers or port existing
+- [ ] A/B test call quality before full switch
+
+---
 
 ### Caregiver Authentication
 **Goal:** Secure multi-user access
@@ -172,7 +174,6 @@
 | Streaming TTS | `adapters/elevenlabs-streaming.js` |
 | Quick Observer (L1) | `pipelines/quick-observer.js` |
 | Conversation Director (L2) | `pipelines/fast-observer.js` |
-| Post-Turn Agent (L3) | `pipelines/post-turn-agent.js` |
 | Post-Call Analysis | `services/call-analysis.js` |
 | Token Selection | `v1-advanced.js` (selectModelConfig) |
 | Memory System | `services/memory.js` |

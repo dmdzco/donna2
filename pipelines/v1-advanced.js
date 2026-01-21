@@ -41,7 +41,6 @@ function selectModelConfig(quickResult, directorResult) {
     const rec = directorResult.model_recommendation || directorResult.modelRecommendation;
     config.max_tokens = rec.max_tokens || DEFAULT_MAX_TOKENS;
     config.reason = rec.reason || 'director';
-    // Note: We always use VOICE_MODEL, but director influences tokens
   }
 
   // Quick observer can escalate tokens if it detects urgent signals
@@ -445,8 +444,8 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         channels: 1,
         punctuate: true,
         interim_results: true,
-        endpointing: 500, // Faster turn detection
-        utterance_end_ms: 1000,
+        endpointing: 250, // Reduced from 500ms for faster turn detection
+        utterance_end_ms: 600, // Reduced from 1000ms for faster response
       });
 
       this.dgConnection.on('open', () => {

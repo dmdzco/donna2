@@ -55,7 +55,9 @@ export class ClaudeAdapter extends LLMAdapter {
       messages: claudeMessages.length > 0 ? claudeMessages : [{ role: 'user', content: 'Hello' }],
     });
 
-    return response.content[0].type === 'text' ? response.content[0].text : '';
+    // Filter out thinking blocks, only return text content
+    const textBlock = response.content.find(block => block.type === 'text');
+    return textBlock?.text || '';
   }
 
   async stream(systemPrompt, messages, options = {}, onChunk = () => {}) {
@@ -76,9 +78,19 @@ export class ClaudeAdapter extends LLMAdapter {
     });
 
     let fullResponse = '';
+    let isThinkingBlock = false;
 
     for await (const event of stream) {
-      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+      // Track when we enter/exit thinking blocks (Claude 4.5 extended thinking)
+      if (event.type === 'content_block_start') {
+        isThinkingBlock = event.content_block?.type === 'thinking';
+      }
+      if (event.type === 'content_block_stop') {
+        isThinkingBlock = false;
+      }
+
+      // Only output text deltas that aren't from thinking blocks
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && !isThinkingBlock) {
         const text = event.delta.text;
         fullResponse += text;
         onChunk(text);

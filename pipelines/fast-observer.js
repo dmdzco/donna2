@@ -319,9 +319,12 @@ export function formatDirectorGuidance(direction) {
   } else if (direction.direction?.stay_or_shift === 'wrap_up') {
     parts.push('WRAP-UP');
   } else if (direction.guidance?.specific_instruction) {
-    // Truncate long instructions
+    // Skip stage-direction-like instructions that Haiku might speak aloud
     const instr = direction.guidance.specific_instruction;
-    parts.push(instr.length > 40 ? instr.substring(0, 40) + '...' : instr);
+    const isStageDirection = /\b(laugh|pause|sigh|smile|nod|speak|empathy|concern|warmth|gently)\b/i.test(instr);
+    if (!isStageDirection) {
+      parts.push(instr.length > 40 ? instr.substring(0, 40) + '...' : instr);
+    }
   }
 
   // Emotional flag only if notable

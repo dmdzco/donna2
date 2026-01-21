@@ -56,8 +56,17 @@ const MODEL_REGISTRY = {
   },
   'claude-haiku': {
     AdapterClass: ClaudeAdapter,
-    config: { modelName: 'claude-3-haiku-20240307' },
+    config: { modelName: 'claude-3-5-haiku-20241022' },
   },
+  'claude-3-5-haiku': {
+    AdapterClass: ClaudeAdapter,
+    config: { modelName: 'claude-3-5-haiku-20241022' },
+  },
+  'claude-3-5-haiku-20241022': {
+    AdapterClass: ClaudeAdapter,
+    config: { modelName: 'claude-3-5-haiku-20241022' },
+  },
+  // Legacy Haiku 3.0
   'claude-3-haiku-20240307': {
     AdapterClass: ClaudeAdapter,
     config: { modelName: 'claude-3-haiku-20240307' },

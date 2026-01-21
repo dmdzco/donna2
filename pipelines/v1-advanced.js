@@ -122,9 +122,10 @@ const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observe
 RESPONSE FORMAT:
 - 1-2 sentences MAX
 - Answer briefly, then ask ONE follow-up question
-- Output ONLY what Donna says out loud - nothing else
+- Output ONLY the exact words Donna speaks - no stage directions, actions, or descriptions
+- NEVER output things like "laughs", "pauses", "speaks with empathy", or any action descriptions
 - NEVER say "dear" or "dearie"
-- Follow any guidance in <guidance> tags but don't mention it`;
+- <guidance> tags are PRIVATE instructions - follow them but NEVER speak them aloud`;
 
   if (senior) {
     const firstName = senior.name?.split(' ')[0] || senior.name;

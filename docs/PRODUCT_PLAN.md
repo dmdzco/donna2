@@ -661,17 +661,39 @@ Connect with Alexa, Google Home, smart displays.
 | **Care** | $149/mo | 10 | 500 | + Observer, analytics |
 | **Enterprise** | Custom | Unlimited | Unlimited | + API, integrations |
 
-### Cost Structure (Estimated per call)
-| Component | Cost | Notes |
-|-----------|------|-------|
-| Twilio | ~$0.02/min | Voice + Media Streams |
-| Gemini (V0) | ~$0.001 | Free tier generous |
-| Claude (V1) | ~$0.01 | Per response |
-| Deepgram (V1) | ~$0.005/min | STT |
-| ElevenLabs (V1) | ~$0.02 | Per response |
-| OpenAI (embeddings) | ~$0.001 | Per memory |
-| **Total V0** | ~$0.03/min | |
-| **Total V1** | ~$0.06/min | |
+### Cost Structure (15-minute call estimate)
+
+**Assumptions:** 15-min call, ~20 conversational exchanges, ~1,000 chars TTS output
+
+#### V0 Pipeline (Gemini Native Audio)
+| Component | Calculation | Cost |
+|-----------|-------------|------|
+| Twilio Voice | 15 min × $0.02/min | $0.30 |
+| Gemini 2.5 Flash | ~900 sec audio I/O | ~$0.05 |
+| OpenAI Embeddings | Memory search + storage | ~$0.01 |
+| **Total V0 per call** | | **~$0.36** |
+| **Monthly (30 calls)** | | **~$10.80** |
+
+#### V1 Pipeline (Claude + Director + Streaming TTS)
+| Component | Calculation | Cost |
+|-----------|-------------|------|
+| Twilio Voice | 15 min × $0.02/min | $0.30 |
+| Deepgram STT | 15 min × $0.0043/min | $0.065 |
+| Claude Sonnet 4 | ~20 exchanges, ~12k tokens | ~$0.08 |
+| ElevenLabs TTS | ~1,000 chars (short responses) | ~$0.18 |
+| Gemini 3 Flash (Director) | ~20 calls × ~1.2k tokens | ~$0.01 |
+| Gemini Flash (Post-Call) | 1 analysis, ~5k tokens | ~$0.005 |
+| OpenAI Embeddings | Memory search + storage | ~$0.01 |
+| **Total V1 per call** | | **~$0.65** |
+| **Monthly (30 calls)** | | **~$19.50** |
+
+#### Cost Comparison
+| Metric | V0 | V1 |
+|--------|----|----|
+| Per call | $0.36 | $0.65 |
+| Per month (1 senior) | $10.80 | $19.50 |
+| Per month (10 seniors) | $108 | $195 |
+| Primary cost driver | Twilio (83%) | Twilio + TTS (74%) |
 
 ### Key Metrics to Track
 - **Engagement:** Average call duration, calls per senior per week

@@ -305,7 +305,8 @@ export class V1AdvancedSession {
   }
 
   /**
-   * Generate personalized greeting using Claude with full context
+   * Generate personalized greeting using templated system
+   * Falls back to this when no cached greeting is available
    */
   async generateGreeting() {
     const firstName = this.senior?.name?.split(' ')[0];
@@ -315,38 +316,26 @@ export class V1AdvancedSession {
       return `Hello! It's Donna calling to check in. How are you doing today?`;
     }
 
-    // Run quick memory search for greeting context
+    // Run quick memory search for greeting context (for interest weighting)
     let recentMemories = [];
     if (this.senior?.id) {
       try {
-        recentMemories = await memoryService.getRecent(this.senior.id, 5);
+        recentMemories = await memoryService.getRecent(this.senior.id, 10);
         console.log(`[V1][${this.streamSid}] Greeting context: ${recentMemories.length} recent memories`);
       } catch (e) {
         console.error(`[V1][${this.streamSid}] Memory fetch error:`, e.message);
       }
     }
 
-    // Build greeting prompt with full context
-    const greetingPrompt = `You are Donna, calling ${firstName} to check in.
+    // Use templated greeting system (no last index tracking when generating on-the-fly)
+    const { greeting, templateIndex, selectedInterest } = contextCacheService.generateTemplatedGreeting(
+      this.senior,
+      recentMemories,
+      -1  // No previous index to exclude
+    );
 
-CONTEXT:
-- Interests: ${this.senior.interests?.join(', ') || 'unknown'}
-${this.memoryContext ? `\n${this.memoryContext}` : ''}
-${recentMemories.length > 0 ? `\nRecent memories:\n${recentMemories.map(m => `- ${m.content}`).join('\n')}` : ''}
-
-Generate a warm, personalized greeting (1-2 sentences). Reference something specific from their life - a hobby, recent event, or something you remember about them. End with a question.
-
-RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
-
-    try {
-      const adapter = getAdapter(VOICE_MODEL);
-      const greeting = await adapter.generate(greetingPrompt, [], { maxTokens: 100, temperature: 0.8 });
-      console.log(`[V1][${this.streamSid}] Generated greeting: "${greeting.substring(0, 50)}..."`);
-      return greeting.trim();
-    } catch (error) {
-      console.error(`[V1][${this.streamSid}] Greeting generation error:`, error.message);
-      return `Hello ${firstName}! It's Donna calling to check in. How are you doing today?`;
-    }
+    console.log(`[V1][${this.streamSid}] Generated greeting: template=${templateIndex}, interest=${selectedInterest || 'none'}`);
+    return greeting;
   }
 
   async connect() {

@@ -13,6 +13,7 @@ import { applyVolumeGain } from '../audio-utils.js';
 
 // Voice IDs for ElevenLabs
 const VOICE_IDS = {
+  river: 'SAz9YHcvj6GT2YYXdXww',     // River - default
   rachel: '21m00Tcm4TlvDq8ikWAM',    // Rachel - warm, mature
   domi: 'AZnzlk1XvdvUeBnXmlld',      // Domi - younger
   bella: 'EXAVITQu4vr4xnSDxMaL',     // Bella - soft
@@ -22,7 +23,7 @@ const VOICE_IDS = {
 export class ElevenLabsStreamingTTS {
   constructor(apiKey = process.env.ELEVENLABS_API_KEY) {
     this.apiKey = apiKey;
-    this.voiceId = VOICE_IDS.rachel;
+    this.voiceId = VOICE_IDS.river;
     this.modelId = 'eleven_turbo_v2_5';
     this.speed = 0.8;  // Speech speed: 0.7 (slow) to 1.2 (fast)
     this.volume = 1.0; // Volume gain: 0.5 (-6dB) to 2.0 (+6dB)

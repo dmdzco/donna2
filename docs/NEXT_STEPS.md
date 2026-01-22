@@ -112,6 +112,73 @@
 
 ---
 
+### In-Call Web Search
+**Goal:** Allow Donna to search the web during conversations for current information
+
+- [ ] Integrate OpenAI web search tool into Director pipeline
+- [ ] Detect when senior asks about current events/news/weather
+- [ ] Run search in parallel (don't block response)
+- [ ] Inject search results into next turn's context
+- [ ] Cache results to avoid duplicate searches
+
+---
+
+### Improved Call End Guidance
+**Goal:** Better conversation wrap-up with natural endings
+
+- [ ] Enhance Director's closing phase detection
+- [ ] Add transition phrases for graceful endings
+- [ ] Summarize key points before goodbye
+- [ ] Confirm any action items (medication taken, appointments noted)
+- [ ] Warm sign-off that references next call
+
+---
+
+### Greeting Rotation System
+**Goal:** Vary greetings to feel more natural and less repetitive
+
+- [ ] Pre-generate 6 different greeting variations per senior
+- [ ] Cache greetings with ElevenLabs TTS
+- [ ] Rotate through greetings throughout the day
+- [ ] Include time-of-day awareness (morning/afternoon/evening)
+- [ ] Personalize with recent context (last call summary)
+
+---
+
+### In-Call Reminder Tracking
+**Goal:** Prevent duplicate reminder delivery within a single call
+
+- [ ] Track `remindersDeliveredThisCall` in V1AdvancedSession
+- [ ] Director checks delivered list before recommending reminder
+- [ ] Mark reminder as delivered when acknowledgment detected
+- [ ] Pass delivered list to Director on each turn
+- [ ] Log reminder delivery events for observability
+
+---
+
+### Cross-Call Reminder Tracking
+**Goal:** Track reminder delivery across multiple calls
+
+- [ ] Use `reminderDeliveries` table to track attempts
+- [ ] Check if reminder was delivered in recent calls (24hr window)
+- [ ] Detect acknowledgment patterns in Quick Observer
+- [ ] Update delivery status (pending → delivered → acknowledged)
+- [ ] Prevent re-delivery of already-acknowledged reminders
+
+---
+
+### Post-Call Reminder Verification
+**Goal:** Verify reminders were delivered and retry if missed
+
+- [ ] Post-call analysis checks if pending reminders were mentioned
+- [ ] Compare `pendingReminders` vs transcript for delivery confirmation
+- [ ] If reminder not delivered, mark for retry
+- [ ] Schedule follow-up call for missed critical reminders
+- [ ] Configurable retry policy (max attempts, delay between)
+- [ ] Alert caregiver if reminder repeatedly missed
+
+---
+
 ### Caregiver Authentication
 **Goal:** Secure multi-user access
 

@@ -77,9 +77,9 @@ export class ElevenLabsAdapter {
           text,
           model_id: this.modelId,
           voice_settings: {
-            stability: 0.5,
+            stability: 0.4,
             similarity_boost: 0.75,
-            style: 0.0,
+            style: 0.2,
             speed: this.speed,
             use_speaker_boost: true,
           },
@@ -126,9 +126,9 @@ export class ElevenLabsAdapter {
           text,
           model_id: this.modelId,
           voice_settings: {
-            stability: 0.5,
+            stability: 0.4,
             similarity_boost: 0.75,
-            style: 0.0,
+            style: 0.2,
             speed: this.speed,
             use_speaker_boost: true,
           },

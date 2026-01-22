@@ -104,9 +104,9 @@ export class ElevenLabsStreamingTTS {
         this.ws.send(JSON.stringify({
           text: ' ',  // Initial space to prime the connection
           voice_settings: {
-            stability: 0.5,
+            stability: 0.4,
             similarity_boost: 0.75,
-            style: 0.0,
+            style: 0.2,
             speed: this.speed,
             use_speaker_boost: true,
           },

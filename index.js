@@ -16,6 +16,17 @@ import { parse as parseUrl } from 'url';
 import { db } from './db/client.js';
 import { reminders, seniors, conversations } from './db/schema.js';
 import { eq, desc, gte, and, sql } from 'drizzle-orm';
+import { validateBody, validateParams } from './middleware/validate.js';
+import {
+  createSeniorSchema,
+  updateSeniorSchema,
+  createMemorySchema,
+  createReminderSchema,
+  updateReminderSchema,
+  initiateCallSchema,
+  seniorIdParamSchema,
+  reminderIdParamSchema,
+} from './validators/schemas.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -201,12 +212,8 @@ app.post('/voice/status', async (req, res) => {
 });
 
 // API: Initiate outbound call
-app.post('/api/call', async (req, res) => {
+app.post('/api/call', validateBody(initiateCallSchema), async (req, res) => {
   const { phoneNumber } = req.body;
-
-  if (!phoneNumber) {
-    return res.status(400).json({ error: 'phoneNumber required' });
-  }
 
   try {
     // PRE-FETCH: Look up senior and build context BEFORE calling Twilio
@@ -253,7 +260,7 @@ app.post('/api/calls/:callSid/end', async (req, res) => {
 // === SENIOR MANAGEMENT APIs ===
 
 // Create a senior profile
-app.post('/api/seniors', async (req, res) => {
+app.post('/api/seniors', validateBody(createSeniorSchema), async (req, res) => {
   try {
     const senior = await seniorService.create(req.body);
     res.json(senior);
@@ -274,7 +281,7 @@ app.get('/api/seniors', async (req, res) => {
 });
 
 // Get senior by ID
-app.get('/api/seniors/:id', async (req, res) => {
+app.get('/api/seniors/:id', validateParams(seniorIdParamSchema), async (req, res) => {
   try {
     const senior = await seniorService.getById(req.params.id);
     if (!senior) {
@@ -287,7 +294,7 @@ app.get('/api/seniors/:id', async (req, res) => {
 });
 
 // Update senior
-app.patch('/api/seniors/:id', async (req, res) => {
+app.patch('/api/seniors/:id', validateParams(seniorIdParamSchema), validateBody(updateSeniorSchema), async (req, res) => {
   try {
     const senior = await seniorService.update(req.params.id, req.body);
     res.json(senior);
@@ -299,15 +306,15 @@ app.patch('/api/seniors/:id', async (req, res) => {
 // === MEMORY APIs ===
 
 // Store a memory for a senior
-app.post('/api/seniors/:id/memories', async (req, res) => {
+app.post('/api/seniors/:id/memories', validateParams(seniorIdParamSchema), validateBody(createMemorySchema), async (req, res) => {
   const { type, content, importance } = req.body;
   try {
     const memory = await memoryService.store(
       req.params.id,
-      type || 'fact',
+      type,
       content,
       'manual',
-      importance || 50
+      importance
     );
     res.json(memory);
   } catch (error) {
@@ -317,7 +324,7 @@ app.post('/api/seniors/:id/memories', async (req, res) => {
 });
 
 // Search memories for a senior
-app.get('/api/seniors/:id/memories/search', async (req, res) => {
+app.get('/api/seniors/:id/memories/search', validateParams(seniorIdParamSchema), async (req, res) => {
   const { q, limit } = req.query;
   try {
     const memories = await memoryService.search(
@@ -332,7 +339,7 @@ app.get('/api/seniors/:id/memories/search', async (req, res) => {
 });
 
 // Get recent memories for a senior
-app.get('/api/seniors/:id/memories', async (req, res) => {
+app.get('/api/seniors/:id/memories', validateParams(seniorIdParamSchema), async (req, res) => {
   try {
     const memories = await memoryService.getRecent(req.params.id, 20);
     res.json(memories);
@@ -344,7 +351,7 @@ app.get('/api/seniors/:id/memories', async (req, res) => {
 // === CONVERSATION APIs ===
 
 // Get conversations for a senior
-app.get('/api/seniors/:id/conversations', async (req, res) => {
+app.get('/api/seniors/:id/conversations', validateParams(seniorIdParamSchema), async (req, res) => {
   try {
     const convos = await conversationService.getForSenior(req.params.id, 20);
     res.json(convos);
@@ -393,16 +400,16 @@ app.get('/api/reminders', async (req, res) => {
 });
 
 // Create a reminder
-app.post('/api/reminders', async (req, res) => {
+app.post('/api/reminders', validateBody(createReminderSchema), async (req, res) => {
   try {
     const { seniorId, type, title, description, scheduledTime, isRecurring, cronExpression } = req.body;
     const [reminder] = await db.insert(reminders).values({
       seniorId,
-      type: type || 'custom',
+      type,
       title,
       description,
-      scheduledTime: scheduledTime ? new Date(scheduledTime) : null,
-      isRecurring: isRecurring || false,
+      scheduledTime: scheduledTime || null,
+      isRecurring,
       cronExpression,
     }).returning();
     res.json(reminder);
@@ -412,13 +419,13 @@ app.post('/api/reminders', async (req, res) => {
 });
 
 // Update a reminder
-app.patch('/api/reminders/:id', async (req, res) => {
+app.patch('/api/reminders/:id', validateParams(reminderIdParamSchema), validateBody(updateReminderSchema), async (req, res) => {
   try {
     const { title, description, scheduledTime, isRecurring, cronExpression, isActive } = req.body;
     const updateData = {};
     if (title !== undefined) updateData.title = title;
     if (description !== undefined) updateData.description = description;
-    if (scheduledTime !== undefined) updateData.scheduledTime = new Date(scheduledTime);
+    if (scheduledTime !== undefined) updateData.scheduledTime = scheduledTime;
     if (isRecurring !== undefined) updateData.isRecurring = isRecurring;
     if (cronExpression !== undefined) updateData.cronExpression = cronExpression;
     if (isActive !== undefined) updateData.isActive = isActive;
@@ -434,7 +441,7 @@ app.patch('/api/reminders/:id', async (req, res) => {
 });
 
 // Delete a reminder
-app.delete('/api/reminders/:id', async (req, res) => {
+app.delete('/api/reminders/:id', validateParams(reminderIdParamSchema), async (req, res) => {
   try {
     await db.delete(reminders).where(eq(reminders.id, req.params.id));
     res.json({ success: true });

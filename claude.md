@@ -118,10 +118,10 @@ The Director proactively guides each call:
 │   └── news.js                 ← News via OpenAI web search
 ├── db/
 │   └── schema.js               ← Database schema (Drizzle ORM)
-├── public/
-│   └── admin.html              ← Admin UI
+├── public/                         ← Static files (legacy)
 ├── apps/
-│   └── observability/          ← Observability dashboard (React)
+│   ├── admin/                      ← Admin dashboard (React + Vite)
+│   └── observability/              ← Observability dashboard (React)
 └── audio-utils.js              ← Audio format conversion
 ```
 
@@ -141,7 +141,8 @@ The Director proactively guides each call:
 | Change token selection logic | `pipelines/v1-advanced.js` (selectModelConfig) |
 | Modify system prompts | `pipelines/v1-advanced.js` (buildSystemPrompt) |
 | Add new API endpoint | `index.js` |
-| Update admin UI | `public/admin.html` |
+| Update admin UI | `apps/admin/src/pages/*` (React) |
+| Update admin API client | `apps/admin/src/lib/api.ts` |
 | Database changes | `db/schema.js` |
 
 ### Deployment
@@ -189,7 +190,19 @@ See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
 - ~~Dynamic Token Routing~~ ✓ Completed
 - ~~Conversation Director~~ ✓ Completed
 - ~~Post-Call Analysis~~ ✓ Completed
+- ~~Admin Dashboard Separation~~ ✓ Completed (React app in `apps/admin/`)
 - Prompt Caching (Anthropic)
+
+### Architecture Cleanup
+
+See [docs/ARCHITECTURE_CLEANUP_PLAN.md](docs/ARCHITECTURE_CLEANUP_PLAN.md) for the 7-phase restructuring plan:
+- **Phase 1** ✓ Frontend Separation (Admin Dashboard → React)
+- **Phase 2** Route Extraction (Split index.js)
+- **Phase 3** Shared Packages (Turborepo monorepo)
+- **Phase 4** TypeScript Migration
+- **Phase 5** Testing Infrastructure
+- **Phase 6** API Improvements (Zod, versioning)
+- **Phase 7** Authentication (Clerk)
 - Memory Context Improvements
 - Caregiver Authentication (Clerk)
 - Telnyx Migration (65% cost savings)

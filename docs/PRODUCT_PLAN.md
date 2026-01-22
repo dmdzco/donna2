@@ -392,6 +392,93 @@ Insights and trends for caregivers.
 
 ---
 
+### 29. In-Call Web Search 📋 **Planned**
+Enable Donna to search the web during calls for current information.
+
+- **Use cases:**
+  - Answer questions about current events
+  - Look up weather, sports scores, news
+  - Find information senior is curious about
+- **Provider:** OpenAI web search or similar
+- **Value:** More helpful, knowledgeable companion
+
+---
+
+### 30. Graceful Call Ending 📋 **Planned**
+Allow Donna to naturally end phone calls when appropriate.
+
+- **Triggers:**
+  - Conversation Director detects closing phase complete
+  - Senior indicates goodbye
+  - Call duration reaches reasonable limit
+- **Implementation:** Twilio API to end call after final goodbye
+- **Value:** Natural conversation endings, prevent awkward silences
+
+---
+
+### 31. In-Call Memory (Don't Repeat Within Call) 📋 **Planned**
+Donna must remember what she has said throughout a single call to avoid repetition.
+
+- **Problem:** If Donna reminds user to do jumping jacks early in call, she shouldn't say it again later as if it's the first time
+- **Solution:**
+  - Track all reminders/advice given during current call
+  - Check before giving any reminder/advice
+  - If already said, either skip or acknowledge: "As I mentioned earlier..."
+- **Storage:** In-memory per-session tracking (not database)
+- **Value:** More natural, less robotic conversations
+
+---
+
+### 32. Same-Day Cross-Call Memory 📋 **Planned**
+If Donna calls a user in the morning and they have another call later that same day, Donna must recall what was discussed.
+
+- **Critical scenario:** If Donna gives a reminder in the morning (e.g., "water your succulent"), she cannot give that same reminder in the afternoon without acknowledging it
+  - **Bad:** "Remember to water your succulent" (again, could kill the plant)
+  - **Good:** "This morning I reminded you to water your succulent - did you get a chance to do that?"
+- **Implementation:**
+  - Track reminders delivered per senior per day
+  - On subsequent calls same day, check delivery history
+  - Reference previous reminder, ask for confirmation
+- **Storage:** `reminderDeliveries` table with timestamp
+- **Value:** Prevents harmful duplicate reminders, feels more human
+
+---
+
+### 33. Conversation Balance: Interest Usage 📋 **Planned**
+Strike a balance between using stored interests and avoiding over-reliance on them.
+
+- **Problem:** If every call Donna asks about the Seahawks and Palm Beach within 60 seconds, it becomes:
+  - Boring and repetitive
+  - Feels fake/overly personalized
+  - Inhuman interaction pattern
+- **Solution:**
+  - Rotate which interests to mention per call
+  - Track when interests were last referenced
+  - Vary timing - don't always lead with interests
+  - Let interests emerge naturally from conversation
+  - Use interests to respond to topics, not always to initiate
+- **Goal:** Interests guide conversation without dominating it
+- **Value:** More natural, less predictable conversations
+
+---
+
+### 34. Conversation Balance: Question Frequency 📋 **Planned**
+Strike a balance between asking questions to drive conversation and avoiding interrogation feel.
+
+- **Problem:** Too many questions in succession feels like an interrogation, not a conversation
+- **Solution:**
+  - Track questions asked per call
+  - Limit consecutive questions (max 2-3)
+  - Intersperse with statements, observations, stories
+  - Match senior's energy - if they're talkative, ask fewer questions
+  - If they're quiet, use open-ended questions sparingly
+- **Metrics:**
+  - Question-to-statement ratio
+  - Senior response length (engagement indicator)
+- **Value:** Comfortable, natural conversation flow
+
+---
+
 ## Suggested Features
 
 ### 15. Proactive Wellness Check-Ins 💡 **Suggested**

@@ -256,10 +256,6 @@ When a call ends, async batch analysis runs:
 │   └── news.js                 ← OpenAI web search, 1hr cache
 ├── db/
 │   └── schema.js               ← Database schema
-├── providers/
-│   ├── index.js                ← Provider factory
-│   ├── voice-provider.js       ← Voice provider interface
-│   └── memory-provider.js      ← Memory provider interface
 ├── packages/
 │   ├── logger/                 ← TypeScript logging package
 │   └── event-bus/              ← TypeScript event bus package

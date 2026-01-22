@@ -444,6 +444,19 @@ const TRANSPORTATION_PATTERNS = [
 ];
 
 // ============================================================================
+// NEWS/CURRENT EVENTS PATTERNS - Triggers buffer response for web search
+// ============================================================================
+const NEWS_PATTERNS = [
+  { pattern: /\b(news|headline|headlines)\b/i, signal: 'news_request' },
+  { pattern: /\b(what('s| is) happening|what('s| is) going on)\b/i, signal: 'news_request' },
+  { pattern: /\b(current events|latest)\b/i, signal: 'news_request' },
+  { pattern: /\b(weather|forecast)\b/i, signal: 'weather_request' },
+  { pattern: /\b(president|election|politics|political)\b/i, signal: 'news_request' },
+  { pattern: /\b(stock market|economy|economic)\b/i, signal: 'news_request' },
+  { pattern: /\b(sports|game|score|scores)\b/i, signal: 'sports_request' },
+];
+
+// ============================================================================
 // QUESTION PATTERNS - User expects a response
 // ============================================================================
 const QUESTION_PATTERNS = [
@@ -509,12 +522,14 @@ export function quickAnalyze(userMessage, recentHistory = []) {
     endOfLifeSignals: [],     // Mortality, burden, estate
     hydrationSignals: [],     // Hydration and nutrition
     transportSignals: [],     // Transportation and mobility
+    newsSignals: [],          // News/current events requests
     isQuestion: false,
     questionType: null,
     engagementLevel: 'normal',
     guidance: null,
     modelRecommendation: null,
     reminderResponse: null,
+    needsWebSearch: false,    // Triggers buffer response pattern
   };
 
   if (!userMessage) return result;
@@ -609,6 +624,14 @@ export function quickAnalyze(userMessage, recentHistory = []) {
   for (const { pattern, signal, severity } of TRANSPORTATION_PATTERNS) {
     if (pattern.test(text)) {
       result.transportSignals.push({ signal, severity: severity || 'medium' });
+    }
+  }
+
+  // News/current events patterns - triggers web search buffer
+  for (const { pattern, signal } of NEWS_PATTERNS) {
+    if (pattern.test(text)) {
+      result.newsSignals.push(signal);
+      result.needsWebSearch = true;
     }
   }
 

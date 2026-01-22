@@ -174,7 +174,6 @@ websocket/
 **Progress:**
 - ✅ Created `packages/logger/` - TypeScript logging package
 - ✅ Created `packages/event-bus/` - TypeScript event bus package
-- ✅ Created `providers/` - Abstraction layer for swappable implementations
 
 **Create monorepo structure:**
 ```json

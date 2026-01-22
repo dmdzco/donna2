@@ -145,7 +145,7 @@ function hasUnclosedGuidanceTag(text) {
 /**
  * Build system prompt - full context, adapters handle any quirks
  */
-const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, directorGuidance = null, previousCallsSummary = null) => {
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, directorGuidance = null, previousCallsSummary = null, newsContext = null) => {
   let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
 
 CRITICAL - YOUR OUTPUT IS SPOKEN ALOUD:
@@ -188,6 +188,11 @@ RESPONSE FORMAT:
   // Always inject memories (short facts)
   if (dynamicMemoryContext) {
     prompt += `\n\n${dynamicMemoryContext}`;
+  }
+
+  // Inject news/current events context (from web search)
+  if (newsContext) {
+    prompt += `\n\n${newsContext}`;
   }
 
   // Build guidance parts
@@ -305,7 +310,8 @@ export class V1AdvancedSession {
   }
 
   /**
-   * Generate personalized greeting using Claude with full context
+   * Generate personalized greeting using templated system
+   * Falls back to this when no cached greeting is available
    */
   async generateGreeting() {
     const firstName = this.senior?.name?.split(' ')[0];
@@ -315,38 +321,26 @@ export class V1AdvancedSession {
       return `Hello! It's Donna calling to check in. How are you doing today?`;
     }
 
-    // Run quick memory search for greeting context
+    // Run quick memory search for greeting context (for interest weighting)
     let recentMemories = [];
     if (this.senior?.id) {
       try {
-        recentMemories = await memoryService.getRecent(this.senior.id, 5);
+        recentMemories = await memoryService.getRecent(this.senior.id, 10);
         console.log(`[V1][${this.streamSid}] Greeting context: ${recentMemories.length} recent memories`);
       } catch (e) {
         console.error(`[V1][${this.streamSid}] Memory fetch error:`, e.message);
       }
     }
 
-    // Build greeting prompt with full context
-    const greetingPrompt = `You are Donna, calling ${firstName} to check in.
+    // Use templated greeting system (no last index tracking when generating on-the-fly)
+    const { greeting, templateIndex, selectedInterest } = contextCacheService.generateTemplatedGreeting(
+      this.senior,
+      recentMemories,
+      -1  // No previous index to exclude
+    );
 
-CONTEXT:
-- Interests: ${this.senior.interests?.join(', ') || 'unknown'}
-${this.memoryContext ? `\n${this.memoryContext}` : ''}
-${recentMemories.length > 0 ? `\nRecent memories:\n${recentMemories.map(m => `- ${m.content}`).join('\n')}` : ''}
-
-Generate a warm, personalized greeting (1-2 sentences). Reference something specific from their life - a hobby, recent event, or something you remember about them. End with a question.
-
-RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
-
-    try {
-      const adapter = getAdapter(VOICE_MODEL);
-      const greeting = await adapter.generate(greetingPrompt, [], { maxTokens: 100, temperature: 0.8 });
-      console.log(`[V1][${this.streamSid}] Generated greeting: "${greeting.substring(0, 50)}..."`);
-      return greeting.trim();
-    } catch (error) {
-      console.error(`[V1][${this.streamSid}] Greeting generation error:`, error.message);
-      return `Hello ${firstName}! It's Donna calling to check in. How are you doing today?`;
-    }
+    console.log(`[V1][${this.streamSid}] Generated greeting: template=${templateIndex}, interest=${selectedInterest || 'none'}`);
+    return greeting;
   }
 
   async connect() {
@@ -463,6 +457,49 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
     }
   }
 
+  /**
+   * Send a quick buffer response while waiting for web search
+   * Used when user asks about news/weather/current events
+   */
+  async sendBufferResponse(bufferText = "Let me check on that for you...") {
+    if (!process.env.ELEVENLABS_API_KEY) {
+      console.log(`[V1][${this.streamSid}] ELEVENLABS_API_KEY not set, skipping buffer`);
+      return;
+    }
+
+    const startTime = Date.now();
+    console.log(`[V1][${this.streamSid}] Sending buffer response: "${bufferText}"`);
+
+    try {
+      const pcmBuffer = await this.tts.textToSpeech(bufferText);
+      const mulawBuffer = pcm24kToMulaw8k(pcmBuffer);
+
+      this.isSpeaking = true;
+
+      // Send to Twilio in chunks
+      const chunkSize = 3200;
+      for (let i = 0; i < mulawBuffer.length; i += chunkSize) {
+        if (!this.isSpeaking) break;
+
+        const chunk = mulawBuffer.slice(i, i + chunkSize);
+        if (this.twilioWs.readyState === 1) {
+          this.twilioWs.send(JSON.stringify({
+            event: 'media',
+            streamSid: this.streamSid,
+            media: { payload: chunk.toString('base64') }
+          }));
+        }
+        await new Promise(resolve => setImmediate(resolve));
+      }
+
+      this.isSpeaking = false;
+      console.log(`[V1][${this.streamSid}] Buffer response sent in ${Date.now() - startTime}ms`);
+    } catch (error) {
+      console.error(`[V1][${this.streamSid}] Buffer response failed:`, error.message);
+      this.isSpeaking = false;
+    }
+  }
+
   async connectDeepgram() {
     if (!process.env.DEEPGRAM_API_KEY) {
       console.log(`[V1][${this.streamSid}] DEEPGRAM_API_KEY not set, STT disabled`);
@@ -556,40 +593,95 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
 
     console.log(`[V1][${this.streamSid}] Processing: "${text}" (seniorId: ${this.senior?.id || 'none'}, ${this.callState.minutesElapsed.toFixed(1)}min)`);
 
-    // Start Conversation Director (Layer 2) in parallel - results used for guidance
-    // Don't await - this runs in background and results are used in NEXT turn or current if ready
-    this.pendingDirector = runDirectorPipeline(
-      text,
-      this.conversationLog,
-      this.senior?.id,
-      this.senior,
-      this.callState
-    ).then(result => {
-      this.lastDirectorResult = result;
-      const dir = result.direction;
-      console.log(`[V1][${this.streamSid}] Director: phase=${dir?.analysis?.call_phase}, engagement=${dir?.analysis?.engagement_level}, tone=${dir?.guidance?.tone}`);
+    // Quick Observer (Layer 1) - check if this needs web search (news/weather/etc)
+    const quickCheck = quickAnalyze(text);
+    const needsWebSearch = quickCheck.needsWebSearch;
 
-      // Update memories from director's semantic search
-      if (result.memories?.length > 0) {
-        const memoryText = result.memories.map(m => `- ${m.content}`).join('\n');
-        this.dynamicMemoryContext = `\n\nFrom previous conversations:\n${memoryText}`;
-      }
+    // Track news context for this turn
+    let currentNewsContext = null;
 
-      // Track reminder delivery if director said to deliver
-      if (dir?.reminder?.should_deliver && dir?.reminder?.which_reminder) {
-        this.callState.remindersDelivered.push(dir.reminder.which_reminder);
+    if (needsWebSearch) {
+      // Buffer response pattern: send "let me check" while fetching news
+      console.log(`[V1][${this.streamSid}] News intent detected (${quickCheck.newsSignals.join(', ')}), using buffer pattern`);
+
+      // Send buffer response immediately (non-blocking feel)
+      await this.sendBufferResponse("Let me check on that for you...");
+
+      // Log buffer to conversation
+      this.conversationLog.push({
+        role: 'assistant',
+        content: "Let me check on that for you...",
+        timestamp: new Date().toISOString()
+      });
+
+      // Now await Director pipeline to get news results
+      try {
+        const directorResult = await runDirectorPipeline(
+          text,
+          this.conversationLog,
+          this.senior?.id,
+          this.senior,
+          this.callState
+        );
+
+        this.lastDirectorResult = directorResult;
+        const dir = directorResult.direction;
+        console.log(`[V1][${this.streamSid}] Director (awaited): phase=${dir?.analysis?.call_phase}, news=${directorResult.currentEvents ? 'fetched' : 'none'}`);
+
+        // Extract news context
+        if (directorResult.currentEvents?.content) {
+          currentNewsContext = directorResult.currentEvents.content;
+          console.log(`[V1][${this.streamSid}] News context ready: ${currentNewsContext.substring(0, 100)}...`);
+        }
+
+        // Update memories from director's semantic search
+        if (directorResult.memories?.length > 0) {
+          const memoryText = directorResult.memories.map(m => `- ${m.content}`).join('\n');
+          this.dynamicMemoryContext = `\n\nFrom previous conversations:\n${memoryText}`;
+        }
+
+        // Track reminder delivery
+        if (dir?.reminder?.should_deliver && dir?.reminder?.which_reminder) {
+          this.callState.remindersDelivered.push(dir.reminder.which_reminder);
+        }
+      } catch (e) {
+        console.error(`[V1][${this.streamSid}] Director error (awaited):`, e.message);
       }
-    }).catch(e => {
-      console.error(`[V1][${this.streamSid}] Director error:`, e.message);
-    });
+    } else {
+      // Normal flow: Start Director in background (not awaited)
+      this.pendingDirector = runDirectorPipeline(
+        text,
+        this.conversationLog,
+        this.senior?.id,
+        this.senior,
+        this.callState
+      ).then(result => {
+        this.lastDirectorResult = result;
+        const dir = result.direction;
+        console.log(`[V1][${this.streamSid}] Director: phase=${dir?.analysis?.call_phase}, engagement=${dir?.analysis?.engagement_level}, tone=${dir?.guidance?.tone}`);
+
+        // Update memories from director's semantic search
+        if (result.memories?.length > 0) {
+          const memoryText = result.memories.map(m => `- ${m.content}`).join('\n');
+          this.dynamicMemoryContext = `\n\nFrom previous conversations:\n${memoryText}`;
+        }
+
+        // Track reminder delivery if director said to deliver
+        if (dir?.reminder?.should_deliver && dir?.reminder?.which_reminder) {
+          this.callState.remindersDelivered.push(dir.reminder.which_reminder);
+        }
+      }).catch(e => {
+        console.error(`[V1][${this.streamSid}] Director error:`, e.message);
+      });
+    }
 
     // Generate and send response (streaming or blocking based on feature flag)
     const useStreaming = V1_STREAMING_ENABLED && process.env.ELEVENLABS_API_KEY;
-    console.log(`[V1][${this.streamSid}] Response mode: ${useStreaming ? 'STREAMING' : 'BLOCKING'}`);
+    console.log(`[V1][${this.streamSid}] Response mode: ${useStreaming ? 'STREAMING' : 'BLOCKING'}, newsContext: ${currentNewsContext ? 'yes' : 'no'}`);
     if (useStreaming) {
-      await this.generateAndSendResponseStreaming(text);
+      await this.generateAndSendResponseStreaming(text, currentNewsContext);
     } else {
-      await this.generateAndSendResponse(text);
+      await this.generateAndSendResponse(text, currentNewsContext);
     }
 
     // Process any pending utterances
@@ -599,7 +691,7 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
     }
   }
 
-  async generateAndSendResponse(userMessage) {
+  async generateAndSendResponse(userMessage, newsContext = null) {
     this.isProcessing = true;
     this.wasInterrupted = false; // Reset interrupt flag
 
@@ -644,9 +736,10 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         this.dynamicMemoryContext,
         quickResult.guidance,
         directorGuidance,
-        this.previousCallsSummary
+        this.previousCallsSummary,
+        newsContext
       );
-      console.log(`[V1][${this.streamSid}] System prompt built: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, senior=${this.senior?.name || 'none'}`);
+      console.log(`[V1][${this.streamSid}] System prompt built: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, news=${newsContext ? 'yes' : 'no'}, senior=${this.senior?.name || 'none'}`);
 
       // Build messages array
       const messages = this.conversationLog
@@ -696,7 +789,7 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
    * Streaming response generation - reduces latency from ~1.5s to ~400ms
    * Uses: Quick Observer (0ms) → Claude Streaming → Sentence Buffer → WebSocket TTS
    */
-  async generateAndSendResponseStreaming(userMessage) {
+  async generateAndSendResponseStreaming(userMessage, newsContext = null) {
     this.isProcessing = true;
     this.wasInterrupted = false;
     const startTime = Date.now();
@@ -746,9 +839,10 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         this.dynamicMemoryContext,
         quickResult.guidance,
         directorGuidance,
-        this.previousCallsSummary
+        this.previousCallsSummary,
+        newsContext
       );
-      console.log(`[V1][${this.streamSid}] System prompt: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, senior=${this.senior?.name || 'none'}`);
+      console.log(`[V1][${this.streamSid}] System prompt: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, news=${newsContext ? 'yes' : 'no'}, senior=${this.senior?.name || 'none'}`);
 
       // Build messages array
       const messages = this.conversationLog

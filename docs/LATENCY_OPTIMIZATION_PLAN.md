@@ -2,114 +2,53 @@
 
 ## Current State (January 2026)
 
-**Achieved so far:**
+**Achieved:**
 - ✅ Pre-built greeting (skips Claude for first response)
 - ✅ Claude streaming (sentence-by-sentence delivery)
 - ✅ ElevenLabs WebSocket TTS (pre-connected)
-- ✅ Deepgram STT (pre-connected)
-- ✅ Haiku as default model (faster than Sonnet)
+- ✅ Deepgram STT (real-time, 500ms endpointing)
+- ✅ Dynamic token routing (100-400 based on context)
+- ✅ Conversation Director in parallel (~150ms)
+- ✅ Sentence buffering with `<guidance>` tag stripping
+- ✅ Barge-in support (interrupt detection)
 
-**Current latency:** ~600ms time-to-first-audio (after greeting)
+**Current latency:** ~400-500ms time-to-first-audio (after greeting)
 
-**Target:** ~300-400ms time-to-first-audio
+**Target achieved:** ✓ 300-500ms range
 
 ---
 
 ## Optimization 1: Pre-warm Claude Connection
 
-### Why it wasn't done yet
-Initial focus was on streaming architecture (bigger win). HTTP keep-alive is a smaller optimization.
+### Status: DEFERRED
 
-### What it does
-Reuses the HTTPS connection to Anthropic across multiple requests instead of opening a new TCP connection each time.
+HTTP keep-alive provides marginal improvement (~50-100ms) compared to the gains already achieved with streaming. The Anthropic SDK handles connection management internally.
 
-### Implementation
-
-**File:** `pipelines/v1-advanced.js`
-
-```javascript
-import { Agent } from 'https';
-
-// Create a keep-alive agent for Claude connections
-const claudeAgent = new Agent({
-  keepAlive: true,
-  keepAliveMsecs: 30000,  // Keep connection alive for 30s
-  maxSockets: 5,          // Max concurrent connections
-  timeout: 60000          // Socket timeout
-});
-
-// Pass to Anthropic client
-const anthropic = new Anthropic({
-  httpAgent: claudeAgent
-});
-```
-
-### Expected savings
-- **First request of call:** No change (still needs initial connection)
-- **Subsequent requests:** ~50-100ms saved per utterance
-
-### Checklist
-- [ ] Create keep-alive agent in `v1-advanced.js`
-- [ ] Pass agent to Anthropic client
-- [ ] Test connection reuse across utterances
-- [ ] Add logging to confirm keep-alive is working
+**Expected savings:** ~50-100ms per subsequent utterance
+**Priority:** Low - streaming achieved bigger wins
 
 ---
 
 ## Optimization 2: Pre-fetch Senior Memories
 
-### Why it wasn't done yet
-Memory search was designed as on-demand (triggered by keywords). Pre-fetching is a new optimization.
+### Status: ✅ IMPLEMENTED
 
-### What it does
-When a call starts, immediately fetch the senior's most important memories so they're ready when needed.
+Memories are now pre-fetched when calls start, especially for reminder calls.
 
-### Implementation
+**Implementation:**
+- `services/scheduler.js` - `prefetchForPhone()` builds context before Twilio call
+- `services/memory.js` - `buildContext()` fetches critical + recent + important memories
+- `services/memory.js` - `getCritical()`, `getImportant()`, `getRecent()` methods
+- Memory context injected into system prompt via `buildSystemPrompt()`
 
-**File:** `pipelines/v1-advanced.js`
+**Features implemented:**
+- ✅ Pre-fetch on call start (parallel with greeting)
+- ✅ Tiered memory injection (critical → contextual → background)
+- ✅ Memory decay (30-day half-life)
+- ✅ Recent access boost (+10 importance if accessed in last week)
+- ✅ Deduplication (cosine > 0.9 blocks duplicate storage)
 
-```javascript
-// In constructor or call start
-async prefetchMemories(seniorId) {
-  if (!seniorId) return;
-
-  try {
-    // Fetch top memories by importance (not query-based)
-    this.prefetchedMemories = await memoryService.getTopMemories(seniorId, 5);
-    console.log(`[V1] Pre-fetched ${this.prefetchedMemories.length} memories`);
-  } catch (error) {
-    console.error('[V1] Memory prefetch failed:', error.message);
-    this.prefetchedMemories = [];
-  }
-}
-```
-
-**File:** `services/memory.js` (new method)
-
-```javascript
-async getTopMemories(seniorId, limit = 5) {
-  const result = await db.query(`
-    SELECT content, type, importance, created_at
-    FROM memories
-    WHERE senior_id = $1
-    ORDER BY importance DESC, created_at DESC
-    LIMIT $2
-  `, [seniorId, limit]);
-
-  return result.rows;
-}
-```
-
-### Expected savings
-- **When memory is needed:** ~100ms saved (already in memory)
-- **Most calls:** Pre-fetched memories injected into first real response
-
-### Checklist
-- [ ] Add `getTopMemories()` to `services/memory.js`
-- [ ] Add `prefetchMemories()` to V1 session
-- [ ] Call prefetch on session start (parallel with greeting)
-- [ ] Inject pre-fetched memories into system prompt
-- [ ] Fall back to search if prefetch missed relevant memory
+**Savings achieved:** ~100ms per turn (memories already in context)
 
 ---
 
@@ -187,24 +126,34 @@ export function getCachedResponse(userMessage, senior) {
 
 ---
 
-## Optimization 4: Dynamic Model Routing
+## Optimization 4: Dynamic Token Routing
 
-### Why it wasn't done yet
-Haiku default was just implemented. Dynamic routing is the natural next step.
+### Status: ✅ IMPLEMENTED
 
-### What it does
-Observers recommend when to upgrade from Haiku to Sonnet based on conversation context.
+Token count is now dynamically selected based on conversation context.
 
-### Full spec
-See [DYNAMIC_MODEL_ROUTING.md](DYNAMIC_MODEL_ROUTING.md)
+**Implementation:**
+- `pipelines/v1-advanced.js` - `selectModelConfig()` function
+- `pipelines/quick-observer.js` - `modelRecommendation` output with severity-based tokens
+- `pipelines/fast-observer.js` - `model_recommendation` in Director output
 
-### Checklist
-- [ ] Add `modelRecommendation` output to `quick-observer.js`
-- [ ] Add `modelRecommendation` output to `fast-observer.js`
-- [ ] Add `modelRecommendation` output to `observer-agent.js`
-- [ ] Create `selectModelConfig()` function in `v1-advanced.js`
-- [ ] Integrate model selection into streaming path
-- [ ] Add logging for model selection decisions
+**Token selection logic:**
+1. Director provides base `max_tokens` (100-400) based on call phase, emotion, engagement
+2. Quick Observer can escalate for urgent signals (health, safety)
+3. Final = `Math.max(director_tokens, quick_observer_tokens)`
+
+**Token ranges by situation:**
+| Situation | Tokens | Source |
+|-----------|--------|--------|
+| Normal | 100 | Default |
+| Health mention | 150-180 | Quick Observer |
+| Safety (high) | 200 | Quick Observer |
+| Emotional support | 200-250 | Director |
+| Low engagement | 200 | Director |
+| Reminder delivery | 150 | Director |
+| Call closing | 150 | Director |
+
+**Model:** Single model (Claude Sonnet 4.5) - simplified from Haiku/Sonnet switching
 
 ---
 
@@ -274,43 +223,64 @@ stream.on('text', (text) => {
 
 ---
 
-## Implementation Priority
+## Implementation Status Summary
 
-| Optimization | Effort | Impact | Priority |
-|-------------|--------|--------|----------|
-| Pre-warm Claude connection | Low | ~50-100ms | 1 |
-| Pre-fetch memories | Medium | ~100ms | 2 |
-| Dynamic model routing | Medium | Quality + context | 3 |
-| Cache common responses | Medium | ~500ms (10-20% of turns) | 4 |
-| Parallel initialization | Low | ~50ms | 5 |
-| Speculative TTS | High | ~100-200ms | 6 (future) |
-
----
-
-## Expected Final Latency
-
-| Stage | Current | After Optimizations |
-|-------|---------|-------------------|
-| Greeting | ~400ms | ~400ms (unchanged) |
-| Normal response | ~600ms | ~400-450ms |
-| Cache hit | ~600ms | ~100ms |
-| Complex response (Sonnet) | N/A | ~800ms |
-
-**Target achieved:** 300-450ms for most responses
+| Optimization | Status | Impact |
+|-------------|--------|--------|
+| Pre-built greeting | ✅ Done | Instant first response |
+| Claude streaming | ✅ Done | ~200-300ms first token |
+| ElevenLabs WebSocket | ✅ Done | ~100-150ms TTS |
+| Sentence buffering | ✅ Done | Natural speech flow |
+| Pre-fetch memories | ✅ Done | ~100ms saved |
+| Dynamic token routing | ✅ Done | Right-sized responses |
+| Conversation Director | ✅ Done | Quality + guidance |
+| Pre-warm Claude | Deferred | Marginal gains |
+| Cache common responses | Deferred | Complexity vs gain |
+| Speculative TTS | Future | Requires careful design |
 
 ---
 
-## Files to Modify
+## Current Latency Achieved
 
-| File | Changes |
-|------|---------|
-| `pipelines/v1-advanced.js` | Keep-alive agent, memory prefetch, model selection |
-| `pipelines/response-cache.js` | New file for cached responses |
-| `pipelines/quick-observer.js` | Add `modelRecommendation` output |
-| `pipelines/fast-observer.js` | Add `modelRecommendation` output |
-| `pipelines/observer-agent.js` | Add `modelRecommendation` output |
-| `services/memory.js` | Add `getTopMemories()` method |
+| Stage | Latency | Notes |
+|-------|---------|-------|
+| Greeting | ~100ms | Pre-generated, cached |
+| Normal response | ~400-500ms | After user stops |
+| First turn (after greeting) | ~400ms | Claude streaming |
+| Emotional response | ~500-600ms | More tokens (200-250) |
+| Extended response | ~700-800ms | 300-400 tokens |
+
+**Target achieved:** ✓ 400-500ms for most responses
 
 ---
 
-*Last updated: January 2026*
+## Files Implementing Optimizations
+
+| File | Optimizations |
+|------|---------------|
+| `pipelines/v1-advanced.js` | Streaming, sentence buffer, barge-in, model selection |
+| `pipelines/quick-observer.js` | Regex patterns, token recommendations |
+| `pipelines/fast-observer.js` | Conversation Director, guidance, tokens |
+| `adapters/elevenlabs-streaming.js` | WebSocket TTS |
+| `services/memory.js` | Pre-fetch, decay, tiered injection |
+| `services/scheduler.js` | Context pre-fetch for reminder calls |
+
+---
+
+## Future Optimizations
+
+### Prompt Caching (Anthropic)
+Cache static system prompt parts for 90% cost savings on input tokens.
+- Add `cache_control: { type: "ephemeral" }` to static content blocks
+- Estimated savings: ~$0.04/call → ~$1.20/mo per senior
+
+### Alternative TTS Providers
+| Provider | Latency | Quality | Status |
+|----------|---------|---------|--------|
+| ElevenLabs WS | ~150ms | Excellent | Current |
+| Cartesia | ~50ms | Very Good | Future test |
+| Deepgram TTS | ~100ms | Good | Future test |
+
+---
+
+*Last updated: January 2026 - v3.1*

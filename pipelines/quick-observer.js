@@ -302,6 +302,148 @@ const ENVIRONMENT_PATTERNS = [
 ];
 
 // ============================================================================
+// ADL (ACTIVITIES OF DAILY LIVING) PATTERNS - Functional independence
+// ============================================================================
+const ADL_PATTERNS = [
+  // Bathing and hygiene
+  { pattern: /\b(can't (get in|get out of) (the )?(shower|tub|bath))\b/i, signal: 'bathing_difficulty', severity: 'high' },
+  { pattern: /\b(trouble (showering|bathing|washing)|hard to (shower|bathe|wash))\b/i, signal: 'bathing_difficulty', severity: 'high' },
+  { pattern: /\b(haven't (showered|bathed|washed) in|skip(ped)? (my )?(shower|bath))\b/i, signal: 'hygiene_concern', severity: 'medium' },
+
+  // Dressing
+  { pattern: /\b(can't (get dressed|put on|button|zip|tie))\b/i, signal: 'dressing_difficulty', severity: 'medium' },
+  { pattern: /\b(trouble (dressing|getting dressed|with (buttons|zippers|shoelaces)))\b/i, signal: 'dressing_difficulty', severity: 'medium' },
+  { pattern: /\b(hard to (reach|bend|lift my arms))\b/i, signal: 'mobility_limitation', severity: 'medium' },
+
+  // Toileting
+  { pattern: /\b(accident|accidents|wet myself|soiled|incontinence|bladder|bowel)\b/i, signal: 'continence_issue', severity: 'high' },
+  { pattern: /\b(trouble (getting to|using) the (bathroom|toilet))\b/i, signal: 'toileting_difficulty', severity: 'high' },
+
+  // Mobility and transfers
+  { pattern: /\b(can't (get up|stand up|get out of (bed|chair))|trouble (standing|getting up))\b/i, signal: 'transfer_difficulty', severity: 'high' },
+  { pattern: /\b(need(ed)? help (getting up|standing|walking))\b/i, signal: 'mobility_assistance', severity: 'high' },
+  { pattern: /\b(use a (walker|cane|wheelchair)|started using)\b/i, signal: 'mobility_aid', severity: 'low' },
+  { pattern: /\b(stuck in (bed|chair)|couldn't (move|get up))\b/i, signal: 'immobility', severity: 'high' },
+
+  // Grooming
+  { pattern: /\b(can't (brush|comb|cut|trim)|trouble with (my )?(hair|nails|teeth))\b/i, signal: 'grooming_difficulty', severity: 'low' },
+
+  // General independence
+  { pattern: /\b(can't do (it|things) (myself|alone|anymore)|need(ed)? help (with everything|doing))\b/i, signal: 'independence_loss', severity: 'high' },
+  { pattern: /\b(losing my independence|not independent|depend on)\b/i, signal: 'independence_concern', severity: 'medium' },
+];
+
+// ============================================================================
+// COGNITIVE DECLINE PATTERNS - Memory, confusion, word-finding
+// ============================================================================
+const COGNITIVE_PATTERNS = [
+  // Word-finding difficulty
+  { pattern: /\b(can't (think of|remember) the word|what's (it|that) called|you know what I mean)\b/i, signal: 'word_finding', severity: 'low' },
+  { pattern: /\b(tip of my tongue|brain (fog|freeze)|mind (went blank|is blank))\b/i, signal: 'word_finding', severity: 'low' },
+
+  // Time/place confusion
+  { pattern: /\b(what (day|year|month) is it|forgot what (day|year)|lost track of (time|days))\b/i, signal: 'time_confusion', severity: 'medium' },
+  { pattern: /\b(thought (it was|today was)|didn't realize|mixed up the (days|dates))\b/i, signal: 'time_confusion', severity: 'medium' },
+
+  // Object misplacement (unusual locations)
+  { pattern: /\b(put (the|my) .* in the (fridge|freezer|oven|microwave|closet))\b/i, signal: 'object_misplacement', severity: 'high' },
+  { pattern: /\b(found (my|the) .* in (a strange|the wrong|an odd) place)\b/i, signal: 'object_misplacement', severity: 'medium' },
+  { pattern: /\b(keep losing|can't find (my|the)|where did I put)\b/i, signal: 'misplacing_items', severity: 'low' },
+
+  // Task confusion
+  { pattern: /\b(forgot (what I was|why I) (doing|came|went)|what was I (doing|saying))\b/i, signal: 'task_confusion', severity: 'medium' },
+  { pattern: /\b(started to .* (and|but) forgot|couldn't (finish|remember how))\b/i, signal: 'task_confusion', severity: 'medium' },
+
+  // Recognition issues
+  { pattern: /\b(didn't recognize|who (is|was) that|couldn't (place|remember) (them|who))\b/i, signal: 'recognition_issue', severity: 'high' },
+
+  // Getting lost
+  { pattern: /\b(got lost (going|coming|driving|walking)|couldn't find my way)\b/i, signal: 'navigation_confusion', severity: 'high' },
+  { pattern: /\b(familiar place.*(confus|lost)|didn't know where I was)\b/i, signal: 'navigation_confusion', severity: 'high' },
+];
+
+// ============================================================================
+// REQUEST FOR HELP PATTERNS - Direct asks for assistance
+// ============================================================================
+const HELP_REQUEST_PATTERNS = [
+  { pattern: /\b(can you help|could you help|help me (with|to|understand))\b/i, signal: 'direct_help_request' },
+  { pattern: /\b(I need help (with|to|doing)|need (some|your) help)\b/i, signal: 'direct_help_request' },
+  { pattern: /\b(do you know (how|what|where|when|why)|what should I do)\b/i, signal: 'advice_request' },
+  { pattern: /\b(can you (tell|explain|remind)|would you (mind|be able to))\b/i, signal: 'information_request' },
+  { pattern: /\b(I('m| am) (confused|not sure|unsure) (about|how|what))\b/i, signal: 'clarification_request' },
+  { pattern: /\b(how do (I|you)|what('s| is) the (best|right) way)\b/i, signal: 'guidance_request' },
+];
+
+// ============================================================================
+// END OF LIFE PATTERNS - Mortality, estate, burden (handle with care)
+// ============================================================================
+const END_OF_LIFE_PATTERNS = [
+  // Mortality awareness
+  { pattern: /\b(when I('m| am) gone|after I('m| am) gone|when I die|if I die)\b/i, signal: 'mortality_mention', severity: 'medium' },
+  { pattern: /\b(don't have (much|long) (time|left)|not (long|much time) (for|left))\b/i, signal: 'mortality_mention', severity: 'medium' },
+  { pattern: /\b(my (time|days) (are|is) (numbered|limited|running out))\b/i, signal: 'mortality_mention', severity: 'medium' },
+
+  // Estate and affairs
+  { pattern: /\b(will (and testament)?|living will|estate|power of attorney)\b/i, signal: 'estate_planning', severity: 'low' },
+  { pattern: /\b(getting (my )?affairs in order|putting things in order)\b/i, signal: 'estate_planning', severity: 'low' },
+
+  // Burden concerns
+  { pattern: /\b(don't want to be a burden|burden (on|to) (my|the)|being a burden)\b/i, signal: 'burden_concern', severity: 'high' },
+  { pattern: /\b((everyone|they)'d be better off|better off without me)\b/i, signal: 'burden_concern', severity: 'high' },
+
+  // Giving up / hopelessness
+  { pattern: /\b(what's the point|why bother|no point (in|anymore)|given up)\b/i, signal: 'hopelessness', severity: 'high' },
+  { pattern: /\b(rather (die|not wake up|be dead)|ready to (go|die)|tired of living)\b/i, signal: 'death_wish', severity: 'high' },
+
+  // Saying goodbye
+  { pattern: /\b(want(ed)? to say goodbye|in case (something|anything) happens)\b/i, signal: 'farewell_concern', severity: 'high' },
+];
+
+// ============================================================================
+// HYDRATION AND NUTRITION DETAIL PATTERNS
+// ============================================================================
+const HYDRATION_PATTERNS = [
+  // Dehydration indicators
+  { pattern: /\b(haven't (had|drunk|drank) (water|anything)|not drinking (enough|much))\b/i, signal: 'dehydration_risk', severity: 'high' },
+  { pattern: /\b(very thirsty|so thirsty|mouth is dry|dry mouth)\b/i, signal: 'dehydration_symptom', severity: 'medium' },
+  { pattern: /\b(dark (urine|pee)|not (peeing|urinating) (much|enough))\b/i, signal: 'dehydration_symptom', severity: 'high' },
+
+  // Weight and nutrition
+  { pattern: /\b(lost (a lot of )?weight|losing weight|clothes (are|feel) (loose|big))\b/i, signal: 'weight_loss', severity: 'high' },
+  { pattern: /\b(not (eating|hungry)|no appetite|can't eat|haven't eaten (in|for))\b/i, signal: 'poor_nutrition', severity: 'high' },
+  { pattern: /\b(skip(ped|ping)? meals?|forgot to eat|too tired to (eat|cook))\b/i, signal: 'missed_meals', severity: 'medium' },
+
+  // Positive nutrition
+  { pattern: /\b(drinking (lots of |more )?water|staying hydrated|ate (well|good))\b/i, signal: 'good_nutrition', severity: 'positive' },
+  { pattern: /\b(good appetite|eating (well|better)|gained (some )?weight)\b/i, signal: 'good_nutrition', severity: 'positive' },
+
+  // Swallowing issues
+  { pattern: /\b(trouble swallowing|hard to swallow|chok(e|ed|ing) on|food (gets|got) stuck)\b/i, signal: 'swallowing_difficulty', severity: 'high' },
+];
+
+// ============================================================================
+// TRANSPORTATION AND MOBILITY PATTERNS
+// ============================================================================
+const TRANSPORTATION_PATTERNS = [
+  // Driving cessation
+  { pattern: /\b(can't drive (anymore)?|stopped driving|gave up (driving|my car|the keys))\b/i, signal: 'driving_cessation', severity: 'medium' },
+  { pattern: /\b(took (away )?my (keys|license|car)|not (allowed|supposed) to drive)\b/i, signal: 'driving_restriction', severity: 'medium' },
+  { pattern: /\b(shouldn't (be )?driv(e|ing)|dangerous (to|for me to) drive)\b/i, signal: 'driving_concern', severity: 'medium' },
+
+  // Transportation needs
+  { pattern: /\b(need(ed)? a ride|can't get (there|to)|no (way to get|transportation))\b/i, signal: 'transportation_need', severity: 'medium' },
+  { pattern: /\b(stuck at home|can't (go|get) anywhere|no way to (leave|get out))\b/i, signal: 'homebound', severity: 'high' },
+  { pattern: /\b(miss(ing)? (my car|driving|going out)|wish I could (drive|go))\b/i, signal: 'mobility_loss_grief', severity: 'medium' },
+
+  // Dependency
+  { pattern: /\b(depend on .* (for rides|to take me)|have to (ask|wait) for)\b/i, signal: 'transportation_dependency', severity: 'low' },
+  { pattern: /\b(uber|lyft|taxi|cab|bus|public transit|paratransit)\b/i, signal: 'alternative_transport', severity: 'low' },
+
+  // Appointments
+  { pattern: /\b(missed .* (because|couldn't get)|can't get to (my )?appointment)\b/i, signal: 'missed_due_to_transport', severity: 'high' },
+];
+
+// ============================================================================
 // QUESTION PATTERNS - User expects a response
 // ============================================================================
 const QUESTION_PATTERNS = [
@@ -361,6 +503,12 @@ export function quickAnalyze(userMessage, recentHistory = []) {
     activitySignals: [],
     timeSignals: [],
     environmentSignals: [],
+    adlSignals: [],           // Activities of Daily Living
+    cognitiveSignals: [],     // Cognitive decline indicators
+    helpRequestSignals: [],   // Direct requests for help
+    endOfLifeSignals: [],     // Mortality, burden, estate
+    hydrationSignals: [],     // Hydration and nutrition
+    transportSignals: [],     // Transportation and mobility
     isQuestion: false,
     questionType: null,
     engagementLevel: 'normal',
@@ -419,6 +567,48 @@ export function quickAnalyze(userMessage, recentHistory = []) {
   for (const { pattern, signal } of ENVIRONMENT_PATTERNS) {
     if (pattern.test(text)) {
       result.environmentSignals.push(signal);
+    }
+  }
+
+  // ADL (Activities of Daily Living) patterns
+  for (const { pattern, signal, severity } of ADL_PATTERNS) {
+    if (pattern.test(text)) {
+      result.adlSignals.push({ signal, severity: severity || 'medium' });
+    }
+  }
+
+  // Cognitive decline patterns
+  for (const { pattern, signal, severity } of COGNITIVE_PATTERNS) {
+    if (pattern.test(text)) {
+      result.cognitiveSignals.push({ signal, severity: severity || 'medium' });
+    }
+  }
+
+  // Help request patterns
+  for (const { pattern, signal } of HELP_REQUEST_PATTERNS) {
+    if (pattern.test(text)) {
+      result.helpRequestSignals.push(signal);
+    }
+  }
+
+  // End of life patterns
+  for (const { pattern, signal, severity } of END_OF_LIFE_PATTERNS) {
+    if (pattern.test(text)) {
+      result.endOfLifeSignals.push({ signal, severity: severity || 'medium' });
+    }
+  }
+
+  // Hydration and nutrition patterns
+  for (const { pattern, signal, severity } of HYDRATION_PATTERNS) {
+    if (pattern.test(text)) {
+      result.hydrationSignals.push({ signal, severity: severity || 'medium' });
+    }
+  }
+
+  // Transportation patterns
+  for (const { pattern, signal, severity } of TRANSPORTATION_PATTERNS) {
+    if (pattern.test(text)) {
+      result.transportSignals.push({ signal, severity: severity || 'medium' });
     }
   }
 
@@ -484,6 +674,18 @@ export function quickAnalyze(userMessage, recentHistory = []) {
  * Returns token adjustment for sensitive situations
  */
 function buildModelRecommendation(analysis) {
+  // End of life concerns - HIGHEST priority (death wish, hopelessness)
+  const criticalEndOfLife = analysis.endOfLifeSignals.filter(
+    s => s.signal === 'death_wish' || s.signal === 'hopelessness' || s.signal === 'burden_concern'
+  );
+  if (criticalEndOfLife.length > 0) {
+    return {
+      use_sonnet: true,
+      max_tokens: 250,
+      reason: 'crisis_support'
+    };
+  }
+
   // Safety concerns - highest priority
   const highSeveritySafety = analysis.safetySignals.filter(s => s.severity === 'high');
   if (highSeveritySafety.length > 0) {
@@ -491,6 +693,36 @@ function buildModelRecommendation(analysis) {
       use_sonnet: true,
       max_tokens: 200,
       reason: 'safety_concern'
+    };
+  }
+
+  // ADL high severity - functional decline
+  const highSeverityADL = analysis.adlSignals.filter(s => s.severity === 'high');
+  if (highSeverityADL.length > 0) {
+    return {
+      use_sonnet: true,
+      max_tokens: 180,
+      reason: 'functional_concern'
+    };
+  }
+
+  // Cognitive high severity - confusion, getting lost
+  const highSeverityCognitive = analysis.cognitiveSignals.filter(s => s.severity === 'high');
+  if (highSeverityCognitive.length > 0) {
+    return {
+      use_sonnet: true,
+      max_tokens: 180,
+      reason: 'cognitive_concern'
+    };
+  }
+
+  // Hydration high severity - dehydration, weight loss, swallowing
+  const highSeverityHydration = analysis.hydrationSignals.filter(s => s.severity === 'high');
+  if (highSeverityHydration.length > 0) {
+    return {
+      use_sonnet: true,
+      max_tokens: 160,
+      reason: 'nutrition_concern'
     };
   }
 
@@ -511,6 +743,54 @@ function buildModelRecommendation(analysis) {
       use_sonnet: true,
       max_tokens: 150,
       reason: 'health_mention'
+    };
+  }
+
+  // End of life (non-critical) - estate planning, mortality awareness
+  if (analysis.endOfLifeSignals.length > 0) {
+    return {
+      use_sonnet: true,
+      max_tokens: 180,
+      reason: 'end_of_life_topic'
+    };
+  }
+
+  // ADL medium severity
+  const mediumSeverityADL = analysis.adlSignals.filter(s => s.severity === 'medium');
+  if (mediumSeverityADL.length > 0) {
+    return {
+      use_sonnet: true,
+      max_tokens: 140,
+      reason: 'functional_mention'
+    };
+  }
+
+  // Cognitive medium severity
+  const mediumSeverityCognitive = analysis.cognitiveSignals.filter(s => s.severity === 'medium');
+  if (mediumSeverityCognitive.length > 0) {
+    return {
+      use_sonnet: true,
+      max_tokens: 140,
+      reason: 'cognitive_mention'
+    };
+  }
+
+  // Transportation - homebound or missed appointments
+  const highSeverityTransport = analysis.transportSignals.filter(s => s.severity === 'high');
+  if (highSeverityTransport.length > 0) {
+    return {
+      use_sonnet: true,
+      max_tokens: 150,
+      reason: 'mobility_isolation'
+    };
+  }
+
+  // Help request - they're asking for something
+  if (analysis.helpRequestSignals.length > 0) {
+    return {
+      use_sonnet: true,
+      max_tokens: 150,
+      reason: 'help_request'
     };
   }
 
@@ -612,6 +892,93 @@ function buildGuidance(analysis) {
       accident: 'They had an accident. Ask if they are hurt and if they need help.',
     };
     lines.push(`[SAFETY] ${safetyGuidance[safetySignal.signal] || 'Safety concern detected. Ask if they are okay.'}`);
+  }
+
+  // End of life signals - CRITICAL priority (handle with extreme care)
+  if (analysis.endOfLifeSignals.length > 0) {
+    const eolSignal = analysis.endOfLifeSignals[0];
+    const eolGuidance = {
+      death_wish: 'CRITICAL: They expressed wanting to die. Be very gentle. Ask if they\'re okay. Listen. Consider if caregiver should be alerted.',
+      hopelessness: 'They sound hopeless. Acknowledge their feelings. Remind them you care. Ask what\'s making them feel this way.',
+      burden_concern: 'They feel like a burden. Reassure them they are loved and valued. Ask what\'s making them feel this way.',
+      mortality_mention: 'They mentioned their mortality. Be gentle. Let them share if they want to talk about it.',
+      estate_planning: 'They mentioned their affairs/will. Acknowledge this is important. Ask if there\'s anything on their mind.',
+      farewell_concern: 'They seem to be saying goodbye. Ask gently if everything is okay.',
+    };
+    lines.push(`[END OF LIFE] ${eolGuidance[eolSignal.signal] || 'Sensitive topic. Be very gentle and listen.'}`);
+  }
+
+  // ADL signals - HIGH priority for caregiver awareness
+  if (analysis.adlSignals.length > 0) {
+    const adlSignal = analysis.adlSignals[0];
+    const adlGuidance = {
+      bathing_difficulty: 'Trouble bathing is concerning. Ask gently if they\'re getting help with this.',
+      hygiene_concern: 'Hygiene concern. Ask gently if everything is okay at home.',
+      dressing_difficulty: 'Trouble dressing. Ask if they have help with this.',
+      mobility_limitation: 'Mobility limitation. Ask how they\'re managing.',
+      continence_issue: 'Sensitive topic. Be very gentle. Ask if they have supplies and support.',
+      toileting_difficulty: 'Toileting difficulty. Ask gently if they have help.',
+      transfer_difficulty: 'Trouble getting up is a fall risk. Ask if they\'ve told someone.',
+      mobility_assistance: 'They need help moving. Ask who helps them.',
+      mobility_aid: 'They use a mobility aid. Ask how it\'s working for them.',
+      immobility: 'They were stuck. This is concerning. Ask if they\'re okay now.',
+      grooming_difficulty: 'Ask if they have help with grooming.',
+      independence_loss: 'Loss of independence is hard. Acknowledge their feelings. Ask how they\'re coping.',
+      independence_concern: 'Acknowledge this is difficult. Ask how they\'re managing.',
+    };
+    lines.push(`[DAILY LIVING] ${adlGuidance[adlSignal.signal] || 'They mentioned difficulty with daily tasks. Ask how they\'re managing.'}`);
+  }
+
+  // Cognitive signals - HIGH priority
+  if (analysis.cognitiveSignals.length > 0) {
+    const cogSignal = analysis.cognitiveSignals[0];
+    const cogGuidance = {
+      word_finding: 'Word-finding difficulty. Be patient. Help them if they need it.',
+      time_confusion: 'Time confusion. Gently orient them. Ask if this happens often.',
+      object_misplacement: 'Unusual object placement. Ask gently if this has happened before.',
+      misplacing_items: 'Everyone loses things. Be reassuring.',
+      task_confusion: 'They lost track of what they were doing. Be patient and help redirect.',
+      recognition_issue: 'Recognition difficulty is concerning. Ask gently about this.',
+      navigation_confusion: 'Getting lost is concerning. Ask if they got home safely. Who knows about this?',
+    };
+    lines.push(`[COGNITIVE] ${cogGuidance[cogSignal.signal] || 'Possible cognitive concern. Be patient and reassuring.'}`);
+  }
+
+  // Hydration signals
+  if (analysis.hydrationSignals.length > 0) {
+    const hydSignal = analysis.hydrationSignals[0];
+    const hydGuidance = {
+      dehydration_risk: 'Not drinking enough. Encourage them to get some water now.',
+      dehydration_symptom: 'Possible dehydration. Encourage fluids. Ask how they\'re feeling.',
+      weight_loss: 'Weight loss is concerning. Ask if they\'re eating okay. Have they told their doctor?',
+      poor_nutrition: 'Poor appetite is concerning. Ask what\'s making it hard to eat.',
+      missed_meals: 'Skipping meals. Encourage them to eat something. Ask why they\'re skipping.',
+      good_nutrition: 'Great that they\'re eating well! Reinforce this.',
+      swallowing_difficulty: 'Swallowing problems are serious. Ask if they\'ve told their doctor.',
+    };
+    lines.push(`[NUTRITION] ${hydGuidance[hydSignal.signal] || 'Nutrition concern. Ask about their eating and drinking.'}`);
+  }
+
+  // Transportation signals
+  if (analysis.transportSignals.length > 0) {
+    const transSignal = analysis.transportSignals[0];
+    const transGuidance = {
+      driving_cessation: 'Not driving anymore is a big change. Acknowledge the loss of independence.',
+      driving_restriction: 'Having driving restricted is hard. Acknowledge their feelings.',
+      driving_concern: 'Ask about their driving concerns. Safety is important.',
+      transportation_need: 'They need transportation. Ask if they have someone who can help.',
+      homebound: 'Being stuck at home is isolating. Ask how they\'re coping. Who can help?',
+      mobility_loss_grief: 'They miss driving. Acknowledge this loss. Ask how they\'re getting around.',
+      transportation_dependency: 'Depending on others is hard. Ask how it\'s going.',
+      alternative_transport: 'Ask how the transportation service is working for them.',
+      missed_due_to_transport: 'They missed something due to transport. This is concerning. Ask if they can reschedule.',
+    };
+    lines.push(`[TRANSPORT] ${transGuidance[transSignal.signal] || 'Transportation came up. Ask how they\'re getting around.'}`);
+  }
+
+  // Help request signals
+  if (analysis.helpRequestSignals.length > 0) {
+    lines.push('[HELP REQUEST] They\'re asking for help. Address their request directly and clearly.');
   }
 
   // Health signals - HIGH priority

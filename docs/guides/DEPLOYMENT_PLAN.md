@@ -5,46 +5,68 @@ Deploy Donna to Railway for production use.
 ## Prerequisites
 
 - Railway account ([railway.app](https://railway.app))
-- GitHub account with your Donna repository
+- GitHub account with your Donna repository (`donna2`)
 
 ## Quick Deploy
 
-### 1. Push to GitHub
+### 1. Deploy Command
+
+**IMPORTANT:** Railway's GitHub webhook is unreliable. Always deploy manually:
 
 ```bash
-git push origin main
+# Full deploy after committing
+git add . && git commit -m "your message" && git push && git push origin main:master && railway up
+
+# Or use alias after committing
+git pushall && railway up
 ```
 
-### 2. Deploy on Railway
+### 2. Initial Setup (First Time Only)
 
 1. Go to [railway.app](https://railway.app)
 2. Click **"New Project"** → **"Deploy from GitHub repo"**
 3. Select your `donna2` repository
-4. Railway auto-detects Node.js and deploys
+4. Railway auto-detects Node.js
 
 ### 3. Add Environment Variables
 
 In Railway dashboard → Variables:
 
-| Variable | Where to Get It |
-|----------|-----------------|
-| `PORT` | Railway sets automatically |
-| `GOOGLE_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| `TWILIO_ACCOUNT_SID` | [console.twilio.com](https://console.twilio.com) |
-| `TWILIO_AUTH_TOKEN` | [console.twilio.com](https://console.twilio.com) |
-| `TWILIO_PHONE_NUMBER` | Your Twilio phone number |
-| `DATABASE_URL` | [neon.tech](https://neon.tech) (Milestone 7+) |
+| Variable | Source | Required |
+|----------|--------|----------|
+| `PORT` | Railway sets automatically | Auto |
+| `DATABASE_URL` | [neon.tech](https://neon.tech) | ✅ |
+| `TWILIO_ACCOUNT_SID` | [console.twilio.com](https://console.twilio.com) | ✅ |
+| `TWILIO_AUTH_TOKEN` | [console.twilio.com](https://console.twilio.com) | ✅ |
+| `TWILIO_PHONE_NUMBER` | Your Twilio phone number | ✅ |
+| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) | ✅ |
+| `GOOGLE_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | ✅ |
+| `ELEVENLABS_API_KEY` | [elevenlabs.io](https://elevenlabs.io) | ✅ |
+| `DEEPGRAM_API_KEY` | [deepgram.com](https://deepgram.com) | ✅ |
+| `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) | ✅ |
+
+**Optional:**
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `V1_STREAMING_ENABLED` | `true` | Enable streaming pipeline |
+| `VOICE_MODEL` | `claude-sonnet` | Main voice model |
+| `FAST_OBSERVER_MODEL` | `gemini-3-flash` | Conversation Director model |
 
 ### 4. Get Your Public URL
 
 Railway provides a URL like: `https://donna-production.up.railway.app`
 
+This URL is stored in `RAILWAY_PUBLIC_DOMAIN` environment variable.
+
 ### 5. Configure Twilio Webhooks
 
 1. Go to [Twilio Console](https://console.twilio.com) → Phone Numbers
 2. Select your number
-3. Set webhook: `https://YOUR-APP.up.railway.app/voice/answer`
-4. Method: `POST`
+3. Under "Voice & Fax":
+   - **A Call Comes In:** `https://YOUR-APP.up.railway.app/voice/answer`
+   - **Method:** `POST`
+   - **Status Callback:** `https://YOUR-APP.up.railway.app/voice/status`
+   - **Method:** `POST`
 
 ## Verify Deployment
 
@@ -54,17 +76,23 @@ curl https://YOUR-APP.up.railway.app/health
 
 Expected response:
 ```json
-{"status": "ok", "milestone": 1}
+{"status": "ok", "timestamp": "2026-01-21T..."}
 ```
 
-## Redeploy After Changes
+## Deploy Workflow
 
-Railway auto-deploys when you push to GitHub:
+After making changes:
 
 ```bash
-git add -A
-git commit -m "Update feature"
-git push origin main
+# 1. Test locally
+npm run dev
+
+# 2. Commit changes
+git add .
+git commit -m "feat: your change description"
+
+# 3. Push and deploy
+git push && git push origin main:master && railway up
 ```
 
 ## Troubleshooting
@@ -73,24 +101,48 @@ git push origin main
 
 Railway dashboard → Deployments → View Logs
 
+Or use CLI:
+```bash
+railway logs
+```
+
 ### Common Issues
 
 **Build fails:**
-- Check `package.json` has correct start script
-- Ensure Node.js version ≥20
+- Check `package.json` has correct start script (`node index.js`)
+- Ensure Node.js version ≥20 in `package.json`
 
 **Twilio not connecting:**
-- Verify webhook URL is correct
+- Verify webhook URL is HTTPS (Railway provides this)
 - Check Railway logs for incoming requests
+- Ensure phone number is configured in Twilio Console
+
+**WebSocket connection issues:**
+- Railway supports WebSockets by default
+- Check for `wss://` URL construction in logs
 
 **Environment variables not working:**
 - Variables are case-sensitive
-- Redeploy after adding new variables
+- Run `railway up` after adding new variables
+- Verify in Railway dashboard → Variables
+
+**Database connection issues:**
+- Neon connection strings include `?sslmode=require`
+- Check `DATABASE_URL` format
 
 ## Cost
 
 Railway offers:
-- **Free tier:** $5/month credit (enough for development)
-- **Pro:** Usage-based pricing
+- **Hobby plan:** $5/month
+- **Pro plan:** Usage-based
+
+Typical monthly costs for development:
+- Railway: ~$5-15
+- Neon (free tier): $0
+- External APIs: Variable
 
 See [railway.app/pricing](https://railway.app/pricing)
+
+---
+
+*Last updated: January 2026*

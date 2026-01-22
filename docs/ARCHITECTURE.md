@@ -72,7 +72,7 @@
 │  │   │              │   (100-400 tokens)  │                                      │   │   │
 │  │   │              └──────────┬──────────┘                                      │   │   │
 │  │   │                         ▼                                                 │   │   │
-│  │   │              Claude Sonnet Streaming                                      │   │   │
+│  │   │              Claude Sonnet 4.5 Streaming                                  │   │   │
 │  │   │                         │                                                 │   │   │
 │  │   │                         ▼                                                 │   │   │
 │  │   │              Sentence Buffer → ElevenLabs WS → Twilio                    │   │   │
@@ -361,26 +361,32 @@ FAST_OBSERVER_MODEL=gemini-3-flash # Director model
 
 ## Latency Budget
 
-| Component | Target |
-|-----------|--------|
-| Deepgram utterance | ~500ms |
-| Quick Observer (L1) | 0ms |
-| Director (L2) | ~150ms (parallel) |
-| Claude first token | ~300ms |
-| TTS first audio | ~150ms |
-| **Total time-to-first-audio** | **~600ms** |
+| Component | Target | Notes |
+|-----------|--------|-------|
+| Deepgram utterance | ~500ms | 500ms endpointing config |
+| Quick Observer (L1) | 0ms | Regex only |
+| Director (L2) | ~150ms | Runs parallel with response |
+| Claude first token | ~200-300ms | Streaming enabled |
+| Sentence buffering | ~50ms | Until punctuation detected |
+| TTS first audio | ~100-150ms | WebSocket pre-connected |
+| **Total time-to-first-audio** | **~400-500ms** | After user stops speaking |
 
 ---
 
-## Cost Summary
+## Cost Summary (15-min call, ~20 turns)
 
 | Component | Model | Per Call |
 |-----------|-------|----------|
 | L1 Quick Observer | Regex | $0 |
-| L2 Director | Gemini 3 Flash | ~$0.0002 |
-| Voice | Claude Sonnet | ~$0.003 |
-| Post-Call Analysis | Gemini Flash | ~$0.0005 |
-| **Total** | | **~$0.004** |
+| L2 Director | Gemini 3 Flash | ~$0.01 |
+| Voice | Claude Sonnet 4.5 | ~$0.08 |
+| Post-Call Analysis | Gemini Flash | ~$0.005 |
+| Memory/Embeddings | OpenAI | ~$0.01 |
+| **AI Total** | | **~$0.11** |
+| Twilio Voice | | ~$0.30 |
+| Deepgram STT | | ~$0.065 |
+| ElevenLabs TTS | | ~$0.18 |
+| **Total per call** | | **~$0.65** |
 
 ---
 

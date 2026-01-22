@@ -18,6 +18,7 @@ import { reminders, seniors, conversations } from './db/schema.js';
 import { eq, desc, gte, and, sql } from 'drizzle-orm';
 import { validateBody, validateParams } from './middleware/validate.js';
 import { validateTwilioWebhook } from './middleware/twilio.js';
+import { apiLimiter, callLimiter, writeLimiter } from './middleware/rate-limit.js';
 import {
   createSeniorSchema,
   updateSeniorSchema,
@@ -52,6 +53,9 @@ app.use(express.json());
 
 // Serve static files (admin UI)
 app.use(express.static(join(__dirname, 'public')));
+
+// Rate limiting for API routes (100 req/min per IP)
+app.use('/api/', apiLimiter);
 
 const PORT = process.env.PORT || 3001;
 const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -212,8 +216,8 @@ app.post('/voice/status', validateTwilioWebhook, async (req, res) => {
   }
 });
 
-// API: Initiate outbound call
-app.post('/api/call', validateBody(initiateCallSchema), async (req, res) => {
+// API: Initiate outbound call (strict rate limit: 5/min)
+app.post('/api/call', callLimiter, validateBody(initiateCallSchema), async (req, res) => {
   const { phoneNumber } = req.body;
 
   try {
@@ -261,7 +265,7 @@ app.post('/api/calls/:callSid/end', async (req, res) => {
 // === SENIOR MANAGEMENT APIs ===
 
 // Create a senior profile
-app.post('/api/seniors', validateBody(createSeniorSchema), async (req, res) => {
+app.post('/api/seniors', writeLimiter, validateBody(createSeniorSchema), async (req, res) => {
   try {
     const senior = await seniorService.create(req.body);
     res.json(senior);
@@ -295,7 +299,7 @@ app.get('/api/seniors/:id', validateParams(seniorIdParamSchema), async (req, res
 });
 
 // Update senior
-app.patch('/api/seniors/:id', validateParams(seniorIdParamSchema), validateBody(updateSeniorSchema), async (req, res) => {
+app.patch('/api/seniors/:id', writeLimiter, validateParams(seniorIdParamSchema), validateBody(updateSeniorSchema), async (req, res) => {
   try {
     const senior = await seniorService.update(req.params.id, req.body);
     res.json(senior);
@@ -307,7 +311,7 @@ app.patch('/api/seniors/:id', validateParams(seniorIdParamSchema), validateBody(
 // === MEMORY APIs ===
 
 // Store a memory for a senior
-app.post('/api/seniors/:id/memories', validateParams(seniorIdParamSchema), validateBody(createMemorySchema), async (req, res) => {
+app.post('/api/seniors/:id/memories', writeLimiter, validateParams(seniorIdParamSchema), validateBody(createMemorySchema), async (req, res) => {
   const { type, content, importance } = req.body;
   try {
     const memory = await memoryService.store(
@@ -401,7 +405,7 @@ app.get('/api/reminders', async (req, res) => {
 });
 
 // Create a reminder
-app.post('/api/reminders', validateBody(createReminderSchema), async (req, res) => {
+app.post('/api/reminders', writeLimiter, validateBody(createReminderSchema), async (req, res) => {
   try {
     const { seniorId, type, title, description, scheduledTime, isRecurring, cronExpression } = req.body;
     const [reminder] = await db.insert(reminders).values({
@@ -420,7 +424,7 @@ app.post('/api/reminders', validateBody(createReminderSchema), async (req, res) 
 });
 
 // Update a reminder
-app.patch('/api/reminders/:id', validateParams(reminderIdParamSchema), validateBody(updateReminderSchema), async (req, res) => {
+app.patch('/api/reminders/:id', writeLimiter, validateParams(reminderIdParamSchema), validateBody(updateReminderSchema), async (req, res) => {
   try {
     const { title, description, scheduledTime, isRecurring, cronExpression, isActive } = req.body;
     const updateData = {};
@@ -442,7 +446,7 @@ app.patch('/api/reminders/:id', validateParams(reminderIdParamSchema), validateB
 });
 
 // Delete a reminder
-app.delete('/api/reminders/:id', validateParams(reminderIdParamSchema), async (req, res) => {
+app.delete('/api/reminders/:id', writeLimiter, validateParams(reminderIdParamSchema), async (req, res) => {
   try {
     await db.delete(reminders).where(eq(reminders.id, req.params.id));
     res.json({ success: true });

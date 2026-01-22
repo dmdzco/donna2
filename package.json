@@ -19,6 +19,7 @@
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.1",
     "express": "^4.21.0",
+    "express-rate-limit": "^8.2.1",
     "openai": "^6.16.0",
     "twilio": "^5.4.0",
     "ws": "^8.19.0",

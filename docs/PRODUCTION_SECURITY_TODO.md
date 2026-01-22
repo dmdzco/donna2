@@ -6,15 +6,15 @@
 
 ---
 
-## Current Production Readiness: 54%
+## Current Production Readiness: 62%
 
-| Category | Grade | Target |
-|----------|-------|--------|
-| Security | D → | A |
-| Scalability | C → | B+ |
-| Reliability | C → | B+ |
-| Testing | F → | B |
-| Observability | D → | B |
+| Category | Grade | Target | Progress |
+|----------|-------|--------|----------|
+| Security | D → **C+** | A | Zod ✅ Twilio ✅ Rate Limit ✅ (Auth pending) |
+| Scalability | C → | B+ | |
+| Reliability | C → | B+ | |
+| Testing | F → | B | |
+| Observability | D → | B | |
 
 ---
 
@@ -59,37 +59,17 @@
 
 ---
 
-### 4. Rate Limiting
-**Risk:** DoS attacks, API abuse, runaway costs from spam calls.
+### 4. ~~Rate Limiting~~ ✅ DONE
+**Status:** Implemented January 2026
 
-- [ ] Install `express-rate-limit`
-- [ ] Add global rate limit (100 req/min per IP)
-- [ ] Add stricter limit for `/api/call` (5 calls/min per IP)
-- [ ] Add stricter limit for auth endpoints (10 req/min)
-- [ ] Return proper 429 responses with `Retry-After` header
+- [x] Install `express-rate-limit`
+- [x] Global API rate limit (100 req/min per IP)
+- [x] Strict call limiter (5 calls/min per IP) on `/api/call`
+- [x] Write limiter (30 req/min) on POST/PATCH/DELETE endpoints
+- [x] Auth limiter (10 req/min) ready for Clerk integration
+- [x] Proper 429 responses with `Retry-After` header
 
-```javascript
-import rateLimit from 'express-rate-limit';
-
-const apiLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-const callLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 5,
-  message: { error: 'Too many calls initiated' },
-});
-
-app.use('/api/', apiLimiter);
-app.post('/api/call', callLimiter, ...);
-```
-
-**Files:** `index.js` or `middleware/rate-limit.js`
-**Effort:** 4 hours
+**Files:** `middleware/rate-limit.js`, `index.js`
 
 ---
 
@@ -445,7 +425,7 @@ app.get('/health', async (req, res) => {
 - [ ] Authentication (Clerk)
 - [x] Input Validation (Zod) ✅
 - [x] Twilio Webhook Verification ✅
-- [ ] Rate Limiting
+- [x] Rate Limiting ✅
 
 ### Before 100 Users (HIGH)
 - [ ] Testing Infrastructure (60% coverage)

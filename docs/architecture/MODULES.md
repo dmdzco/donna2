@@ -1,8 +1,14 @@
 # Donna Modular Architecture
 
-This guide explains Donna's modular architecture design. This architecture is the goal for Phase C (Milestones 11-15) of the incremental build.
+> **Status:** HISTORICAL REFERENCE ONLY
+>
+> This document describes a planned modular architecture that was **not implemented**. The actual Donna codebase uses a simpler, direct architecture documented in [OVERVIEW.md](./OVERVIEW.md).
+>
+> Keeping this document for reference on potential future refactoring patterns.
 
-> **Note:** Start with the simple Gemini voice implementation first. See [INCREMENTAL_BUILD_GUIDE.md](../INCREMENTAL_BUILD_GUIDE.md) for the milestone-based roadmap.
+---
+
+This guide explains a proposed modular architecture design that was planned for Phase C (Milestones 11-15).
 
 ---
 

@@ -4,22 +4,25 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ## Features
 
-- **Conversation Director Architecture (2-Layer + Post-Call)**
-  - Layer 1: Quick Observer (0ms) - Instant regex patterns
+### Voice Pipeline
+- **2-Layer Conversation Director Architecture**
+  - Layer 1: Quick Observer (0ms) - 730+ regex patterns for health, emotion, safety
   - Layer 2: Conversation Director (~150ms) - Gemini 3 Flash for call guidance
-  - Post-Call Analysis - Async summary, concerns, engagement metrics
+  - Post-Call Analysis - Summary, concerns, engagement score
 - **Dynamic Token Routing** - 100-400 tokens based on context
 - **Streaming Pipeline** - ~600ms time-to-first-audio
   - Claude streaming responses (sentence-by-sentence)
   - ElevenLabs WebSocket TTS
-  - Parallel connection startup
+  - Barge-in support (interrupt detection)
+
+### Core Capabilities
 - Real-time voice calls (Twilio Media Streams)
-- Speech transcription (Deepgram STT)
-- Memory system with semantic search (pgvector)
+- Speech transcription (Deepgram Nova 2)
+- Semantic memory with decay + deduplication (pgvector)
 - News updates (OpenAI web search)
 - Scheduled reminder calls with delivery tracking
-- Admin dashboard
-- Observability dashboard
+- Admin dashboard (4 tabs)
+- Observability dashboard (React)
 
 ## Quick Start
 
@@ -101,22 +104,25 @@ The Director proactively guides each call:
 
 ```
 donna/
-├── index.js                    # Main server
+├── index.js                    # Express server, routes, WebSocket handlers
 ├── pipelines/
-│   ├── v1-advanced.js          # Main voice pipeline + call state
-│   ├── quick-observer.js       # Layer 1: Instant regex patterns
-│   └── fast-observer.js        # Layer 2: Conversation Director
+│   ├── v1-advanced.js          # Main pipeline: STT→Observers→Claude→TTS
+│   ├── quick-observer.js       # Layer 1: 730+ lines of regex patterns
+│   └── fast-observer.js        # Layer 2: Conversation Director (Gemini)
 ├── adapters/
-│   ├── llm/index.js            # Multi-provider LLM adapter
-│   ├── elevenlabs.js           # ElevenLabs REST TTS
-│   └── elevenlabs-streaming.js # ElevenLabs WebSocket TTS
+│   ├── llm/
+│   │   ├── index.js            # Multi-provider factory (Claude, Gemini)
+│   │   ├── claude.js           # Claude adapter with streaming
+│   │   └── gemini.js           # Gemini adapter for Director
+│   ├── elevenlabs.js           # REST TTS (fallback/greetings)
+│   └── elevenlabs-streaming.js # WebSocket TTS (~150ms)
 ├── services/
-│   ├── call-analysis.js        # Post-call batch analysis
-│   ├── memory.js               # Memory storage + semantic search
-│   ├── seniors.js              # Senior profile CRUD
-│   ├── conversations.js        # Conversation history
-│   ├── scheduler.js            # Reminder scheduler
-│   └── news.js                 # News via OpenAI web search
+│   ├── call-analysis.js        # Post-call: summary, concerns, score
+│   ├── memory.js               # Semantic search, decay, deduplication
+│   ├── seniors.js              # Senior CRUD, phone normalization
+│   ├── conversations.js        # Call records, transcripts
+│   ├── scheduler.js            # Reminder scheduling + prefetch
+│   └── news.js                 # OpenAI web search, 1hr cache
 ├── db/
 │   ├── client.js               # Database connection
 │   └── schema.js               # Drizzle ORM schema
@@ -174,15 +180,16 @@ FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
 ## Deployment
 
 **Railway:**
-1. Push to GitHub
-2. Connect repo on [railway.app](https://railway.app)
-3. Add environment variables
-4. Deploy (auto-deploys on push)
 
-Or deploy directly:
 ```bash
-railway up
+# Deploy manually (recommended - webhook unreliable)
+git push && git push origin main:master && railway up
+
+# Or use alias after committing
+git pushall && railway up
 ```
+
+See [docs/guides/DEPLOYMENT_PLAN.md](./docs/guides/DEPLOYMENT_PLAN.md) for full setup.
 
 ## Documentation
 

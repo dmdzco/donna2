@@ -66,7 +66,7 @@ Test calls directly from browser without needing a phone.
 
 #### 2.1 V1 Pipeline (Claude + Conversation Director) ✅ **Implemented**
 Production pipeline with 2-layer observer architecture and streaming.
-- **Latency:** ~400ms time-to-first-audio (streaming)
+- **Latency:** ~600ms time-to-first-audio (streaming)
 - **Components:**
   - STT: Deepgram (real-time transcription)
   - LLM: Claude Sonnet 4 (streaming responses)

@@ -26,7 +26,7 @@
   - Layer 2: Conversation Director (~150ms) - Proactive call guidance (Gemini 3 Flash)
   - Post-Call Analysis - Async batch analysis when call ends
 - **Dynamic Token Routing** - Automatic token adjustment (100-400 tokens)
-- **Streaming Pipeline** (~400ms time-to-first-audio)
+- **Streaming Pipeline** (~600ms time-to-first-audio)
   - Claude streaming responses (sentence-by-sentence)
   - ElevenLabs WebSocket TTS
   - Parallel connection startup
@@ -106,22 +106,36 @@ The Director proactively guides each call:
 │   ├── quick-observer.js       ← Layer 1: Instant regex patterns
 │   └── fast-observer.js        ← Layer 2: Conversation Director
 ├── adapters/
-│   ├── llm/index.js            ← Multi-provider LLM adapter
+│   ├── llm/index.js            ← Multi-provider LLM adapter (model registry)
 │   ├── elevenlabs.js           ← ElevenLabs REST TTS adapter
 │   └── elevenlabs-streaming.js ← ElevenLabs WebSocket TTS
+├── providers/
+│   ├── index.js                ← Provider factory (swappable abstractions)
+│   ├── voice-provider.js       ← Voice provider interface
+│   ├── gemini-voice-provider.js ← Gemini voice implementation
+│   ├── memory-provider.js      ← Memory provider interface
+│   ├── postgres-memory-provider.js ← PostgreSQL + pgvector implementation
+│   └── session-manager.js      ← Session lifecycle management
 ├── services/
 │   ├── call-analysis.js        ← Post-call batch analysis
+│   ├── context-cache.js        ← Pre-caches senior context (5 AM local)
 │   ├── memory.js               ← Memory storage + semantic search
 │   ├── seniors.js              ← Senior profile CRUD
 │   ├── conversations.js        ← Conversation history
 │   ├── scheduler.js            ← Reminder scheduler
 │   └── news.js                 ← News via OpenAI web search
 ├── db/
-│   └── schema.js               ← Database schema (Drizzle ORM)
-├── public/                         ← Static files (legacy)
+│   ├── client.js               ← Database connection (Neon + Drizzle)
+│   ├── schema.js               ← Database schema (Drizzle ORM)
+│   └── setup-pgvector.js       ← pgvector initialization
+├── packages/
+│   ├── logger/                 ← TypeScript logging package
+│   └── event-bus/              ← TypeScript event bus package
+├── public/                     ← Static files (legacy fallback)
 ├── apps/
-│   ├── admin/                      ← Admin dashboard (React + Vite)
-│   └── observability/              ← Observability dashboard (React)
+│   ├── admin/                  ← Admin dashboard (React + Vite) - primary
+│   ├── observability/          ← Observability dashboard (React)
+│   └── web/                    ← Future web app placeholder
 └── audio-utils.js              ← Audio format conversion
 ```
 
@@ -140,6 +154,9 @@ The Director proactively guides each call:
 | Modify post-call analysis | `services/call-analysis.js` |
 | Change token selection logic | `pipelines/v1-advanced.js` (selectModelConfig) |
 | Modify system prompts | `pipelines/v1-advanced.js` (buildSystemPrompt) |
+| Pre-cache senior context | `services/context-cache.js` |
+| Swap voice/memory providers | `providers/index.js` |
+| Add new LLM model | `adapters/llm/index.js` (MODEL_REGISTRY) |
 | Add new API endpoint | `index.js` |
 | Update admin UI | `apps/admin/src/pages/*` (React) |
 | Update admin API client | `apps/admin/src/lib/api.ts` |
@@ -186,7 +203,7 @@ FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
 ## Roadmap
 
 See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
-- ~~Streaming Pipeline~~ ✓ Completed (~400ms latency)
+- ~~Streaming Pipeline~~ ✓ Completed (~600ms latency)
 - ~~Dynamic Token Routing~~ ✓ Completed
 - ~~Conversation Director~~ ✓ Completed
 - ~~Post-Call Analysis~~ ✓ Completed

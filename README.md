@@ -10,8 +10,8 @@ AI-powered companion that provides elderly individuals with friendly phone conve
   - Layer 2: Conversation Director (~150ms) - Gemini 3 Flash for call guidance
   - Post-Call Analysis - Summary, concerns, engagement score
 - **Dynamic Token Routing** - 100-400 tokens based on context
-- **Streaming Pipeline** - ~400-500ms time-to-first-audio
-  - Claude Sonnet 4.5 streaming (sentence-by-sentence)
+- **Streaming Pipeline** - ~600ms time-to-first-audio
+  - Claude streaming responses (sentence-by-sentence)
   - ElevenLabs WebSocket TTS
   - Barge-in support (interrupt detection)
 
@@ -36,8 +36,9 @@ Test health:
 curl http://localhost:3001/health
 ```
 
-Admin dashboard: `http://localhost:3001/admin.html`
+Admin dashboard: `http://localhost:5173` (run `npm run dev` in `apps/admin/`)
 Observability: `http://localhost:5174` (run `npm run dev` in `apps/observability/`)
+Legacy admin: `http://localhost:3001/admin.html` (fallback)
 
 ## Architecture
 
@@ -123,13 +124,21 @@ donna/
 │   ├── scheduler.js            # Reminder scheduling + prefetch
 │   └── news.js                 # OpenAI web search, 1hr cache
 ├── db/
-│   ├── client.js               # Drizzle ORM connection
-│   └── schema.js               # 6 tables + pgvector
-├── public/
-│   └── admin.html              # 4-tab admin dashboard
+│   ├── client.js               # Database connection
+│   └── schema.js               # Drizzle ORM schema
+├── providers/
+│   ├── index.js                # Provider factory (swappable abstractions)
+│   ├── voice-provider.js       # Voice provider interface
+│   └── memory-provider.js      # Memory provider interface
+├── packages/
+│   ├── logger/                 # TypeScript logging package
+│   └── event-bus/              # TypeScript event bus package
+├── public/                     # Legacy static files (fallback)
+│   └── admin.html              # Legacy admin UI
 ├── apps/
-│   └── observability/          # React dashboard (Vite)
-└── audio-utils.js              # mulaw↔PCM conversion
+│   ├── admin/                  # React admin dashboard (primary)
+│   └── observability/          # React observability dashboard
+└── audio-utils.js              # Audio format conversion
 ```
 
 ## Environment Variables

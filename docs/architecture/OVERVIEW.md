@@ -255,13 +255,20 @@ When a call ends, async batch analysis runs:
 │   ├── scheduler.js            ← Reminder scheduling + prefetch
 │   └── news.js                 ← OpenAI web search, 1hr cache
 ├── db/
-│   ├── client.js               ← Drizzle connection
-│   └── schema.js               ← 6 tables + pgvector
+│   └── schema.js               ← Database schema
+├── providers/
+│   ├── index.js                ← Provider factory
+│   ├── voice-provider.js       ← Voice provider interface
+│   └── memory-provider.js      ← Memory provider interface
+├── packages/
+│   ├── logger/                 ← TypeScript logging package
+│   └── event-bus/              ← TypeScript event bus package
 ├── public/
-│   └── admin.html              ← 4-tab admin dashboard
+│   └── admin.html              ← Legacy admin UI (fallback)
 ├── apps/
-│   └── observability/          ← React dashboard (Vite)
-└── audio-utils.js              ← mulaw↔PCM conversion
+│   ├── admin/                  ← React admin dashboard (primary)
+│   └── observability/          ← React observability dashboard
+└── audio-utils.js              ← Audio conversion
 ```
 
 ---
@@ -293,15 +300,14 @@ Uses pgvector for semantic search with intelligent features:
 
 ## Latency Budget (Streaming Pipeline)
 
-| Component | Target | Notes |
-|-----------|--------|-------|
-| Deepgram utterance detection | ~500ms | 500ms endpointing |
-| Quick Observer (L1) | 0ms | Regex only |
-| Conversation Director (L2) | ~150ms | Runs in parallel |
-| Claude first token | ~200-300ms | Streaming enabled |
-| Sentence buffering | ~50ms | Until punctuation |
-| TTS first audio | ~100-150ms | WebSocket pre-connected |
-| **Total time-to-first-audio** | **~400-500ms** | After user stops speaking |
+| Component | Target |
+|-----------|--------|
+| Deepgram utterance detection | ~300ms |
+| Quick Observer (L1) | 0ms |
+| Conversation Director (L2) | ~150ms (parallel) |
+| Claude first token | ~200ms |
+| TTS first audio | ~100ms |
+| **Total time-to-first-audio** | **~600ms** |
 
 ---
 

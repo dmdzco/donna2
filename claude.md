@@ -26,7 +26,7 @@
   - Layer 2: Conversation Director (~150ms) - Proactive call guidance (Gemini 3 Flash)
   - Post-Call Analysis - Async batch analysis when call ends
 - **Dynamic Token Routing** - Automatic token adjustment (100-400 tokens)
-- **Streaming Pipeline** (~400ms time-to-first-audio)
+- **Streaming Pipeline** (~600ms time-to-first-audio)
   - Claude streaming responses (sentence-by-sentence)
   - ElevenLabs WebSocket TTS
   - Parallel connection startup
@@ -133,27 +133,37 @@ Instant regex patterns (0ms) for:
 │                                 - runDirectorPipeline()
 │                                 - formatDirectorGuidance()
 ├── adapters/
-│   ├── llm/
-│   │   ├── index.js            ← Model registry + factory
-│   │   ├── claude.js           ← Streaming, thinking disabled
-│   │   └── gemini.js           ← Role handling quirks
-│   ├── elevenlabs.js           ← REST TTS (greetings)
-│   └── elevenlabs-streaming.js ← WebSocket TTS (~150ms)
+│   ├── llm/index.js            ← Multi-provider LLM adapter (model registry)
+│   ├── elevenlabs.js           ← ElevenLabs REST TTS adapter
+│   └── elevenlabs-streaming.js ← ElevenLabs WebSocket TTS
+├── providers/
+│   ├── index.js                ← Provider factory (swappable abstractions)
+│   ├── voice-provider.js       ← Voice provider interface
+│   ├── gemini-voice-provider.js ← Gemini voice implementation
+│   ├── memory-provider.js      ← Memory provider interface
+│   ├── postgres-memory-provider.js ← PostgreSQL + pgvector implementation
+│   └── session-manager.js      ← Session lifecycle management
 ├── services/
-│   ├── call-analysis.js        ← Post-call Gemini analysis
-│   ├── memory.js               ← pgvector, decay, deduplication
-│   ├── seniors.js              ← CRUD, phone normalization
-│   ├── conversations.js        ← Call records, summaries
-│   ├── scheduler.js            ← Reminders + context prefetch
-│   └── news.js                 ← OpenAI web search + cache
+│   ├── call-analysis.js        ← Post-call batch analysis
+│   ├── context-cache.js        ← Pre-caches senior context (5 AM local)
+│   ├── memory.js               ← Memory storage + semantic search
+│   ├── seniors.js              ← Senior profile CRUD
+│   ├── conversations.js        ← Conversation history
+│   ├── scheduler.js            ← Reminder scheduler
+│   └── news.js                 ← News via OpenAI web search
 ├── db/
-│   ├── client.js               ← Drizzle connection (Neon)
-│   └── schema.js               ← 6 tables + pgvector
-├── public/
-│   └── admin.html              ← 4-tab admin dashboard
+│   ├── client.js               ← Database connection (Neon + Drizzle)
+│   ├── schema.js               ← Database schema (Drizzle ORM)
+│   └── setup-pgvector.js       ← pgvector initialization
+├── packages/
+│   ├── logger/                 ← TypeScript logging package
+│   └── event-bus/              ← TypeScript event bus package
+├── public/                     ← Static files (legacy fallback)
 ├── apps/
-│   └── observability/          ← React dashboard (Vite)
-└── audio-utils.js              ← mulaw↔PCM conversion
+│   ├── admin/                  ← Admin dashboard (React + Vite) - primary
+│   ├── observability/          ← Observability dashboard (React)
+│   └── web/                    ← Future web app placeholder
+└── audio-utils.js              ← Audio format conversion
 ```
 
 ---
@@ -171,8 +181,12 @@ Instant regex patterns (0ms) for:
 | Modify post-call analysis | `services/call-analysis.js` |
 | Change token selection logic | `pipelines/v1-advanced.js` (selectModelConfig) |
 | Modify system prompts | `pipelines/v1-advanced.js` (buildSystemPrompt) |
+| Pre-cache senior context | `services/context-cache.js` |
+| Swap voice/memory providers | `providers/index.js` |
+| Add new LLM model | `adapters/llm/index.js` (MODEL_REGISTRY) |
 | Add new API endpoint | `index.js` |
-| Update admin UI | `public/admin.html` |
+| Update admin UI | `apps/admin/src/pages/*` (React) |
+| Update admin API client | `apps/admin/src/lib/api.ts` |
 | Database changes | `db/schema.js` |
 
 ### Deployment
@@ -216,17 +230,24 @@ FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
 ## Roadmap
 
 See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
+- ~~Streaming Pipeline~~ ✓ Completed (~600ms latency)
+- ~~Dynamic Token Routing~~ ✓ Completed
+- ~~Conversation Director~~ ✓ Completed
+- ~~Post-Call Analysis~~ ✓ Completed
+- ~~Admin Dashboard Separation~~ ✓ Completed (React app in `apps/admin/`)
+- Prompt Caching (Anthropic)
 
-### Completed
-- ✅ Streaming Pipeline (~400-500ms latency)
-- ✅ Dynamic Token Routing (100-400 tokens)
-- ✅ Conversation Director (Gemini 3 Flash)
-- ✅ Post-Call Analysis (summary, concerns, score)
-- ✅ Memory Improvements (decay, deduplication, tiered injection)
-- ✅ Barge-in support
+### Architecture Cleanup
 
-### Upcoming
-- Prompt Caching (Anthropic) - ~90% input token savings
+See [docs/ARCHITECTURE_CLEANUP_PLAN.md](docs/ARCHITECTURE_CLEANUP_PLAN.md) for the 7-phase restructuring plan:
+- **Phase 1** ✓ Frontend Separation (Admin Dashboard → React)
+- **Phase 2** Route Extraction (Split index.js)
+- **Phase 3** Shared Packages (Turborepo monorepo)
+- **Phase 4** TypeScript Migration
+- **Phase 5** Testing Infrastructure
+- **Phase 6** API Improvements (Zod, versioning)
+- **Phase 7** Authentication (Clerk)
+- Memory Context Improvements
 - Caregiver Authentication (Clerk)
 - Telnyx Migration (~65% telephony cost savings)
 - Call Analysis Dashboard

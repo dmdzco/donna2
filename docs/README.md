@@ -43,6 +43,9 @@ AI-powered senior companion assistant with voice calls.
 | Quick Observer | `pipelines/quick-observer.js` |
 | Post-Call Analysis | `services/call-analysis.js` |
 | Token Selection | `v1-advanced.js` (selectModelConfig) |
+| Admin Dashboard | `apps/admin/` (React) |
+| Provider Abstractions | `providers/` |
+| Context Cache | `services/context-cache.js` |
 | Memory System | `services/memory.js` |
 | Scheduler | `services/scheduler.js` |
 

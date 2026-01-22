@@ -16,7 +16,7 @@
 │  │   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                      │   │
 │  │   │   Senior's   │    │    Admin     │    │ Observability│                      │   │
 │  │   │    Phone     │    │  Dashboard   │    │  Dashboard   │                      │   │
-│  │   │  (Twilio)    │    │ /admin.html  │    │ :5174        │                      │   │
+│  │   │  (Twilio)    │    │ apps/admin/  │    │ :5174        │                      │   │
 │  │   └──────┬───────┘    └──────┬───────┘    └──────┬───────┘                      │   │
 │  │          │                   │                   │                               │   │
 │  └──────────┼───────────────────┼───────────────────┼───────────────────────────────┘   │
@@ -306,17 +306,26 @@ donna/
 │   └── elevenlabs-streaming.js # ElevenLabs WebSocket TTS
 ├── services/
 │   ├── call-analysis.js        # Post-call batch analysis
+│   ├── context-cache.js        # Pre-caches senior context
 │   ├── seniors.js              # Senior CRUD operations
 │   ├── memory.js               # Memory storage + search
 │   ├── conversations.js        # Conversation records
 │   ├── scheduler.js            # Reminder scheduler
 │   └── news.js                 # News via OpenAI
+├── providers/
+│   ├── index.js                # Provider factory
+│   ├── voice-provider.js       # Voice provider interface
+│   └── memory-provider.js      # Memory provider interface
+├── packages/
+│   ├── logger/                 # TypeScript logging package
+│   └── event-bus/              # TypeScript event bus package
 ├── db/
 │   ├── client.js               # Database connection (Drizzle)
 │   └── schema.js               # Table definitions
 ├── public/
-│   └── admin.html              # Admin dashboard UI
+│   └── admin.html              # Legacy admin UI (fallback)
 ├── apps/
+│   ├── admin/                  # React admin dashboard (primary)
 │   └── observability/          # React observability dashboard
 └── docs/
     └── architecture/           # This file and related docs

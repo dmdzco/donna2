@@ -11,7 +11,7 @@ import { seniorService } from './services/seniors.js';
 import { memoryService } from './services/memory.js';
 import { conversationService } from './services/conversations.js';
 import { schedulerService, startScheduler } from './services/scheduler.js';
-// import { BrowserSession } from './browser-session.js';
+import { BrowserSession } from './browser-session.js';
 import { parse as parseUrl } from 'url';
 import { db } from './db/client.js';
 import { reminders, seniors, conversations } from './db/schema.js';
@@ -29,6 +29,7 @@ app.use(cors({
     'https://observability-production-3677.up.railway.app',
     'http://localhost:3000',
     'http://localhost:3001',
+    'http://localhost:5173',  // Admin dashboard (React)
     'http://localhost:5174',
   ],
   credentials: true,

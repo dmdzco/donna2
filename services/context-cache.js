@@ -8,7 +8,7 @@
  * - Recent call summaries
  * - Critical memories (Tier 1)
  * - Important memories (with decay applied)
- * - Pre-generated greeting
+ * - Pre-generated greeting (templated with rotation)
  */
 
 import { memoryService } from './memory.js';
@@ -23,6 +23,32 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 // Pre-fetch hour in local timezone (5 AM)
 const PREFETCH_HOUR = 5;
+
+// Greeting templates - {name} and {interest} are replaced dynamically
+const GREETING_TEMPLATES = [
+  // Warm & curious
+  "Hey {name}! It's Donna. I was just thinking about your {interest} - how's that going?",
+  // Casual check-in
+  "Hi {name}, Donna here! Have you had a chance to enjoy any {interest} lately?",
+  // Enthusiastic
+  "{name}! So good to talk to you. Tell me - anything new with your {interest}?",
+  // Gentle opener
+  "Hello {name}, it's Donna calling. I'd love to hear what you've been up to with {interest}.",
+  // Direct & friendly
+  "Hey there {name}! Donna checking in. Been doing any {interest} this week?",
+  // Conversational
+  "{name}, hi! It's Donna. I was curious - how's the {interest} going these days?"
+];
+
+// Fallback templates when no interests defined
+const FALLBACK_TEMPLATES = [
+  "Hey {name}! It's Donna. How have you been?",
+  "Hi {name}, Donna here! How are you doing today?",
+  "{name}! So good to talk to you. What's new?",
+  "Hello {name}, it's Donna calling. How's everything going?",
+  "Hey there {name}! Donna checking in. How are you?",
+  "{name}, hi! It's Donna. How's your day been?"
+];
 
 /**
  * Get local hour for a timezone

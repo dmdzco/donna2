@@ -126,10 +126,6 @@ donna/
 ├── db/
 │   ├── client.js               # Database connection
 │   └── schema.js               # Drizzle ORM schema
-├── providers/
-│   ├── index.js                # Provider factory (swappable abstractions)
-│   ├── voice-provider.js       # Voice provider interface
-│   └── memory-provider.js      # Memory provider interface
 ├── packages/
 │   ├── logger/                 # TypeScript logging package
 │   └── event-bus/              # TypeScript event bus package

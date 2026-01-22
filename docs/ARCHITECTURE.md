@@ -312,10 +312,6 @@ donna/
 │   ├── conversations.js        # Conversation records
 │   ├── scheduler.js            # Reminder scheduler
 │   └── news.js                 # News via OpenAI
-├── providers/
-│   ├── index.js                # Provider factory
-│   ├── voice-provider.js       # Voice provider interface
-│   └── memory-provider.js      # Memory provider interface
 ├── packages/
 │   ├── logger/                 # TypeScript logging package
 │   └── event-bus/              # TypeScript event bus package

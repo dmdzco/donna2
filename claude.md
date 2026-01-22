@@ -136,13 +136,6 @@ Instant regex patterns (0ms) for:
 │   ├── llm/index.js            ← Multi-provider LLM adapter (model registry)
 │   ├── elevenlabs.js           ← ElevenLabs REST TTS adapter
 │   └── elevenlabs-streaming.js ← ElevenLabs WebSocket TTS
-├── providers/
-│   ├── index.js                ← Provider factory (swappable abstractions)
-│   ├── voice-provider.js       ← Voice provider interface
-│   ├── gemini-voice-provider.js ← Gemini voice implementation
-│   ├── memory-provider.js      ← Memory provider interface
-│   ├── postgres-memory-provider.js ← PostgreSQL + pgvector implementation
-│   └── session-manager.js      ← Session lifecycle management
 ├── services/
 │   ├── call-analysis.js        ← Post-call batch analysis
 │   ├── context-cache.js        ← Pre-caches senior context (5 AM local)
@@ -182,7 +175,6 @@ Instant regex patterns (0ms) for:
 | Change token selection logic | `pipelines/v1-advanced.js` (selectModelConfig) |
 | Modify system prompts | `pipelines/v1-advanced.js` (buildSystemPrompt) |
 | Pre-cache senior context | `services/context-cache.js` |
-| Swap voice/memory providers | `providers/index.js` |
 | Add new LLM model | `adapters/llm/index.js` (MODEL_REGISTRY) |
 | Add new API endpoint | `index.js` |
 | Update admin UI | `apps/admin/src/pages/*` (React) |

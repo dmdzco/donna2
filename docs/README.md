@@ -16,21 +16,10 @@ AI-powered senior companion assistant with voice calls.
 
 - **[Next Steps](NEXT_STEPS.md)** - Roadmap and recently completed features
 - **[Product Plan](PRODUCT_PLAN.md)** - Full feature list with status
-- **[Latency Optimization](LATENCY_OPTIMIZATION_PLAN.md)** - Performance improvements
 
-### Configuration & Deployment
+### Deployment
 
-- **[Dynamic Token Routing](DYNAMIC_MODEL_ROUTING.md)** - Token selection based on context
 - **[Deployment Guide](guides/DEPLOYMENT_PLAN.md)** - Railway deployment instructions
-
-### Design Documents
-
-- **[plans/](plans/)** - Historical design documents for major features
-
-### Historical Reference
-
-- [Streaming Observer Spec](STREAMING_OBSERVER_SPEC.md) - Original streaming + 4-layer design (superseded)
-- [Module Reference](architecture/MODULES.md) - Proposed modular architecture (not implemented)
 
 ## Quick Reference
 
@@ -44,7 +33,6 @@ AI-powered senior companion assistant with voice calls.
 | Post-Call Analysis | `services/call-analysis.js` |
 | Token Selection | `v1-advanced.js` (selectModelConfig) |
 | Admin Dashboard | `apps/admin/` (React) |
-| Provider Abstractions | `providers/` |
 | Context Cache | `services/context-cache.js` |
 | Memory System | `services/memory.js` |
 | Scheduler | `services/scheduler.js` |

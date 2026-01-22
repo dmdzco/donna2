@@ -75,6 +75,15 @@ export const reminderDeliveries = pgTable('reminder_deliveries', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// Caregivers - maps Clerk user IDs to seniors they can access
+export const caregivers = pgTable('caregivers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  clerkUserId: varchar('clerk_user_id', { length: 255 }).notNull(), // Clerk user ID
+  seniorId: uuid('senior_id').references(() => seniors.id).notNull(),
+  role: varchar('role', { length: 50 }).default('caregiver'), // caregiver, family, admin
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // Call Analyses - post-call analysis results
 export const callAnalyses = pgTable('call_analyses', {
   id: uuid('id').defaultRandom().primaryKey(),

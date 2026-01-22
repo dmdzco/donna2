@@ -23,7 +23,7 @@ const VOICE_IDS = {
 export class ElevenLabsStreamingTTS {
   constructor(apiKey = process.env.ELEVENLABS_API_KEY) {
     this.apiKey = apiKey;
-    this.voiceId = VOICE_IDS.river;
+    this.voiceId = VOICE_IDS.rachel;
     this.modelId = 'eleven_turbo_v2_5';
     this.speed = 0.8;  // Speech speed: 0.7 (slow) to 1.2 (fast)
     this.volume = 1.0; // Volume gain: 0.5 (-6dB) to 2.0 (+6dB)

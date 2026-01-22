@@ -47,113 +47,82 @@
 ### Conversation Director Architecture
 
 ```
-User speaks → Deepgram STT (Nova 2, 500ms endpointing)
+User speaks → Deepgram STT → Process utterance
                                   │
                   ┌───────────────┼───────────────┐
-                  ▼               ▼               (parallel)
+                  ▼               ▼
             Layer 1 (0ms)   Layer 2 (~150ms)
             Quick Observer  Conversation Director
-            (730+ regex)    (Gemini 3 Flash)
+            (regex)         (Gemini 3 Flash)
                   │               │
                   └───────┬───────┘
                           ▼
               ┌─────────────────────┐
-              │ selectModelConfig() │
+              │ Dynamic Token Select│
               │   (100-400 tokens)  │
               └──────────┬──────────┘
                          ▼
-              Claude Sonnet 4.5 Streaming
+              Claude Sonnet Streaming
                          │
                          ▼
-              Sentence Buffer + <guidance> stripping
-                         │
-                         ▼
-              ElevenLabs WS (eleven_turbo_v2_5)
-                         │
-                         ▼
-              Twilio (mulaw 8kHz)
+              Sentence Buffer → ElevenLabs WS → Twilio
                          │
                          ▼ (on call end)
               Post-Call Analysis (Gemini Flash)
-              + Memory Extraction (GPT-4o-mini)
+              - Summary, concerns, engagement score
 ```
 
 ### Conversation Director
 
-The Director (Gemini 3 Flash, ~150ms) proactively guides each call:
+The Director proactively guides each call:
 
 | Feature | Description |
 |---------|-------------|
 | **Call Phase Tracking** | opening → rapport → main → closing |
 | **Topic Management** | When to stay, transition, or wrap up |
-| **Reminder Delivery** | Natural moments (never during grief/sadness) |
+| **Reminder Delivery** | Natural moments to deliver reminders |
 | **Engagement Monitoring** | Detect low engagement, suggest re-engagement |
 | **Emotional Detection** | Adjust tone for sad/concerned seniors |
 | **Token Recommendations** | 100-400 tokens based on context |
 
-### Quick Observer (Layer 1)
-
-Instant regex patterns (0ms) for:
-- **Health**: 30+ patterns (pain, falls, medication, symptoms)
-- **Emotion**: 25+ patterns with valence/intensity
-- **Family**: 25+ relationship patterns including pets
-- **Safety**: Scams, strangers, emergencies
-- **Engagement**: Response length analysis
-
 ### Dynamic Token Selection
 
-| Situation | Tokens | Source |
-|-----------|--------|--------|
+| Situation | Tokens | Trigger |
+|-----------|--------|---------|
 | Normal conversation | 100 | Default |
-| Health mention | 150-180 | Quick Observer |
-| Safety (high severity) | 200 | Quick Observer |
+| Health mention | 150 | Quick Observer |
 | Emotional support | 200-250 | Director |
 | Low engagement | 200 | Director |
 | Reminder delivery | 150 | Director |
 | Call closing | 150 | Director |
-| Simple question | 80 | Quick Observer |
 
 ### Key Files
 
 ```
 /
-├── index.js                    ← Express server, routes, WebSocket handlers
+├── index.js                    ← Main server
 ├── pipelines/
-│   ├── v1-advanced.js          ← Main pipeline (~1000 lines)
-│   │                             - V1AdvancedSession class
-│   │                             - processUtterance(), generateResponse()
-│   │                             - selectModelConfig(), buildSystemPrompt()
-│   │                             - Barge-in: interruptSpeech()
-│   ├── quick-observer.js       ← Layer 1 (~730 lines)
-│   │                             - quickAnalyze() - instant patterns
-│   │                             - Health, emotion, safety patterns
-│   │                             - modelRecommendation output
-│   └── fast-observer.js        ← Layer 2 (~550 lines)
-│                                 - getConversationDirection()
-│                                 - runDirectorPipeline()
-│                                 - formatDirectorGuidance()
+│   ├── v1-advanced.js          ← Main voice pipeline + call state
+│   ├── quick-observer.js       ← Layer 1: Instant regex patterns
+│   └── fast-observer.js        ← Layer 2: Conversation Director
 ├── adapters/
-│   ├── llm/
-│   │   ├── index.js            ← Model registry + factory
-│   │   ├── claude.js           ← Streaming, thinking disabled
-│   │   └── gemini.js           ← Role handling quirks
-│   ├── elevenlabs.js           ← REST TTS (greetings)
-│   └── elevenlabs-streaming.js ← WebSocket TTS (~150ms)
+│   ├── llm/index.js            ← Multi-provider LLM adapter
+│   ├── elevenlabs.js           ← ElevenLabs REST TTS adapter
+│   └── elevenlabs-streaming.js ← ElevenLabs WebSocket TTS
 ├── services/
-│   ├── call-analysis.js        ← Post-call Gemini analysis
-│   ├── memory.js               ← pgvector, decay, deduplication
-│   ├── seniors.js              ← CRUD, phone normalization
-│   ├── conversations.js        ← Call records, summaries
-│   ├── scheduler.js            ← Reminders + context prefetch
-│   └── news.js                 ← OpenAI web search + cache
+│   ├── call-analysis.js        ← Post-call batch analysis
+│   ├── memory.js               ← Memory storage + semantic search
+│   ├── seniors.js              ← Senior profile CRUD
+│   ├── conversations.js        ← Conversation history
+│   ├── scheduler.js            ← Reminder scheduler
+│   └── news.js                 ← News via OpenAI web search
 ├── db/
-│   ├── client.js               ← Drizzle connection (Neon)
-│   └── schema.js               ← 6 tables + pgvector
-├── public/
-│   └── admin.html              ← 4-tab admin dashboard
+│   └── schema.js               ← Database schema (Drizzle ORM)
+├── public/                         ← Static files (legacy)
 ├── apps/
-│   └── observability/          ← React dashboard (Vite)
-└── audio-utils.js              ← mulaw↔PCM conversion
+│   ├── admin/                      ← Admin dashboard (React + Vite)
+│   └── observability/              ← Observability dashboard (React)
+└── audio-utils.js              ← Audio format conversion
 ```
 
 ---
@@ -172,7 +141,8 @@ Instant regex patterns (0ms) for:
 | Change token selection logic | `pipelines/v1-advanced.js` (selectModelConfig) |
 | Modify system prompts | `pipelines/v1-advanced.js` (buildSystemPrompt) |
 | Add new API endpoint | `index.js` |
-| Update admin UI | `public/admin.html` |
+| Update admin UI | `apps/admin/src/pages/*` (React) |
+| Update admin API client | `apps/admin/src/lib/api.ts` |
 | Database changes | `db/schema.js` |
 
 ### Deployment
@@ -216,34 +186,26 @@ FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
 ## Roadmap
 
 See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
+- ~~Streaming Pipeline~~ ✓ Completed (~400ms latency)
+- ~~Dynamic Token Routing~~ ✓ Completed
+- ~~Conversation Director~~ ✓ Completed
+- ~~Post-Call Analysis~~ ✓ Completed
+- ~~Admin Dashboard Separation~~ ✓ Completed (React app in `apps/admin/`)
+- Prompt Caching (Anthropic)
 
-### Completed
-- ✅ Streaming Pipeline (~400-500ms latency)
-- ✅ Dynamic Token Routing (100-400 tokens)
-- ✅ Conversation Director (Gemini 3 Flash)
-- ✅ Post-Call Analysis (summary, concerns, score)
-- ✅ Memory Improvements (decay, deduplication, tiered injection)
-- ✅ Barge-in support
+### Architecture Cleanup
 
-### Upcoming
-- Prompt Caching (Anthropic) - ~90% input token savings
+See [docs/ARCHITECTURE_CLEANUP_PLAN.md](docs/ARCHITECTURE_CLEANUP_PLAN.md) for the 7-phase restructuring plan:
+- **Phase 1** ✓ Frontend Separation (Admin Dashboard → React)
+- **Phase 2** Route Extraction (Split index.js)
+- **Phase 3** Shared Packages (Turborepo monorepo)
+- **Phase 4** TypeScript Migration
+- **Phase 5** Testing Infrastructure
+- **Phase 6** API Improvements (Zod, versioning)
+- **Phase 7** Authentication (Clerk)
+- Memory Context Improvements
 - Caregiver Authentication (Clerk)
-- Telnyx Migration (~65% telephony cost savings)
-- Call Analysis Dashboard
-
----
-
-## Cost per 15-minute call
-
-| Component | Cost |
-|-----------|------|
-| Twilio Voice | ~$0.30 |
-| ElevenLabs TTS | ~$0.18 |
-| Claude Sonnet 4.5 | ~$0.08 |
-| Deepgram STT | ~$0.065 |
-| Gemini Flash (Director + Analysis) | ~$0.015 |
-| OpenAI (Embeddings + News) | ~$0.01 |
-| **Total** | **~$0.65** |
+- Telnyx Migration (65% cost savings)
 
 ---
 

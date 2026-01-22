@@ -223,7 +223,7 @@ When a call ends, async batch analysis runs:
 | **Voice AI** | Claude Sonnet 4.5 | Streaming responses, extended thinking disabled |
 | **Director** | Gemini 3 Flash | ~150ms, cost-efficient guidance |
 | **Post-Call Analysis** | Gemini Flash | ~$0.0005/call |
-| **STT** | Deepgram Nova 2 | Real-time, 500ms endpointing |
+| **STT** | Deepgram Nova 2 | Real-time, 300ms endpointing |
 | **TTS** | ElevenLabs WebSocket | `eleven_turbo_v2_5`, Rachel voice |
 | **Database** | Neon PostgreSQL + pgvector | Drizzle ORM |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |

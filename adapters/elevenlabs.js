@@ -10,6 +10,7 @@ const ELEVENLABS_API_URL = 'https://api.elevenlabs.io/v1';
 // Voice IDs for ElevenLabs
 // Rachel is a warm, mature female voice suitable for Donna
 const VOICE_IDS = {
+  river: 'SAz9YHcvj6GT2YYXdXww',     // River - default
   rachel: '21m00Tcm4TlvDq8ikWAM',    // Rachel - warm, mature
   domi: 'AZnzlk1XvdvUeBnXmlld',      // Domi - younger
   bella: 'EXAVITQu4vr4xnSDxMaL',     // Bella - soft
@@ -20,7 +21,7 @@ const VOICE_IDS = {
 export class ElevenLabsAdapter {
   constructor(apiKey = process.env.ELEVENLABS_API_KEY) {
     this.apiKey = apiKey;
-    this.voiceId = VOICE_IDS.rachel; // Default to Rachel
+    this.voiceId = VOICE_IDS.river; // Default to River
     this.modelId = 'eleven_turbo_v2_5'; // Fast, low latency model
     this.speed = 0.8;  // Speech speed: 0.7 (slow) to 1.2 (fast)
     this.volume = 1.0; // Volume gain: 0.5 (-6dB) to 2.0 (+6dB)

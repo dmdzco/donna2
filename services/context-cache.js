@@ -69,7 +69,93 @@ function getLocalHour(timezone) {
 }
 
 /**
- * Generate time-appropriate greeting
+ * Select an interest using weighted random selection
+ * Weights are boosted by recency of mention in memories
+ */
+function selectInterest(interests, recentMemories) {
+  if (!interests || interests.length === 0) {
+    return null;
+  }
+
+  // Calculate weights based on memory recency
+  const weights = new Map();
+  const now = Date.now();
+  const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+  const FOURTEEN_DAYS = 14 * 24 * 60 * 60 * 1000;
+
+  // Base weight for all interests
+  for (const interest of interests) {
+    weights.set(interest.toLowerCase(), 1.0);
+  }
+
+  // Boost weights based on recent memory mentions
+  for (const memory of recentMemories || []) {
+    const content = memory.content?.toLowerCase() || '';
+    const memoryAge = now - new Date(memory.createdAt).getTime();
+
+    for (const interest of interests) {
+      const interestLower = interest.toLowerCase();
+      if (content.includes(interestLower)) {
+        const currentWeight = weights.get(interestLower) || 1.0;
+        if (memoryAge <= SEVEN_DAYS) {
+          weights.set(interestLower, currentWeight + 2.0);
+        } else if (memoryAge <= FOURTEEN_DAYS) {
+          weights.set(interestLower, currentWeight + 1.0);
+        }
+      }
+    }
+  }
+
+  // Weighted random selection
+  const totalWeight = Array.from(weights.values()).reduce((a, b) => a + b, 0);
+  let random = Math.random() * totalWeight;
+
+  for (const interest of interests) {
+    const weight = weights.get(interest.toLowerCase()) || 1.0;
+    random -= weight;
+    if (random <= 0) {
+      return interest;
+    }
+  }
+
+  // Fallback to first interest
+  return interests[0];
+}
+
+/**
+ * Generate a templated greeting with rotation
+ * Returns { greeting, templateIndex }
+ */
+function generateTemplatedGreeting(senior, recentMemories, lastGreetingIndex) {
+  const firstName = senior?.name?.split(' ')[0] || 'there';
+  const interests = senior?.interests || [];
+
+  // Select interest with weighted random
+  const selectedInterest = selectInterest(interests, recentMemories);
+
+  // Choose template array based on whether we have interests
+  const templates = selectedInterest ? GREETING_TEMPLATES : FALLBACK_TEMPLATES;
+
+  // Select template index (exclude last used)
+  let availableIndices = templates.map((_, i) => i);
+  if (lastGreetingIndex >= 0 && lastGreetingIndex < templates.length) {
+    availableIndices = availableIndices.filter(i => i !== lastGreetingIndex);
+  }
+  const templateIndex = availableIndices[Math.floor(Math.random() * availableIndices.length)];
+
+  // Fill template
+  let greeting = templates[templateIndex]
+    .replace('{name}', firstName);
+
+  if (selectedInterest) {
+    greeting = greeting.replace('{interest}', selectedInterest);
+  }
+
+  return { greeting, templateIndex, selectedInterest };
+}
+
+/**
+ * Generate simple fallback greeting (legacy, kept for compatibility)
  */
 function generateGreeting(senior, localHour) {
   const firstName = senior?.name?.split(' ')[0] || 'there';
@@ -100,16 +186,26 @@ async function prefetchAndCache(seniorId) {
       return null;
     }
 
-    // Fetch all context in parallel
-    const [summaries, criticalMemories, importantMemories] = await Promise.all([
+    // Fetch all context in parallel (including recent memories for greeting interest weighting)
+    const [summaries, criticalMemories, importantMemories, recentMemories] = await Promise.all([
       conversationService.getRecentSummaries(seniorId, 3),
       memoryService.getCritical(seniorId, 3),
-      memoryService.getImportant(seniorId, 5)
+      memoryService.getImportant(seniorId, 5),
+      memoryService.getRecent(seniorId, 10)
     ]);
 
-    // Generate greeting based on current local time
-    const localHour = getLocalHour(senior.timezone);
-    const greeting = generateGreeting(senior, localHour);
+    // Get last greeting index from previous cache (if exists)
+    const previousCache = cache.get(seniorId);
+    const lastGreetingIndex = previousCache?.lastGreetingIndex ?? -1;
+
+    // Generate templated greeting with rotation
+    const { greeting, templateIndex, selectedInterest } = generateTemplatedGreeting(
+      senior,
+      recentMemories,
+      lastGreetingIndex
+    );
+
+    console.log(`[ContextCache] Generated greeting for ${senior.name}: template=${templateIndex}, interest=${selectedInterest || 'none'}`);
 
     // Build memory context string (Tier 1 + important)
     const memoryParts = [];
@@ -136,6 +232,7 @@ async function prefetchAndCache(seniorId) {
       importantMemories,
       memoryContext: memoryParts.join('\n'),
       greeting,
+      lastGreetingIndex: templateIndex,
       cachedAt: Date.now(),
       expiresAt: Date.now() + CACHE_TTL_MS
     };
@@ -254,7 +351,11 @@ export const contextCacheService = {
   runDailyPrefetch,
   getStats,
   getLocalHour,
-  generateGreeting
+  generateGreeting,
+  generateTemplatedGreeting,
+  selectInterest,
+  GREETING_TEMPLATES,
+  FALLBACK_TEMPLATES
 };
 
 export default contextCacheService;

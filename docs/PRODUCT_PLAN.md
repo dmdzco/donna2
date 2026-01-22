@@ -444,37 +444,41 @@ If Donna calls a user in the morning and they have another call later that same 
 
 ---
 
-### 33. Conversation Balance: Interest Usage 📋 **Planned**
+### 33. Conversation Balance: Interest Usage ✅ **Implemented (Phase 1)**
 Strike a balance between using stored interests and avoiding over-reliance on them.
 
 - **Problem:** If every call Donna asks about the Seahawks and Palm Beach within 60 seconds, it becomes:
   - Boring and repetitive
   - Feels fake/overly personalized
   - Inhuman interaction pattern
-- **Solution:**
-  - Rotate which interests to mention per call
-  - Track when interests were last referenced
-  - Vary timing - don't always lead with interests
+- **Phase 1 (Implemented):** Prompt-based guidance
+  - Instructions to not lead with interests
   - Let interests emerge naturally from conversation
-  - Use interests to respond to topics, not always to initiate
+  - Use interests to respond, not always initiate
+  - Vary which interests are referenced
+- **Phase 2 (Future):** State-based tracking
+  - Track which interests were mentioned per call in session state
+  - Track last-referenced timestamp per interest in database
+  - Explicit rotation logic across calls
 - **Goal:** Interests guide conversation without dominating it
 - **Value:** More natural, less predictable conversations
 
 ---
 
-### 34. Conversation Balance: Question Frequency 📋 **Planned**
+### 34. Conversation Balance: Question Frequency ✅ **Implemented (Phase 1)**
 Strike a balance between asking questions to drive conversation and avoiding interrogation feel.
 
 - **Problem:** Too many questions in succession feels like an interrogation, not a conversation
-- **Solution:**
-  - Track questions asked per call
-  - Limit consecutive questions (max 2-3)
-  - Intersperse with statements, observations, stories
-  - Match senior's energy - if they're talkative, ask fewer questions
-  - If they're quiet, use open-ended questions sparingly
-- **Metrics:**
-  - Question-to-statement ratio
-  - Senior response length (engagement indicator)
+- **Phase 1 (Implemented):** Prompt-based guidance
+  - Limit consecutive questions (max 2)
+  - After 2 questions, share observation/story/reaction
+  - Match senior's energy - talkative = fewer questions
+  - Balance questions with statements and reactions
+- **Phase 2 (Future):** State-based tracking
+  - Track questions asked per call in session state
+  - Question-to-statement ratio metrics
+  - Senior response length tracking (engagement indicator)
+  - Automatic adjustment based on engagement
 - **Value:** Comfortable, natural conversation flow
 
 ---

@@ -4,8 +4,8 @@
   "type": "module",
   "description": "AI-powered senior companion assistant",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node --watch index.js",
+    "start": "node --disable-warning=DEP0040 index.js",
+    "dev": "node --disable-warning=DEP0040 --watch index.js",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },

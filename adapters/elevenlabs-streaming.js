@@ -9,6 +9,7 @@
  */
 
 import WebSocket from 'ws';
+import { applyVolumeGain } from '../audio-utils.js';
 
 // Voice IDs for ElevenLabs
 const VOICE_IDS = {
@@ -23,6 +24,8 @@ export class ElevenLabsStreamingTTS {
     this.apiKey = apiKey;
     this.voiceId = VOICE_IDS.rachel;
     this.modelId = 'eleven_turbo_v2_5';
+    this.speed = 0.87;  // Speech speed: 0.7 (slow) to 1.2 (fast)
+    this.volume = 1.0; // Volume gain: 0.5 (-6dB) to 2.0 (+6dB)
     this.ws = null;
     this.isConnected = false;
     this.isConnecting = false;
@@ -42,6 +45,22 @@ export class ElevenLabsStreamingTTS {
     } else {
       this.voiceId = voiceId;
     }
+  }
+
+  /**
+   * Set speech speed
+   * @param {number} speed - Speed multiplier: 0.7 (slow) to 1.2 (fast), default 1.0
+   */
+  setSpeed(speed) {
+    this.speed = Math.max(0.7, Math.min(1.2, speed));
+  }
+
+  /**
+   * Set volume gain
+   * @param {number} volume - Volume multiplier: 0.5 (-6dB) to 2.0 (+6dB), default 1.0
+   */
+  setVolume(volume) {
+    this.volume = Math.max(0.5, Math.min(2.0, volume));
   }
 
   /**
@@ -87,6 +106,7 @@ export class ElevenLabsStreamingTTS {
             stability: 0.5,
             similarity_boost: 0.75,
             style: 0.0,
+            speed: this.speed,
             use_speaker_boost: true,
           },
           generation_config: {
@@ -113,7 +133,11 @@ export class ElevenLabsStreamingTTS {
 
           if (message.audio) {
             // Decode base64 audio and send to callback
-            const audioBuffer = Buffer.from(message.audio, 'base64');
+            let audioBuffer = Buffer.from(message.audio, 'base64');
+            // Apply volume gain if not default
+            if (this.volume !== 1.0) {
+              audioBuffer = applyVolumeGain(audioBuffer, this.volume);
+            }
             if (this.onAudioChunk) {
               this.onAudioChunk(audioBuffer);
             }
@@ -133,7 +157,12 @@ export class ElevenLabsStreamingTTS {
         } catch (e) {
           // Binary data or parse error - might be raw audio
           if (data instanceof Buffer && this.onAudioChunk) {
-            this.onAudioChunk(data);
+            let audioBuffer = data;
+            // Apply volume gain if not default
+            if (this.volume !== 1.0) {
+              audioBuffer = applyVolumeGain(audioBuffer, this.volume);
+            }
+            this.onAudioChunk(audioBuffer);
           }
         }
       });

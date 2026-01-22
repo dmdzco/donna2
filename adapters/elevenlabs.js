@@ -3,6 +3,8 @@
  * Converts text to speech using ElevenLabs API
  */
 
+import { applyVolumeGain } from '../audio-utils.js';
+
 const ELEVENLABS_API_URL = 'https://api.elevenlabs.io/v1';
 
 // Voice IDs for ElevenLabs
@@ -20,6 +22,8 @@ export class ElevenLabsAdapter {
     this.apiKey = apiKey;
     this.voiceId = VOICE_IDS.rachel; // Default to Rachel
     this.modelId = 'eleven_turbo_v2_5'; // Fast, low latency model
+    this.speed = 0.87;  // Speech speed: 0.7 (slow) to 1.2 (fast)
+    this.volume = 1.0; // Volume gain: 0.5 (-6dB) to 2.0 (+6dB)
   }
 
   /**
@@ -32,6 +36,22 @@ export class ElevenLabsAdapter {
     } else {
       this.voiceId = voiceId;
     }
+  }
+
+  /**
+   * Set speech speed
+   * @param {number} speed - Speed multiplier: 0.7 (slow) to 1.2 (fast), default 1.0
+   */
+  setSpeed(speed) {
+    this.speed = Math.max(0.7, Math.min(1.2, speed));
+  }
+
+  /**
+   * Set volume gain
+   * @param {number} volume - Volume multiplier: 0.5 (-6dB) to 2.0 (+6dB), default 1.0
+   */
+  setVolume(volume) {
+    this.volume = Math.max(0.5, Math.min(2.0, volume));
   }
 
   /**
@@ -59,6 +79,7 @@ export class ElevenLabsAdapter {
             stability: 0.5,
             similarity_boost: 0.75,
             style: 0.0,
+            speed: this.speed,
             use_speaker_boost: true,
           },
         }),
@@ -71,7 +92,14 @@ export class ElevenLabsAdapter {
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer);
+    let pcmBuffer = Buffer.from(arrayBuffer);
+
+    // Apply volume gain if not default
+    if (this.volume !== 1.0) {
+      pcmBuffer = applyVolumeGain(pcmBuffer, this.volume);
+    }
+
+    return pcmBuffer;
   }
 
   /**
@@ -100,6 +128,7 @@ export class ElevenLabsAdapter {
             stability: 0.5,
             similarity_boost: 0.75,
             style: 0.0,
+            speed: this.speed,
             use_speaker_boost: true,
           },
         }),
@@ -116,7 +145,12 @@ export class ElevenLabsAdapter {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      onChunk(Buffer.from(value));
+      let pcmBuffer = Buffer.from(value);
+      // Apply volume gain if not default
+      if (this.volume !== 1.0) {
+        pcmBuffer = applyVolumeGain(pcmBuffer, this.volume);
+      }
+      onChunk(pcmBuffer);
     }
   }
 

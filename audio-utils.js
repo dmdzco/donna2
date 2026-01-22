@@ -109,3 +109,26 @@ export function base64Pcm24kToBase64Mulaw8k(base64Pcm) {
   const mulawBuffer = pcm24kToMulaw8k(pcmBuffer);
   return mulawBuffer.toString('base64');
 }
+
+/**
+ * Apply volume gain to PCM 16-bit audio buffer
+ * @param {Buffer} pcmBuffer - PCM 16-bit audio buffer
+ * @param {number} gain - Volume multiplier (0.5 = -6dB, 1.0 = unchanged, 2.0 = +6dB)
+ * @returns {Buffer} - Adjusted PCM buffer
+ */
+export function applyVolumeGain(pcmBuffer, gain = 1.0) {
+  if (gain === 1.0) return pcmBuffer;
+
+  const numSamples = pcmBuffer.length / 2;
+  const outputBuffer = Buffer.alloc(pcmBuffer.length);
+
+  for (let i = 0; i < numSamples; i++) {
+    let sample = pcmBuffer.readInt16LE(i * 2);
+    // Apply gain and clamp to 16-bit range
+    sample = Math.round(sample * gain);
+    sample = Math.max(-32768, Math.min(32767, sample));
+    outputBuffer.writeInt16LE(sample, i * 2);
+  }
+
+  return outputBuffer;
+}

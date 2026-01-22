@@ -13,7 +13,7 @@ This document describes the Donna v3.1 system architecture with the **Conversati
 │                                                                              │
 │   ┌─────────────────┐                                                        │
 │   │  Admin Dashboard │                                                       │
-│   │   /admin.html    │                                                       │
+│   │   apps/admin/    │                                                       │
 │   └────────┬─────────┘                                                       │
 │            │                                                                 │
 │            ▼                                                                 │
@@ -227,10 +227,18 @@ When a call ends, async batch analysis runs:
 │   └── news.js                 ← News via OpenAI
 ├── db/
 │   └── schema.js               ← Database schema
+├── providers/
+│   ├── index.js                ← Provider factory
+│   ├── voice-provider.js       ← Voice provider interface
+│   └── memory-provider.js      ← Memory provider interface
+├── packages/
+│   ├── logger/                 ← TypeScript logging package
+│   └── event-bus/              ← TypeScript event bus package
 ├── public/
-│   └── admin.html              ← Admin UI
+│   └── admin.html              ← Legacy admin UI (fallback)
 ├── apps/
-│   └── observability/          ← React dashboard
+│   ├── admin/                  ← React admin dashboard (primary)
+│   └── observability/          ← React observability dashboard
 └── audio-utils.js              ← Audio conversion
 ```
 
@@ -264,7 +272,7 @@ Uses pgvector for semantic search:
 | Conversation Director (L2) | ~150ms (parallel) |
 | Claude first token | ~200ms |
 | TTS first audio | ~100ms |
-| **Total time-to-first-audio** | **~400ms** |
+| **Total time-to-first-audio** | **~600ms** |
 
 ---
 

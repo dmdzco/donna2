@@ -238,7 +238,7 @@ Cache static parts of system prompt, pay only 10% for cached reads.
 | Token Selection | `v1-advanced.js` (selectModelConfig) |
 | Memory System | `services/memory.js` |
 | Scheduler | `services/scheduler.js` |
-| Admin UI | `public/admin.html` |
+| Admin UI | `apps/admin/` (React) |
 | Observability | `apps/observability/` |
 
 ## Documentation

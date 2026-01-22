@@ -17,6 +17,7 @@ import { db } from './db/client.js';
 import { reminders, seniors, conversations } from './db/schema.js';
 import { eq, desc, gte, and, sql } from 'drizzle-orm';
 import { validateBody, validateParams } from './middleware/validate.js';
+import { validateTwilioWebhook } from './middleware/twilio.js';
 import {
   createSeniorSchema,
   updateSeniorSchema,
@@ -84,7 +85,7 @@ app.get('/health', (req, res) => {
 });
 
 // Twilio webhook - incoming/outgoing call answered
-app.post('/voice/answer', async (req, res) => {
+app.post('/voice/answer', validateTwilioWebhook, async (req, res) => {
   const callSid = req.body.CallSid;
   // For outbound calls: From = Twilio number, To = person being called
   // For inbound calls: From = caller, To = Twilio number
@@ -169,7 +170,7 @@ app.post('/voice/answer', async (req, res) => {
 });
 
 // Twilio status callback
-app.post('/voice/status', async (req, res) => {
+app.post('/voice/status', validateTwilioWebhook, async (req, res) => {
   const { CallSid, CallStatus, CallDuration } = req.body;
   console.log(`Call ${CallSid}: ${CallStatus} (${CallDuration || 0}s)`);
 

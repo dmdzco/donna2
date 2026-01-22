@@ -116,7 +116,7 @@ export class BrowserSession {
         channels: 1,
         punctuate: true,
         interim_results: true,
-        endpointing: 500,
+        endpointing: 300, // Faster turn detection (reduced from 500ms)
         utterance_end_ms: 1000,
       });
 

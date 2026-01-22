@@ -324,7 +324,7 @@ Reduced V1 pipeline latency from ~1.5s to ~400ms time-to-first-audio.
 - [x] ~400ms time-to-first-audio achieved
 
 **Phase 3 (Fine-Tuning) - 📋 PLANNED**
-- [ ] Tune Deepgram endpointing (500ms → 300ms)
+- [x] Tune Deepgram endpointing (500ms → 300ms) ✅
 - [ ] Connection pooling for TTS
 
 **Phase 4 (Alternative Providers) - 💡 FUTURE**

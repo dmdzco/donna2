@@ -532,7 +532,7 @@ export class V1AdvancedSession {
         channels: 1,
         punctuate: true,
         interim_results: true,
-        endpointing: 500, // Faster turn detection
+        endpointing: 300, // Faster turn detection (reduced from 500ms)
         utterance_end_ms: 1000,
       });
 

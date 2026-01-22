@@ -396,31 +396,91 @@ async function searchRelevantMemories(seniorId, userMessage) {
 }
 
 /**
- * Check for current events if user mentions news/weather/etc
+ * Check if user is asking for web search (news, info lookup, etc)
  */
 async function checkCurrentEvents(userMessage) {
-  const newsKeywords = /\b(news|weather|today|happening|world|president|election)\b/i;
+  // Patterns that trigger web search
+  const searchTriggers = /\b(news|weather|happening|world|president|election|look.{0,10}up|search|can you (find|check)|do you know|what('s| is) the (best|top))\b/i;
 
-  if (!newsKeywords.test(userMessage)) {
+  if (!searchTriggers.test(userMessage)) {
     return null;
   }
 
   try {
-    const topicMatch = userMessage.match(/(?:about|the|what's)\s+(\w+(?:\s+\w+)?)/i);
-    const topic = topicMatch ? topicMatch[1] : 'general news';
+    // Determine if this is a news request or general search
+    const isNewsRequest = /\b(news|headline|happening|current events|today)\b/i.test(userMessage);
 
-    const news = await newsService.getNewsForSenior([topic], 2);
-    if (news) {
-      return {
-        type: 'news',
-        content: news,
-      };
+    if (isNewsRequest) {
+      // Use news service for news-type queries
+      const topicMatch = userMessage.match(/(?:about|the|what's)\s+(\w+(?:\s+\w+)?)/i);
+      const topic = topicMatch ? topicMatch[1] : 'general news';
+
+      const news = await newsService.getNewsForSenior([topic], 2);
+      if (news) {
+        return {
+          type: 'news',
+          content: news,
+        };
+      }
+    } else {
+      // General web search - use OpenAI directly
+      const searchResult = await performWebSearch(userMessage);
+      if (searchResult) {
+        return {
+          type: 'search',
+          content: searchResult,
+        };
+      }
     }
   } catch (error) {
-    console.error('[ConversationDirector] News fetch error:', error.message);
+    console.error('[ConversationDirector] Search error:', error.message);
   }
 
   return null;
+}
+
+/**
+ * Perform a general web search using OpenAI
+ */
+async function performWebSearch(query) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.log('[ConversationDirector] OpenAI not configured, skipping web search');
+    return null;
+  }
+
+  try {
+    const OpenAI = (await import('openai')).default;
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+    console.log(`[ConversationDirector] Web search: "${query.substring(0, 50)}..."`);
+
+    const response = await client.responses.create({
+      model: 'gpt-4o-mini',
+      tools: [{ type: 'web_search_preview' }],
+      input: `Answer this question concisely (2-3 sentences max): ${query}
+
+              This answer will be read aloud to an elderly person, so:
+              - Keep it simple and clear
+              - Be conversational, not technical
+              - If you can't find the answer, say so briefly`,
+      tool_choice: 'required',
+    });
+
+    const result = response.output_text?.trim();
+
+    if (!result) {
+      console.log('[ConversationDirector] No search result returned');
+      return null;
+    }
+
+    console.log(`[ConversationDirector] Search result: "${result.substring(0, 100)}..."`);
+
+    return `Here's what I found:\n${result}`;
+
+  } catch (error) {
+    console.error('[ConversationDirector] Web search error:', error.message);
+    return null;
+  }
 }
 
 /**

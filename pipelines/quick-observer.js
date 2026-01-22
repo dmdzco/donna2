@@ -444,9 +444,10 @@ const TRANSPORTATION_PATTERNS = [
 ];
 
 // ============================================================================
-// NEWS/CURRENT EVENTS PATTERNS - Triggers buffer response for web search
+// WEB SEARCH PATTERNS - Triggers buffer response for web search
 // ============================================================================
 const NEWS_PATTERNS = [
+  // News and current events
   { pattern: /\b(news|headline|headlines)\b/i, signal: 'news_request' },
   { pattern: /\b(what('s| is) happening|what('s| is) going on)\b/i, signal: 'news_request' },
   { pattern: /\b(current events|latest)\b/i, signal: 'news_request' },
@@ -454,6 +455,14 @@ const NEWS_PATTERNS = [
   { pattern: /\b(president|election|politics|political)\b/i, signal: 'news_request' },
   { pattern: /\b(stock market|economy|economic)\b/i, signal: 'news_request' },
   { pattern: /\b(sports|game|score|scores)\b/i, signal: 'sports_request' },
+
+  // General search requests
+  { pattern: /\b(look (that |it |this )?up|look up)\b/i, signal: 'search_request' },
+  { pattern: /\b(search for|search (the )?internet|google)\b/i, signal: 'search_request' },
+  { pattern: /\b(can you (find|check|look)|could you (find|check|look))\b/i, signal: 'search_request' },
+  { pattern: /\b(find out|figure out) (about|what|who|where|when|why|how)\b/i, signal: 'search_request' },
+  { pattern: /\b(do you know (what|who|where|when|why|how))\b/i, signal: 'search_request' },
+  { pattern: /\b(what('s| is) the (best|top|most))\b/i, signal: 'search_request' },
 ];
 
 // ============================================================================

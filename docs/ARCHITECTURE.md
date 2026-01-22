@@ -368,7 +368,7 @@ FAST_OBSERVER_MODEL=gemini-3-flash # Director model
 
 | Component | Target | Notes |
 |-----------|--------|-------|
-| Deepgram utterance | ~500ms | 500ms endpointing config |
+| Deepgram utterance | ~300ms | 300ms endpointing config |
 | Quick Observer (L1) | 0ms | Regex only |
 | Director (L2) | ~150ms | Runs parallel with response |
 | Claude first token | ~200-300ms | Streaming enabled |

@@ -13,6 +13,7 @@ export interface Call {
   senior_name?: string;
   senior_phone?: string;
   turn_count?: number;
+  call_metrics?: CallMetrics | null;
 }
 
 export interface TimelineEvent {
@@ -81,4 +82,33 @@ export interface Continuity {
   lastCallDropped: boolean;
   lastInteractionAt?: string;
   turnCount: number;
+}
+
+export interface TurnMetric {
+  turnIndex: number;
+  role: string;
+  model: string;
+  maxTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  ttfa?: number | null;
+  responseTime: number;
+  tokenReason: string;
+}
+
+export interface CallMetrics {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTokens: number;
+  avgResponseTime: number;
+  avgTtfa: number | null;
+  turnCount: number;
+  estimatedCost: number;
+  modelsUsed: string[];
+}
+
+export interface MetricsData {
+  turnMetrics: TurnMetric[];
+  callMetrics: CallMetrics | null;
+  durationSeconds: number | null;
 }

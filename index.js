@@ -15,7 +15,7 @@ import { schedulerService, startScheduler } from './services/scheduler.js';
 import { BrowserSession } from './browser-session.js';
 import { parse as parseUrl } from 'url';
 import { db } from './db/client.js';
-import { reminders, seniors, conversations, caregivers, caregiverSeniors } from './db/schema.js';
+import { reminders, seniors, conversations, caregivers } from './db/schema.js';
 import { eq, desc, gte, and, sql } from 'drizzle-orm';
 import { validateBody, validateParams } from './middleware/validate.js';
 import { validateTwilioWebhook } from './middleware/twilio.js';

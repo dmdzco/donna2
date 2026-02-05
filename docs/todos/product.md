@@ -385,4 +385,4 @@ Not prioritized. Evaluate when bandwidth allows.
 
 ---
 
-*Reference: [PRODUCT_PLAN.md](../PRODUCT_PLAN.md), [NEXT_STEPS.md](../NEXT_STEPS.md) (original sources)*
+*Migrated from NEXT_STEPS.md (deleted). See [PRODUCT_PLAN.md](../PRODUCT_PLAN.md) for feature descriptions.*

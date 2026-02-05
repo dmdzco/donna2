@@ -25,10 +25,9 @@ AI-powered senior companion assistant with voice calls.
 - **[Architecture Details](ARCHITECTURE.md)** - Technical deep-dive with layer details
 - **[Conversation Director Spec](CONVERSATION_DIRECTOR_SPEC.md)** - Proactive call guidance system
 
-### Roadmap & Planning
+### Product Reference
 
-- **[Next Steps](NEXT_STEPS.md)** - Roadmap and recently completed features
-- **[Product Plan](PRODUCT_PLAN.md)** - Full feature list with status
+- **[Product Plan](PRODUCT_PLAN.md)** - Feature descriptions, architecture diagrams, business model
 
 ### Deployment
 

@@ -404,4 +404,4 @@ websocket/
 
 ---
 
-*Reference: [PRODUCTION_SECURITY_TODO.md](../PRODUCTION_SECURITY_TODO.md) (original source)*
+*Migrated from PRODUCTION_SECURITY_TODO.md (deleted)*

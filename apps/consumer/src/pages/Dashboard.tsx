@@ -3,7 +3,7 @@ import { useAuth, SignOutButton } from '@clerk/clerk-react';
 import { useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, User, Calendar, Bell, Settings, LogOut, Phone,
-  ChevronRight, Plus, Trash2, Edit2, Check, X, Clock, CheckCircle2
+  ChevronRight, Plus, Trash2, Check, X, Clock, CheckCircle2
 } from 'lucide-react';
 import './Dashboard.css';
 
@@ -50,7 +50,6 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
 
   // Reminder editing state
-  const [editingReminder, setEditingReminder] = useState<string | null>(null);
   const [newReminderTitle, setNewReminderTitle] = useState('');
   const [isAddingReminder, setIsAddingReminder] = useState(false);
 

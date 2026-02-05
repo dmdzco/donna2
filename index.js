@@ -41,15 +41,16 @@ const __dirname = dirname(__filename);
 
 const app = express();
 
-// CORS - allow admin dashboard, observability, and local development
+// CORS - allow admin dashboard, consumer app, observability, and local development
 app.use(cors({
   origin: [
     'https://donna-admin.vercel.app',
+    'https://consumer-ruddy.vercel.app',
     'https://observability-production-3677.up.railway.app',
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:5173',  // Admin dashboard (React)
-    'http://localhost:5174',
+    'http://localhost:5174',  // Consumer app (React)
   ],
   credentials: true,
 }));

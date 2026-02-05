@@ -71,7 +71,8 @@ Your job is to GUIDE the conversation proactively - not just react to what was s
 Senior: {{SENIOR_NAME}}
 Call duration: {{MINUTES_ELAPSED}} minutes (max {{MAX_DURATION}} minutes)
 Call type: {{CALL_TYPE}}
-Pending reminders: {{PENDING_REMINDERS}}
+Pending reminders (NOT yet delivered): {{PENDING_REMINDERS}}
+Already delivered this call (do NOT repeat): {{DELIVERED_REMINDERS}}
 Senior's interests: {{INTERESTS}}
 Senior's family: {{FAMILY_MEMBERS}}
 Important memories: {{MEMORIES}}
@@ -99,10 +100,18 @@ Important memories: {{MEMORIES}}
    - Follow their lead while guiding toward goals
    - Natural conversation flow with purpose
 
-4. **Closing (8-10 min)**:
-   - Wrap up warmly, don't abruptly end
-   - Confirm any action items (medication, appointments)
-   - Express looking forward to next call
+4. **Winding Down (7-9 min)**:
+   - Conversation is naturally slowing - short responses, repeated topics
+   - Summarize what you discussed ("It was so nice hearing about...")
+   - Confirm any action items (medication taken? appointments noted?)
+   - Transition: "Well, it's been so lovely talking with you..."
+
+5. **Closing (9-10 min, or after goodbye detected)**:
+   - Senior said goodbye or is clearly ready to end
+   - Give a warm, brief sign-off referencing something from the call
+   - Mention next call if known ("I'll call you again tomorrow!")
+   - Keep it short - don't prolong after goodbyes
+   - After mutual goodbyes, the call will end automatically
 
 ### Topic Transitions
 
@@ -126,6 +135,8 @@ Never be abrupt. Use natural transition phrases:
 - Interrupt engaging conversation
 - Deliver when engagement is low (re-engage first)
 - Sound clinical or robotic
+- NEVER recommend delivering a reminder that is in the "Already delivered" list
+- If a delivered reminder comes up again, suggest acknowledging with "As I mentioned earlier..."
 
 ### Re-engagement Strategies
 
@@ -174,7 +185,7 @@ Respond with ONLY valid JSON matching this exact schema:
 
 {
   "analysis": {
-    "call_phase": "opening|rapport|main|closing",
+    "call_phase": "opening|rapport|main|winding_down|closing",
     "engagement_level": "high|medium|low",
     "current_topic": "string",
     "topics_covered": ["string"],
@@ -242,6 +253,7 @@ export async function getConversationDirection(
     .replace('{{MAX_DURATION}}', callState?.maxDuration || 10)
     .replace('{{CALL_TYPE}}', callState?.callType || 'check-in')
     .replace('{{PENDING_REMINDERS}}', formatReminders(remainingReminders))
+    .replace('{{DELIVERED_REMINDERS}}', deliveredSet.size > 0 ? [...deliveredSet].join(', ') : 'None')
     .replace('{{INTERESTS}}', seniorContext?.interests?.join(', ') || 'unknown')
     .replace('{{FAMILY_MEMBERS}}', formatFamily(seniorContext?.family))
     .replace('{{MEMORIES}}', formatMemories(memories))
@@ -351,7 +363,11 @@ export function formatDirectorGuidance(direction) {
   parts.push(`${phase}/${engagement}/${tone}`);
 
   // Priority action
-  if (direction.reminder?.should_deliver) {
+  if (phase === 'closing') {
+    parts.push('CLOSING: Say a warm goodbye. Keep it brief.');
+  } else if (phase === 'winding_down') {
+    parts.push('WINDING DOWN: Summarize key points, confirm action items, begin warm sign-off.');
+  } else if (direction.reminder?.should_deliver) {
     parts.push(`REMIND: ${direction.reminder.which_reminder}`);
   } else if (direction.analysis?.engagement_level === 'low') {
     parts.push('RE-ENGAGE');

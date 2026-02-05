@@ -1,15 +1,22 @@
 import { createClient } from '@deepgram/sdk';
+import twilio from 'twilio';
 import { ElevenLabsAdapter } from '../adapters/elevenlabs.js';
 import { ElevenLabsStreamingTTS } from '../adapters/elevenlabs-streaming.js';
 import { pcm24kToMulaw8k } from '../audio-utils.js';
 import { memoryService } from '../services/memory.js';
 import { schedulerService } from '../services/scheduler.js';
 import { contextCacheService } from '../services/context-cache.js';
+import { greetingService } from '../services/greetings.js';
 import { quickAnalyze } from './quick-observer.js';
 import { runDirectorPipeline, formatDirectorGuidance } from './fast-observer.js';
 import { getAdapter, isModelAvailable } from '../adapters/llm/index.js';
 import { analyzeCompletedCall, saveCallAnalysis, getHighSeverityConcerns } from '../services/call-analysis.js';
 import { conversationService } from '../services/conversations.js';
+
+// Twilio client for programmatic call ending
+const twilioClient = (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN)
+  ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
+  : null;
 
 // Feature flag for streaming - set to false for rollback
 const V1_STREAMING_ENABLED = process.env.V1_STREAMING_ENABLED !== 'false';
@@ -145,7 +152,7 @@ function hasUnclosedGuidanceTag(text) {
 /**
  * Build system prompt - full context, adapters handle any quirks
  */
-const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, directorGuidance = null, previousCallsSummary = null, newsContext = null) => {
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, directorGuidance = null, previousCallsSummary = null, newsContext = null, deliveredReminders = []) => {
   let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
 
 CRITICAL - YOUR OUTPUT IS SPOKEN ALOUD:
@@ -198,6 +205,13 @@ CONVERSATION BALANCE - QUESTION FREQUENCY:
 
   if (reminderPrompt) {
     prompt += reminderPrompt;
+  }
+
+  // Inform about already-delivered reminders to prevent repetition
+  if (deliveredReminders.length > 0) {
+    prompt += `\n\nREMINDERS ALREADY DELIVERED THIS CALL (do NOT repeat these):`;
+    prompt += `\n${deliveredReminders.map(r => `- ${r}`).join('\n')}`;
+    prompt += `\nIf they bring up a delivered reminder again, say something like "As I mentioned earlier..." instead of repeating the full reminder.`;
   }
 
   // Always inject memories (short facts)
@@ -266,6 +280,9 @@ export class V1AdvancedSession {
       remindersDelivered: [],
     };
 
+    // Track delivered reminders as a Set for deduplication
+    this.deliveredReminderSet = new Set();
+
     // Reminder acknowledgment tracking
     this.currentDelivery = currentDelivery; // Delivery record for acknowledgment tracking
     this.reminderAcknowledged = false;      // Track if acknowledgment was detected
@@ -295,6 +312,13 @@ export class V1AdvancedSession {
     this.lastAudioTime = Date.now();
     this.silenceThreshold = 1500; // 1.5s of silence = end of turn
     this.silenceCheckInterval = null;
+
+    // Graceful call ending state
+    this.seniorSaidGoodbye = false;   // Senior said goodbye
+    this.donnaSaidGoodbye = false;    // Donna responded with goodbye
+    this.callEndingInitiated = false; // Call termination timer started
+    this.callEndTimer = null;         // Timer for post-goodbye silence
+    this.callTerminationReason = null; // Why the call ended
   }
 
   /**
@@ -322,39 +346,126 @@ export class V1AdvancedSession {
         streamSid: this.streamSid
       }));
     }
+
+    // If call ending was initiated and senior speaks again, cancel it
+    if (this.callEndingInitiated) {
+      console.log(`[V1][${this.streamSid}] Senior spoke during call ending - cancelling auto-hangup`);
+      this.cancelCallEnding();
+    }
   }
 
   /**
-   * Generate personalized greeting using templated system
+   * Initiate graceful call ending after mutual goodbyes
+   * Waits for a period of silence before terminating the call via Twilio
+   */
+  initiateCallEnding() {
+    if (this.callEndingInitiated) return;
+
+    this.callEndingInitiated = true;
+    const silenceWait = 4000; // 4 seconds of silence after Donna's goodbye
+
+    console.log(`[V1][${this.streamSid}] Call ending initiated - waiting ${silenceWait}ms for silence`);
+
+    this.callEndTimer = setTimeout(async () => {
+      // Double-check that the senior hasn't spoken since we started waiting
+      const silenceSinceLastAudio = Date.now() - this.lastAudioTime;
+      if (silenceSinceLastAudio < 2000) {
+        console.log(`[V1][${this.streamSid}] Recent audio detected (${silenceSinceLastAudio}ms ago), cancelling auto-hangup`);
+        this.callEndingInitiated = false;
+        return;
+      }
+
+      await this.terminateCall('mutual_goodbye');
+    }, silenceWait);
+  }
+
+  /**
+   * Cancel a pending call ending (e.g., if senior speaks again)
+   */
+  cancelCallEnding() {
+    if (this.callEndTimer) {
+      clearTimeout(this.callEndTimer);
+      this.callEndTimer = null;
+    }
+    this.callEndingInitiated = false;
+    // Reset goodbye state since conversation is continuing
+    this.seniorSaidGoodbye = false;
+    this.donnaSaidGoodbye = false;
+  }
+
+  /**
+   * Terminate the call via Twilio REST API
+   * @param {string} reason - Why the call is ending
+   */
+  async terminateCall(reason) {
+    this.callTerminationReason = reason;
+    console.log(`[V1][${this.streamSid}] Terminating call (reason: ${reason}, callSid: ${this.callSid})`);
+
+    if (!this.callSid) {
+      console.log(`[V1][${this.streamSid}] No callSid available, cannot terminate via Twilio`);
+      return;
+    }
+
+    if (!twilioClient) {
+      console.log(`[V1][${this.streamSid}] Twilio client not configured, cannot terminate call`);
+      return;
+    }
+
+    try {
+      await twilioClient.calls(this.callSid).update({ status: 'completed' });
+      console.log(`[V1][${this.streamSid}] Call terminated successfully via Twilio API`);
+    } catch (error) {
+      console.error(`[V1][${this.streamSid}] Failed to terminate call via Twilio:`, error.message);
+    }
+  }
+
+  /**
+   * Check if Donna's response contains goodbye language
+   * Used to detect when Donna has said her goodbye so we can start the silence timer
+   */
+  checkDonnaGoodbye(responseText) {
+    const goodbyePattern = /\b(goodbye|bye|goodnight|take care|talk to you (later|soon|tomorrow|next time)|see you|have a (good|great|nice|lovely|wonderful) (day|night|evening|afternoon)|until (next time|tomorrow))\b/i;
+    return goodbyePattern.test(responseText);
+  }
+
+  /**
+   * Generate personalized greeting using the greeting rotation service
    * Falls back to this when no cached greeting is available
    */
   async generateGreeting() {
-    const firstName = this.senior?.name?.split(' ')[0];
-
     // If no senior context, use simple greeting
     if (!this.senior) {
       return `Hello! It's Donna calling to check in. How are you doing today?`;
     }
 
-    // Run quick memory search for greeting context (for interest weighting)
+    // Fetch recent memories and last call summary in parallel
     let recentMemories = [];
+    let lastCallSummary = null;
+
     if (this.senior?.id) {
       try {
-        recentMemories = await memoryService.getRecent(this.senior.id, 10);
-        console.log(`[V1][${this.streamSid}] Greeting context: ${recentMemories.length} recent memories`);
+        const [memories, summaries] = await Promise.all([
+          memoryService.getRecent(this.senior.id, 10),
+          conversationService.getRecentSummaries(this.senior.id, 1),
+        ]);
+        recentMemories = memories;
+        lastCallSummary = summaries || null;
+        console.log(`[V1][${this.streamSid}] Greeting context: ${recentMemories.length} memories, lastCall=${lastCallSummary ? 'yes' : 'no'}`);
       } catch (e) {
-        console.error(`[V1][${this.streamSid}] Memory fetch error:`, e.message);
+        console.error(`[V1][${this.streamSid}] Greeting context fetch error:`, e.message);
       }
     }
 
-    // Use templated greeting system (no last index tracking when generating on-the-fly)
-    const { greeting, templateIndex, selectedInterest } = contextCacheService.generateTemplatedGreeting(
-      this.senior,
+    const { greeting, period, templateIndex, selectedInterest } = greetingService.getGreeting({
+      seniorName: this.senior.name,
+      timezone: this.senior.timezone,
+      interests: this.senior.interests,
+      lastCallSummary,
       recentMemories,
-      -1  // No previous index to exclude
-    );
+      seniorId: this.senior.id,
+    });
 
-    console.log(`[V1][${this.streamSid}] Generated greeting: template=${templateIndex}, interest=${selectedInterest || 'none'}`);
+    console.log(`[V1][${this.streamSid}] Generated greeting: period=${period}, template=${templateIndex}, interest=${selectedInterest || 'none'}`);
     return greeting;
   }
 
@@ -420,6 +531,21 @@ export class V1AdvancedSession {
 
     // Start silence detection
     this.startSilenceDetection();
+  }
+
+  /**
+   * Track a reminder as delivered (deduplicated)
+   * @param {string} reminderKey - Reminder title or ID
+   * @param {string} source - How it was detected ('director', 'acknowledgment', 'response')
+   */
+  markReminderDelivered(reminderKey, source = 'unknown') {
+    if (!reminderKey || this.deliveredReminderSet.has(reminderKey)) return;
+
+    this.deliveredReminderSet.add(reminderKey);
+    this.callState.remindersDelivered.push(reminderKey);
+
+    const turnNumber = this.conversationLog.length;
+    console.log(`[V1][${this.streamSid}] Reminder delivered: "${reminderKey}" (source: ${source}, turn: ${turnNumber})`);
   }
 
   /**
@@ -612,6 +738,15 @@ export class V1AdvancedSession {
     const quickCheck = quickAnalyze(text);
     const needsWebSearch = quickCheck.needsWebSearch;
 
+    // Track goodbye signals from the senior
+    if (quickCheck.goodbyeSignals?.length > 0) {
+      const hasStrongGoodbye = quickCheck.goodbyeSignals.some(g => g.strength === 'strong');
+      if (hasStrongGoodbye) {
+        this.seniorSaidGoodbye = true;
+        console.log(`[V1][${this.streamSid}] Senior goodbye detected: ${quickCheck.goodbyeSignals.map(g => g.signal).join(', ')}`);
+      }
+    }
+
     // Track news context for this turn
     let currentNewsContext = null;
 
@@ -657,7 +792,7 @@ export class V1AdvancedSession {
 
         // Track reminder delivery
         if (dir?.reminder?.should_deliver && dir?.reminder?.which_reminder) {
-          this.callState.remindersDelivered.push(dir.reminder.which_reminder);
+          this.markReminderDelivered(dir.reminder.which_reminder, 'director');
         }
       } catch (e) {
         console.error(`[V1][${this.streamSid}] Director error (awaited):`, e.message);
@@ -683,7 +818,7 @@ export class V1AdvancedSession {
 
         // Track reminder delivery if director said to deliver
         if (dir?.reminder?.should_deliver && dir?.reminder?.which_reminder) {
-          this.callState.remindersDelivered.push(dir.reminder.which_reminder);
+          this.markReminderDelivered(dir.reminder.which_reminder, 'director');
         }
       }).catch(e => {
         console.error(`[V1][${this.streamSid}] Director error:`, e.message);
@@ -727,6 +862,12 @@ export class V1AdvancedSession {
             userMessage
           );
           console.log(`[V1][${this.streamSid}] Marked reminder as ${type}`);
+
+          // Also mark in in-call tracking to prevent re-delivery
+          const reminderTitle = this.callState.pendingReminders?.[0]?.title;
+          if (reminderTitle) {
+            this.markReminderDelivered(reminderTitle, 'acknowledgment');
+          }
         }
       }
 
@@ -752,9 +893,10 @@ export class V1AdvancedSession {
         quickResult.guidance,
         directorGuidance,
         this.previousCallsSummary,
-        newsContext
+        newsContext,
+        this.callState.remindersDelivered
       );
-      console.log(`[V1][${this.streamSid}] System prompt built: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, news=${newsContext ? 'yes' : 'no'}, senior=${this.senior?.name || 'none'}`);
+      console.log(`[V1][${this.streamSid}] System prompt built: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, news=${newsContext ? 'yes' : 'no'}, senior=${this.senior?.name || 'none'}, deliveredReminders=${this.callState.remindersDelivered.length}`);
 
       // Build messages array
       const messages = this.conversationLog
@@ -793,6 +935,15 @@ export class V1AdvancedSession {
       // Convert to speech and send to Twilio
       await this.textToSpeechAndSend(responseText);
 
+      // Check if Donna said goodbye - if mutual, initiate call ending
+      if (this.checkDonnaGoodbye(responseText)) {
+        this.donnaSaidGoodbye = true;
+        console.log(`[V1][${this.streamSid}] Donna goodbye detected in response`);
+        if (this.seniorSaidGoodbye) {
+          this.initiateCallEnding();
+        }
+      }
+
     } catch (error) {
       console.error(`[V1][${this.streamSid}] Response generation failed:`, error.message);
     } finally {
@@ -830,6 +981,12 @@ export class V1AdvancedSession {
             userMessage
           );
           console.log(`[V1][${this.streamSid}] Marked reminder as ${type}`);
+
+          // Also mark in in-call tracking to prevent re-delivery
+          const reminderTitle = this.callState.pendingReminders?.[0]?.title;
+          if (reminderTitle) {
+            this.markReminderDelivered(reminderTitle, 'acknowledgment');
+          }
         }
       }
 
@@ -855,9 +1012,10 @@ export class V1AdvancedSession {
         quickResult.guidance,
         directorGuidance,
         this.previousCallsSummary,
-        newsContext
+        newsContext,
+        this.callState.remindersDelivered
       );
-      console.log(`[V1][${this.streamSid}] System prompt: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, news=${newsContext ? 'yes' : 'no'}, senior=${this.senior?.name || 'none'}`);
+      console.log(`[V1][${this.streamSid}] System prompt: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, news=${newsContext ? 'yes' : 'no'}, senior=${this.senior?.name || 'none'}, deliveredReminders=${this.callState.remindersDelivered.length}`);
 
       // Build messages array
       const messages = this.conversationLog
@@ -981,6 +1139,15 @@ export class V1AdvancedSession {
 
       // Wait a moment for final audio chunks before closing
       await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Check if Donna said goodbye - if mutual, initiate call ending
+      if (fullResponse && this.checkDonnaGoodbye(fullResponse)) {
+        this.donnaSaidGoodbye = true;
+        console.log(`[V1][${this.streamSid}] Donna goodbye detected in streaming response`);
+        if (this.seniorSaidGoodbye) {
+          this.initiateCallEnding();
+        }
+      }
 
     } catch (error) {
       console.error(`[V1][${this.streamSid}] Streaming response failed:`, error.message);
@@ -1127,8 +1294,13 @@ export class V1AdvancedSession {
       console.error(`[V1][${this.streamSid}] Post-call analysis failed:`, err.message);
     });
 
-    // Stop intervals
+    // Stop intervals and timers
     if (this.silenceCheckInterval) clearInterval(this.silenceCheckInterval);
+    if (this.callEndTimer) clearTimeout(this.callEndTimer);
+
+    // Log call termination reason
+    const terminationReason = this.callTerminationReason || 'external';
+    console.log(`[V1][${this.streamSid}] Call termination reason: ${terminationReason}`);
 
     // Close streaming TTS if active
     if (this.streamingTts) {

@@ -14,6 +14,7 @@
 import { memoryService } from './memory.js';
 import { conversationService } from './conversations.js';
 import { seniorService } from './seniors.js';
+import { greetingService } from './greetings.js';
 
 // In-memory cache (could be Redis for multi-instance deployments)
 const cache = new Map();
@@ -194,18 +195,20 @@ async function prefetchAndCache(seniorId) {
       memoryService.getRecent(seniorId, 10)
     ]);
 
-    // Get last greeting index from previous cache (if exists)
-    const previousCache = cache.get(seniorId);
-    const lastGreetingIndex = previousCache?.lastGreetingIndex ?? -1;
+    // Get last call summary for context-aware greetings
+    const lastCallSummary = summaries || null;
 
-    // Generate templated greeting with rotation
-    const { greeting, templateIndex, selectedInterest } = generateTemplatedGreeting(
-      senior,
+    // Generate greeting using the greeting rotation service
+    const { greeting, period, templateIndex, selectedInterest } = greetingService.getGreeting({
+      seniorName: senior.name,
+      timezone: senior.timezone,
+      interests: senior.interests,
+      lastCallSummary,
       recentMemories,
-      lastGreetingIndex
-    );
+      seniorId: senior.id,
+    });
 
-    console.log(`[ContextCache] Generated greeting for ${senior.name}: template=${templateIndex}, interest=${selectedInterest || 'none'}`);
+    console.log(`[ContextCache] Generated greeting for ${senior.name}: period=${period}, template=${templateIndex}, interest=${selectedInterest || 'none'}`);
 
     // Build memory context string (Tier 1 + important)
     const memoryParts = [];

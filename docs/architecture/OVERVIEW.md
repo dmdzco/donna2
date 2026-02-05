@@ -1,6 +1,6 @@
 # Donna Architecture Overview
 
-This document describes the Donna v3.1 system architecture with the **Conversation Director** and post-call analysis.
+This document describes the Donna v3.2 system architecture with the **Conversation Director**, post-call analysis, consumer app, and security hardening.
 
 ---
 
@@ -8,13 +8,13 @@ This document describes the Donna v3.1 system architecture with the **Conversati
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│              DONNA v3.1 - CONVERSATION DIRECTOR ARCHITECTURE                 │
+│              DONNA v3.2 - CONVERSATION DIRECTOR ARCHITECTURE                 │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│   ┌─────────────────┐  ┌─────────────────┐                                  │
-│   │  Admin Dashboard │  │  Observability  │                                  │
-│   │   /admin.html    │  │   Dashboard     │                                  │
-│   └────────┬─────────┘  └────────┬────────┘                                  │
+│   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐              │
+│   │  Admin Dashboard │  │  Consumer App  │  │  Observability  │              │
+│   │  apps/admin/     │  │ apps/consumer/ │  │   Dashboard     │              │
+│   └────────┬─────────┘  └────────┬───────┘  └────────┬────────┘              │
 │            │                      │                                          │
 │            ▼                      ▼                                          │
 │   ┌──────────────────┐        ┌──────────────────┐                          │
@@ -235,35 +235,50 @@ When a call ends, async batch analysis runs:
 
 ```
 /
-├── index.js                    ← Express server, routes, WebSocket handlers
+├── index.js                    ← Express server, routes, WebSocket handlers (1,234 LOC)
 ├── pipelines/
-│   ├── v1-advanced.js          ← Main pipeline: STT→Observers→Claude→TTS
-│   ├── quick-observer.js       ← Layer 1: 730+ lines of regex patterns
-│   └── fast-observer.js        ← Layer 2: Conversation Director (Gemini)
+│   ├── v1-advanced.js          ← Main pipeline: STT→Observers→Claude→TTS (1,198 LOC)
+│   ├── quick-observer.js       ← Layer 1: 730+ lines of regex patterns (1,127 LOC)
+│   └── fast-observer.js        ← Layer 2: Conversation Director (Gemini) (615 LOC)
 ├── adapters/
 │   ├── llm/
 │   │   ├── index.js            ← Multi-provider factory (Claude, Gemini)
 │   │   ├── claude.js           ← Claude adapter with streaming
-│   │   └── gemini.js           ← Gemini adapter for Director/Analysis
+│   │   ├── gemini.js           ← Gemini adapter for Director/Analysis
+│   │   └── base.js             ← Base LLM interface
 │   ├── elevenlabs.js           ← REST TTS (fallback/greetings)
 │   └── elevenlabs-streaming.js ← WebSocket TTS (~150ms first audio)
 ├── services/
 │   ├── call-analysis.js        ← Post-call: summary, concerns, score
+│   ├── caregivers.js           ← Caregiver-senior relationship management
+│   ├── context-cache.js        ← Pre-caches senior context (5 AM local)
 │   ├── memory.js               ← Semantic search, decay, deduplication
 │   ├── seniors.js              ← Senior CRUD, phone normalization
 │   ├── conversations.js        ← Call records, transcripts
 │   ├── scheduler.js            ← Reminder scheduling + prefetch
 │   └── news.js                 ← OpenAI web search, 1hr cache
+├── middleware/
+│   ├── auth.js                 ← Clerk authentication (requireAuth, requireAdmin)
+│   ├── clerk.js                ← Clerk middleware initialization
+│   ├── rate-limit.js           ← express-rate-limit (100/min API, 5/min calls)
+│   ├── twilio.js               ← Twilio webhook signature verification
+│   └── validate.js             ← Zod schema validation middleware
+├── validators/
+│   └── schemas.js              ← Zod schemas for all API inputs
 ├── db/
-│   └── schema.js               ← Database schema
+│   ├── client.js               ← Database connection (Neon + Drizzle)
+│   ├── schema.js               ← Database schema (7 tables)
+│   └── setup-pgvector.js       ← pgvector initialization
 ├── packages/
 │   ├── logger/                 ← TypeScript logging package
 │   └── event-bus/              ← TypeScript event bus package
+├── apps/
+│   ├── admin/                  ← React admin dashboard (primary, Railway)
+│   ├── consumer/               ← Caregiver onboarding + dashboard (Vercel)
+│   ├── observability/          ← React observability dashboard
+│   └── web/                    ← Future placeholder
 ├── public/
 │   └── admin.html              ← Legacy admin UI (fallback)
-├── apps/
-│   ├── admin/                  ← React admin dashboard (primary)
-│   └── observability/          ← React observability dashboard
 └── audio-utils.js              ← Audio conversion
 ```
 
@@ -275,11 +290,12 @@ When a call ends, async batch analysis runs:
 
 | Table | Purpose | Key Fields |
 |-------|---------|------------|
-| **seniors** | User profiles | name, phone, interests, familyInfo, medicalNotes |
-| **conversations** | Call records | callSid, transcript, duration, status, summary |
+| **seniors** | User profiles | name, phone, interests, familyInfo, medicalNotes, city, state, zipCode |
+| **conversations** | Call records | callSid, transcript, duration, status, summary, sentiment |
 | **memories** | Long-term memory | content, type, importance, embedding (1536d) |
-| **reminders** | Scheduled reminders | title, scheduledTime, isRecurring, type |
-| **reminderDeliveries** | Delivery tracking | status, attemptCount, userResponse |
+| **reminders** | Scheduled reminders | title, scheduledTime, isRecurring, type, cronExpression |
+| **reminderDeliveries** | Delivery tracking | status, attemptCount, userResponse, callSid |
+| **caregivers** | User-senior links | clerkUserId, seniorId, role (caregiver/family/admin) |
 | **callAnalyses** | Post-call results | summary, engagementScore, concerns, followUps |
 
 ### Memory System
@@ -381,4 +397,4 @@ git pushall && railway up
 
 ---
 
-*Last updated: January 2026 - v3.1 (Conversation Director)*
+*Last updated: February 2026 - v3.2 (Consumer App + Security Hardening)*

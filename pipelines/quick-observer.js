@@ -466,6 +466,28 @@ const NEWS_PATTERNS = [
 ];
 
 // ============================================================================
+// GOODBYE PATTERNS - Call ending signals
+// ============================================================================
+const GOODBYE_PATTERNS = [
+  // Direct goodbyes
+  { pattern: /\b(goodbye|good bye|bye bye|bye)\b/i, signal: 'goodbye', strength: 'strong' },
+  { pattern: /\b(goodnight|good night|nighty night)\b/i, signal: 'goodnight', strength: 'strong' },
+
+  // Farewell phrases
+  { pattern: /\b(talk to you (later|soon|tomorrow|next time))\b/i, signal: 'talk_later', strength: 'strong' },
+  { pattern: /\b(see you (later|soon|tomorrow|next time))\b/i, signal: 'see_you', strength: 'strong' },
+  { pattern: /\b(take care( of yourself)?)\b/i, signal: 'take_care', strength: 'strong' },
+  { pattern: /\b(have a (good|great|nice|lovely|wonderful) (day|night|evening|afternoon|one))\b/i, signal: 'have_good_day', strength: 'strong' },
+
+  // Softer ending signals
+  { pattern: /\b(i('ll| will) let you go)\b/i, signal: 'let_you_go', strength: 'medium' },
+  { pattern: /\b(i (should|gotta|got to|have to|need to|better) go)\b/i, signal: 'need_to_go', strength: 'medium' },
+  { pattern: /\b(thanks for (calling|the call|chatting|talking))\b/i, signal: 'thanks_for_call', strength: 'strong' },
+  { pattern: /\b(nice (talking|chatting|speaking) (to|with) you)\b/i, signal: 'nice_talking', strength: 'strong' },
+  { pattern: /\b(it was (nice|great|lovely|good) (talking|chatting))\b/i, signal: 'nice_talking', strength: 'strong' },
+];
+
+// ============================================================================
 // QUESTION PATTERNS - User expects a response
 // ============================================================================
 const QUESTION_PATTERNS = [
@@ -496,11 +518,15 @@ const REMINDER_ACKNOWLEDGMENT_PATTERNS = [
   { pattern: /\b(thank(s| you)|appreciate|good reminder|glad you (called|reminded)|thanks for reminding)\b/i, type: 'acknowledged', confidence: 0.7 },
   { pattern: /\b(i('ll| will) get (to it|on it|it done)|going to (take|do) it|about to (take|do))\b/i, type: 'acknowledged', confidence: 0.9 },
   { pattern: /\b(won't forget|i'll remember|good to know)\b/i, type: 'acknowledged', confidence: 0.75 },
+  { pattern: /\b(i('ll| will) (do that|do it|take care of it)|right away|right after)\b/i, type: 'acknowledged', confidence: 0.85 },
+  { pattern: /\b(you('re| are) right|good idea|i should)\b/i, type: 'acknowledged', confidence: 0.7 },
 
   // Confirmation (already done) - higher confidence
   { pattern: /\b(already (took|did|done|finished|had|taken)|just (took|did|finished)|i('ve| have) (taken|done|had|finished))\b/i, type: 'confirmed', confidence: 0.95 },
   { pattern: /\b(took (it|them|my|the)|did (it|that)|done( with)?( it)?|finished|completed)\b/i, type: 'confirmed', confidence: 0.85 },
   { pattern: /\b(earlier|this morning|a (few )?minutes ago|before you called|right before)\b/i, type: 'confirmed', confidence: 0.8 },
+  { pattern: /\b(i already took my (medicine|medication|pills?)|already (had|done) (it|that|my))\b/i, type: 'confirmed', confidence: 0.95 },
+  { pattern: /\b(yes i did( that)?|already done|already did)\b/i, type: 'confirmed', confidence: 0.9 },
 ];
 
 // ============================================================================
@@ -532,6 +558,7 @@ export function quickAnalyze(userMessage, recentHistory = []) {
     hydrationSignals: [],     // Hydration and nutrition
     transportSignals: [],     // Transportation and mobility
     newsSignals: [],          // News/current events requests
+    goodbyeSignals: [],       // Call ending signals
     isQuestion: false,
     questionType: null,
     engagementLevel: 'normal',
@@ -641,6 +668,13 @@ export function quickAnalyze(userMessage, recentHistory = []) {
     if (pattern.test(text)) {
       result.newsSignals.push(signal);
       result.needsWebSearch = true;
+    }
+  }
+
+  // Goodbye patterns - call ending signals
+  for (const { pattern, signal, strength } of GOODBYE_PATTERNS) {
+    if (pattern.test(text)) {
+      result.goodbyeSignals.push({ signal, strength });
     }
   }
 
@@ -1119,6 +1153,16 @@ function buildGuidance(analysis) {
   // Low engagement
   if (analysis.engagementLevel === 'low') {
     lines.push('[ENGAGEMENT] Short responses detected. Ask an open question about something they enjoy.');
+  }
+
+  // Goodbye signals
+  if (analysis.goodbyeSignals.length > 0) {
+    const hasStrong = analysis.goodbyeSignals.some(g => g.strength === 'strong');
+    if (hasStrong) {
+      lines.push('[GOODBYE] They said goodbye. Say a warm goodbye back and wrap up naturally.');
+    } else {
+      lines.push('[GOODBYE] They may be wrapping up. Start closing the conversation warmly.');
+    }
   }
 
   return lines.length > 0 ? lines.join('\n') : null;

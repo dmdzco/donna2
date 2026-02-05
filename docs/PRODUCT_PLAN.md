@@ -1,7 +1,7 @@
 # Donna - Product Plan & Feature Log
 
-> **Last Updated:** January 20, 2026
-> **Version:** 3.1 (Conversation Director Architecture)
+> **Last Updated:** February 5, 2026
+> **Version:** 3.2 (Consumer App + Security Hardening)
 
 ---
 
@@ -290,16 +290,78 @@ Quick call buttons and call management.
 
 ---
 
-### 10. Audio Processing
+### 10. Consumer App (Caregiver Onboarding) ✅ **Implemented**
 
-#### 10.1 Format Conversion ✅ **Implemented**
+#### 10.1 Landing Page ✅ **Implemented**
+Public-facing page for caregivers to discover and sign up for Donna.
+- **Tech:** React + Vite + TypeScript + Tailwind CSS
+- **Auth:** Clerk for registration/login
+- **Deployment:** Vercel
+- **Files:** `apps/consumer/src/pages/Landing.tsx`
+
+#### 10.2 5-Step Onboarding Flow ✅ **Implemented**
+Guided signup that creates a senior profile and configures Donna.
+- **Step 1:** Senior info (name, phone, timezone, city/state/zip)
+- **Step 2:** Relationship (who is signing up - caregiver, family, self)
+- **Step 3:** Interests (select 3-5 topics for conversation)
+- **Step 4:** Additional info (medical notes, preferences)
+- **Step 5:** Reminders (medication, appointments, custom) + call schedule
+- **API:** `POST /api/onboarding` (creates senior + caregiver + reminders)
+- **Files:** `apps/consumer/src/pages/Onboarding.tsx`
+
+#### 10.3 Caregiver Dashboard ✅ **Implemented**
+Post-onboarding view for caregivers to manage their senior.
+- **Features:** Profile summary, reminder management, call history, next scheduled call
+- **Files:** `apps/consumer/src/pages/Dashboard.tsx`
+
+#### 10.4 FAQ Page ✅ **Implemented**
+Frequently asked questions for caregivers and seniors.
+- **Files:** `apps/consumer/src/pages/FAQ.tsx`
+
+---
+
+### 11. Security & Infrastructure ✅ **Implemented**
+
+#### 11.1 Authentication (Clerk) ✅ **Implemented**
+Backend API authentication with Clerk SDK.
+- **Middleware:** `middleware/auth.js` - `requireAuth`, `requireAdmin`
+- **Cofounder fallback:** API key-based access for admin operations
+- **Caregiver table:** `caregivers` table links Clerk users to seniors
+- **Role-based access:** Admin sees all, caregivers see assigned seniors only
+- **Voice webhooks excluded:** `/voice/*` routes bypass auth
+
+#### 11.2 Input Validation (Zod) ✅ **Implemented**
+Schema-based validation for all API inputs.
+- **Schemas:** `validators/schemas.js` - all endpoint schemas
+- **Middleware:** `middleware/validate.js` - validates request body/params
+- **Error format:** Standardized 400 responses with field-level errors
+
+#### 11.3 Rate Limiting ✅ **Implemented**
+Express-rate-limit protecting all endpoints.
+- **Global:** 100 req/min per IP
+- **Call initiation:** 5 calls/min per IP
+- **Write operations:** 30 req/min on POST/PATCH/DELETE
+- **Auth endpoint:** 10 req/min (ready for Clerk)
+- **Files:** `middleware/rate-limit.js`
+
+#### 11.4 Twilio Webhook Verification ✅ **Implemented**
+Validates incoming Twilio webhook signatures.
+- **Middleware:** `middleware/twilio.js`
+- **Dev mode:** Allows localhost requests with warning
+- **Prod mode:** Rejects unsigned requests with 403
+
+---
+
+### 12. Audio Processing
+
+#### 12.1 Format Conversion ✅ **Implemented**
 Convert between Twilio and AI audio formats.
 - **Twilio:** mulaw 8kHz mono
 - **Gemini:** PCM 16kHz (input), 24kHz (output)
 - **ElevenLabs:** PCM 24kHz
 - **Files:** `audio-utils.js`
 
-#### 10.2 Real-Time Streaming ✅ **Implemented**
+#### 12.2 Real-Time Streaming ✅ **Implemented**
 Bidirectional audio streaming via WebSocket.
 - **Chunk size:** 640 bytes (~80ms) for Twilio, 3200 bytes (~400ms) for barge-in
 - **Protocol:** Twilio Media Streams
@@ -308,7 +370,7 @@ Bidirectional audio streaming via WebSocket.
 
 ## Planned Features
 
-### 11. V1 Latency Optimization ✅ **Implemented**
+### 13. V1 Latency Optimization ✅ **Implemented**
 Reduced V1 pipeline latency from ~1.5s to ~400ms time-to-first-audio.
 
 **Phase 1 (Architecture) - ✅ COMPLETE**
@@ -337,7 +399,7 @@ Reduced V1 pipeline latency from ~1.5s to ~400ms time-to-first-audio.
 
 ---
 
-### 12. Caregiver Authentication 📋 **Planned**
+### 14. Caregiver Frontend Authentication 📋 **Planned**
 Secure multi-user access with login system.
 
 - **Provider:** Clerk (recommended)
@@ -354,7 +416,7 @@ Secure multi-user access with login system.
 
 ---
 
-### 13. Call Analysis Storage ✅ **Implemented**
+### 15. Call Analysis Storage ✅ **Implemented**
 Persist post-call analysis for caregiver review.
 
 - **Database table:**
@@ -380,7 +442,7 @@ Persist post-call analysis for caregiver review.
 
 ---
 
-### 14. Analytics Dashboard 📋 **Planned**
+### 16. Analytics Dashboard 📋 **Planned**
 Insights and trends for caregivers.
 
 - **Metrics:**
@@ -653,6 +715,7 @@ Connect with Alexa, Google Home, smart displays.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **3.2** | Feb 5, 2026 | Consumer app (onboarding + dashboard), security hardening (Clerk, Zod, rate limiting, webhook verification) |
 | **3.1** | Jan 20, 2026 | Conversation Director architecture (2-layer + post-call), extensive Quick Observer regex, post-call analysis |
 | **2.5** | Jan 20, 2026 | Barge-in support, queue clearing, streaming pipeline |
 | **2.4** | Jan 18, 2026 | Claude + Observer + ElevenLabs pipeline |
@@ -776,13 +839,29 @@ Connect with Alexa, Google Home, smart displays.
 | Audio Utils | `audio-utils.js` |
 | Memory | `services/memory.js` |
 | Seniors | `services/seniors.js` |
+| Caregivers | `services/caregivers.js` |
 | Conversations | `services/conversations.js` |
 | Scheduler | `services/scheduler.js` |
 | News | `services/news.js` |
 | Database Schema | `db/schema.js` |
-| Admin UI | `public/admin.html` |
+| Authentication | `middleware/auth.js`, `middleware/clerk.js` |
+| Input Validation | `middleware/validate.js`, `validators/schemas.js` |
+| Rate Limiting | `middleware/rate-limit.js` |
+| Twilio Verification | `middleware/twilio.js` |
+| Admin Dashboard | `apps/admin/` (React + Vite) |
+| Consumer App | `apps/consumer/` (React + Vite + Clerk) |
+| Observability | `apps/observability/` |
 | Browser Call | `public/call.html`, `browser-session.js` |
 
 ---
+
+## Feature Counts
+
+| Status | Count |
+|--------|-------|
+| Implemented | 48 |
+| Partial | 2 |
+| Planned | 14 |
+| Suggested | 14 |
 
 *This is a living document. Update as features are added or plans change.*

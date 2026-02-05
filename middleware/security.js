@@ -11,13 +11,20 @@ export function securityHeaders() {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"], // admin.html uses inline scripts
+        scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:"],
         connectSrc: ["'self'", "ws:", "wss:"],
       },
     },
-    crossOriginEmbedderPolicy: false, // Allow cross-origin resources
+    crossOriginEmbedderPolicy: false,
+    strictTransportSecurity: {
+      maxAge: 31536000, // 1 year
+      includeSubDomains: true,
+    },
+    referrerPolicy: {
+      policy: 'strict-origin-when-cross-origin',
+    },
   });
 }
 

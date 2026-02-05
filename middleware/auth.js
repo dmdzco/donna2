@@ -6,6 +6,9 @@
  */
 
 import { clerkMiddleware, getAuth, clerkClient } from '@clerk/express';
+import jwt from 'jsonwebtoken';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'donna-admin-secret-change-me';
 
 // Cofounder API keys from environment (comma-separated)
 const COFOUNDER_API_KEYS = [
@@ -26,7 +29,8 @@ function isCofounderRequest(req) {
  *
  * Checks in order:
  * 1. Cofounder API key (bypass Clerk entirely)
- * 2. Clerk session
+ * 2. Admin JWT Bearer token
+ * 3. Clerk session
  *
  * Sets req.auth with:
  * - isCofounder: boolean
@@ -44,7 +48,24 @@ export async function requireAuth(req, res, next) {
     return next();
   }
 
-  // 2. Check Clerk session
+  // 2. Check for admin JWT Bearer token
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.slice(7);
+      const decoded = jwt.verify(token, JWT_SECRET);
+      req.auth = {
+        isCofounder: false,
+        isAdmin: true,
+        userId: decoded.adminId,
+      };
+      return next();
+    } catch {
+      // Invalid JWT - fall through to Clerk
+    }
+  }
+
+  // 3. Check Clerk session
   try {
     const auth = getAuth(req);
 
@@ -91,6 +112,23 @@ export async function optionalAuth(req, res, next) {
       userId: 'cofounder',
     };
     return next();
+  }
+
+  // Check for admin JWT Bearer token
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.slice(7);
+      const decoded = jwt.verify(token, JWT_SECRET);
+      req.auth = {
+        isCofounder: false,
+        isAdmin: true,
+        userId: decoded.adminId,
+      };
+      return next();
+    } catch {
+      // Invalid JWT - fall through to Clerk
+    }
   }
 
   try {

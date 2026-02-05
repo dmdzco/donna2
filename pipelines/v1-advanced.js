@@ -12,6 +12,7 @@ import { runDirectorPipeline, formatDirectorGuidance } from './fast-observer.js'
 import { getAdapter, isModelAvailable } from '../adapters/llm/index.js';
 import { analyzeCompletedCall, saveCallAnalysis, getHighSeverityConcerns } from '../services/call-analysis.js';
 import { conversationService } from '../services/conversations.js';
+import { dailyContextService } from '../services/daily-context.js';
 
 // Twilio client for programmatic call ending
 const twilioClient = (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN)
@@ -152,7 +153,7 @@ function hasUnclosedGuidanceTag(text) {
 /**
  * Build system prompt - full context, adapters handle any quirks
  */
-const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, directorGuidance = null, previousCallsSummary = null, newsContext = null, deliveredReminders = []) => {
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, directorGuidance = null, previousCallsSummary = null, newsContext = null, deliveredReminders = [], conversationTracking = null, todaysContext = null) => {
   let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
 
 CRITICAL - YOUR OUTPUT IS SPOKEN ALOUD:
@@ -199,6 +200,11 @@ CONVERSATION BALANCE - QUESTION FREQUENCY:
     prompt += `\n\nRecent calls:\n${previousCallsSummary}`;
   }
 
+  // Same-day cross-call context
+  if (todaysContext) {
+    prompt += `\n\n${todaysContext}`;
+  }
+
   if (memoryContext) {
     prompt += `\n\n${memoryContext}`;
   }
@@ -212,6 +218,10 @@ CONVERSATION BALANCE - QUESTION FREQUENCY:
     prompt += `\n\nREMINDERS ALREADY DELIVERED THIS CALL (do NOT repeat these):`;
     prompt += `\n${deliveredReminders.map(r => `- ${r}`).join('\n')}`;
     prompt += `\nIf they bring up a delivered reminder again, say something like "As I mentioned earlier..." instead of repeating the full reminder.`;
+  }
+
+  if (conversationTracking) {
+    prompt += `\n\n${conversationTracking}`;
   }
 
   // Always inject memories (short facts)
@@ -307,6 +317,13 @@ export class V1AdvancedSession {
     this.isSpeaking = false; // Track if Donna is currently speaking
     this.wasInterrupted = false; // Track if user interrupted during response generation
     this.dynamicMemoryContext = null; // Real-time memory search results
+    this.todaysContext = null; // Same-day cross-call context
+
+    // In-call conversation tracking (prevent repetition)
+    this.topicsDiscussed = [];      // Topics that came up (e.g., "gardening", "grandkids")
+    this.questionsAsked = [];       // Questions Donna asked
+    this.adviceGiven = [];          // Advice/suggestions Donna provided
+    this.storiesShared = [];        // Facts or anecdotes Donna mentioned
 
     // Silence detection for turn-taking
     this.lastAudioTime = Date.now();
@@ -503,6 +520,21 @@ export class V1AdvancedSession {
       }
     }
 
+    // Load same-day cross-call context
+    if (this.senior?.id) {
+      try {
+        this.todaysContext = await dailyContextService.getTodaysContext(
+          this.senior.id,
+          this.senior.timezone
+        );
+        if (this.todaysContext?.previousCallCount > 0) {
+          console.log(`[V1][${this.streamSid}] Same-day context: ${this.todaysContext.previousCallCount} previous calls today, ${this.todaysContext.remindersDelivered?.length || 0} reminders already delivered`);
+        }
+      } catch (e) {
+        console.log(`[V1][${this.streamSid}] Could not load today's context: ${e.message}`);
+      }
+    }
+
     // Use pre-generated greeting > cached greeting > generate fresh
     const greetingText = this.preGeneratedGreeting || cachedGreeting || await this.generateGreeting();
     if (this.preGeneratedGreeting) {
@@ -553,6 +585,151 @@ export class V1AdvancedSession {
    */
   updateCallState() {
     this.callState.minutesElapsed = (Date.now() - this.callState.startTime) / 60000;
+  }
+
+  /**
+   * Extract conversation elements from Donna's response and user message
+   * Used for in-call repetition prevention
+   */
+  extractConversationElements(responseText, userMessage) {
+    const questions = [];
+    const advice = [];
+    const topics = [];
+
+    // Extract questions from Donna's response (sentences ending in ?)
+    if (responseText) {
+      const questionMatches = responseText.match(/[^.!?]*\?/g);
+      if (questionMatches) {
+        for (const q of questionMatches) {
+          const trimmed = q.trim();
+          // Keep short summary (max 5 words from the question)
+          const words = trimmed.split(/\s+/).slice(0, 5).join(' ');
+          if (words) questions.push(words);
+        }
+      }
+
+      // Extract advice phrases from Donna's response
+      const advicePattern = /(?:you should|try to|don't forget to|make sure to|remember to|how about)[^.!?]*/gi;
+      const adviceMatches = responseText.match(advicePattern);
+      if (adviceMatches) {
+        for (const a of adviceMatches) {
+          const words = a.trim().split(/\s+/).slice(0, 5).join(' ');
+          if (words) advice.push(words);
+        }
+      }
+    }
+
+    // Extract topic keywords from user message
+    if (userMessage) {
+      const lower = userMessage.toLowerCase();
+      // Common activity/topic words
+      const topicPatterns = [
+        /\b(garden(?:ing)?|plant(?:ing|s)?|flower(?:s)?)\b/i,
+        /\b(cook(?:ing)?|bak(?:ing)?|recipe(?:s)?|dinner|lunch|breakfast)\b/i,
+        /\b(walk(?:ing)?|exercise|yoga|swimming)\b/i,
+        /\b(read(?:ing)?|book(?:s)?|newspaper)\b/i,
+        /\b(church|prayer|service|bible)\b/i,
+        /\b(tv|television|show(?:s)?|movie(?:s)?|watch(?:ing)?)\b/i,
+        /\b(grandkid(?:s)?|grandchild(?:ren)?|grandson|granddaughter)\b/i,
+        /\b(son|daughter|brother|sister|husband|wife|family)\b/i,
+        /\b(doctor|hospital|appointment|medication|medicine|pill(?:s)?)\b/i,
+        /\b(weather|rain(?:ing)?|snow(?:ing)?|sunny|cold|hot)\b/i,
+        /\b(sleep(?:ing)?|nap|rest(?:ing)?|tired)\b/i,
+        /\b(friend(?:s)?|neighbor(?:s)?|visitor(?:s)?|company)\b/i,
+        /\b(pain|ache|hurt(?:ing)?|sore|dizzy|fall|fell)\b/i,
+        /\b(bird(?:s)?|cat(?:s)?|dog(?:s)?|pet(?:s)?)\b/i,
+        /\b(music|sing(?:ing)?|radio|song(?:s)?)\b/i,
+        /\b(craft(?:s)?|knit(?:ting)?|sew(?:ing)?|puzzle(?:s)?)\b/i,
+      ];
+
+      for (const pattern of topicPatterns) {
+        const match = lower.match(pattern);
+        if (match) {
+          topics.push(match[1]);
+        }
+      }
+    }
+
+    return { questions, advice, topics };
+  }
+
+  /**
+   * Track conversation elements from Quick Observer signals
+   */
+  trackTopicsFromSignals(quickResult) {
+    if (quickResult.healthSignals?.length > 0) {
+      if (!this.topicsDiscussed.includes('health')) {
+        this.topicsDiscussed.push('health');
+      }
+    }
+    if (quickResult.familySignals?.length > 0) {
+      if (!this.topicsDiscussed.includes('family')) {
+        this.topicsDiscussed.push('family');
+      }
+    }
+    if (quickResult.activitySignals?.length > 0) {
+      for (const signal of quickResult.activitySignals) {
+        const topic = String(signal).toLowerCase().split(/\s+/).slice(0, 2).join(' ');
+        if (topic && !this.topicsDiscussed.includes(topic)) {
+          this.topicsDiscussed.push(topic);
+        }
+      }
+    }
+    if (quickResult.emotionSignals?.length > 0) {
+      const negatives = quickResult.emotionSignals.filter(e => e.valence === 'negative');
+      if (negatives.length > 0 && !this.topicsDiscussed.includes('emotions')) {
+        this.topicsDiscussed.push('emotions');
+      }
+    }
+  }
+
+  /**
+   * Update tracking arrays with extracted elements, enforcing size limits
+   */
+  recordConversationElements(elements) {
+    if (elements.questions?.length > 0) {
+      this.questionsAsked.push(...elements.questions);
+      if (this.questionsAsked.length > 8) {
+        this.questionsAsked = this.questionsAsked.slice(-8);
+      }
+    }
+    if (elements.advice?.length > 0) {
+      this.adviceGiven.push(...elements.advice);
+      if (this.adviceGiven.length > 8) {
+        this.adviceGiven = this.adviceGiven.slice(-8);
+      }
+    }
+    if (elements.topics?.length > 0) {
+      for (const t of elements.topics) {
+        if (!this.topicsDiscussed.includes(t)) {
+          this.topicsDiscussed.push(t);
+        }
+      }
+      if (this.topicsDiscussed.length > 10) {
+        this.topicsDiscussed = this.topicsDiscussed.slice(-10);
+      }
+    }
+  }
+
+  /**
+   * Get a formatted summary of conversation tracking for the system prompt
+   */
+  getConversationTrackingSummary() {
+    const sections = [];
+
+    if (this.topicsDiscussed.length > 0) {
+      sections.push(`- Topics discussed: ${this.topicsDiscussed.join(', ')}`);
+    }
+    if (this.questionsAsked.length > 0) {
+      sections.push(`- Questions you've asked: ${this.questionsAsked.join('; ')}`);
+    }
+    if (this.adviceGiven.length > 0) {
+      sections.push(`- Advice you've given: ${this.adviceGiven.join('; ')}`);
+    }
+
+    if (sections.length === 0) return null;
+
+    return `CONVERSATION SO FAR THIS CALL (avoid repeating):\n${sections.join('\n')}\nBuild on these topics rather than reintroducing them. Ask NEW questions.`;
   }
 
   /**
@@ -876,6 +1053,9 @@ export class V1AdvancedSession {
         ? formatDirectorGuidance(this.lastDirectorResult.direction)
         : null;
 
+      // Track topics from Quick Observer signals
+      this.trackTopicsFromSignals(quickResult);
+
       // Dynamic model selection based on Director + Quick Observer
       const modelConfig = selectModelConfig(quickResult, this.lastDirectorResult?.direction);
 
@@ -894,7 +1074,9 @@ export class V1AdvancedSession {
         directorGuidance,
         this.previousCallsSummary,
         newsContext,
-        this.callState.remindersDelivered
+        this.callState.remindersDelivered,
+        this.getConversationTrackingSummary(),
+        this.todaysContext ? dailyContextService.formatTodaysContext(this.todaysContext) : null
       );
       console.log(`[V1][${this.streamSid}] System prompt built: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, news=${newsContext ? 'yes' : 'no'}, senior=${this.senior?.name || 'none'}, deliveredReminders=${this.callState.remindersDelivered.length}`);
 
@@ -931,6 +1113,10 @@ export class V1AdvancedSession {
         content: responseText,
         timestamp: new Date().toISOString()
       });
+
+      // Track conversation elements for repetition prevention
+      const elements = this.extractConversationElements(responseText, userMessage);
+      this.recordConversationElements(elements);
 
       // Convert to speech and send to Twilio
       await this.textToSpeechAndSend(responseText);
@@ -995,6 +1181,9 @@ export class V1AdvancedSession {
         ? formatDirectorGuidance(this.lastDirectorResult.direction)
         : null;
 
+      // Track topics from Quick Observer signals
+      this.trackTopicsFromSignals(quickResult);
+
       // Dynamic model selection based on Director + Quick Observer
       const modelConfig = selectModelConfig(quickResult, this.lastDirectorResult?.direction);
 
@@ -1013,7 +1202,9 @@ export class V1AdvancedSession {
         directorGuidance,
         this.previousCallsSummary,
         newsContext,
-        this.callState.remindersDelivered
+        this.callState.remindersDelivered,
+        this.getConversationTrackingSummary(),
+        this.todaysContext ? dailyContextService.formatTodaysContext(this.todaysContext) : null
       );
       console.log(`[V1][${this.streamSid}] System prompt: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, news=${newsContext ? 'yes' : 'no'}, senior=${this.senior?.name || 'none'}, deliveredReminders=${this.callState.remindersDelivered.length}`);
 
@@ -1135,6 +1326,10 @@ export class V1AdvancedSession {
           content: fullResponse,
           timestamp: new Date().toISOString()
         });
+
+        // Track conversation elements for repetition prevention
+        const elements = this.extractConversationElements(fullResponse, userMessage);
+        this.recordConversationElements(elements);
       }
 
       // Wait a moment for final audio chunks before closing
@@ -1274,6 +1469,22 @@ export class V1AdvancedSession {
 
   async close() {
     console.log(`[V1][${this.streamSid}] Closing session...`);
+
+    // Save daily context for same-day cross-call memory
+    if (this.senior?.id) {
+      try {
+        await dailyContextService.saveCallContext(this.senior.id, this.callSid, {
+          topicsDiscussed: this.topicsDiscussed || [],
+          remindersDelivered: [...this.callState.remindersDelivered],
+          adviceGiven: this.adviceGiven || [],
+          keyMoments: [],
+          summary: null, // Filled later by post-call analysis
+        });
+        console.log(`[V1][${this.streamSid}] Saved daily context`);
+      } catch (e) {
+        console.error(`[V1][${this.streamSid}] Failed to save daily context:`, e.message);
+      }
+    }
 
     // Extract memories
     await this.extractMemories();

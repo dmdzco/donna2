@@ -454,14 +454,20 @@ Insights and trends for caregivers.
 
 ---
 
-### 29. In-Call Web Search 📋 **Planned**
+### 29. In-Call Web Search 🔄 **Partial**
 Enable Donna to search the web during calls for current information.
 
-- **Use cases:**
-  - Answer questions about current events
-  - Look up weather, sports scores, news
-  - Find information senior is curious about
-- **Provider:** OpenAI web search or similar
+- **Currently working:**
+  - News/weather/sports detection patterns in Quick Observer (NEWS_PATTERNS)
+  - Buffer response pattern ("Let me check on that...")
+  - Director's `checkCurrentEvents()` + `performWebSearch()` via OpenAI web_search_preview
+  - Results injected as newsContext into system prompt
+- **Needs enhancement:**
+  - [ ] Broader pattern matching for general curiosity questions ("what year...", "how tall...", "who invented...")
+  - [ ] Better search query extraction (currently crude topic matching)
+  - [ ] More conversational result formatting for elderly users
+  - [ ] Direct web search path (bypass Director for simple lookups)
+- **Provider:** OpenAI web search (gpt-4o-mini with web_search_preview tool)
 - **Value:** More helpful, knowledgeable companion
 
 ---
@@ -865,8 +871,8 @@ Connect with Alexa, Google Home, smart displays.
 | Status | Count |
 |--------|-------|
 | Implemented | 51 |
-| Partial | 2 |
-| Planned | 11 |
+| Partial | 3 |
+| Planned | 10 |
 | Suggested | 14 |
 
 *This is a living document. Update as features are added or plans change.*

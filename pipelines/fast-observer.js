@@ -76,6 +76,7 @@ Already delivered this call (do NOT repeat): {{DELIVERED_REMINDERS}}
 Senior's interests: {{INTERESTS}}
 Senior's family: {{FAMILY_MEMBERS}}
 Important memories: {{MEMORIES}}
+Previous calls today: {{TODAYS_PREVIOUS_CALLS}}
 
 ## CONVERSATION SO FAR
 
@@ -137,6 +138,7 @@ Never be abrupt. Use natural transition phrases:
 - Sound clinical or robotic
 - NEVER recommend delivering a reminder that is in the "Already delivered" list
 - If a delivered reminder comes up again, suggest acknowledging with "As I mentioned earlier..."
+- If a reminder was already delivered in a PREVIOUS call today, suggest asking "Did you get a chance to [do it]?" instead of re-delivering
 
 ### Re-engagement Strategies
 
@@ -257,6 +259,7 @@ export async function getConversationDirection(
     .replace('{{INTERESTS}}', seniorContext?.interests?.join(', ') || 'unknown')
     .replace('{{FAMILY_MEMBERS}}', formatFamily(seniorContext?.family))
     .replace('{{MEMORIES}}', formatMemories(memories))
+    .replace('{{TODAYS_PREVIOUS_CALLS}}', callState?.todaysContext || 'None (first call today)')
     .replace('{{CONVERSATION_HISTORY}}', formatHistory(conversationHistory));
 
   try {
@@ -416,26 +419,36 @@ async function searchRelevantMemories(seniorId, userMessage) {
  */
 async function checkCurrentEvents(userMessage) {
   // Patterns that trigger web search
-  const searchTriggers = /\b(news|weather|happening|world|president|election|look.{0,10}up|search|can you (find|check)|do you know|what('s| is) the (best|top))\b/i;
+  const searchTriggers = /\b(news|weather|happening|world|president|election|look.{0,10}up|search|can you (find|check)|do you know|what('s| is) the (best|top)|what year did|how many\b.*\b(are there|does|did)|who (was|is|were|invented|discovered|founded|wrote|created)|when did|how long ago|what happened in|how (tall|old|big|far|deep|long|fast|heavy|much does) is|what('s| is) the (population|capital|distance|height|size|age) of|I wonder|I('m| am) curious|have you heard about|tell me about|what do you know about|what is the\b.{3,}|what are the\b.{3,}|where is\b.{3,}\b(located|at))\b/i;
 
   if (!searchTriggers.test(userMessage)) {
     return null;
   }
 
   try {
-    // Determine if this is a news request or general search
+    // Determine if this is a news request, curiosity/factual question, or general search
     const isNewsRequest = /\b(news|headline|happening|current events|today)\b/i.test(userMessage);
+    const isFactualOrCuriosity = /\b(what year did|how many|who (was|is|were|invented|discovered|founded|wrote|created)|when did|how long ago|what happened in|how (tall|old|big|far|deep|long|fast|heavy|much does) is|what('s| is) the (population|capital|distance|height|size|age) of|I wonder|I('m| am) curious|have you heard about|tell me about|what do you know about|what is the|what are the|where is\b.{3,}\b(located|at))\b/i.test(userMessage);
 
     if (isNewsRequest) {
       // Use news service for news-type queries
-      const topicMatch = userMessage.match(/(?:about|the|what's)\s+(\w+(?:\s+\w+)?)/i);
-      const topic = topicMatch ? topicMatch[1] : 'general news';
+      const topicMatch = userMessage.match(/(?:news\s+(?:about|on)|about|on|the)\s+(.{3,40}?)(?:\?|$|\.)/i);
+      const topic = topicMatch ? topicMatch[1].trim() : 'general news';
 
       const news = await newsService.getNewsForSenior([topic], 2);
       if (news) {
         return {
           type: 'news',
           content: news,
+        };
+      }
+    } else if (isFactualOrCuriosity) {
+      // Factual / curiosity question - pass the full question as the search query
+      const searchResult = await performWebSearch(userMessage);
+      if (searchResult) {
+        return {
+          type: 'factual',
+          content: searchResult,
         };
       }
     } else {
@@ -473,12 +486,14 @@ async function performWebSearch(query) {
     const response = await client.responses.create({
       model: 'gpt-4o-mini',
       tools: [{ type: 'web_search_preview' }],
-      input: `Answer this question concisely (2-3 sentences max): ${query}
+      input: `Answer this question in 2-3 short, friendly sentences: ${query}
 
-              This answer will be read aloud to an elderly person, so:
-              - Keep it simple and clear
-              - Be conversational, not technical
-              - If you can't find the answer, say so briefly`,
+              This will be spoken aloud to an elderly person during a phone call, so:
+              - Use warm, conversational language (like a friend explaining something)
+              - Avoid jargon, technical terms, or complex numbers
+              - Round numbers to make them easy to remember
+              - If it's a factual question, give the answer right away
+              - If you can't find the answer, just say "I'm not sure about that"`,
       tool_choice: 'required',
     });
 
@@ -491,7 +506,7 @@ async function performWebSearch(query) {
 
     console.log(`[ConversationDirector] Search result: "${result.substring(0, 100)}..."`);
 
-    return `Here's what I found:\n${result}`;
+    return result;
 
   } catch (error) {
     console.error('[ConversationDirector] Web search error:', error.message);

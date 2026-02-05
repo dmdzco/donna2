@@ -463,6 +463,30 @@ const NEWS_PATTERNS = [
   { pattern: /\b(find out|figure out) (about|what|who|where|when|why|how)\b/i, signal: 'search_request' },
   { pattern: /\b(do you know (what|who|where|when|why|how))\b/i, signal: 'search_request' },
   { pattern: /\b(what('s| is) the (best|top|most))\b/i, signal: 'search_request' },
+
+  // General knowledge / factual questions
+  { pattern: /\bwhat year did\b/i, signal: 'factual_question' },
+  { pattern: /\bhow many\b.*\b(are there|does|did|in the|in a)\b/i, signal: 'factual_question' },
+  { pattern: /\bwho (was|is|were|invented|discovered|founded|wrote|created)\b/i, signal: 'factual_question' },
+  { pattern: /\bwhat is the\b.{3,}/i, signal: 'factual_question' },
+  { pattern: /\bwhat are the\b.{3,}/i, signal: 'factual_question' },
+
+  // Historical questions
+  { pattern: /\bwhen did\b.{3,}/i, signal: 'factual_question' },
+  { pattern: /\bhow long ago\b/i, signal: 'factual_question' },
+  { pattern: /\bwhat happened in\b/i, signal: 'factual_question' },
+
+  // Factual lookups
+  { pattern: /\bhow (tall|old|big|far|deep|long|fast|heavy|much does) is\b/i, signal: 'factual_question' },
+  { pattern: /\bwhat('s| is) the (population|capital|distance|height|size|age) of\b/i, signal: 'factual_question' },
+  { pattern: /\bwhere is\b.{3,}\b(located|at)\b/i, signal: 'factual_question' },
+
+  // Curiosity / conversational search
+  { pattern: /\bI wonder\b/i, signal: 'curiosity_question' },
+  { pattern: /\bI('m| am) curious (about|if|whether)\b/i, signal: 'curiosity_question' },
+  { pattern: /\bhave you heard about\b/i, signal: 'curiosity_question' },
+  { pattern: /\btell me about\b.{3,}/i, signal: 'curiosity_question' },
+  { pattern: /\bwhat do you know about\b/i, signal: 'curiosity_question' },
 ];
 
 // ============================================================================

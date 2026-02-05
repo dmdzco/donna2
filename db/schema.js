@@ -104,3 +104,17 @@ export const callAnalyses = pgTable('call_analyses', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// Daily call context - tracks what happened in each call for same-day cross-call memory
+export const dailyCallContext = pgTable('daily_call_context', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  seniorId: uuid('senior_id').references(() => seniors.id).notNull(),
+  callDate: timestamp('call_date').notNull(),
+  callSid: varchar('call_sid', { length: 100 }),
+  topicsDiscussed: text('topics_discussed').array(),
+  remindersDelivered: text('reminders_delivered').array(),
+  adviceGiven: text('advice_given').array(),
+  keyMoments: json('key_moments'),
+  summary: text('summary'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+

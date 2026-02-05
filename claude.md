@@ -46,7 +46,7 @@
 - Scheduled reminder calls
 - Consumer app (caregiver onboarding + dashboard)
 - Observability dashboard (React)
-- Security: Clerk auth, JWT admin auth, Zod validation, rate limiting, Twilio webhook verification, Helmet headers, API key auth, PII-safe logging
+- Security: Clerk auth, JWT admin auth (enforced in prod), Zod validation, rate limiting (incl. admin login brute-force), Twilio webhook verification, Helmet headers (HSTS 1yr), API key auth, PII-safe logging
 
 ---
 
@@ -150,14 +150,12 @@ The Director proactively guides each call:
 │   ├── scheduler.js            ← Reminder scheduler
 │   └── news.js                 ← News via OpenAI web search
 ├── middleware/
-│   ├── auth.js                 ← Clerk + JWT + cofounder auth
-│   ├── security.js             ← Helmet headers + request ID
+│   ├── auth.js                 ← Clerk + JWT + cofounder auth (JWT_SECRET enforced in prod)
+│   ├── security.js             ← Helmet headers + request ID + HSTS 1yr
 │   ├── rate-limit.js           ← Rate limiting (API, call, write, auth, webhook)
 │   ├── api-auth.js             ← API key authentication (DONNA_API_KEY)
-│   ├── twilio.js               ← Webhook signature verification (legacy)
-│   ├── twilio-auth.js          ← Twilio webhook signature validation
+│   ├── twilio.js               ← Twilio webhook signature validation
 │   ├── validate.js             ← Zod validation middleware
-│   ├── validation.js           ← express-validator schemas
 │   └── error-handler.js        ← Centralized error handler
 ├── lib/
 │   ├── logger.js               ← PII-safe structured logger

@@ -96,7 +96,22 @@
 
 ## Recently Completed
 
-### ✅ Security Hardening (February 2026)
+### ✅ Security Phase 2: Middleware Cleanup & Hardening (February 2026)
+
+**Achieved:** Eliminated 3 duplicate middleware files, hardened admin login, enforced production secrets.
+
+**Implemented:**
+- [x] Removed `middleware/clerk.js` (duplicate of `auth.js`)
+- [x] Removed `middleware/validation.js` (express-validator, replaced by Zod)
+- [x] Consolidated `middleware/twilio-auth.js` into `middleware/twilio.js`
+- [x] Rate limiting on admin login endpoint (10 req/min brute-force protection)
+- [x] JWT_SECRET fail-fast in production (server won't start without it)
+- [x] HSTS extended to 1 year with includeSubDomains
+- [x] Strict referrer policy (`strict-origin-when-cross-origin`)
+
+---
+
+### ✅ Security Hardening Phase 1 (February 2026)
 
 **Achieved:** Comprehensive API security layer addressing 9 security gaps.
 
@@ -106,19 +121,20 @@
 - [x] Rate limiting - 3 tiers: API (100/15min), calls (10/15min), webhooks (500/1min)
 - [x] API key authentication (`DONNA_API_KEY` env var, dev-mode passthrough)
 - [x] Twilio webhook signature validation (skipped in local dev)
-- [x] Input validation on all POST/PATCH routes (express-validator)
+- [x] Input validation on all POST/PATCH routes (Zod)
 - [x] Centralized error handler (never leaks internal error details)
 - [x] PII-safe logger with auto-masking (phone, names, content)
 - [x] Request body size limits (1MB)
 
-**New Files:**
+**Middleware Files (after Phase 2 cleanup):**
 ```
 middleware/
-├── security.js       ← Helmet + request ID
-├── rate-limit.js     ← 3-tier rate limiting
-├── twilio-auth.js    ← Webhook signature validation
+├── auth.js           ← Clerk + JWT + cofounder auth
+├── security.js       ← Helmet + request ID + HSTS
+├── rate-limit.js     ← 5-tier rate limiting (api, call, write, auth, webhook)
+├── twilio.js         ← Webhook signature validation (consolidated)
 ├── api-auth.js       ← API key auth (Bearer token)
-├── validation.js     ← Input validation schemas
+├── validate.js       ← Zod validation middleware
 └── error-handler.js  ← Validation checker + error handler
 lib/
 ├── logger.js         ← PII-safe structured logger
@@ -128,6 +144,7 @@ lib/
 **Security Notes:**
 - Set `DONNA_API_KEY` in production to enable API auth
 - Twilio auth auto-enables when `RAILWAY_PUBLIC_DOMAIN` is set
+- `JWT_SECRET` is required in production (fail-fast)
 - All service files now use PII-safe logger (no raw phone/name in logs)
 
 ---

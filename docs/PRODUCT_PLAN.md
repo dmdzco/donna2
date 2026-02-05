@@ -400,18 +400,23 @@ Reduced V1 pipeline latency from ~1.5s to ~400ms time-to-first-audio.
 ---
 
 ### 11.5. Security Hardening ✅ **Implemented**
-Comprehensive API security layer.
+Comprehensive API security layer (Phase 1 + Phase 2).
 
-- **Components:**
+- **Phase 1 Components:**
   - [x] Helmet security headers (CSP, HSTS, X-Frame-Options)
   - [x] Request ID tracking (X-Request-Id)
-  - [x] 3-tier rate limiting (API: 100/15min, calls: 10/15min, webhooks: 500/1min)
+  - [x] 5-tier rate limiting (API, calls, write, auth, webhooks)
   - [x] API key authentication (DONNA_API_KEY env var)
   - [x] Twilio webhook signature validation
-  - [x] Input validation on all POST/PATCH routes (express-validator)
+  - [x] Input validation on all POST/PATCH routes (Zod)
   - [x] Centralized error handler (no internal error leaks)
   - [x] PII-safe logger (auto-masks phone numbers, names, content)
   - [x] Request body size limits (1MB)
+- **Phase 2 (Cleanup & Hardening):**
+  - [x] Removed 3 duplicate middleware files (clerk.js, validation.js, twilio-auth.js)
+  - [x] Admin login brute-force protection (authLimiter, 10 req/min)
+  - [x] JWT_SECRET fail-fast in production
+  - [x] HSTS 1 year + strict referrer policy
 - **Files:** `middleware/`, `lib/logger.js`, `lib/sanitize.js`
 
 ---

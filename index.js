@@ -19,7 +19,8 @@ import { reminders, seniors, conversations, caregivers, caregiverSeniors } from 
 import { eq, desc, gte, and, sql } from 'drizzle-orm';
 import { validateBody, validateParams } from './middleware/validate.js';
 import { validateTwilioWebhook } from './middleware/twilio.js';
-import { getClerkUserId, clerkClient } from './middleware/clerk.js';
+import { apiLimiter, callLimiter, writeLimiter } from './middleware/rate-limit.js';
+import { clerkMiddleware, requireAuth, requireAdmin, getClerkUserId } from './middleware/auth.js';
 import {
   createSeniorSchema,
   updateSeniorSchema,
@@ -58,6 +59,12 @@ app.use(express.json());
 
 // Serve static files (admin UI)
 app.use(express.static(join(__dirname, 'public')));
+
+// Rate limiting for API routes (100 req/min per IP)
+app.use('/api/', apiLimiter);
+
+// Clerk authentication middleware (initializes auth state)
+app.use(clerkMiddleware());
 
 const PORT = process.env.PORT || 3001;
 const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -218,14 +225,18 @@ app.post('/voice/status', validateTwilioWebhook, async (req, res) => {
   }
 });
 
-// API: Initiate outbound call
-app.post('/api/call', validateBody(initiateCallSchema), async (req, res) => {
+// API: Initiate outbound call (strict rate limit: 5/min)
+app.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSchema), async (req, res) => {
   const { phoneNumber } = req.body;
 
   try {
     // PRE-FETCH: Look up senior and build context BEFORE calling Twilio
     const senior = await seniorService.findByPhone(phoneNumber);
     if (senior) {
+      // Check if user can access this senior
+      if (!await canAccessSenior(req.auth, senior.id)) {
+        return res.status(403).json({ error: 'Access denied to this senior' });
+      }
       await schedulerService.prefetchForPhone(phoneNumber, senior);
     }
 
@@ -246,16 +257,16 @@ app.post('/api/call', validateBody(initiateCallSchema), async (req, res) => {
   }
 });
 
-// API: List active calls
-app.get('/api/calls', (req, res) => {
+// API: List active calls (admin only)
+app.get('/api/calls', requireAdmin, (req, res) => {
   res.json({
     activeCalls: sessions.size,
     callSids: Array.from(sessions.keys()),
   });
 });
 
-// API: End a call
-app.post('/api/calls/:callSid/end', async (req, res) => {
+// API: End a call (admin only)
+app.post('/api/calls/:callSid/end', requireAdmin, async (req, res) => {
   try {
     await twilioClient.calls(req.params.callSid).update({ status: 'completed' });
     res.json({ success: true });
@@ -266,8 +277,30 @@ app.post('/api/calls/:callSid/end', async (req, res) => {
 
 // === SENIOR MANAGEMENT APIs ===
 
-// Create a senior profile
-app.post('/api/seniors', validateBody(createSeniorSchema), async (req, res) => {
+// Helper: Get senior IDs accessible by a user
+async function getAccessibleSeniorIds(auth) {
+  if (auth.isAdmin) return null; // null means all seniors
+  const assignments = await db.select({ seniorId: caregivers.seniorId })
+    .from(caregivers)
+    .where(eq(caregivers.clerkUserId, auth.userId));
+  return assignments.map(a => a.seniorId);
+}
+
+// Helper: Check if user can access a specific senior
+async function canAccessSenior(auth, seniorId) {
+  if (auth.isAdmin) return true;
+  const [assignment] = await db.select()
+    .from(caregivers)
+    .where(and(
+      eq(caregivers.clerkUserId, auth.userId),
+      eq(caregivers.seniorId, seniorId)
+    ))
+    .limit(1);
+  return !!assignment;
+}
+
+// Create a senior profile (admin only)
+app.post('/api/seniors', requireAdmin, writeLimiter, validateBody(createSeniorSchema), async (req, res) => {
   try {
     const senior = await seniorService.create(req.body);
     res.json(senior);
@@ -277,19 +310,33 @@ app.post('/api/seniors', validateBody(createSeniorSchema), async (req, res) => {
   }
 });
 
-// List all seniors
-app.get('/api/seniors', async (req, res) => {
+// List seniors (admins see all, caregivers see assigned)
+app.get('/api/seniors', requireAuth, async (req, res) => {
   try {
-    const seniors = await seniorService.list();
-    res.json(seniors);
+    const accessibleIds = await getAccessibleSeniorIds(req.auth);
+    if (accessibleIds === null) {
+      // Admin: return all
+      const allSeniors = await seniorService.list();
+      return res.json(allSeniors);
+    }
+    if (accessibleIds.length === 0) {
+      return res.json([]);
+    }
+    // Caregiver: filter by assigned seniors
+    const allSeniors = await seniorService.list();
+    const filtered = allSeniors.filter(s => accessibleIds.includes(s.id));
+    res.json(filtered);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
 // Get senior by ID
-app.get('/api/seniors/:id', validateParams(seniorIdParamSchema), async (req, res) => {
+app.get('/api/seniors/:id', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
   try {
+    if (!await canAccessSenior(req.auth, req.params.id)) {
+      return res.status(403).json({ error: 'Access denied to this senior' });
+    }
     const senior = await seniorService.getById(req.params.id);
     if (!senior) {
       return res.status(404).json({ error: 'Senior not found' });
@@ -301,8 +348,11 @@ app.get('/api/seniors/:id', validateParams(seniorIdParamSchema), async (req, res
 });
 
 // Update senior
-app.patch('/api/seniors/:id', validateParams(seniorIdParamSchema), validateBody(updateSeniorSchema), async (req, res) => {
+app.patch('/api/seniors/:id', requireAuth, writeLimiter, validateParams(seniorIdParamSchema), validateBody(updateSeniorSchema), async (req, res) => {
   try {
+    if (!await canAccessSenior(req.auth, req.params.id)) {
+      return res.status(403).json({ error: 'Access denied to this senior' });
+    }
     const senior = await seniorService.update(req.params.id, req.body);
     res.json(senior);
   } catch (error) {
@@ -313,9 +363,12 @@ app.patch('/api/seniors/:id', validateParams(seniorIdParamSchema), validateBody(
 // === MEMORY APIs ===
 
 // Store a memory for a senior
-app.post('/api/seniors/:id/memories', validateParams(seniorIdParamSchema), validateBody(createMemorySchema), async (req, res) => {
+app.post('/api/seniors/:id/memories', requireAuth, writeLimiter, validateParams(seniorIdParamSchema), validateBody(createMemorySchema), async (req, res) => {
   const { type, content, importance } = req.body;
   try {
+    if (!await canAccessSenior(req.auth, req.params.id)) {
+      return res.status(403).json({ error: 'Access denied to this senior' });
+    }
     const memory = await memoryService.store(
       req.params.id,
       type,
@@ -331,9 +384,12 @@ app.post('/api/seniors/:id/memories', validateParams(seniorIdParamSchema), valid
 });
 
 // Search memories for a senior
-app.get('/api/seniors/:id/memories/search', validateParams(seniorIdParamSchema), async (req, res) => {
+app.get('/api/seniors/:id/memories/search', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
   const { q, limit } = req.query;
   try {
+    if (!await canAccessSenior(req.auth, req.params.id)) {
+      return res.status(403).json({ error: 'Access denied to this senior' });
+    }
     const memories = await memoryService.search(
       req.params.id,
       q,
@@ -346,8 +402,11 @@ app.get('/api/seniors/:id/memories/search', validateParams(seniorIdParamSchema),
 });
 
 // Get recent memories for a senior
-app.get('/api/seniors/:id/memories', validateParams(seniorIdParamSchema), async (req, res) => {
+app.get('/api/seniors/:id/memories', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
   try {
+    if (!await canAccessSenior(req.auth, req.params.id)) {
+      return res.status(403).json({ error: 'Access denied to this senior' });
+    }
     const memories = await memoryService.getRecent(req.params.id, 20);
     res.json(memories);
   } catch (error) {
@@ -358,8 +417,11 @@ app.get('/api/seniors/:id/memories', validateParams(seniorIdParamSchema), async 
 // === CONVERSATION APIs ===
 
 // Get conversations for a senior
-app.get('/api/seniors/:id/conversations', validateParams(seniorIdParamSchema), async (req, res) => {
+app.get('/api/seniors/:id/conversations', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
   try {
+    if (!await canAccessSenior(req.auth, req.params.id)) {
+      return res.status(403).json({ error: 'Access denied to this senior' });
+    }
     const convos = await conversationService.getForSenior(req.params.id, 20);
     res.json(convos);
   } catch (error) {
@@ -367,11 +429,17 @@ app.get('/api/seniors/:id/conversations', validateParams(seniorIdParamSchema), a
   }
 });
 
-// Get all recent conversations
-app.get('/api/conversations', async (req, res) => {
+// Get all recent conversations (admins see all, caregivers see their seniors')
+app.get('/api/conversations', requireAuth, async (req, res) => {
   try {
     const convos = await conversationService.getRecent(50);
-    res.json(convos);
+    if (req.auth.isAdmin) {
+      return res.json(convos);
+    }
+    // Filter to accessible seniors
+    const accessibleIds = await getAccessibleSeniorIds(req.auth);
+    const filtered = convos.filter(c => accessibleIds.includes(c.seniorId));
+    res.json(filtered);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -379,10 +447,11 @@ app.get('/api/conversations', async (req, res) => {
 
 // === REMINDER APIs ===
 
-// List all reminders with senior info
-app.get('/api/reminders', async (req, res) => {
+// List all reminders with senior info (admins see all, caregivers see their seniors')
+app.get('/api/reminders', requireAuth, async (req, res) => {
   try {
-    const result = await db.select({
+    const accessibleIds = await getAccessibleSeniorIds(req.auth);
+    let query = db.select({
       id: reminders.id,
       seniorId: reminders.seniorId,
       seniorName: seniors.name,
@@ -400,16 +469,27 @@ app.get('/api/reminders', async (req, res) => {
     .leftJoin(seniors, eq(reminders.seniorId, seniors.id))
     .where(eq(reminders.isActive, true))
     .orderBy(desc(reminders.createdAt));
-    res.json(result);
+
+    const result = await query;
+    if (accessibleIds === null) {
+      return res.json(result); // Admin sees all
+    }
+    // Filter for caregiver
+    const filtered = result.filter(r => accessibleIds.includes(r.seniorId));
+    res.json(filtered);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
 // Create a reminder
-app.post('/api/reminders', validateBody(createReminderSchema), async (req, res) => {
+app.post('/api/reminders', requireAuth, writeLimiter, validateBody(createReminderSchema), async (req, res) => {
   try {
     const { seniorId, type, title, description, scheduledTime, isRecurring, cronExpression } = req.body;
+    // Check access to the senior
+    if (!await canAccessSenior(req.auth, seniorId)) {
+      return res.status(403).json({ error: 'Access denied to this senior' });
+    }
     const [reminder] = await db.insert(reminders).values({
       seniorId,
       type,
@@ -426,8 +506,18 @@ app.post('/api/reminders', validateBody(createReminderSchema), async (req, res) 
 });
 
 // Update a reminder
-app.patch('/api/reminders/:id', validateParams(reminderIdParamSchema), validateBody(updateReminderSchema), async (req, res) => {
+app.patch('/api/reminders/:id', requireAuth, writeLimiter, validateParams(reminderIdParamSchema), validateBody(updateReminderSchema), async (req, res) => {
   try {
+    // Get the reminder to check senior access
+    const [existing] = await db.select({ seniorId: reminders.seniorId })
+      .from(reminders).where(eq(reminders.id, req.params.id));
+    if (!existing) {
+      return res.status(404).json({ error: 'Reminder not found' });
+    }
+    if (!await canAccessSenior(req.auth, existing.seniorId)) {
+      return res.status(403).json({ error: 'Access denied to this reminder' });
+    }
+
     const { title, description, scheduledTime, isRecurring, cronExpression, isActive } = req.body;
     const updateData = {};
     if (title !== undefined) updateData.title = title;
@@ -448,8 +538,18 @@ app.patch('/api/reminders/:id', validateParams(reminderIdParamSchema), validateB
 });
 
 // Delete a reminder
-app.delete('/api/reminders/:id', validateParams(reminderIdParamSchema), async (req, res) => {
+app.delete('/api/reminders/:id', requireAuth, writeLimiter, validateParams(reminderIdParamSchema), async (req, res) => {
   try {
+    // Get the reminder to check senior access
+    const [existing] = await db.select({ seniorId: reminders.seniorId })
+      .from(reminders).where(eq(reminders.id, req.params.id));
+    if (!existing) {
+      return res.status(404).json({ error: 'Reminder not found' });
+    }
+    if (!await canAccessSenior(req.auth, existing.seniorId)) {
+      return res.status(403).json({ error: 'Access denied to this reminder' });
+    }
+
     await db.delete(reminders).where(eq(reminders.id, req.params.id));
     res.json({ success: true });
   } catch (error) {
@@ -459,19 +559,16 @@ app.delete('/api/reminders/:id', validateParams(reminderIdParamSchema), async (r
 
 // === CAREGIVER APIs (Consumer App) ===
 
-// Complete onboarding - creates caregiver + senior + reminders in one transaction
-app.post('/api/onboarding', validateBody(onboardingSchema), async (req, res) => {
+// Complete onboarding - creates senior + links to Clerk user + creates reminders
+app.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardingSchema), async (req, res) => {
   try {
-    const { caregiver: caregiverData, senior: seniorData, relation, interests, additionalInfo, reminders: reminderStrings, updateTopics, callSchedule } = req.body;
+    const { senior: seniorData, relation, interests, additionalInfo, reminders: reminderStrings, updateTopics, callSchedule } = req.body;
 
-    // Get Clerk user ID if authenticated
-    const clerkUserId = getClerkUserId(req);
-
-    // Create caregiver with Clerk user ID
-    const caregiver = await caregiverService.create({
-      ...caregiverData,
-      clerkUserId: clerkUserId || caregiverData.clerkUserId,
-    });
+    // Get Clerk user ID from auth
+    const clerkUserId = req.auth.userId;
+    if (!clerkUserId || clerkUserId === 'cofounder') {
+      return res.status(400).json({ error: 'Clerk authentication required for onboarding' });
+    }
 
     // Prepare senior data with structured info in JSON fields
     const seniorCreateData = {
@@ -501,8 +598,8 @@ app.post('/api/onboarding', validateBody(onboardingSchema), async (req, res) => 
 
     const senior = await seniorService.create(seniorCreateData);
 
-    // Link caregiver to senior
-    await caregiverService.linkSenior(caregiver.id, senior.id, relation, true);
+    // Link Clerk user to senior
+    await caregiverService.linkUserToSenior(clerkUserId, senior.id, 'caregiver');
 
     // Create reminders from strings
     const createdReminders = [];
@@ -521,10 +618,9 @@ app.post('/api/onboarding', validateBody(onboardingSchema), async (req, res) => 
       }
     }
 
-    console.log(`[Onboarding] Completed: caregiver=${caregiver.email}, senior=${senior.name}, reminders=${createdReminders.length}`);
+    console.log(`[Onboarding] Completed: user=${clerkUserId}, senior=${senior.name}, reminders=${createdReminders.length}`);
 
     res.json({
-      caregiver,
       senior,
       reminders: createdReminders,
     });
@@ -534,39 +630,23 @@ app.post('/api/onboarding', validateBody(onboardingSchema), async (req, res) => 
   }
 });
 
-// Get current caregiver's profile and their seniors
-app.get('/api/caregivers/me', async (req, res) => {
+// Get current user's seniors (uses Clerk user ID directly)
+app.get('/api/caregivers/me', requireAuth, async (req, res) => {
   try {
-    // Get Clerk user ID from the session token
-    const clerkUserId = getClerkUserId(req);
+    const clerkUserId = req.auth.userId;
 
-    if (!clerkUserId) {
-      return res.status(401).json({ error: 'Not authenticated' });
+    // Get all seniors this user can access
+    const seniors = await caregiverService.getSeniorsForUser(clerkUserId);
+
+    if (seniors.length === 0) {
+      // No seniors linked - they need to complete onboarding
+      return res.status(404).json({ error: 'No seniors found', needsOnboarding: true });
     }
-
-    const caregiver = await caregiverService.getByClerkUserId(clerkUserId);
-    if (!caregiver) {
-      // Caregiver not found - they need to complete onboarding
-      return res.status(404).json({ error: 'Caregiver not found', needsOnboarding: true });
-    }
-
-    // Get seniors for this caregiver
-    const seniors = await caregiverService.getSeniorsForCaregiver(caregiver.id);
 
     res.json({
-      ...caregiver,
+      clerkUserId,
       seniors,
     });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update caregiver profile
-app.patch('/api/caregivers/:id', validateParams(caregiverIdParamSchema), validateBody(updateCaregiverSchema), async (req, res) => {
-  try {
-    const caregiver = await caregiverService.update(req.params.id, req.body);
-    res.json(caregiver);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -622,8 +702,8 @@ app.patch('/api/seniors/:id/schedule', validateParams(seniorIdParamSchema), asyn
 
 // === STATS API ===
 
-// Dashboard statistics
-app.get('/api/stats', async (req, res) => {
+// Dashboard statistics (admin only for aggregate stats)
+app.get('/api/stats', requireAdmin, async (req, res) => {
   try {
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -682,10 +762,10 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
-// === OBSERVABILITY API ===
+// === OBSERVABILITY API === (admin only)
 
 // Get recent calls for observability dashboard
-app.get('/api/observability/calls', async (req, res) => {
+app.get('/api/observability/calls', requireAdmin, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
     const calls = await db.select({
@@ -732,7 +812,7 @@ app.get('/api/observability/calls', async (req, res) => {
 });
 
 // Get active calls
-app.get('/api/observability/active', async (req, res) => {
+app.get('/api/observability/active', requireAdmin, async (req, res) => {
   try {
     const activeCalls = [];
     for (const [callSid, session] of sessions.entries()) {
@@ -758,7 +838,7 @@ app.get('/api/observability/active', async (req, res) => {
 });
 
 // Get call details by ID
-app.get('/api/observability/calls/:id', async (req, res) => {
+app.get('/api/observability/calls/:id', requireAdmin, async (req, res) => {
   try {
     const [call] = await db.select({
       id: conversations.id,
@@ -805,7 +885,7 @@ app.get('/api/observability/calls/:id', async (req, res) => {
 });
 
 // Get call timeline (events from transcript)
-app.get('/api/observability/calls/:id/timeline', async (req, res) => {
+app.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, res) => {
   try {
     const [call] = await db.select({
       id: conversations.id,
@@ -879,7 +959,7 @@ app.get('/api/observability/calls/:id/timeline', async (req, res) => {
 });
 
 // Get call turns (conversation turns)
-app.get('/api/observability/calls/:id/turns', async (req, res) => {
+app.get('/api/observability/calls/:id/turns', requireAdmin, async (req, res) => {
   try {
     const [call] = await db.select({
       transcript: conversations.transcript,
@@ -906,7 +986,7 @@ app.get('/api/observability/calls/:id/turns', async (req, res) => {
 });
 
 // Get observer signals for a call
-app.get('/api/observability/calls/:id/observer', async (req, res) => {
+app.get('/api/observability/calls/:id/observer', requireAdmin, async (req, res) => {
   try {
     const [call] = await db.select({
       transcript: conversations.transcript,

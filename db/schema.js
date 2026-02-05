@@ -80,6 +80,15 @@ export const reminderDeliveries = pgTable('reminder_deliveries', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// Caregivers - maps Clerk user IDs to seniors they can access
+export const caregivers = pgTable('caregivers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  clerkUserId: varchar('clerk_user_id', { length: 255 }).notNull(), // Clerk user ID
+  seniorId: uuid('senior_id').references(() => seniors.id).notNull(),
+  role: varchar('role', { length: 50 }).default('caregiver'), // caregiver, family, admin
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // Call Analyses - post-call analysis results
 export const callAnalyses = pgTable('call_analyses', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -95,22 +104,3 @@ export const callAnalyses = pgTable('call_analyses', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
-// Caregivers - consumer app users who manage seniors
-export const caregivers = pgTable('caregivers', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  name: varchar('name', { length: 255 }).notNull(),
-  email: varchar('email', { length: 255 }).notNull().unique(),
-  clerkUserId: varchar('clerk_user_id', { length: 255 }).unique(),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
-});
-
-// Caregiver-Senior relationships (many-to-many)
-export const caregiverSeniors = pgTable('caregiver_seniors', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  caregiverId: uuid('caregiver_id').references(() => caregivers.id).notNull(),
-  seniorId: uuid('senior_id').references(() => seniors.id).notNull(),
-  relation: varchar('relation', { length: 50 }), // Mother, Father, Client, Other Loved One
-  isPrimary: boolean('is_primary').default(true),
-  createdAt: timestamp('created_at').defaultNow(),
-});

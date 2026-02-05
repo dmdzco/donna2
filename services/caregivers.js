@@ -1,132 +1,83 @@
 import { db } from '../db/client.js';
-import { caregivers, caregiverSeniors, seniors } from '../db/schema.js';
+import { caregivers, seniors } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
 
 export const caregiverService = {
-  // Create a new caregiver
-  async create(data) {
-    const [caregiver] = await db.insert(caregivers).values({
-      name: data.name,
-      email: data.email.toLowerCase(),
-      clerkUserId: data.clerkUserId || null,
-    }).returning();
-
-    console.log(`[Caregiver] Created: ${caregiver.name} (${caregiver.email})`);
-    return caregiver;
-  },
-
-  // Get caregiver by ID
-  async getById(id) {
-    const [caregiver] = await db.select().from(caregivers)
-      .where(eq(caregivers.id, id));
-    return caregiver || null;
-  },
-
-  // Get caregiver by email
-  async getByEmail(email) {
-    const [caregiver] = await db.select().from(caregivers)
-      .where(eq(caregivers.email, email.toLowerCase()));
-    return caregiver || null;
-  },
-
-  // Get caregiver by Clerk user ID
-  async getByClerkUserId(clerkUserId) {
-    const [caregiver] = await db.select().from(caregivers)
-      .where(eq(caregivers.clerkUserId, clerkUserId));
-    return caregiver || null;
-  },
-
-  // Update a caregiver
-  async update(id, data) {
-    const updateData = { ...data, updatedAt: new Date() };
-
-    if (data.email) {
-      updateData.email = data.email.toLowerCase();
-    }
-
-    const [caregiver] = await db.update(caregivers)
-      .set(updateData)
-      .where(eq(caregivers.id, id))
-      .returning();
-
-    return caregiver;
-  },
-
-  // Link a caregiver to a senior
-  async linkSenior(caregiverId, seniorId, relation, isPrimary = true) {
-    const [link] = await db.insert(caregiverSeniors).values({
-      caregiverId,
+  // Link a Clerk user to a senior (creates caregiver assignment)
+  async linkUserToSenior(clerkUserId, seniorId, role = 'caregiver') {
+    const [assignment] = await db.insert(caregivers).values({
+      clerkUserId,
       seniorId,
-      relation,
-      isPrimary,
+      role,
     }).returning();
 
-    console.log(`[Caregiver] Linked caregiver ${caregiverId} to senior ${seniorId} as ${relation}`);
-    return link;
+    console.log(`[Caregiver] Linked user ${clerkUserId} to senior ${seniorId} as ${role}`);
+    return assignment;
   },
 
-  // Get seniors for a caregiver
-  async getSeniorsForCaregiver(caregiverId) {
-    const links = await db.select({
+  // Get all seniors accessible by a Clerk user
+  async getSeniorsForUser(clerkUserId) {
+    const assignments = await db.select({
+      assignment: caregivers,
       senior: seniors,
-      relation: caregiverSeniors.relation,
-      isPrimary: caregiverSeniors.isPrimary,
     })
-      .from(caregiverSeniors)
-      .innerJoin(seniors, eq(caregiverSeniors.seniorId, seniors.id))
+      .from(caregivers)
+      .innerJoin(seniors, eq(caregivers.seniorId, seniors.id))
       .where(and(
-        eq(caregiverSeniors.caregiverId, caregiverId),
+        eq(caregivers.clerkUserId, clerkUserId),
         eq(seniors.isActive, true)
       ));
 
-    return links.map(link => ({
-      ...link.senior,
-      relation: link.relation,
-      isPrimary: link.isPrimary,
+    return assignments.map(a => ({
+      ...a.senior,
+      role: a.assignment.role,
     }));
   },
 
-  // Get caregivers for a senior
-  async getCaregiversForSenior(seniorId) {
-    const links = await db.select({
-      caregiver: caregivers,
-      relation: caregiverSeniors.relation,
-      isPrimary: caregiverSeniors.isPrimary,
-    })
-      .from(caregiverSeniors)
-      .innerJoin(caregivers, eq(caregiverSeniors.caregiverId, caregivers.id))
-      .where(eq(caregiverSeniors.seniorId, seniorId));
-
-    return links.map(link => ({
-      ...link.caregiver,
-      relation: link.relation,
-      isPrimary: link.isPrimary,
-    }));
-  },
-
-  // Remove a caregiver-senior link
-  async unlinkSenior(caregiverId, seniorId) {
-    const result = await db.delete(caregiverSeniors)
+  // Check if a Clerk user can access a senior
+  async canAccessSenior(clerkUserId, seniorId) {
+    const [assignment] = await db.select()
+      .from(caregivers)
       .where(and(
-        eq(caregiverSeniors.caregiverId, caregiverId),
-        eq(caregiverSeniors.seniorId, seniorId)
+        eq(caregivers.clerkUserId, clerkUserId),
+        eq(caregivers.seniorId, seniorId)
+      ))
+      .limit(1);
+    return !!assignment;
+  },
+
+  // Get all Clerk users who can access a senior
+  async getUsersForSenior(seniorId) {
+    const assignments = await db.select()
+      .from(caregivers)
+      .where(eq(caregivers.seniorId, seniorId));
+
+    return assignments.map(a => ({
+      clerkUserId: a.clerkUserId,
+      role: a.role,
+    }));
+  },
+
+  // Remove a user's access to a senior
+  async unlinkUserFromSenior(clerkUserId, seniorId) {
+    const result = await db.delete(caregivers)
+      .where(and(
+        eq(caregivers.clerkUserId, clerkUserId),
+        eq(caregivers.seniorId, seniorId)
       ))
       .returning();
 
     return result.length > 0;
   },
 
-  // Get or create caregiver by Clerk user ID
-  async getOrCreateByClerkUserId(clerkUserId, userData) {
-    let caregiver = await this.getByClerkUserId(clerkUserId);
-
-    if (!caregiver) {
-      caregiver = await this.create({
-        ...userData,
-        clerkUserId,
-      });
-    }
-
-    return caregiver;
+  // Get assignment details
+  async getAssignment(clerkUserId, seniorId) {
+    const [assignment] = await db.select()
+      .from(caregivers)
+      .where(and(
+        eq(caregivers.clerkUserId, clerkUserId),
+        eq(caregivers.seniorId, seniorId)
+      ));
+    return assignment || null;
   },
 };

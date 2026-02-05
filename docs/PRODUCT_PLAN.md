@@ -392,6 +392,97 @@ Insights and trends for caregivers.
 
 ---
 
+### 29. In-Call Web Search 📋 **Planned**
+Enable Donna to search the web during calls for current information.
+
+- **Use cases:**
+  - Answer questions about current events
+  - Look up weather, sports scores, news
+  - Find information senior is curious about
+- **Provider:** OpenAI web search or similar
+- **Value:** More helpful, knowledgeable companion
+
+---
+
+### 30. Graceful Call Ending 📋 **Planned**
+Allow Donna to naturally end phone calls when appropriate.
+
+- **Triggers:**
+  - Conversation Director detects closing phase complete
+  - Senior indicates goodbye
+  - Call duration reaches reasonable limit
+- **Implementation:** Twilio API to end call after final goodbye
+- **Value:** Natural conversation endings, prevent awkward silences
+
+---
+
+### 31. In-Call Memory (Don't Repeat Within Call) 📋 **Planned**
+Donna must remember what she has said throughout a single call to avoid repetition.
+
+- **Problem:** If Donna reminds user to do jumping jacks early in call, she shouldn't say it again later as if it's the first time
+- **Solution:**
+  - Track all reminders/advice given during current call
+  - Check before giving any reminder/advice
+  - If already said, either skip or acknowledge: "As I mentioned earlier..."
+- **Storage:** In-memory per-session tracking (not database)
+- **Value:** More natural, less robotic conversations
+
+---
+
+### 32. Same-Day Cross-Call Memory 📋 **Planned**
+If Donna calls a user in the morning and they have another call later that same day, Donna must recall what was discussed.
+
+- **Critical scenario:** If Donna gives a reminder in the morning (e.g., "water your succulent"), she cannot give that same reminder in the afternoon without acknowledging it
+  - **Bad:** "Remember to water your succulent" (again, could kill the plant)
+  - **Good:** "This morning I reminded you to water your succulent - did you get a chance to do that?"
+- **Implementation:**
+  - Track reminders delivered per senior per day
+  - On subsequent calls same day, check delivery history
+  - Reference previous reminder, ask for confirmation
+- **Storage:** `reminderDeliveries` table with timestamp
+- **Value:** Prevents harmful duplicate reminders, feels more human
+
+---
+
+### 33. Conversation Balance: Interest Usage ✅ **Implemented (Phase 1)**
+Strike a balance between using stored interests and avoiding over-reliance on them.
+
+- **Problem:** If every call Donna asks about the Seahawks and Palm Beach within 60 seconds, it becomes:
+  - Boring and repetitive
+  - Feels fake/overly personalized
+  - Inhuman interaction pattern
+- **Phase 1 (Implemented):** Prompt-based guidance
+  - Instructions to not lead with interests
+  - Let interests emerge naturally from conversation
+  - Use interests to respond, not always initiate
+  - Vary which interests are referenced
+- **Phase 2 (Future):** State-based tracking
+  - Track which interests were mentioned per call in session state
+  - Track last-referenced timestamp per interest in database
+  - Explicit rotation logic across calls
+- **Goal:** Interests guide conversation without dominating it
+- **Value:** More natural, less predictable conversations
+
+---
+
+### 34. Conversation Balance: Question Frequency ✅ **Implemented (Phase 1)**
+Strike a balance between asking questions to drive conversation and avoiding interrogation feel.
+
+- **Problem:** Too many questions in succession feels like an interrogation, not a conversation
+- **Phase 1 (Implemented):** Prompt-based guidance
+  - Limit consecutive questions (max 2)
+  - After 2 questions, share observation/story/reaction
+  - Match senior's energy - talkative = fewer questions
+  - Balance questions with statements and reactions
+- **Phase 2 (Future):** State-based tracking
+  - Track questions asked per call in session state
+  - Question-to-statement ratio metrics
+  - Senior response length tracking (engagement indicator)
+  - Automatic adjustment based on engagement
+- **Value:** Comfortable, natural conversation flow
+
+---
+
 ## Suggested Features
 
 ### 15. Proactive Wellness Check-Ins 💡 **Suggested**

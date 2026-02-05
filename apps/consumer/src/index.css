@@ -1,0 +1,139 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Consumer app "Golden Age" Palette */
+  --color-bg-cream: #FDFCF8;
+  --color-card-beige: #F2F0E9;
+  --color-text-primary: #1A1A1A;
+  --color-sage-green: #4A5D4F;
+  --color-accent-pink: #E8A0A0;
+  --color-accent-pink-hover: #D89090;
+
+  --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.05);
+  --shadow-float: 0 10px 40px rgba(0, 0, 0, 0.08);
+
+  /* Typography */
+  --font-heading: 'Inter', sans-serif;
+  --font-body: 'Inter', sans-serif;
+
+  /* Shadcn-compatible CSS variables */
+  --background: 40 33% 98%;
+  --foreground: 0 0% 10%;
+  --card: 40 20% 94%;
+  --card-foreground: 0 0% 10%;
+  --popover: 40 33% 98%;
+  --popover-foreground: 0 0% 10%;
+  --primary: 145 12% 33%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 38% 77%;
+  --secondary-foreground: 0 0% 10%;
+  --muted: 40 20% 94%;
+  --muted-foreground: 0 0% 45%;
+  --accent: 0 38% 77%;
+  --accent-foreground: 0 0% 10%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 40 20% 88%;
+  --input: 40 20% 88%;
+  --ring: 145 12% 33%;
+  --radius: 0.75rem;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--color-bg-cream);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  line-height: 1.6;
+  overflow-x: hidden;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+  color: var(--color-text-primary);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+button {
+  font-family: var(--font-body);
+  cursor: pointer;
+  border: none;
+  outline: none;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* Utilities */
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.section-padding {
+  padding: 6rem 0;
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+/* Primary button style */
+.btn-primary {
+  background-color: var(--color-accent-pink);
+  color: white;
+  padding: 12px 24px;
+  border-radius: 9999px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+  background-color: var(--color-accent-pink-hover);
+  transform: translateY(-1px);
+}
+
+/* Secondary button style */
+.btn-secondary {
+  background-color: transparent;
+  color: var(--color-sage-green);
+  padding: 12px 24px;
+  border-radius: 9999px;
+  font-weight: 600;
+  border: 2px solid var(--color-sage-green);
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background-color: var(--color-sage-green);
+  color: white;
+}
+
+/* Glass card style */
+.glass-card {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(12px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow: var(--shadow-soft);
+}

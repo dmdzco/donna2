@@ -8,16 +8,18 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { V1AdvancedSession } from './pipelines/v1-advanced.js';
 import { seniorService } from './services/seniors.js';
+import { caregiverService } from './services/caregivers.js';
 import { memoryService } from './services/memory.js';
 import { conversationService } from './services/conversations.js';
 import { schedulerService, startScheduler } from './services/scheduler.js';
 import { BrowserSession } from './browser-session.js';
 import { parse as parseUrl } from 'url';
 import { db } from './db/client.js';
-import { reminders, seniors, conversations } from './db/schema.js';
+import { reminders, seniors, conversations, caregivers, caregiverSeniors } from './db/schema.js';
 import { eq, desc, gte, and, sql } from 'drizzle-orm';
 import { validateBody, validateParams } from './middleware/validate.js';
 import { validateTwilioWebhook } from './middleware/twilio.js';
+import { getClerkUserId, clerkClient } from './middleware/clerk.js';
 import {
   createSeniorSchema,
   updateSeniorSchema,
@@ -27,6 +29,10 @@ import {
   initiateCallSchema,
   seniorIdParamSchema,
   reminderIdParamSchema,
+  createCaregiverSchema,
+  updateCaregiverSchema,
+  onboardingSchema,
+  caregiverIdParamSchema,
 } from './validators/schemas.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -446,6 +452,169 @@ app.delete('/api/reminders/:id', validateParams(reminderIdParamSchema), async (r
   try {
     await db.delete(reminders).where(eq(reminders.id, req.params.id));
     res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === CAREGIVER APIs (Consumer App) ===
+
+// Complete onboarding - creates caregiver + senior + reminders in one transaction
+app.post('/api/onboarding', validateBody(onboardingSchema), async (req, res) => {
+  try {
+    const { caregiver: caregiverData, senior: seniorData, relation, interests, additionalInfo, reminders: reminderStrings, updateTopics, callSchedule } = req.body;
+
+    // Get Clerk user ID if authenticated
+    const clerkUserId = getClerkUserId(req);
+
+    // Create caregiver with Clerk user ID
+    const caregiver = await caregiverService.create({
+      ...caregiverData,
+      clerkUserId: clerkUserId || caregiverData.clerkUserId,
+    });
+
+    // Prepare senior data with structured info in JSON fields
+    const seniorCreateData = {
+      name: seniorData.name,
+      phone: seniorData.phone,
+      timezone: seniorData.timezone || 'America/New_York',
+      city: seniorData.city,
+      state: seniorData.state,
+      zipCode: seniorData.zipCode,
+      additionalInfo,
+      // Store interests as flat array (topics only)
+      interests: interests?.map(i => i.topic) || [],
+      // Store interest details and other consumer data in familyInfo
+      familyInfo: {
+        relation,
+        interestDetails: interests?.reduce((acc, i) => {
+          if (i.details) acc[i.topic] = i.details;
+          return acc;
+        }, {}),
+      },
+      // Store call schedule and update preferences in preferredCallTimes
+      preferredCallTimes: {
+        schedule: callSchedule,
+        updateTopics: updateTopics || [],
+      },
+    };
+
+    const senior = await seniorService.create(seniorCreateData);
+
+    // Link caregiver to senior
+    await caregiverService.linkSenior(caregiver.id, senior.id, relation, true);
+
+    // Create reminders from strings
+    const createdReminders = [];
+    if (reminderStrings && reminderStrings.length > 0) {
+      for (const reminderTitle of reminderStrings) {
+        if (reminderTitle.trim()) {
+          const [reminder] = await db.insert(reminders).values({
+            seniorId: senior.id,
+            type: 'custom',
+            title: reminderTitle.trim(),
+            isRecurring: true,
+            cronExpression: callSchedule ? `0 ${callSchedule.time.split(':')[1]} ${callSchedule.time.split(':')[0]} * * *` : '0 0 10 * * *',
+          }).returning();
+          createdReminders.push(reminder);
+        }
+      }
+    }
+
+    console.log(`[Onboarding] Completed: caregiver=${caregiver.email}, senior=${senior.name}, reminders=${createdReminders.length}`);
+
+    res.json({
+      caregiver,
+      senior,
+      reminders: createdReminders,
+    });
+  } catch (error) {
+    console.error('Onboarding failed:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get current caregiver's profile and their seniors
+app.get('/api/caregivers/me', async (req, res) => {
+  try {
+    // Get Clerk user ID from the session token
+    const clerkUserId = getClerkUserId(req);
+
+    if (!clerkUserId) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const caregiver = await caregiverService.getByClerkUserId(clerkUserId);
+    if (!caregiver) {
+      // Caregiver not found - they need to complete onboarding
+      return res.status(404).json({ error: 'Caregiver not found', needsOnboarding: true });
+    }
+
+    // Get seniors for this caregiver
+    const seniors = await caregiverService.getSeniorsForCaregiver(caregiver.id);
+
+    res.json({
+      ...caregiver,
+      seniors,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update caregiver profile
+app.patch('/api/caregivers/:id', validateParams(caregiverIdParamSchema), validateBody(updateCaregiverSchema), async (req, res) => {
+  try {
+    const caregiver = await caregiverService.update(req.params.id, req.body);
+    res.json(caregiver);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get senior's call schedule
+app.get('/api/seniors/:id/schedule', validateParams(seniorIdParamSchema), async (req, res) => {
+  try {
+    const senior = await seniorService.getById(req.params.id);
+    if (!senior) {
+      return res.status(404).json({ error: 'Senior not found' });
+    }
+
+    const schedule = senior.preferredCallTimes?.schedule || null;
+
+    res.json({
+      schedule,
+      updateTopics: senior.preferredCallTimes?.updateTopics || [],
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update senior's call schedule
+app.patch('/api/seniors/:id/schedule', validateParams(seniorIdParamSchema), async (req, res) => {
+  try {
+    const { schedule, updateTopics } = req.body;
+    const senior = await seniorService.getById(req.params.id);
+
+    if (!senior) {
+      return res.status(404).json({ error: 'Senior not found' });
+    }
+
+    const updatedPreferredCallTimes = {
+      ...senior.preferredCallTimes,
+      schedule: schedule || senior.preferredCallTimes?.schedule,
+      updateTopics: updateTopics || senior.preferredCallTimes?.updateTopics || [],
+    };
+
+    const updated = await seniorService.update(req.params.id, {
+      preferredCallTimes: updatedPreferredCallTimes,
+    });
+
+    res.json({
+      schedule: updated.preferredCallTimes?.schedule,
+      updateTopics: updated.preferredCallTimes?.updateTopics || [],
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

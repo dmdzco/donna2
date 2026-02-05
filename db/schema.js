@@ -13,6 +13,11 @@ export const seniors = pgTable('seniors', {
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+  // Consumer app fields
+  city: varchar('city', { length: 100 }),
+  state: varchar('state', { length: 50 }),
+  zipCode: varchar('zip_code', { length: 20 }),
+  additionalInfo: text('additional_info'),
 });
 
 // Conversations (call history)
@@ -87,5 +92,25 @@ export const callAnalyses = pgTable('call_analyses', {
   positiveObservations: text('positive_observations').array(),    // Good things noticed
   followUpSuggestions: text('follow_up_suggestions').array(),     // For next call
   callQuality: json('call_quality'),                              // {rapport, goals_achieved, duration_appropriate}
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// Caregivers - consumer app users who manage seniors
+export const caregivers = pgTable('caregivers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  clerkUserId: varchar('clerk_user_id', { length: 255 }).unique(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Caregiver-Senior relationships (many-to-many)
+export const caregiverSeniors = pgTable('caregiver_seniors', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  caregiverId: uuid('caregiver_id').references(() => caregivers.id).notNull(),
+  seniorId: uuid('senior_id').references(() => seniors.id).notNull(),
+  relation: varchar('relation', { length: 50 }), // Mother, Father, Client, Other Loved One
+  isPrimary: boolean('is_primary').default(true),
   createdAt: timestamp('created_at').defaultNow(),
 });

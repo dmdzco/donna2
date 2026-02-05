@@ -207,6 +207,67 @@ export const voiceStatusSchema = z.object({
 }).passthrough();
 
 // =============================================================================
+// Caregiver Schemas
+// =============================================================================
+
+export const createCaregiverSchema = z.object({
+  name: z.string()
+    .min(1, 'Name is required')
+    .max(255, 'Name too long')
+    .trim(),
+  email: z.string()
+    .email('Invalid email format')
+    .max(255)
+    .transform(email => email.toLowerCase()),
+  clerkUserId: z.string().max(255).optional(),
+});
+
+export const updateCaregiverSchema = z.object({
+  name: z.string().min(1).max(255).trim().optional(),
+  email: z.string().email().max(255).transform(email => email.toLowerCase()).optional(),
+}).refine(data => Object.keys(data).length > 0, {
+  message: 'At least one field must be provided for update',
+});
+
+// =============================================================================
+// Onboarding Schema (Combined caregiver + senior creation)
+// =============================================================================
+
+const relationEnum = z.enum(['Mother', 'Father', 'Client', 'Other Loved One']);
+
+const structuredInterestSchema = z.object({
+  topic: z.string().min(1).max(100),
+  details: z.string().max(1000).optional(),
+});
+
+const callScheduleSchema = z.object({
+  days: z.array(z.enum(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])).min(1),
+  time: z.string().regex(/^\d{2}:\d{2}$/, 'Time must be in HH:MM format'),
+});
+
+export const onboardingSchema = z.object({
+  caregiver: z.object({
+    name: z.string().min(1).max(255).trim(),
+    email: z.string().email().max(255),
+    clerkUserId: z.string().max(255).optional(),
+  }),
+  senior: z.object({
+    name: z.string().min(1).max(255).trim(),
+    phone: phoneSchema,
+    city: z.string().max(100).optional(),
+    state: z.string().max(50).optional(),
+    zipCode: z.string().max(20).optional(),
+    timezone: timezoneSchema.optional(),
+  }),
+  relation: relationEnum,
+  interests: z.array(structuredInterestSchema).max(20).optional(),
+  additionalInfo: z.string().max(5000).optional(),
+  reminders: z.array(z.string().max(255)).max(20).optional(),
+  updateTopics: z.array(z.string().max(100)).max(10).optional(),
+  callSchedule: callScheduleSchema.optional(),
+});
+
+// =============================================================================
 // URL Parameter Schemas
 // =============================================================================
 
@@ -222,6 +283,10 @@ export const callSidParamSchema = z.object({
   callSid: z.string().min(1),
 });
 
+export const caregiverIdParamSchema = z.object({
+  id: uuidSchema,
+});
+
 // =============================================================================
 // Export all schemas
 // =============================================================================
@@ -230,6 +295,13 @@ export const schemas = {
   // Seniors
   createSenior: createSeniorSchema,
   updateSenior: updateSeniorSchema,
+
+  // Caregivers
+  createCaregiver: createCaregiverSchema,
+  updateCaregiver: updateCaregiverSchema,
+
+  // Onboarding
+  onboarding: onboardingSchema,
 
   // Memories
   createMemory: createMemorySchema,
@@ -249,6 +321,7 @@ export const schemas = {
   seniorIdParam: seniorIdParamSchema,
   reminderIdParam: reminderIdParamSchema,
   callSidParam: callSidParamSchema,
+  caregiverIdParam: caregiverIdParamSchema,
 };
 
 export default schemas;

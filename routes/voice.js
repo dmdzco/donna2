@@ -126,6 +126,7 @@ router.post('/voice/status', validateTwilioWebhook, async (req, res) => {
               durationSeconds: parseInt(CallDuration) || 0,
               status: CallStatus,
               transcript: transcript,
+              callMetrics: session.getCallMetrics?.() || null,
             });
           } catch (error) {
             console.error(`[${CallSid}] Error saving conversation:`, error);

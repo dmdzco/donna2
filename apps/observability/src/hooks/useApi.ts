@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Call, Timeline, Turn, ObserverSummary, Continuity } from '../types';
+import type { Call, Timeline, Turn, ObserverSummary, Continuity, MetricsData } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api/observability`
@@ -163,4 +163,29 @@ export function useContinuity(seniorId: string | undefined) {
   }, [seniorId]);
 
   return { continuity, loading, error };
+}
+
+export function useCallMetrics(callId: string | undefined) {
+  const [data, setData] = useState<MetricsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!callId) {
+      setData(null);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    fetchJson<MetricsData>(`${API_BASE}/calls/${callId}/metrics`)
+      .then((result) => {
+        setData(result);
+        setError(null);
+      })
+      .catch((err) => setError((err as Error).message))
+      .finally(() => setLoading(false));
+  }, [callId]);
+
+  return { data, loading, error };
 }

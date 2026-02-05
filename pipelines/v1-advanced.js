@@ -329,6 +329,9 @@ export class V1AdvancedSession {
     this.dynamicMemoryContext = null; // Real-time memory search results
     this.todaysContext = null; // Same-day cross-call context
 
+    // Per-call metrics accumulation
+    this.turnMetrics = [];
+
     // In-call conversation tracking (prevent repetition)
     this.topicsDiscussed = [];      // Topics that came up (e.g., "gardening", "grandkids")
     this.questionsAsked = [];       // Questions Donna asked
@@ -1031,6 +1034,7 @@ export class V1AdvancedSession {
   async generateAndSendResponse(userMessage, newsContext = null) {
     this.isProcessing = true;
     this.wasInterrupted = false; // Reset interrupt flag
+    const startTime = Date.now();
 
     try {
       // Layer 1: Quick Observer (0ms) - for post-turn processing
@@ -1105,7 +1109,7 @@ export class V1AdvancedSession {
 
       // Generate response using adapter
       console.log(`[V1][${this.streamSid}] Calling ${adapter.getModelName()}...`);
-      const responseText = await adapter.generate(systemPrompt, messages, {
+      const { text: responseText, usage } = await adapter.generate(systemPrompt, messages, {
         maxTokens: modelConfig.max_tokens,
       });
 
@@ -1121,7 +1125,22 @@ export class V1AdvancedSession {
       this.conversationLog.push({
         role: 'assistant',
         content: responseText,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        metrics: {
+          model: modelConfig.model,
+          maxTokens: modelConfig.max_tokens,
+          inputTokens: usage?.inputTokens || 0,
+          outputTokens: usage?.outputTokens || 0,
+          responseTime: Date.now() - startTime,
+          tokenReason: modelConfig.reason,
+        },
+      });
+
+      this.turnMetrics.push({
+        inputTokens: usage?.inputTokens || 0,
+        outputTokens: usage?.outputTokens || 0,
+        responseTime: Date.now() - startTime,
+        model: modelConfig.model,
       });
 
       // Track conversation elements for repetition prevention
@@ -1261,6 +1280,7 @@ export class V1AdvancedSession {
       await this.streamingTts.connect();
 
       let fullResponse = '';
+      let usage = null;
       let textBuffer = '';
       let firstTokenTime = null;
       let sentencesSent = 0;
@@ -1276,7 +1296,7 @@ export class V1AdvancedSession {
       const checkInterrupt = () => this.wasInterrupted;
 
       try {
-        fullResponse = await adapter.stream(
+        const streamResult = await adapter.stream(
           systemPrompt,
           messages,
           { maxTokens: modelConfig.max_tokens },
@@ -1311,6 +1331,8 @@ export class V1AdvancedSession {
             }
           }
         );
+        fullResponse = streamResult.text;
+        usage = streamResult.usage;
       } catch (error) {
         console.error(`[V1][${this.streamSid}] Streaming error:`, error.message);
       }
@@ -1331,10 +1353,28 @@ export class V1AdvancedSession {
 
       // Log to conversation
       if (fullResponse) {
+        const totalTime = Date.now() - startTime;
         this.conversationLog.push({
           role: 'assistant',
           content: fullResponse,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          metrics: {
+            model: modelConfig.model,
+            maxTokens: modelConfig.max_tokens,
+            inputTokens: usage?.inputTokens || 0,
+            outputTokens: usage?.outputTokens || 0,
+            ttfa: firstTokenTime ? firstTokenTime - startTime : null,
+            responseTime: totalTime,
+            tokenReason: modelConfig.reason,
+          },
+        });
+
+        this.turnMetrics.push({
+          inputTokens: usage?.inputTokens || 0,
+          outputTokens: usage?.outputTokens || 0,
+          responseTime: totalTime,
+          ttfa: firstTokenTime ? firstTokenTime - startTime : null,
+          model: modelConfig.model,
         });
 
         // Track conversation elements for repetition prevention
@@ -1450,6 +1490,38 @@ export class V1AdvancedSession {
 
   getConversationLog() {
     return this.conversationLog;
+  }
+
+  getCallMetrics() {
+    if (this.turnMetrics.length === 0) return null;
+
+    const totalInputTokens = this.turnMetrics.reduce((s, m) => s + m.inputTokens, 0);
+    const totalOutputTokens = this.turnMetrics.reduce((s, m) => s + m.outputTokens, 0);
+    const avgResponseTime = Math.round(
+      this.turnMetrics.reduce((s, m) => s + m.responseTime, 0) / this.turnMetrics.length
+    );
+    const ttfaValues = this.turnMetrics.filter(m => m.ttfa != null).map(m => m.ttfa);
+    const avgTtfa = ttfaValues.length > 0
+      ? Math.round(ttfaValues.reduce((s, v) => s + v, 0) / ttfaValues.length)
+      : null;
+    const modelsUsed = [...new Set(this.turnMetrics.map(m => m.model))];
+
+    // Cost estimation (rough per-token pricing)
+    // Claude Sonnet 4.5: $3/MTok input, $15/MTok output
+    const inputCost = (totalInputTokens / 1_000_000) * 3;
+    const outputCost = (totalOutputTokens / 1_000_000) * 15;
+    const estimatedCost = Math.round((inputCost + outputCost) * 10000) / 10000;
+
+    return {
+      totalInputTokens,
+      totalOutputTokens,
+      totalTokens: totalInputTokens + totalOutputTokens,
+      avgResponseTime,
+      avgTtfa,
+      turnCount: this.turnMetrics.length,
+      estimatedCost,
+      modelsUsed,
+    };
   }
 
   getSeniorId() {

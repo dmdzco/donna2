@@ -23,12 +23,14 @@ app.set('trust proxy', 1);
 app.use(cors({
   origin: [
     'https://donna-admin.vercel.app',
+    'https://admin-v2-liart.vercel.app',
     'https://consumer-ruddy.vercel.app',
     'https://observability-production-3677.up.railway.app',
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:5173',  // Admin dashboard (React)
     'http://localhost:5174',  // Consumer app (React)
+    'http://localhost:5175',  // Admin v2 (React)
   ],
   credentials: true,
 }));

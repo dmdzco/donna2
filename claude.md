@@ -38,7 +38,8 @@
 - **Graceful Call Ending** - Goodbye signal detection + Twilio-based termination
 - **Route Extraction** - 16 modular route files + websocket handler
 - **Admin Dashboard Auth** - JWT-based login with admin_users table (bcrypt passwords)
-- **Admin Dashboard** - Static HTML with 7 tabs: Dashboard, Seniors, Calls, Reminders, Call Analyses, Caregivers, Daily Context
+- **Admin Dashboard (v2)** - React + Vite + Tailwind app (`apps/admin-v2/`) deployed on Vercel with 7 pages: Dashboard, Seniors, Calls, Reminders, Call Analyses, Caregivers, Daily Context. JWT auth, same backend API.
+- **Admin Dashboard (legacy)** - Static HTML at `public/admin.html` (kept as fallback)
 - Real-time voice calls (Twilio Media Streams)
 - Speech transcription (Deepgram STT)
 - Memory system with semantic search (pgvector)
@@ -172,7 +173,14 @@ The Director proactively guides each call:
 │   ├── logger/                 ← TypeScript logging package
 │   └── event-bus/              ← TypeScript event bus package
 ├── apps/
-│   ├── admin/                  ← Admin dashboard (React + Vite)
+│   ├── admin/                  ← Admin dashboard legacy (React + Vite)
+│   ├── admin-v2/               ← Admin dashboard v2 (React + Vite + Tailwind, Vercel)
+│   │   ├── src/
+│   │   │   ├── components/     ← Layout, Modal, Toast
+│   │   │   ├── pages/          ← Dashboard, Seniors, Calls, Reminders, CallAnalyses, Caregivers, DailyContext, Login
+│   │   │   └── lib/            ← api.ts (JWT fetch wrapper), auth.ts (AuthProvider), utils.ts
+│   │   ├── tailwind.config.js  ← Admin color palette (admin-* namespace)
+│   │   └── vercel.json         ← SPA rewrite config
 │   ├── consumer/               ← Consumer app (React + Vite + Clerk, Vercel)
 │   ├── observability/          ← Observability dashboard (React)
 │   └── web/                    ← Future web app placeholder
@@ -202,8 +210,11 @@ The Director proactively guides each call:
 | Modify in-call memory tracking | `pipelines/v1-advanced.js` (extractConversationElements, trackTopicsFromSignals) |
 | Modify cross-call daily context | `services/daily-context.js` |
 | Modify goodbye/call ending | `pipelines/v1-advanced.js` + `pipelines/quick-observer.js` |
-| Update admin UI | `public/admin.html` (static HTML) |
-| Update admin API client | `public/admin.html` (authFetch in script) |
+| Update admin UI (v2) | `apps/admin-v2/src/pages/` (React components) |
+| Update admin API client (v2) | `apps/admin-v2/src/lib/api.ts` (authFetch wrapper) |
+| Update admin colors/theme | `apps/admin-v2/tailwind.config.js` (admin-* color namespace) |
+| Update admin layout/nav | `apps/admin-v2/src/components/Layout.tsx` |
+| Update legacy admin UI | `public/admin.html` (static HTML) |
 | Admin authentication | `routes/admin-auth.js` + `middleware/auth.js` |
 | Call analyses data | `routes/call-analyses.js` |
 | Daily context data | `routes/daily-context.js` |
@@ -236,6 +247,14 @@ git pushall && railway up
 ```
 
 Railway's GitHub webhook is unreliable - always run `railway up` manually to deploy.
+
+**Admin v2 (Vercel)**: Deployed separately from `apps/admin-v2/`:
+```bash
+cd apps/admin-v2 && npx vercel --prod --yes
+```
+Live URL: https://admin-v2-liart.vercel.app
+Backend API: https://donna-api-production-2450.up.railway.app (configured in `.env.production`)
+CORS: Admin v2 origin is allowlisted in `index.js`.
 
 ### Environment Variables
 
@@ -270,6 +289,7 @@ See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
 - ~~Conversation Director~~ ✓ Completed
 - ~~Post-Call Analysis~~ ✓ Completed
 - ~~Admin Dashboard Separation~~ ✓ Completed (React app in `apps/admin/`)
+- ~~Admin Dashboard v2~~ ✓ Completed (React + Vite + Tailwind in `apps/admin-v2/`, deployed on Vercel at https://admin-v2-liart.vercel.app)
 - ~~Security Hardening~~ ✓ Completed (Helmet, API key auth, PII-safe logging, input validation)
 - Prompt Caching (Anthropic)
 

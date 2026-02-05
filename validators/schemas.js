@@ -64,9 +64,9 @@ export const createSeniorSchema = z.object({
   phone: phoneSchema,
   timezone: timezoneSchema.default('America/New_York'),
   interests: z.array(z.string().max(100)).max(20).optional(),
-  familyInfo: z.record(z.unknown()).optional(),
+  familyInfo: z.record(z.string(), z.unknown()).optional(),
   medicalNotes: z.string().max(10000).optional(),
-  preferredCallTimes: z.record(z.unknown()).optional(),
+  preferredCallTimes: z.record(z.string(), z.unknown()).optional(),
   isActive: z.boolean().default(true),
 });
 
@@ -75,9 +75,9 @@ export const updateSeniorSchema = z.object({
   phone: phoneSchema.optional(),
   timezone: timezoneSchema.optional(),
   interests: z.array(z.string().max(100)).max(20).optional(),
-  familyInfo: z.record(z.unknown()).optional(),
+  familyInfo: z.record(z.string(), z.unknown()).optional(),
   medicalNotes: z.string().max(10000).optional(),
-  preferredCallTimes: z.record(z.unknown()).optional(),
+  preferredCallTimes: z.record(z.string(), z.unknown()).optional(),
   isActive: z.boolean().optional(),
 }).refine(data => Object.keys(data).length > 0, {
   message: 'At least one field must be provided for update',
@@ -270,7 +270,7 @@ export const onboardingSchema = z.object({
   // Family info from frontend
   familyInfo: z.object({
     relation: z.string().optional(),
-    interestDetails: z.record(z.string()).optional(),
+    interestDetails: z.record(z.string(), z.string()).optional(),
   }).optional(),
 });
 

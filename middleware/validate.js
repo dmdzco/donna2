@@ -11,10 +11,12 @@ import { ZodError } from 'zod';
  * Format Zod errors into a user-friendly structure
  */
 function formatZodErrors(error) {
-  if (!error || !error.errors || !Array.isArray(error.errors)) {
+  // Zod v4 uses .issues instead of .errors
+  const issues = error?.issues || error?.errors;
+  if (!issues || !Array.isArray(issues)) {
     return [{ field: 'unknown', message: error?.message || 'Validation failed', code: 'unknown' }];
   }
-  return error.errors.map(err => ({
+  return issues.map(err => ({
     field: err.path.join('.') || 'body',
     message: err.message,
     code: err.code,
@@ -108,7 +110,9 @@ export function validate({ body: bodySchema, params: paramsSchema, query: queryS
         req.params = paramsSchema.parse(req.params);
       } catch (error) {
         if (error instanceof ZodError) {
-          errors.push(...error.errors.map(e => ({
+          // Zod v4 uses .issues instead of .errors
+          const issues = error.issues || error.errors || [];
+          errors.push(...issues.map(e => ({
             location: 'params',
             field: e.path.join('.'),
             message: e.message,
@@ -122,7 +126,8 @@ export function validate({ body: bodySchema, params: paramsSchema, query: queryS
         req.query = querySchema.parse(req.query);
       } catch (error) {
         if (error instanceof ZodError) {
-          errors.push(...error.errors.map(e => ({
+          const issues = error.issues || error.errors || [];
+          errors.push(...issues.map(e => ({
             location: 'query',
             field: e.path.join('.'),
             message: e.message,
@@ -136,7 +141,8 @@ export function validate({ body: bodySchema, params: paramsSchema, query: queryS
         req.body = bodySchema.parse(req.body);
       } catch (error) {
         if (error instanceof ZodError) {
-          errors.push(...error.errors.map(e => ({
+          const issues = error.issues || error.errors || [];
+          errors.push(...issues.map(e => ({
             location: 'body',
             field: e.path.join('.'),
             message: e.message,

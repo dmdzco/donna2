@@ -41,6 +41,9 @@ const __dirname = dirname(__filename);
 
 const app = express();
 
+// Trust proxy for Railway/Vercel (needed for rate limiting and X-Forwarded-For)
+app.set('trust proxy', 1);
+
 // CORS - allow admin dashboard, consumer app, observability, and local development
 app.use(cors({
   origin: [

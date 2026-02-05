@@ -1353,7 +1353,6 @@ export class V1AdvancedSession {
 
       // Log to conversation
       if (fullResponse) {
-        const totalTime = Date.now() - startTime;
         this.conversationLog.push({
           role: 'assistant',
           content: fullResponse,

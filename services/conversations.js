@@ -1,6 +1,9 @@
 import { db } from '../db/client.js';
 import { conversations, seniors } from '../db/schema.js';
 import { eq, desc, and, sql } from 'drizzle-orm';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('Conversation');
 
 export const conversationService = {
   // Create a new conversation record
@@ -12,7 +15,7 @@ export const conversationService = {
       status: 'in_progress',
     }).returning();
 
-    console.log(`[Conversation] Created: ${conversation.id} for call ${data.callSid}`);
+    log.info('Created', { id: conversation.id, callSid: data.callSid });
     return conversation;
   },
 
@@ -32,7 +35,7 @@ export const conversationService = {
       .returning();
 
     if (conversation) {
-      console.log(`[Conversation] Completed: ${conversation.id} (${data.durationSeconds}s)`);
+      log.info('Completed', { id: conversation.id, durationSeconds: data.durationSeconds });
     }
     return conversation;
   },
@@ -61,11 +64,11 @@ export const conversationService = {
         .returning();
 
       if (conversation) {
-        console.log(`[Conversation] Updated summary for ${callSid}`);
+        log.info('Updated summary', { callSid });
       }
       return conversation;
     } catch (error) {
-      console.error(`[Conversation] Error updating summary:`, error.message);
+      log.error('Error updating summary', { callSid, error: error.message });
       return null;
     }
   },

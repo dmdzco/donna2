@@ -4,6 +4,9 @@ import { eq, and, lte, isNull, or, sql, ne, lt } from 'drizzle-orm';
 import twilio from 'twilio';
 import { memoryService } from './memory.js';
 import { contextCacheService } from './context-cache.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('Scheduler');
 
 // Initialize Twilio client lazily
 let twilioClient = null;
@@ -178,18 +181,18 @@ export const schedulerService = {
   async triggerReminderCall(reminder, senior, baseUrl, scheduledFor = null, existingDelivery = null) {
     const client = getTwilioClient();
     if (!client) {
-      console.error('[Scheduler] Twilio not configured');
+      log.error('Twilio not configured');
       return null;
     }
 
     try {
-      console.log(`[Scheduler] Pre-fetching context for ${senior.name}...`);
+      log.info('Pre-fetching context', { name: senior.name });
 
       // PRE-FETCH: Build memory context (includes news) BEFORE the call
       const memoryContext = await memoryService.buildContext(senior.id, null, senior);
       const reminderPrompt = this.formatReminderPrompt(reminder);
 
-      console.log(`[Scheduler] Context ready (${memoryContext?.length || 0} chars), triggering call...`);
+      log.info('Context ready, triggering call', { contextLen: memoryContext?.length || 0 });
 
       const call = await client.calls.create({
         to: senior.phone,
@@ -215,7 +218,7 @@ export const schedulerService = {
           })
           .where(eq(reminderDeliveries.id, existingDelivery.id))
           .returning();
-        console.log(`[Scheduler] Updated delivery record (attempt ${delivery.attemptCount}): ${delivery.id}`);
+        log.info('Updated delivery record', { deliveryId: delivery.id, attempt: delivery.attemptCount });
       } else {
         // First attempt - create new delivery record
         [delivery] = await db.insert(reminderDeliveries).values({
@@ -226,7 +229,7 @@ export const schedulerService = {
           status: 'delivered',
           attemptCount: 1
         }).returning();
-        console.log(`[Scheduler] Created delivery record: ${delivery.id}`);
+        log.info('Created delivery record', { deliveryId: delivery.id });
       }
 
       // Store pre-fetched context for this call (ready when /voice/answer is hit)
@@ -240,11 +243,11 @@ export const schedulerService = {
         scheduledFor: targetScheduledFor
       });
 
-      console.log(`[Scheduler] Call initiated: ${call.sid}`);
+      log.info('Call initiated', { callSid: call.sid });
       return call;
 
     } catch (error) {
-      console.error('[Scheduler] Failed to initiate call:', error.message);
+      log.error('Failed to initiate call', { error: error.message });
       return null;
     }
   },
@@ -254,7 +257,7 @@ export const schedulerService = {
    * Uses cache if available, otherwise builds fresh context
    */
   async prefetchForPhone(phoneNumber, senior) {
-    console.log(`[Scheduler] Pre-fetching context for manual call to ${senior?.name || phoneNumber}...`);
+    log.info('Pre-fetching context for manual call', { name: senior?.name, phone: phoneNumber });
 
     let memoryContext = null;
     let preGeneratedGreeting = null;
@@ -267,7 +270,7 @@ export const schedulerService = {
         // Use cached context
         memoryContext = cached.memoryContext;
         preGeneratedGreeting = cached.greeting;
-        console.log(`[Scheduler] Using cached context for ${senior.name}`);
+        log.info('Using cached context', { name: senior.name });
       } else {
         // Build fresh context
         memoryContext = await memoryService.buildContext(senior.id, null, senior);
@@ -284,7 +287,7 @@ export const schedulerService = {
       fetchedAt: new Date()
     });
 
-    console.log(`[Scheduler] Pre-fetch complete for ${normalized} (greeting ready: ${!!preGeneratedGreeting})`);
+    log.info('Pre-fetch complete', { phone: normalized, greetingReady: !!preGeneratedGreeting });
     return { senior, memoryContext, preGeneratedGreeting };
   },
 
@@ -300,7 +303,7 @@ export const schedulerService = {
     try {
       recentMemories = await memoryService.getRecent(senior.id, 5);
     } catch (e) {
-      console.error('[Scheduler] Memory fetch error:', e.message);
+      log.error('Memory fetch error', { error: e.message });
     }
 
     const greetingPrompt = `You are Donna, calling ${firstName} to check in.
@@ -317,10 +320,10 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
     try {
       const adapter = getAdapter(process.env.VOICE_MODEL || 'claude-sonnet');
       const greeting = await adapter.generate(greetingPrompt, [], { maxTokens: 100, temperature: 0.8 });
-      console.log(`[Scheduler] Generated greeting: "${greeting.substring(0, 50)}..."`);
+      log.info('Generated greeting', { content: greeting });
       return greeting.trim();
     } catch (error) {
-      console.error('[Scheduler] Greeting generation error:', error.message);
+      log.error('Greeting generation error', { error: error.message });
       return `Hello ${firstName}! It's Donna calling to check in. How are you doing today?`;
     }
   },
@@ -346,7 +349,7 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
       .set({ lastDeliveredAt: new Date() })
       .where(eq(reminders.id, reminderId));
 
-    console.log(`[Scheduler] Marked reminder ${reminderId} as delivered`);
+    log.info('Marked reminder as delivered', { reminderId });
   },
 
   /**
@@ -355,13 +358,13 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
    */
   async markReminderAcknowledged(deliveryId, status, userResponse) {
     if (!deliveryId) {
-      console.error('[Scheduler] No delivery ID provided for acknowledgment');
+      log.error('No delivery ID provided for acknowledgment');
       return null;
     }
 
     const validStatuses = ['acknowledged', 'confirmed'];
     if (!validStatuses.includes(status)) {
-      console.error(`[Scheduler] Invalid status: ${status}`);
+      log.error('Invalid status', { status });
       return null;
     }
 
@@ -375,10 +378,10 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         .where(eq(reminderDeliveries.id, deliveryId))
         .returning();
 
-      console.log(`[Scheduler] Reminder delivery ${deliveryId} marked as ${status}`);
+      log.info('Reminder delivery marked', { deliveryId, status });
       return updated;
     } catch (error) {
-      console.error('[Scheduler] Failed to mark acknowledgment:', error.message);
+      log.error('Failed to mark acknowledgment', { error: error.message });
       return null;
     }
   },
@@ -398,13 +401,13 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         .limit(1);
 
       if (!delivery) {
-        console.log(`[Scheduler] Delivery ${deliveryId} not found`);
+        log.info('Delivery not found', { deliveryId });
         return;
       }
 
       // If already acknowledged/confirmed, don't change
       if (delivery.status === 'acknowledged' || delivery.status === 'confirmed') {
-        console.log(`[Scheduler] Delivery ${deliveryId} already ${delivery.status}, skipping`);
+        log.info('Delivery already handled, skipping', { deliveryId, status: delivery.status });
         return;
       }
 
@@ -415,9 +418,9 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         .set({ status: newStatus })
         .where(eq(reminderDeliveries.id, deliveryId));
 
-      console.log(`[Scheduler] Delivery ${deliveryId} marked as ${newStatus} (attempt ${delivery.attemptCount})`);
+      log.info('Delivery status updated', { deliveryId, status: newStatus, attempt: delivery.attemptCount });
     } catch (error) {
-      console.error('[Scheduler] Failed to update delivery status:', error.message);
+      log.error('Failed to update delivery status', { error: error.message });
     }
   },
 
@@ -459,14 +462,14 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
  * Start the scheduler polling loop
  */
 export function startScheduler(baseUrl, intervalMs = 60000) {
-  console.log(`[Scheduler] Starting with ${intervalMs / 1000}s interval`);
+  log.info('Starting scheduler', { intervalSeconds: intervalMs / 1000 });
 
   const checkReminders = async () => {
     try {
       const dueReminders = await schedulerService.getDueReminders();
 
       if (dueReminders.length > 0) {
-        console.log(`[Scheduler] Found ${dueReminders.length} due reminder(s)`);
+        log.info('Found due reminders', { count: dueReminders.length });
       }
 
       for (const { reminder, senior, scheduledFor, existingDelivery } of dueReminders) {
@@ -483,7 +486,7 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
         }
       }
     } catch (error) {
-      console.error('[Scheduler] Error checking reminders:', error.message);
+      log.error('Error checking reminders', { error: error.message });
     }
   };
 
@@ -499,16 +502,16 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
     try {
       await contextCacheService.runDailyPrefetch();
     } catch (error) {
-      console.error('[Scheduler] Context pre-fetch error:', error.message);
+      log.error('Context pre-fetch error', { error: error.message });
     }
   }, 60 * 60 * 1000); // Every hour
 
   // Run initial pre-fetch check
   contextCacheService.runDailyPrefetch().catch(err => {
-    console.error('[Scheduler] Initial pre-fetch error:', err.message);
+    log.error('Initial pre-fetch error', { error: err.message });
   });
 
-  console.log('[Scheduler] Context pre-caching enabled (hourly check for 5 AM local time)');
+  log.info('Context pre-caching enabled (hourly check for 5 AM local time)');
 
   return { reminderIntervalId, prefetchIntervalId };
 }

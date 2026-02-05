@@ -1,6 +1,9 @@
 import { db } from '../db/client.js';
 import { seniors } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('Senior');
 
 export const seniorService = {
   // Find senior by phone number
@@ -21,7 +24,7 @@ export const seniorService = {
       phone: data.phone.replace(/\D/g, '').slice(-10),
     }).returning();
 
-    console.log(`[Senior] Created: ${senior.name} (${senior.phone})`);
+    log.info('Created senior', { name: senior.name, phone: senior.phone });
     return senior;
   },
 

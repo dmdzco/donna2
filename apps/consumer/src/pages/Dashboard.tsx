@@ -194,9 +194,13 @@ export default function Dashboard() {
 
     try {
       const token = await getToken();
-      await fetch(`${API_URL}/api/seniors/${activeSenior.id}/calls`, {
+      await fetch(`${API_URL}/api/call`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ phoneNumber: activeSenior.phone }),
       });
       alert('Call initiated! Donna will call shortly.');
     } catch (err) {

@@ -74,7 +74,7 @@ router.patch('/api/seniors/:id', requireAuth, writeLimiter, validateParams(senio
 });
 
 // Get senior's call schedule
-router.get('/api/seniors/:id/schedule', validateParams(seniorIdParamSchema), async (req, res) => {
+router.get('/api/seniors/:id/schedule', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
   try {
     const senior = await seniorService.getById(req.params.id);
     if (!senior) {
@@ -93,7 +93,7 @@ router.get('/api/seniors/:id/schedule', validateParams(seniorIdParamSchema), asy
 });
 
 // Update senior's call schedule
-router.patch('/api/seniors/:id/schedule', validateParams(seniorIdParamSchema), async (req, res) => {
+router.patch('/api/seniors/:id/schedule', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
   try {
     const { schedule, updateTopics } = req.body;
     const senior = await seniorService.getById(req.params.id);

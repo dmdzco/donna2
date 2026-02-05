@@ -1,6 +1,6 @@
 # Donna Architecture
 
-> Comprehensive technical architecture for the AI Senior Companion system (v3.2 - Consumer App + Security Hardening).
+> Comprehensive technical architecture for the AI Senior Companion system (v3.3 - In-Call Memory + Cross-Call Memory + Enhanced Web Search).
 
 ---
 
@@ -8,7 +8,7 @@
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                           DONNA v3.2 - CONVERSATION DIRECTOR                            │
+│                           DONNA v3.3 - CONVERSATION DIRECTOR                            │
 │                                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
 │  │                              CLIENT LAYER                                        │   │
@@ -312,6 +312,7 @@ donna/
 │   ├── call-analysis.js        # Post-call batch analysis
 │   ├── caregivers.js           # Caregiver-senior relationships
 │   ├── context-cache.js        # Pre-caches senior context
+│   ├── daily-context.js        # Same-day cross-call memory service
 │   ├── seniors.js              # Senior CRUD operations
 │   ├── memory.js               # Memory storage + search
 │   ├── conversations.js        # Conversation records
@@ -330,7 +331,7 @@ donna/
 │   └── event-bus/              # TypeScript event bus package
 ├── db/
 │   ├── client.js               # Database connection (Drizzle)
-│   ├── schema.js               # Table definitions (7 tables)
+│   ├── schema.js               # Table definitions (8 tables)
 │   └── setup-pgvector.js       # pgvector initialization
 ├── apps/
 │   ├── admin/                  # React admin dashboard (Railway)
@@ -411,4 +412,4 @@ FAST_OBSERVER_MODEL=gemini-3-flash # Director model
 
 ---
 
-*Last updated: February 2026 - v3.2 (Consumer App + Security Hardening)*
+*Last updated: February 2026 - v3.3 (In-Call Memory + Cross-Call Memory + Enhanced Web Search)*

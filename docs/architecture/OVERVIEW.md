@@ -1,6 +1,6 @@
 # Donna Architecture Overview
 
-This document describes the Donna v3.2 system architecture with the **Conversation Director**, post-call analysis, consumer app, and security hardening.
+This document describes the Donna v3.3 system architecture with the **Conversation Director**, in-call memory tracking, same-day cross-call memory, enhanced web search, consumer app, and security hardening.
 
 ---
 
@@ -8,7 +8,7 @@ This document describes the Donna v3.2 system architecture with the **Conversati
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│              DONNA v3.2 - CONVERSATION DIRECTOR ARCHITECTURE                 │
+│              DONNA v3.3 - CONVERSATION DIRECTOR ARCHITECTURE                 │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐              │
@@ -80,12 +80,17 @@ This document describes the Donna v3.2 system architecture with the **Conversati
 │   │  │ (pgvector)   │  │  (reminders) │  │ (OpenAI web) │               │  │
 │   │  │ + decay      │  │  + prefetch  │  │  + 1hr cache │               │  │
 │   │  └──────────────┘  └──────────────┘  └──────────────┘               │  │
+│   │  ┌──────────────┐                                                    │  │
+│   │  │ Daily Context│                                                    │  │
+│   │  │ (cross-call) │                                                    │  │
+│   │  │ + same-day   │                                                    │  │
+│   │  └──────────────┘                                                    │  │
 │   └────────────────────────────────────┬─────────────────────────────────┘  │
 │                                        ▼                                     │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
 │   │                     PostgreSQL (Neon + pgvector)                      │  │
 │   │  seniors | conversations | memories | reminders | reminderDeliveries  │  │
-│   │                        | callAnalyses                                 │  │
+│   │  caregivers | callAnalyses | dailyCallContext                        │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -164,6 +169,8 @@ Instant regex-based analysis (0ms) with comprehensive patterns:
 | **Safety** | Scams, strangers, emergencies | +100 tokens |
 | **Engagement** | Response length analysis | +50 if low |
 | **Questions** | Yes/no, WH-questions, opinions | Response type hint |
+| **Factual/Curiosity** | 18 patterns ("what year", "how tall", "I wonder") | Web search trigger |
+| **News** | Weather, sports, current events | Web search trigger |
 
 ---
 
@@ -252,6 +259,7 @@ When a call ends, async batch analysis runs:
 │   ├── call-analysis.js        ← Post-call: summary, concerns, score
 │   ├── caregivers.js           ← Caregiver-senior relationship management
 │   ├── context-cache.js        ← Pre-caches senior context (5 AM local)
+│   ├── daily-context.js        ← Same-day cross-call memory service
 │   ├── memory.js               ← Semantic search, decay, deduplication
 │   ├── seniors.js              ← Senior CRUD, phone normalization
 │   ├── conversations.js        ← Call records, transcripts
@@ -267,7 +275,7 @@ When a call ends, async batch analysis runs:
 │   └── schemas.js              ← Zod schemas for all API inputs
 ├── db/
 │   ├── client.js               ← Database connection (Neon + Drizzle)
-│   ├── schema.js               ← Database schema (7 tables)
+│   ├── schema.js               ← Database schema (8 tables)
 │   └── setup-pgvector.js       ← pgvector initialization
 ├── packages/
 │   ├── logger/                 ← TypeScript logging package
@@ -297,6 +305,7 @@ When a call ends, async batch analysis runs:
 | **reminderDeliveries** | Delivery tracking | status, attemptCount, userResponse, callSid |
 | **caregivers** | User-senior links | clerkUserId, seniorId, role (caregiver/family/admin) |
 | **callAnalyses** | Post-call results | summary, engagementScore, concerns, followUps |
+| **dailyCallContext** | Same-day cross-call memory | seniorId, callDate, topicsDiscussed, remindersDelivered, adviceGiven, keyMoments, summary |
 
 ### Memory System
 
@@ -397,4 +406,4 @@ git pushall && railway up
 
 ---
 
-*Last updated: February 2026 - v3.2 (Consumer App + Security Hardening)*
+*Last updated: February 2026 - v3.3 (In-Call Memory + Cross-Call Memory + Enhanced Web Search)*

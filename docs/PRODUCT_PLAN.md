@@ -1,7 +1,7 @@
 # Donna - Product Plan & Feature Log
 
 > **Last Updated:** February 5, 2026
-> **Version:** 3.2 (Consumer App + Security Hardening)
+> **Version:** 3.3 (In-Call Memory + Cross-Call Memory + Enhanced Web Search)
 
 ---
 
@@ -454,20 +454,19 @@ Insights and trends for caregivers.
 
 ---
 
-### 29. In-Call Web Search 🔄 **Partial**
+### 29. In-Call Web Search ✅ **Implemented**
 Enable Donna to search the web during calls for current information.
 
-- **Currently working:**
-  - News/weather/sports detection patterns in Quick Observer (NEWS_PATTERNS)
-  - Buffer response pattern ("Let me check on that...")
-  - Director's `checkCurrentEvents()` + `performWebSearch()` via OpenAI web_search_preview
-  - Results injected as newsContext into system prompt
-- **Needs enhancement:**
-  - [ ] Broader pattern matching for general curiosity questions ("what year...", "how tall...", "who invented...")
-  - [ ] Better search query extraction (currently crude topic matching)
-  - [ ] More conversational result formatting for elderly users
-  - [ ] Direct web search path (bypass Director for simple lookups)
+- **Features:**
+  - [x] News/weather/sports detection patterns in Quick Observer (NEWS_PATTERNS)
+  - [x] Buffer response pattern ("Let me check on that...")
+  - [x] Director's `checkCurrentEvents()` + `performWebSearch()` via OpenAI web_search_preview
+  - [x] Results injected as newsContext into system prompt
+  - [x] 18 factual/curiosity patterns ("what year...", "how tall...", "who invented...", "I wonder...", "tell me about...")
+  - [x] Improved search query extraction with factual/curiosity branching
+  - [x] Senior-friendly conversational result formatting
 - **Provider:** OpenAI web search (gpt-4o-mini with web_search_preview tool)
+- **Files:** `pipelines/quick-observer.js` (patterns), `pipelines/fast-observer.js` (search logic)
 - **Value:** More helpful, knowledgeable companion
 
 ---
@@ -491,28 +490,40 @@ Donna naturally ends phone calls when appropriate.
 Donna tracks what she has said during a call to avoid repetition.
 
 - **Problem:** If Donna reminds user to do jumping jacks early in call, she shouldn't say it again later as if it's the first time
-- **Solution:**
+- **Reminder Tracking:**
   - `deliveredReminderSet` tracks all reminders delivered during current call
   - System prompt includes "REMINDERS ALREADY DELIVERED THIS CALL" section
   - Acknowledgment detection (8 patterns) marks reminders as delivered
   - Director instructed: "NEVER recommend delivering a reminder that is in the 'Already delivered' list"
   - If delivered reminder comes up again, suggest: "As I mentioned earlier..."
-- **Storage:** In-memory per-session Set (not database)
+- **Conversation Element Tracking:**
+  - `topicsDiscussed` - Tracks topics via Quick Observer signals + keyword extraction (16 patterns)
+  - `questionsAsked` - Detects and records questions from responses (limit: 8)
+  - `adviceGiven` - Detects advice phrases ("you should", "try to", etc.) (limit: 8)
+  - `storiesShared` - Tracks stories/anecdotes shared (limit: 5)
+  - System prompt includes "CONVERSATION SO FAR THIS CALL" section with all tracked elements
+- **Methods:** `extractConversationElements()`, `trackTopicsFromSignals()`, `recordConversationElements()`, `getConversationTrackingSummary()`
+- **Storage:** In-memory per-session arrays and Sets (not database)
+- **Files:** `pipelines/v1-advanced.js`
 - **Value:** More natural, less robotic conversations
 
 ---
 
-### 32. Same-Day Cross-Call Memory 📋 **Planned**
-If Donna calls a user in the morning and they have another call later that same day, Donna must recall what was discussed.
+### 32. Same-Day Cross-Call Memory ✅ **Implemented**
+If Donna calls a user in the morning and they have another call later that same day, Donna recalls what was discussed.
 
 - **Critical scenario:** If Donna gives a reminder in the morning (e.g., "water your succulent"), she cannot give that same reminder in the afternoon without acknowledging it
   - **Bad:** "Remember to water your succulent" (again, could kill the plant)
   - **Good:** "This morning I reminded you to water your succulent - did you get a chance to do that?"
 - **Implementation:**
-  - Track reminders delivered per senior per day
-  - On subsequent calls same day, check delivery history
-  - Reference previous reminder, ask for confirmation
-- **Storage:** `reminderDeliveries` table with timestamp
+  - `daily_call_context` DB table tracks per-call: topics, reminders delivered, advice given, key moments, summary
+  - On call start: `dailyContextService.getTodaysContext()` loads all previous calls from today (timezone-aware)
+  - Aggregates across calls using Sets for uniqueness
+  - System prompt includes "EARLIER TODAY" section with previous call data
+  - Director prompt includes previous call count for reminder awareness
+  - On call end: `dailyContextService.saveCallContext()` persists current call data
+- **Storage:** `daily_call_context` table (PostgreSQL) with timezone-aware date grouping
+- **Files:** `services/daily-context.js`, `db/schema.js`, `pipelines/v1-advanced.js`, `pipelines/fast-observer.js`
 - **Value:** Prevents harmful duplicate reminders, feels more human
 
 ---
@@ -726,6 +737,7 @@ Connect with Alexa, Google Home, smart displays.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **3.3** | Feb 5, 2026 | In-call memory tracking (topics, questions, advice), same-day cross-call memory, enhanced web search (18 factual/curiosity patterns) |
 | **3.2** | Feb 5, 2026 | Consumer app (onboarding + dashboard), security hardening (Clerk, Zod, rate limiting, webhook verification) |
 | **3.1** | Jan 20, 2026 | Conversation Director architecture (2-layer + post-call), extensive Quick Observer regex, post-call analysis |
 | **2.5** | Jan 20, 2026 | Barge-in support, queue clearing, streaming pipeline |
@@ -742,7 +754,7 @@ Connect with Alexa, Google Home, smart displays.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        DONNA SYSTEM v3.1                             │
+│                        DONNA SYSTEM v3.3                             │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐           │
@@ -845,6 +857,7 @@ Connect with Alexa, Google Home, smart displays.
 | Layer 1: Quick Observer | `pipelines/quick-observer.js` |
 | Layer 2: Conversation Director | `pipelines/fast-observer.js` |
 | Post-Call Analysis | `services/call-analysis.js` |
+| Daily Context (Cross-Call) | `services/daily-context.js` |
 | ElevenLabs TTS (REST) | `adapters/elevenlabs.js` |
 | ElevenLabs TTS (Streaming) | `adapters/elevenlabs-streaming.js` |
 | Audio Utils | `audio-utils.js` |
@@ -870,9 +883,9 @@ Connect with Alexa, Google Home, smart displays.
 
 | Status | Count |
 |--------|-------|
-| Implemented | 51 |
-| Partial | 3 |
-| Planned | 10 |
+| Implemented | 53 |
+| Partial | 2 |
+| Planned | 9 |
 | Suggested | 14 |
 
 *This is a living document. Update as features are added or plans change.*

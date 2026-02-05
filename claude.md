@@ -18,11 +18,11 @@
 
 ---
 
-## Current Status: v3.2
+## Current Status: v3.3
 
 ### Working Features
 - **Conversation Director Architecture (2-Layer + Post-Call)**
-  - Layer 1: Quick Observer (0ms) - Instant regex patterns + goodbye detection
+  - Layer 1: Quick Observer (0ms) - Instant regex patterns + goodbye detection + factual/curiosity patterns
   - Layer 2: Conversation Director (~150ms) - Proactive call guidance (Gemini 3 Flash)
   - Post-Call Analysis - Async batch analysis when call ends
 - **Dynamic Token Routing** - Automatic token adjustment (100-400 tokens)
@@ -30,6 +30,9 @@
   - Claude streaming responses (sentence-by-sentence)
   - ElevenLabs WebSocket TTS
   - Parallel connection startup
+- **In-Call Memory Tracking** - Topics, questions, advice, stories tracked per call to prevent repetition
+- **Same-Day Cross-Call Memory** - Daily context persists across multiple calls per senior per day
+- **Enhanced Web Search** - 18 factual/curiosity patterns + improved search triggers and senior-friendly prompts
 - **Greeting Rotation** - 24 time-based templates with context-aware followups
 - **In-Call Reminder Tracking** - Delivery tracking with acknowledgment detection
 - **Graceful Call Ending** - Goodbye signal detection + Twilio-based termination
@@ -133,6 +136,7 @@ The Director proactively guides each call:
 │   └── elevenlabs-streaming.js ← ElevenLabs WebSocket TTS
 ├── services/
 │   ├── greetings.js            ← Greeting rotation (24 templates)
+│   ├── daily-context.js        ← Same-day cross-call memory service
 │   ├── call-analysis.js        ← Post-call batch analysis
 │   ├── caregivers.js           ← Caregiver-senior relationships
 │   ├── context-cache.js        ← Pre-caches senior context (5 AM local)
@@ -150,7 +154,7 @@ The Director proactively guides each call:
 │   └── schemas.js              ← Zod schemas for all API inputs
 ├── db/
 │   ├── client.js               ← Database connection (Neon + Drizzle)
-│   ├── schema.js               ← Database schema (Drizzle ORM)
+│   ├── schema.js               ← Database schema (8 tables, Drizzle ORM)
 │   └── setup-pgvector.js       ← pgvector initialization
 ├── packages/
 │   ├── logger/                 ← TypeScript logging package
@@ -183,6 +187,8 @@ The Director proactively guides each call:
 | Add new API endpoint | `routes/` (create new route file, register in `routes/index.js`) |
 | Modify greeting templates | `services/greetings.js` |
 | Change reminder tracking | `pipelines/v1-advanced.js` (deliveredReminderSet) |
+| Modify in-call memory tracking | `pipelines/v1-advanced.js` (extractConversationElements, trackTopicsFromSignals) |
+| Modify cross-call daily context | `services/daily-context.js` |
 | Modify goodbye/call ending | `pipelines/v1-advanced.js` + `pipelines/quick-observer.js` |
 | Update admin UI | `apps/admin/src/pages/*` (React) |
 | Update admin API client | `apps/admin/src/lib/api.ts` |
@@ -264,4 +270,4 @@ See [docs/ARCHITECTURE_CLEANUP_PLAN.md](docs/ARCHITECTURE_CLEANUP_PLAN.md) for t
 
 ---
 
-*Last updated: February 2026 - v3.2*
+*Last updated: February 2026 - v3.3*

@@ -19,6 +19,9 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Real-time voice calls (Twilio Media Streams)
 - Speech transcription (Deepgram Nova 2)
 - Semantic memory with decay + deduplication (pgvector)
+- In-call memory tracking (topics, questions, advice, stories)
+- Same-day cross-call memory (timezone-aware daily context)
+- Enhanced web search (factual/curiosity questions + news)
 - News updates (OpenAI web search)
 - Scheduled reminder calls with delivery tracking
 - Admin dashboard (React, 4 tabs)
@@ -117,6 +120,7 @@ donna/
 │   ├── call-analysis.js        # Post-call: summary, concerns, score
 │   ├── caregivers.js           # Caregiver-senior relationship management
 │   ├── context-cache.js        # Pre-cache senior context (5 AM)
+│   ├── daily-context.js        # Same-day cross-call memory service
 │   ├── memory.js               # Semantic search, decay, deduplication
 │   ├── seniors.js              # Senior CRUD, phone normalization
 │   ├── conversations.js        # Call records, transcripts
@@ -132,7 +136,7 @@ donna/
 │   └── schemas.js              # Zod schemas for all API inputs
 ├── db/
 │   ├── client.js               # Database connection (Neon + Drizzle)
-│   ├── schema.js               # Drizzle ORM schema (7 tables)
+│   ├── schema.js               # Drizzle ORM schema (8 tables)
 │   └── setup-pgvector.js       # pgvector initialization
 ├── packages/
 │   ├── logger/                 # TypeScript logging package

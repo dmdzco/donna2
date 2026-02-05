@@ -399,19 +399,19 @@ Reduced V1 pipeline latency from ~1.5s to ~400ms time-to-first-audio.
 
 ---
 
-### 14. Caregiver Frontend Authentication 📋 **Planned**
-Secure multi-user access with login system.
+### 14. Caregiver Frontend Authentication ✅ **Implemented**
+Secure multi-user access with Clerk login system.
 
-- **Provider:** Clerk (recommended)
+- **Provider:** Clerk
 - **Database additions:**
   ```sql
   caregivers (id, email, name, auth_id, created_at)
   caregiver_seniors (caregiver_id, senior_id)
   ```
 - **Features:**
-  - [ ] Login/logout UI
-  - [ ] Protected API routes
-  - [ ] Data filtering by caregiver assignment
+  - [x] Login/logout UI
+  - [x] Protected API routes
+  - [x] Data filtering by caregiver assignment
   - [ ] Invite system for family members
 
 ---
@@ -466,27 +466,32 @@ Enable Donna to search the web during calls for current information.
 
 ---
 
-### 30. Graceful Call Ending 📋 **Planned**
-Allow Donna to naturally end phone calls when appropriate.
+### 30. Graceful Call Ending ✅ **Implemented**
+Donna naturally ends phone calls when appropriate.
 
 - **Triggers:**
-  - Conversation Director detects closing phase complete
-  - Senior indicates goodbye
-  - Call duration reaches reasonable limit
-- **Implementation:** Twilio API to end call after final goodbye
+  - Quick Observer detects goodbye signals (12 patterns, strong/medium strength)
+  - Conversation Director tracks `winding_down` phase before `closing`
+  - Mutual goodbye detection (senior + Donna both said goodbye)
+- **Implementation:**
+  - Twilio REST API to programmatically end call after final goodbye
+  - 4-second silence timer after mutual goodbye before termination
+  - Cancel-on-interrupt if senior speaks again
 - **Value:** Natural conversation endings, prevent awkward silences
 
 ---
 
-### 31. In-Call Memory (Don't Repeat Within Call) 📋 **Planned**
-Donna must remember what she has said throughout a single call to avoid repetition.
+### 31. In-Call Memory (Don't Repeat Within Call) ✅ **Implemented**
+Donna tracks what she has said during a call to avoid repetition.
 
 - **Problem:** If Donna reminds user to do jumping jacks early in call, she shouldn't say it again later as if it's the first time
 - **Solution:**
-  - Track all reminders/advice given during current call
-  - Check before giving any reminder/advice
-  - If already said, either skip or acknowledge: "As I mentioned earlier..."
-- **Storage:** In-memory per-session tracking (not database)
+  - `deliveredReminderSet` tracks all reminders delivered during current call
+  - System prompt includes "REMINDERS ALREADY DELIVERED THIS CALL" section
+  - Acknowledgment detection (8 patterns) marks reminders as delivered
+  - Director instructed: "NEVER recommend delivering a reminder that is in the 'Already delivered' list"
+  - If delivered reminder comes up again, suggest: "As I mentioned earlier..."
+- **Storage:** In-memory per-session Set (not database)
 - **Value:** More natural, less robotic conversations
 
 ---
@@ -859,9 +864,9 @@ Connect with Alexa, Google Home, smart displays.
 
 | Status | Count |
 |--------|-------|
-| Implemented | 48 |
+| Implemented | 51 |
 | Partial | 2 |
-| Planned | 14 |
+| Planned | 11 |
 | Suggested | 14 |
 
 *This is a living document. Update as features are added or plans change.*

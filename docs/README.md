@@ -4,6 +4,19 @@ AI-powered senior companion assistant with voice calls.
 
 ## Current Version: v3.1 (Conversation Director)
 
+## Task Tracking
+
+**[Todo Dashboard](todos/_dashboard.md)** - Single source of truth for all tasks
+
+| Domain | Link | Description |
+|--------|------|-------------|
+| Dashboard | [_dashboard.md](todos/_dashboard.md) | Progress overview, priority queue |
+| Security | [security.md](todos/security.md) | Infrastructure hardening by priority tier |
+| Architecture | [architecture.md](todos/architecture.md) | 7 cleanup phases with dependencies |
+| Product | [product.md](todos/product.md) | Features by category (planned + suggested) |
+
+---
+
 ## Documentation Index
 
 ### Architecture

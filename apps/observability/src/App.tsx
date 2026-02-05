@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { CallList } from './components/CallList';
 import { CallTimeline } from './components/CallTimeline';
 import { ObserverPanel } from './components/ObserverPanel';
+import { MetricsPanel } from './components/MetricsPanel';
 import { LiveCallMonitor } from './components/LiveCallMonitor';
 import type { Call } from './types';
 import './App.css';
 
 type AppMode = 'history' | 'live';
-type ViewMode = 'timeline' | 'observer';
+type ViewMode = 'timeline' | 'observer' | 'metrics';
 
 export default function App() {
   const [appMode, setAppMode] = useState<AppMode>('history');
@@ -74,6 +75,12 @@ export default function App() {
                   >
                     Observer
                   </button>
+                  <button
+                    className={viewMode === 'metrics' ? 'active' : ''}
+                    onClick={() => setViewMode('metrics')}
+                  >
+                    Metrics
+                  </button>
                 </div>
               </div>
 
@@ -81,8 +88,10 @@ export default function App() {
               <div className="call-content">
                 {viewMode === 'timeline' ? (
                   <CallTimeline callId={selectedCall.id} />
-                ) : (
+                ) : viewMode === 'observer' ? (
                   <ObserverPanel callId={selectedCall.id} />
+                ) : (
+                  <MetricsPanel callId={selectedCall.id} />
                 )}
               </div>
             </>

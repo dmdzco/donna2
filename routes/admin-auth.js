@@ -4,12 +4,16 @@ import { adminUsers } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { authLimiter } from '../middleware/rate-limit.js';
 
 const router = Router();
+if (!process.env.JWT_SECRET && process.env.RAILWAY_PUBLIC_DOMAIN) {
+  throw new Error('JWT_SECRET environment variable is required in production');
+}
 const JWT_SECRET = process.env.JWT_SECRET || 'donna-admin-secret-change-me';
 
 // Login - no auth required
-router.post('/api/admin/login', async (req, res) => {
+router.post('/api/admin/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 

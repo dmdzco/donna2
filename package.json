@@ -20,11 +20,13 @@
     "@google/genai": "^1.37.0",
     "@google/generative-ai": "^0.24.1",
     "@neondatabase/serverless": "^1.0.2",
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.1",
     "express": "^4.21.0",
     "express-rate-limit": "^8.2.1",
+    "jsonwebtoken": "^9.0.3",
     "openai": "^6.16.0",
     "twilio": "^5.4.0",
     "ws": "^8.19.0",
@@ -34,10 +36,10 @@
     "node": ">=20.0.0"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.31.8",
-    "vitest": "^3.0.0",
+    "@playwright/test": "^1.50.0",
     "@vitest/coverage-v8": "^3.0.0",
+    "drizzle-kit": "^0.31.8",
     "msw": "^2.0.0",
-    "@playwright/test": "^1.50.0"
+    "vitest": "^3.0.0"
   }
 }

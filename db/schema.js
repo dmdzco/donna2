@@ -118,3 +118,13 @@ export const dailyCallContext = pgTable('daily_call_context', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// Admin users for dashboard authentication
+export const adminUsers = pgTable('admin_users', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  name: varchar('name', { length: 255 }),
+  createdAt: timestamp('created_at').defaultNow(),
+  lastLoginAt: timestamp('last_login_at'),
+});
+

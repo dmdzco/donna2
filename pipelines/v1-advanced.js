@@ -1,22 +1,30 @@
 import { createClient } from '@deepgram/sdk';
+import twilio from 'twilio';
 import { ElevenLabsAdapter } from '../adapters/elevenlabs.js';
 import { ElevenLabsStreamingTTS } from '../adapters/elevenlabs-streaming.js';
 import { pcm24kToMulaw8k } from '../audio-utils.js';
 import { memoryService } from '../services/memory.js';
 import { schedulerService } from '../services/scheduler.js';
 import { contextCacheService } from '../services/context-cache.js';
+import { greetingService } from '../services/greetings.js';
 import { quickAnalyze } from './quick-observer.js';
 import { runDirectorPipeline, formatDirectorGuidance } from './fast-observer.js';
 import { getAdapter, isModelAvailable } from '../adapters/llm/index.js';
 import { analyzeCompletedCall, saveCallAnalysis, getHighSeverityConcerns } from '../services/call-analysis.js';
 import { conversationService } from '../services/conversations.js';
+import { dailyContextService } from '../services/daily-context.js';
+
+// Twilio client for programmatic call ending
+const twilioClient = (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN)
+  ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
+  : null;
 
 // Feature flag for streaming - set to false for rollback
 const V1_STREAMING_ENABLED = process.env.V1_STREAMING_ENABLED !== 'false';
 
 // Model configuration
 const VOICE_MODEL = process.env.VOICE_MODEL || 'claude-sonnet';  // Main voice model
-const DEFAULT_MAX_TOKENS = 100;
+const DEFAULT_MAX_TOKENS = 150;
 
 // Log available models
 console.log(`[V1] Streaming enabled: ${V1_STREAMING_ENABLED}, ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? 'set' : 'NOT SET'}`);
@@ -145,21 +153,46 @@ function hasUnclosedGuidanceTag(text) {
 /**
  * Build system prompt - full context, adapters handle any quirks
  */
-const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, directorGuidance = null, previousCallsSummary = null) => {
-  let prompt = `You are Donna, a warm and caring AI companion making a phone call to an elderly person.
+const buildSystemPrompt = (senior, memoryContext, reminderPrompt = null, observerSignal = null, dynamicMemoryContext = null, quickObserverGuidance = null, directorGuidance = null, previousCallsSummary = null, newsContext = null, deliveredReminders = [], conversationTracking = null, todaysContext = null) => {
+  let prompt = `You are Donna, a warm and caring AI voice companion making a phone call to an elderly person. Your primary goal is to understand the person's spoken words, even if the speech-to-text transcription contains errors. Your responses will be converted to speech using a text-to-speech system, so your output must be plain, natural-sounding text.
 
 CRITICAL - YOUR OUTPUT IS SPOKEN ALOUD:
 - Output ONLY the exact words Donna speaks
-- NEVER include <guidance> tags, thinking, reasoning, or XML tags in your output
-- NEVER include stage directions like "laughs", "pauses", "speaks with empathy"
-- NEVER include action descriptions or internal thoughts
 - Your entire response will be converted to audio - every character will be spoken
+- NEVER include tags, thinking, reasoning, XML, or any markup in your output
+- NEVER include stage directions like "laughs", "pauses", "speaks with empathy"
+- NEVER include action descriptions, internal thoughts, or formatting like bullet points
+- Respond in plain text only - no special characters, asterisks, or symbols that don't belong in speech
+- Your response should sound natural and conversational when read aloud
+
+SPEECH-TO-TEXT AWARENESS:
+- The person's words come through speech-to-text which may contain errors
+- Silently correct for likely transcription errors - focus on intended meaning, not literal text
+- If a word sounds like another word in context, infer and correct without mentioning the error
+- For example, if transcription says "I need to go to the doctor too morrow" understand it as "I need to go to the doctor tomorrow"
+- If you truly cannot understand what they said, warmly ask them to repeat: "I'm sorry, could you say that again for me?"
 
 RESPONSE FORMAT:
-- 1-2 sentences MAX
+- 1-2 sentences MAX - keep it short and direct
 - Answer briefly, then ask ONE follow-up question
 - NEVER say "dear" or "dearie"
-- Just speak naturally as Donna would`;
+- Just speak naturally as Donna would
+- Prioritize clarity and accuracy in every response
+
+CONVERSATION BALANCE - INTEREST USAGE:
+- Do NOT lead every conversation with their stored interests
+- Let interests emerge naturally from what they share
+- If they mention something, THEN connect it to a known interest
+- Vary which interests you reference - don't always ask about the same ones
+- Sometimes just listen and respond without bringing up interests at all
+- Interests are context to help you relate, not a checklist to cover
+
+CONVERSATION BALANCE - QUESTION FREQUENCY:
+- Avoid asking more than 2 questions in a row - it feels like an interrogation
+- After 2 questions, share an observation, story, or react to what they said
+- Match their energy: if they're talkative, ask fewer questions and listen more
+- If they give short answers, try ONE open-ended question, then share something yourself
+- Conversation is a dance - balance questions with statements and reactions`;
 
   if (senior) {
     const firstName = senior.name?.split(' ')[0] || senior.name;
@@ -177,6 +210,11 @@ RESPONSE FORMAT:
     prompt += `\n\nRecent calls:\n${previousCallsSummary}`;
   }
 
+  // Same-day cross-call context
+  if (todaysContext) {
+    prompt += `\n\n${todaysContext}`;
+  }
+
   if (memoryContext) {
     prompt += `\n\n${memoryContext}`;
   }
@@ -185,9 +223,25 @@ RESPONSE FORMAT:
     prompt += reminderPrompt;
   }
 
+  // Inform about already-delivered reminders to prevent repetition
+  if (deliveredReminders.length > 0) {
+    prompt += `\n\nREMINDERS ALREADY DELIVERED THIS CALL (do NOT repeat these):`;
+    prompt += `\n${deliveredReminders.map(r => `- ${r}`).join('\n')}`;
+    prompt += `\nIf they bring up a delivered reminder again, say something like "As I mentioned earlier..." instead of repeating the full reminder.`;
+  }
+
+  if (conversationTracking) {
+    prompt += `\n\n${conversationTracking}`;
+  }
+
   // Always inject memories (short facts)
   if (dynamicMemoryContext) {
     prompt += `\n\n${dynamicMemoryContext}`;
+  }
+
+  // Inject news/current events context (from web search)
+  if (newsContext) {
+    prompt += `\n\n${newsContext}`;
   }
 
   // Build guidance parts
@@ -246,6 +300,9 @@ export class V1AdvancedSession {
       remindersDelivered: [],
     };
 
+    // Track delivered reminders as a Set for deduplication
+    this.deliveredReminderSet = new Set();
+
     // Reminder acknowledgment tracking
     this.currentDelivery = currentDelivery; // Delivery record for acknowledgment tracking
     this.reminderAcknowledged = false;      // Track if acknowledgment was detected
@@ -270,11 +327,25 @@ export class V1AdvancedSession {
     this.isSpeaking = false; // Track if Donna is currently speaking
     this.wasInterrupted = false; // Track if user interrupted during response generation
     this.dynamicMemoryContext = null; // Real-time memory search results
+    this.todaysContext = null; // Same-day cross-call context
+
+    // In-call conversation tracking (prevent repetition)
+    this.topicsDiscussed = [];      // Topics that came up (e.g., "gardening", "grandkids")
+    this.questionsAsked = [];       // Questions Donna asked
+    this.adviceGiven = [];          // Advice/suggestions Donna provided
+    this.storiesShared = [];        // Facts or anecdotes Donna mentioned
 
     // Silence detection for turn-taking
     this.lastAudioTime = Date.now();
     this.silenceThreshold = 1500; // 1.5s of silence = end of turn
     this.silenceCheckInterval = null;
+
+    // Graceful call ending state
+    this.seniorSaidGoodbye = false;   // Senior said goodbye
+    this.donnaSaidGoodbye = false;    // Donna responded with goodbye
+    this.callEndingInitiated = false; // Call termination timer started
+    this.callEndTimer = null;         // Timer for post-goodbye silence
+    this.callTerminationReason = null; // Why the call ended
   }
 
   /**
@@ -302,51 +373,127 @@ export class V1AdvancedSession {
         streamSid: this.streamSid
       }));
     }
+
+    // If call ending was initiated and senior speaks again, cancel it
+    if (this.callEndingInitiated) {
+      console.log(`[V1][${this.streamSid}] Senior spoke during call ending - cancelling auto-hangup`);
+      this.cancelCallEnding();
+    }
   }
 
   /**
-   * Generate personalized greeting using Claude with full context
+   * Initiate graceful call ending after mutual goodbyes
+   * Waits for a period of silence before terminating the call via Twilio
+   */
+  initiateCallEnding() {
+    if (this.callEndingInitiated) return;
+
+    this.callEndingInitiated = true;
+    const silenceWait = 4000; // 4 seconds of silence after Donna's goodbye
+
+    console.log(`[V1][${this.streamSid}] Call ending initiated - waiting ${silenceWait}ms for silence`);
+
+    this.callEndTimer = setTimeout(async () => {
+      // Double-check that the senior hasn't spoken since we started waiting
+      const silenceSinceLastAudio = Date.now() - this.lastAudioTime;
+      if (silenceSinceLastAudio < 2000) {
+        console.log(`[V1][${this.streamSid}] Recent audio detected (${silenceSinceLastAudio}ms ago), cancelling auto-hangup`);
+        this.callEndingInitiated = false;
+        return;
+      }
+
+      await this.terminateCall('mutual_goodbye');
+    }, silenceWait);
+  }
+
+  /**
+   * Cancel a pending call ending (e.g., if senior speaks again)
+   */
+  cancelCallEnding() {
+    if (this.callEndTimer) {
+      clearTimeout(this.callEndTimer);
+      this.callEndTimer = null;
+    }
+    this.callEndingInitiated = false;
+    // Reset goodbye state since conversation is continuing
+    this.seniorSaidGoodbye = false;
+    this.donnaSaidGoodbye = false;
+  }
+
+  /**
+   * Terminate the call via Twilio REST API
+   * @param {string} reason - Why the call is ending
+   */
+  async terminateCall(reason) {
+    this.callTerminationReason = reason;
+    console.log(`[V1][${this.streamSid}] Terminating call (reason: ${reason}, callSid: ${this.callSid})`);
+
+    if (!this.callSid) {
+      console.log(`[V1][${this.streamSid}] No callSid available, cannot terminate via Twilio`);
+      return;
+    }
+
+    if (!twilioClient) {
+      console.log(`[V1][${this.streamSid}] Twilio client not configured, cannot terminate call`);
+      return;
+    }
+
+    try {
+      await twilioClient.calls(this.callSid).update({ status: 'completed' });
+      console.log(`[V1][${this.streamSid}] Call terminated successfully via Twilio API`);
+    } catch (error) {
+      console.error(`[V1][${this.streamSid}] Failed to terminate call via Twilio:`, error.message);
+    }
+  }
+
+  /**
+   * Check if Donna's response contains goodbye language
+   * Used to detect when Donna has said her goodbye so we can start the silence timer
+   */
+  checkDonnaGoodbye(responseText) {
+    const goodbyePattern = /\b(goodbye|bye|goodnight|take care|talk to you (later|soon|tomorrow|next time)|see you|have a (good|great|nice|lovely|wonderful) (day|night|evening|afternoon)|until (next time|tomorrow))\b/i;
+    return goodbyePattern.test(responseText);
+  }
+
+  /**
+   * Generate personalized greeting using the greeting rotation service
+   * Falls back to this when no cached greeting is available
    */
   async generateGreeting() {
-    const firstName = this.senior?.name?.split(' ')[0];
-
     // If no senior context, use simple greeting
     if (!this.senior) {
       return `Hello! It's Donna calling to check in. How are you doing today?`;
     }
 
-    // Run quick memory search for greeting context
+    // Fetch recent memories and last call summary in parallel
     let recentMemories = [];
+    let lastCallSummary = null;
+
     if (this.senior?.id) {
       try {
-        recentMemories = await memoryService.getRecent(this.senior.id, 5);
-        console.log(`[V1][${this.streamSid}] Greeting context: ${recentMemories.length} recent memories`);
+        const [memories, summaries] = await Promise.all([
+          memoryService.getRecent(this.senior.id, 10),
+          conversationService.getRecentSummaries(this.senior.id, 1),
+        ]);
+        recentMemories = memories;
+        lastCallSummary = summaries || null;
+        console.log(`[V1][${this.streamSid}] Greeting context: ${recentMemories.length} memories, lastCall=${lastCallSummary ? 'yes' : 'no'}`);
       } catch (e) {
-        console.error(`[V1][${this.streamSid}] Memory fetch error:`, e.message);
+        console.error(`[V1][${this.streamSid}] Greeting context fetch error:`, e.message);
       }
     }
 
-    // Build greeting prompt with full context
-    const greetingPrompt = `You are Donna, calling ${firstName} to check in.
+    const { greeting, period, templateIndex, selectedInterest } = greetingService.getGreeting({
+      seniorName: this.senior.name,
+      timezone: this.senior.timezone,
+      interests: this.senior.interests,
+      lastCallSummary,
+      recentMemories,
+      seniorId: this.senior.id,
+    });
 
-CONTEXT:
-- Interests: ${this.senior.interests?.join(', ') || 'unknown'}
-${this.memoryContext ? `\n${this.memoryContext}` : ''}
-${recentMemories.length > 0 ? `\nRecent memories:\n${recentMemories.map(m => `- ${m.content}`).join('\n')}` : ''}
-
-Generate a warm, personalized greeting (1-2 sentences). Reference something specific from their life - a hobby, recent event, or something you remember about them. End with a question.
-
-RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
-
-    try {
-      const adapter = getAdapter(VOICE_MODEL);
-      const greeting = await adapter.generate(greetingPrompt, [], { maxTokens: 100, temperature: 0.8 });
-      console.log(`[V1][${this.streamSid}] Generated greeting: "${greeting.substring(0, 50)}..."`);
-      return greeting.trim();
-    } catch (error) {
-      console.error(`[V1][${this.streamSid}] Greeting generation error:`, error.message);
-      return `Hello ${firstName}! It's Donna calling to check in. How are you doing today?`;
-    }
+    console.log(`[V1][${this.streamSid}] Generated greeting: period=${period}, template=${templateIndex}, interest=${selectedInterest || 'none'}`);
+    return greeting;
   }
 
   async connect() {
@@ -383,6 +530,21 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
       }
     }
 
+    // Load same-day cross-call context
+    if (this.senior?.id) {
+      try {
+        this.todaysContext = await dailyContextService.getTodaysContext(
+          this.senior.id,
+          this.senior.timezone
+        );
+        if (this.todaysContext?.previousCallCount > 0) {
+          console.log(`[V1][${this.streamSid}] Same-day context: ${this.todaysContext.previousCallCount} previous calls today, ${this.todaysContext.remindersDelivered?.length || 0} reminders already delivered`);
+        }
+      } catch (e) {
+        console.log(`[V1][${this.streamSid}] Could not load today's context: ${e.message}`);
+      }
+    }
+
     // Use pre-generated greeting > cached greeting > generate fresh
     const greetingText = this.preGeneratedGreeting || cachedGreeting || await this.generateGreeting();
     if (this.preGeneratedGreeting) {
@@ -414,10 +576,170 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
   }
 
   /**
+   * Track a reminder as delivered (deduplicated)
+   * @param {string} reminderKey - Reminder title or ID
+   * @param {string} source - How it was detected ('director', 'acknowledgment', 'response')
+   */
+  markReminderDelivered(reminderKey, source = 'unknown') {
+    if (!reminderKey || this.deliveredReminderSet.has(reminderKey)) return;
+
+    this.deliveredReminderSet.add(reminderKey);
+    this.callState.remindersDelivered.push(reminderKey);
+
+    const turnNumber = this.conversationLog.length;
+    console.log(`[V1][${this.streamSid}] Reminder delivered: "${reminderKey}" (source: ${source}, turn: ${turnNumber})`);
+  }
+
+  /**
    * Update call state timing
    */
   updateCallState() {
     this.callState.minutesElapsed = (Date.now() - this.callState.startTime) / 60000;
+  }
+
+  /**
+   * Extract conversation elements from Donna's response and user message
+   * Used for in-call repetition prevention
+   */
+  extractConversationElements(responseText, userMessage) {
+    const questions = [];
+    const advice = [];
+    const topics = [];
+
+    // Extract questions from Donna's response (sentences ending in ?)
+    if (responseText) {
+      const questionMatches = responseText.match(/[^.!?]*\?/g);
+      if (questionMatches) {
+        for (const q of questionMatches) {
+          const trimmed = q.trim();
+          // Keep short summary (max 5 words from the question)
+          const words = trimmed.split(/\s+/).slice(0, 5).join(' ');
+          if (words) questions.push(words);
+        }
+      }
+
+      // Extract advice phrases from Donna's response
+      const advicePattern = /(?:you should|try to|don't forget to|make sure to|remember to|how about)[^.!?]*/gi;
+      const adviceMatches = responseText.match(advicePattern);
+      if (adviceMatches) {
+        for (const a of adviceMatches) {
+          const words = a.trim().split(/\s+/).slice(0, 5).join(' ');
+          if (words) advice.push(words);
+        }
+      }
+    }
+
+    // Extract topic keywords from user message
+    if (userMessage) {
+      const lower = userMessage.toLowerCase();
+      // Common activity/topic words
+      const topicPatterns = [
+        /\b(garden(?:ing)?|plant(?:ing|s)?|flower(?:s)?)\b/i,
+        /\b(cook(?:ing)?|bak(?:ing)?|recipe(?:s)?|dinner|lunch|breakfast)\b/i,
+        /\b(walk(?:ing)?|exercise|yoga|swimming)\b/i,
+        /\b(read(?:ing)?|book(?:s)?|newspaper)\b/i,
+        /\b(church|prayer|service|bible)\b/i,
+        /\b(tv|television|show(?:s)?|movie(?:s)?|watch(?:ing)?)\b/i,
+        /\b(grandkid(?:s)?|grandchild(?:ren)?|grandson|granddaughter)\b/i,
+        /\b(son|daughter|brother|sister|husband|wife|family)\b/i,
+        /\b(doctor|hospital|appointment|medication|medicine|pill(?:s)?)\b/i,
+        /\b(weather|rain(?:ing)?|snow(?:ing)?|sunny|cold|hot)\b/i,
+        /\b(sleep(?:ing)?|nap|rest(?:ing)?|tired)\b/i,
+        /\b(friend(?:s)?|neighbor(?:s)?|visitor(?:s)?|company)\b/i,
+        /\b(pain|ache|hurt(?:ing)?|sore|dizzy|fall|fell)\b/i,
+        /\b(bird(?:s)?|cat(?:s)?|dog(?:s)?|pet(?:s)?)\b/i,
+        /\b(music|sing(?:ing)?|radio|song(?:s)?)\b/i,
+        /\b(craft(?:s)?|knit(?:ting)?|sew(?:ing)?|puzzle(?:s)?)\b/i,
+      ];
+
+      for (const pattern of topicPatterns) {
+        const match = lower.match(pattern);
+        if (match) {
+          topics.push(match[1]);
+        }
+      }
+    }
+
+    return { questions, advice, topics };
+  }
+
+  /**
+   * Track conversation elements from Quick Observer signals
+   */
+  trackTopicsFromSignals(quickResult) {
+    if (quickResult.healthSignals?.length > 0) {
+      if (!this.topicsDiscussed.includes('health')) {
+        this.topicsDiscussed.push('health');
+      }
+    }
+    if (quickResult.familySignals?.length > 0) {
+      if (!this.topicsDiscussed.includes('family')) {
+        this.topicsDiscussed.push('family');
+      }
+    }
+    if (quickResult.activitySignals?.length > 0) {
+      for (const signal of quickResult.activitySignals) {
+        const topic = String(signal).toLowerCase().split(/\s+/).slice(0, 2).join(' ');
+        if (topic && !this.topicsDiscussed.includes(topic)) {
+          this.topicsDiscussed.push(topic);
+        }
+      }
+    }
+    if (quickResult.emotionSignals?.length > 0) {
+      const negatives = quickResult.emotionSignals.filter(e => e.valence === 'negative');
+      if (negatives.length > 0 && !this.topicsDiscussed.includes('emotions')) {
+        this.topicsDiscussed.push('emotions');
+      }
+    }
+  }
+
+  /**
+   * Update tracking arrays with extracted elements, enforcing size limits
+   */
+  recordConversationElements(elements) {
+    if (elements.questions?.length > 0) {
+      this.questionsAsked.push(...elements.questions);
+      if (this.questionsAsked.length > 8) {
+        this.questionsAsked = this.questionsAsked.slice(-8);
+      }
+    }
+    if (elements.advice?.length > 0) {
+      this.adviceGiven.push(...elements.advice);
+      if (this.adviceGiven.length > 8) {
+        this.adviceGiven = this.adviceGiven.slice(-8);
+      }
+    }
+    if (elements.topics?.length > 0) {
+      for (const t of elements.topics) {
+        if (!this.topicsDiscussed.includes(t)) {
+          this.topicsDiscussed.push(t);
+        }
+      }
+      if (this.topicsDiscussed.length > 10) {
+        this.topicsDiscussed = this.topicsDiscussed.slice(-10);
+      }
+    }
+  }
+
+  /**
+   * Get a formatted summary of conversation tracking for the system prompt
+   */
+  getConversationTrackingSummary() {
+    const sections = [];
+
+    if (this.topicsDiscussed.length > 0) {
+      sections.push(`- Topics discussed: ${this.topicsDiscussed.join(', ')}`);
+    }
+    if (this.questionsAsked.length > 0) {
+      sections.push(`- Questions you've asked: ${this.questionsAsked.join('; ')}`);
+    }
+    if (this.adviceGiven.length > 0) {
+      sections.push(`- Advice you've given: ${this.adviceGiven.join('; ')}`);
+    }
+
+    if (sections.length === 0) return null;
+
+    return `CONVERSATION SO FAR THIS CALL (avoid repeating):\n${sections.join('\n')}\nBuild on these topics rather than reintroducing them. Ask NEW questions.`;
   }
 
   /**
@@ -463,6 +785,49 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
     }
   }
 
+  /**
+   * Send a quick buffer response while waiting for web search
+   * Used when user asks about news/weather/current events
+   */
+  async sendBufferResponse(bufferText = "Let me check on that for you...") {
+    if (!process.env.ELEVENLABS_API_KEY) {
+      console.log(`[V1][${this.streamSid}] ELEVENLABS_API_KEY not set, skipping buffer`);
+      return;
+    }
+
+    const startTime = Date.now();
+    console.log(`[V1][${this.streamSid}] Sending buffer response: "${bufferText}"`);
+
+    try {
+      const pcmBuffer = await this.tts.textToSpeech(bufferText);
+      const mulawBuffer = pcm24kToMulaw8k(pcmBuffer);
+
+      this.isSpeaking = true;
+
+      // Send to Twilio in chunks
+      const chunkSize = 3200;
+      for (let i = 0; i < mulawBuffer.length; i += chunkSize) {
+        if (!this.isSpeaking) break;
+
+        const chunk = mulawBuffer.slice(i, i + chunkSize);
+        if (this.twilioWs.readyState === 1) {
+          this.twilioWs.send(JSON.stringify({
+            event: 'media',
+            streamSid: this.streamSid,
+            media: { payload: chunk.toString('base64') }
+          }));
+        }
+        await new Promise(resolve => setImmediate(resolve));
+      }
+
+      this.isSpeaking = false;
+      console.log(`[V1][${this.streamSid}] Buffer response sent in ${Date.now() - startTime}ms`);
+    } catch (error) {
+      console.error(`[V1][${this.streamSid}] Buffer response failed:`, error.message);
+      this.isSpeaking = false;
+    }
+  }
+
   async connectDeepgram() {
     if (!process.env.DEEPGRAM_API_KEY) {
       console.log(`[V1][${this.streamSid}] DEEPGRAM_API_KEY not set, STT disabled`);
@@ -480,7 +845,7 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         channels: 1,
         punctuate: true,
         interim_results: true,
-        endpointing: 500, // Faster turn detection
+        endpointing: 300, // Faster turn detection (reduced from 500ms)
         utterance_end_ms: 1000,
       });
 
@@ -556,40 +921,104 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
 
     console.log(`[V1][${this.streamSid}] Processing: "${text}" (seniorId: ${this.senior?.id || 'none'}, ${this.callState.minutesElapsed.toFixed(1)}min)`);
 
-    // Start Conversation Director (Layer 2) in parallel - results used for guidance
-    // Don't await - this runs in background and results are used in NEXT turn or current if ready
-    this.pendingDirector = runDirectorPipeline(
-      text,
-      this.conversationLog,
-      this.senior?.id,
-      this.senior,
-      this.callState
-    ).then(result => {
-      this.lastDirectorResult = result;
-      const dir = result.direction;
-      console.log(`[V1][${this.streamSid}] Director: phase=${dir?.analysis?.call_phase}, engagement=${dir?.analysis?.engagement_level}, tone=${dir?.guidance?.tone}`);
+    // Quick Observer (Layer 1) - check if this needs web search (news/weather/etc)
+    const quickCheck = quickAnalyze(text);
+    const needsWebSearch = quickCheck.needsWebSearch;
 
-      // Update memories from director's semantic search
-      if (result.memories?.length > 0) {
-        const memoryText = result.memories.map(m => `- ${m.content}`).join('\n');
-        this.dynamicMemoryContext = `\n\nFrom previous conversations:\n${memoryText}`;
+    // Track goodbye signals from the senior
+    if (quickCheck.goodbyeSignals?.length > 0) {
+      const hasStrongGoodbye = quickCheck.goodbyeSignals.some(g => g.strength === 'strong');
+      if (hasStrongGoodbye) {
+        this.seniorSaidGoodbye = true;
+        console.log(`[V1][${this.streamSid}] Senior goodbye detected: ${quickCheck.goodbyeSignals.map(g => g.signal).join(', ')}`);
       }
+    }
 
-      // Track reminder delivery if director said to deliver
-      if (dir?.reminder?.should_deliver && dir?.reminder?.which_reminder) {
-        this.callState.remindersDelivered.push(dir.reminder.which_reminder);
+    // Track news context for this turn
+    let currentNewsContext = null;
+
+    if (needsWebSearch) {
+      // Buffer response pattern: send "let me check" while fetching news
+      console.log(`[V1][${this.streamSid}] News intent detected (${quickCheck.newsSignals.join(', ')}), using buffer pattern`);
+
+      // Send buffer response immediately (non-blocking feel)
+      await this.sendBufferResponse("Let me check on that for you...");
+
+      // Log buffer to conversation
+      this.conversationLog.push({
+        role: 'assistant',
+        content: "Let me check on that for you...",
+        timestamp: new Date().toISOString()
+      });
+
+      // Now await Director pipeline to get news results
+      try {
+        const directorResult = await runDirectorPipeline(
+          text,
+          this.conversationLog,
+          this.senior?.id,
+          this.senior,
+          this.callState
+        );
+
+        this.lastDirectorResult = directorResult;
+        const dir = directorResult.direction;
+        console.log(`[V1][${this.streamSid}] Director (awaited): phase=${dir?.analysis?.call_phase}, news=${directorResult.currentEvents ? 'fetched' : 'none'}`);
+
+        // Extract news context
+        if (directorResult.currentEvents?.content) {
+          currentNewsContext = directorResult.currentEvents.content;
+          console.log(`[V1][${this.streamSid}] News context ready: ${currentNewsContext.substring(0, 100)}...`);
+        }
+
+        // Update memories from director's semantic search
+        if (directorResult.memories?.length > 0) {
+          const memoryText = directorResult.memories.map(m => `- ${m.content}`).join('\n');
+          this.dynamicMemoryContext = `\n\nFrom previous conversations:\n${memoryText}`;
+        }
+
+        // Track reminder delivery
+        if (dir?.reminder?.should_deliver && dir?.reminder?.which_reminder) {
+          this.markReminderDelivered(dir.reminder.which_reminder, 'director');
+        }
+      } catch (e) {
+        console.error(`[V1][${this.streamSid}] Director error (awaited):`, e.message);
       }
-    }).catch(e => {
-      console.error(`[V1][${this.streamSid}] Director error:`, e.message);
-    });
+    } else {
+      // Normal flow: Start Director in background (not awaited)
+      this.pendingDirector = runDirectorPipeline(
+        text,
+        this.conversationLog,
+        this.senior?.id,
+        this.senior,
+        this.callState
+      ).then(result => {
+        this.lastDirectorResult = result;
+        const dir = result.direction;
+        console.log(`[V1][${this.streamSid}] Director: phase=${dir?.analysis?.call_phase}, engagement=${dir?.analysis?.engagement_level}, tone=${dir?.guidance?.tone}`);
+
+        // Update memories from director's semantic search
+        if (result.memories?.length > 0) {
+          const memoryText = result.memories.map(m => `- ${m.content}`).join('\n');
+          this.dynamicMemoryContext = `\n\nFrom previous conversations:\n${memoryText}`;
+        }
+
+        // Track reminder delivery if director said to deliver
+        if (dir?.reminder?.should_deliver && dir?.reminder?.which_reminder) {
+          this.markReminderDelivered(dir.reminder.which_reminder, 'director');
+        }
+      }).catch(e => {
+        console.error(`[V1][${this.streamSid}] Director error:`, e.message);
+      });
+    }
 
     // Generate and send response (streaming or blocking based on feature flag)
     const useStreaming = V1_STREAMING_ENABLED && process.env.ELEVENLABS_API_KEY;
-    console.log(`[V1][${this.streamSid}] Response mode: ${useStreaming ? 'STREAMING' : 'BLOCKING'}`);
+    console.log(`[V1][${this.streamSid}] Response mode: ${useStreaming ? 'STREAMING' : 'BLOCKING'}, newsContext: ${currentNewsContext ? 'yes' : 'no'}`);
     if (useStreaming) {
-      await this.generateAndSendResponseStreaming(text);
+      await this.generateAndSendResponseStreaming(text, currentNewsContext);
     } else {
-      await this.generateAndSendResponse(text);
+      await this.generateAndSendResponse(text, currentNewsContext);
     }
 
     // Process any pending utterances
@@ -599,7 +1028,7 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
     }
   }
 
-  async generateAndSendResponse(userMessage) {
+  async generateAndSendResponse(userMessage, newsContext = null) {
     this.isProcessing = true;
     this.wasInterrupted = false; // Reset interrupt flag
 
@@ -620,6 +1049,12 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
             userMessage
           );
           console.log(`[V1][${this.streamSid}] Marked reminder as ${type}`);
+
+          // Also mark in in-call tracking to prevent re-delivery
+          const reminderTitle = this.callState.pendingReminders?.[0]?.title;
+          if (reminderTitle) {
+            this.markReminderDelivered(reminderTitle, 'acknowledgment');
+          }
         }
       }
 
@@ -627,6 +1062,9 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
       const directorGuidance = this.lastDirectorResult?.direction
         ? formatDirectorGuidance(this.lastDirectorResult.direction)
         : null;
+
+      // Track topics from Quick Observer signals
+      this.trackTopicsFromSignals(quickResult);
 
       // Dynamic model selection based on Director + Quick Observer
       const modelConfig = selectModelConfig(quickResult, this.lastDirectorResult?.direction);
@@ -644,13 +1082,17 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         this.dynamicMemoryContext,
         quickResult.guidance,
         directorGuidance,
-        this.previousCallsSummary
+        this.previousCallsSummary,
+        newsContext,
+        this.callState.remindersDelivered,
+        this.getConversationTrackingSummary(),
+        this.todaysContext ? dailyContextService.formatTodaysContext(this.todaysContext) : null
       );
-      console.log(`[V1][${this.streamSid}] System prompt built: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, senior=${this.senior?.name || 'none'}`);
+      console.log(`[V1][${this.streamSid}] System prompt built: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, news=${newsContext ? 'yes' : 'no'}, senior=${this.senior?.name || 'none'}, deliveredReminders=${this.callState.remindersDelivered.length}`);
 
       // Build messages array
       const messages = this.conversationLog
-        .slice(-10) // Keep last 20 exchanges for context
+        .slice(-20) // Keep last 20 exchanges for better in-conversation memory
         .map(entry => ({
           role: entry.role,
           content: entry.content
@@ -682,8 +1124,21 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         timestamp: new Date().toISOString()
       });
 
+      // Track conversation elements for repetition prevention
+      const elements = this.extractConversationElements(responseText, userMessage);
+      this.recordConversationElements(elements);
+
       // Convert to speech and send to Twilio
       await this.textToSpeechAndSend(responseText);
+
+      // Check if Donna said goodbye - if mutual, initiate call ending
+      if (this.checkDonnaGoodbye(responseText)) {
+        this.donnaSaidGoodbye = true;
+        console.log(`[V1][${this.streamSid}] Donna goodbye detected in response`);
+        if (this.seniorSaidGoodbye) {
+          this.initiateCallEnding();
+        }
+      }
 
     } catch (error) {
       console.error(`[V1][${this.streamSid}] Response generation failed:`, error.message);
@@ -696,7 +1151,7 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
    * Streaming response generation - reduces latency from ~1.5s to ~400ms
    * Uses: Quick Observer (0ms) → Claude Streaming → Sentence Buffer → WebSocket TTS
    */
-  async generateAndSendResponseStreaming(userMessage) {
+  async generateAndSendResponseStreaming(userMessage, newsContext = null) {
     this.isProcessing = true;
     this.wasInterrupted = false;
     const startTime = Date.now();
@@ -722,6 +1177,12 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
             userMessage
           );
           console.log(`[V1][${this.streamSid}] Marked reminder as ${type}`);
+
+          // Also mark in in-call tracking to prevent re-delivery
+          const reminderTitle = this.callState.pendingReminders?.[0]?.title;
+          if (reminderTitle) {
+            this.markReminderDelivered(reminderTitle, 'acknowledgment');
+          }
         }
       }
 
@@ -729,6 +1190,9 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
       const directorGuidance = this.lastDirectorResult?.direction
         ? formatDirectorGuidance(this.lastDirectorResult.direction)
         : null;
+
+      // Track topics from Quick Observer signals
+      this.trackTopicsFromSignals(quickResult);
 
       // Dynamic model selection based on Director + Quick Observer
       const modelConfig = selectModelConfig(quickResult, this.lastDirectorResult?.direction);
@@ -746,13 +1210,17 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
         this.dynamicMemoryContext,
         quickResult.guidance,
         directorGuidance,
-        this.previousCallsSummary
+        this.previousCallsSummary,
+        newsContext,
+        this.callState.remindersDelivered,
+        this.getConversationTrackingSummary(),
+        this.todaysContext ? dailyContextService.formatTodaysContext(this.todaysContext) : null
       );
-      console.log(`[V1][${this.streamSid}] System prompt: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, senior=${this.senior?.name || 'none'}`);
+      console.log(`[V1][${this.streamSid}] System prompt: memory=${this.memoryContext ? this.memoryContext.length : 0} chars, news=${newsContext ? 'yes' : 'no'}, senior=${this.senior?.name || 'none'}, deliveredReminders=${this.callState.remindersDelivered.length}`);
 
       // Build messages array
       const messages = this.conversationLog
-        .slice(-10)
+        .slice(-20) // Keep last 20 exchanges for better in-conversation memory
         .map(entry => ({
           role: entry.role,
           content: entry.content
@@ -868,10 +1336,23 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
           content: fullResponse,
           timestamp: new Date().toISOString()
         });
+
+        // Track conversation elements for repetition prevention
+        const elements = this.extractConversationElements(fullResponse, userMessage);
+        this.recordConversationElements(elements);
       }
 
       // Wait a moment for final audio chunks before closing
       await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Check if Donna said goodbye - if mutual, initiate call ending
+      if (fullResponse && this.checkDonnaGoodbye(fullResponse)) {
+        this.donnaSaidGoodbye = true;
+        console.log(`[V1][${this.streamSid}] Donna goodbye detected in streaming response`);
+        if (this.seniorSaidGoodbye) {
+          this.initiateCallEnding();
+        }
+      }
 
     } catch (error) {
       console.error(`[V1][${this.streamSid}] Streaming response failed:`, error.message);
@@ -999,6 +1480,22 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
   async close() {
     console.log(`[V1][${this.streamSid}] Closing session...`);
 
+    // Save daily context for same-day cross-call memory
+    if (this.senior?.id) {
+      try {
+        await dailyContextService.saveCallContext(this.senior.id, this.callSid, {
+          topicsDiscussed: this.topicsDiscussed || [],
+          remindersDelivered: [...this.callState.remindersDelivered],
+          adviceGiven: this.adviceGiven || [],
+          keyMoments: [],
+          summary: null, // Filled later by post-call analysis
+        });
+        console.log(`[V1][${this.streamSid}] Saved daily context`);
+      } catch (e) {
+        console.error(`[V1][${this.streamSid}] Failed to save daily context:`, e.message);
+      }
+    }
+
     // Extract memories
     await this.extractMemories();
 
@@ -1018,8 +1515,13 @@ RESPOND WITH ONLY THE GREETING TEXT - nothing else.`;
       console.error(`[V1][${this.streamSid}] Post-call analysis failed:`, err.message);
     });
 
-    // Stop intervals
+    // Stop intervals and timers
     if (this.silenceCheckInterval) clearInterval(this.silenceCheckInterval);
+    if (this.callEndTimer) clearTimeout(this.callEndTimer);
+
+    // Log call termination reason
+    const terminationReason = this.callTerminationReason || 'external';
+    console.log(`[V1][${this.streamSid}] Call termination reason: ${terminationReason}`);
 
     // Close streaming TTS if active
     if (this.streamingTts) {

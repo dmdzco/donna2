@@ -4,22 +4,35 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ## Features
 
-- **Conversation Director Architecture (2-Layer + Post-Call)**
-  - Layer 1: Quick Observer (0ms) - Instant regex patterns
+### Voice Pipeline
+- **2-Layer Conversation Director Architecture**
+  - Layer 1: Quick Observer (0ms) - 730+ regex patterns for health, emotion, safety
   - Layer 2: Conversation Director (~150ms) - Gemini 3 Flash for call guidance
-  - Post-Call Analysis - Async summary, concerns, engagement metrics
+  - Post-Call Analysis - Summary, concerns, engagement score
 - **Dynamic Token Routing** - 100-400 tokens based on context
-- **Streaming Pipeline** - ~400ms time-to-first-audio
+- **Streaming Pipeline** - ~600ms time-to-first-audio
   - Claude streaming responses (sentence-by-sentence)
   - ElevenLabs WebSocket TTS
-  - Parallel connection startup
+  - Barge-in support (interrupt detection)
+
+### Core Capabilities
 - Real-time voice calls (Twilio Media Streams)
-- Speech transcription (Deepgram STT)
-- Memory system with semantic search (pgvector)
+- Speech transcription (Deepgram Nova 2)
+- Semantic memory with decay + deduplication (pgvector)
+- In-call memory tracking (topics, questions, advice, stories)
+- Same-day cross-call memory (timezone-aware daily context)
+- Enhanced web search (factual/curiosity questions + news)
 - News updates (OpenAI web search)
 - Scheduled reminder calls with delivery tracking
-- Admin dashboard
-- Observability dashboard
+- Admin dashboard (React, 4 tabs)
+- Consumer app (caregiver onboarding + dashboard)
+- Observability dashboard (React)
+
+### Security
+- Authentication (Clerk) with role-based access
+- Input validation (Zod schemas)
+- Rate limiting (express-rate-limit)
+- Twilio webhook signature verification
 
 ## Quick Start
 
@@ -33,7 +46,8 @@ Test health:
 curl http://localhost:3001/health
 ```
 
-Admin dashboard: `http://localhost:3001/admin.html`
+Admin dashboard: `http://localhost:5173` (run `npm run dev` in `apps/admin/`)
+Consumer app: `http://localhost:5175` (run `npm run dev` in `apps/consumer/`)
 Observability: `http://localhost:5174` (run `npm run dev` in `apps/observability/`)
 
 ## Architecture
@@ -85,44 +99,54 @@ The Director proactively guides each call:
 | **Emotional Detection** | Adjust tone for sad/concerned seniors |
 | **Token Recommendations** | 100-400 tokens based on context |
 
-## Dynamic Token Selection
-
-| Situation | Tokens | Trigger |
-|-----------|--------|---------|
-| Normal conversation | 100 | Default |
-| Health mention | 150 | Quick Observer |
-| Emotional support | 200-250 | Director |
-| Low engagement | 200 | Director |
-| Reminder delivery | 150 | Director |
-| Call closing | 150 | Director |
-
 ## Project Structure
 
 ```
 donna/
-├── index.js                    # Main server
+├── index.js                    # Express server, routes, WebSocket handlers
 ├── pipelines/
-│   ├── v1-advanced.js          # Main voice pipeline + call state
-│   ├── quick-observer.js       # Layer 1: Instant regex patterns
-│   └── fast-observer.js        # Layer 2: Conversation Director
+│   ├── v1-advanced.js          # Main pipeline: STT→Observers→Claude→TTS
+│   ├── quick-observer.js       # Layer 1: 730+ lines of regex patterns
+│   └── fast-observer.js        # Layer 2: Conversation Director (Gemini)
 ├── adapters/
-│   ├── llm/index.js            # Multi-provider LLM adapter
-│   ├── elevenlabs.js           # ElevenLabs REST TTS
-│   └── elevenlabs-streaming.js # ElevenLabs WebSocket TTS
+│   ├── llm/
+│   │   ├── index.js            # Multi-provider factory (Claude, Gemini)
+│   │   ├── claude.js           # Claude adapter with streaming
+│   │   ├── gemini.js           # Gemini adapter for Director
+│   │   └── base.js             # Base LLM interface
+│   ├── elevenlabs.js           # REST TTS (fallback/greetings)
+│   └── elevenlabs-streaming.js # WebSocket TTS (~150ms)
 ├── services/
-│   ├── call-analysis.js        # Post-call batch analysis
-│   ├── memory.js               # Memory storage + semantic search
-│   ├── seniors.js              # Senior profile CRUD
-│   ├── conversations.js        # Conversation history
-│   ├── scheduler.js            # Reminder scheduler
-│   └── news.js                 # News via OpenAI web search
+│   ├── call-analysis.js        # Post-call: summary, concerns, score
+│   ├── caregivers.js           # Caregiver-senior relationship management
+│   ├── context-cache.js        # Pre-cache senior context (5 AM)
+│   ├── daily-context.js        # Same-day cross-call memory service
+│   ├── memory.js               # Semantic search, decay, deduplication
+│   ├── seniors.js              # Senior CRUD, phone normalization
+│   ├── conversations.js        # Call records, transcripts
+│   ├── scheduler.js            # Reminder scheduling + prefetch
+│   └── news.js                 # OpenAI web search, 1hr cache
+├── middleware/
+│   ├── auth.js                 # Clerk authentication
+│   ├── clerk.js                # Clerk middleware init
+│   ├── rate-limit.js           # Rate limiting
+│   ├── twilio.js               # Webhook signature verification
+│   └── validate.js             # Zod validation middleware
+├── validators/
+│   └── schemas.js              # Zod schemas for all API inputs
 ├── db/
-│   ├── client.js               # Database connection
-│   └── schema.js               # Drizzle ORM schema
-├── public/
-│   └── admin.html              # Admin UI
+│   ├── client.js               # Database connection (Neon + Drizzle)
+│   ├── schema.js               # Drizzle ORM schema (8 tables)
+│   └── setup-pgvector.js       # pgvector initialization
+├── packages/
+│   ├── logger/                 # TypeScript logging package
+│   └── event-bus/              # TypeScript event bus package
 ├── apps/
-│   └── observability/          # React observability dashboard
+│   ├── admin/                  # React admin dashboard (Railway)
+│   ├── consumer/               # Caregiver onboarding + dashboard (Vercel)
+│   ├── observability/          # React observability dashboard
+│   └── web/                    # Future placeholder
+├── public/                     # Legacy static files (fallback)
 └── audio-utils.js              # Audio format conversion
 ```
 
@@ -159,27 +183,36 @@ FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
 | `/api/seniors/:id` | GET/PATCH | Get/update senior |
 | `/api/seniors/:id/memories` | GET/POST | Manage memories |
 | `/api/conversations` | GET | View conversation history |
-| `/api/reminders` | GET/POST | Manage reminders |
+| `/api/reminders` | GET/POST/PATCH/DELETE | Manage reminders |
+| `/api/onboarding` | POST | Consumer app onboarding |
+| `/api/caregivers` | GET/POST | Caregiver management |
 | `/api/observability/*` | GET | Observability data |
 
 ## Deployment
 
-**Railway:**
-1. Push to GitHub
-2. Connect repo on [railway.app](https://railway.app)
-3. Add environment variables
-4. Deploy (auto-deploys on push)
+**API Server (Railway):**
 
-Or deploy directly:
 ```bash
-railway up
+# Deploy manually (recommended - webhook unreliable)
+git push && git push origin main:master && railway up
+
+# Or use alias after committing
+git pushall && railway up
 ```
+
+**Consumer App (Vercel):**
+- Auto-deploys from `apps/consumer/` on push
+- Build command: `cd apps/consumer && npm install && npm run build`
+
+See [docs/guides/DEPLOYMENT_PLAN.md](./docs/guides/DEPLOYMENT_PLAN.md) for full setup.
 
 ## Documentation
 
 - [docs/architecture/OVERVIEW.md](./docs/architecture/OVERVIEW.md) - System architecture
+- [docs/PRODUCT_PLAN.md](./docs/PRODUCT_PLAN.md) - Product plan and feature log
 - [docs/CONVERSATION_DIRECTOR_SPEC.md](./docs/CONVERSATION_DIRECTOR_SPEC.md) - Director specification
 - [docs/NEXT_STEPS.md](./docs/NEXT_STEPS.md) - Roadmap
+- [docs/todos/_dashboard.md](./docs/todos/_dashboard.md) - Task tracking dashboard
 - [CLAUDE.md](./CLAUDE.md) - AI assistant context
 
 ## License

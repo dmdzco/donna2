@@ -1,7 +1,7 @@
 # Donna - Product Plan & Feature Log
 
-> **Last Updated:** January 20, 2026
-> **Version:** 3.1 (Conversation Director Architecture)
+> **Last Updated:** February 5, 2026
+> **Version:** 3.3 (In-Call Memory + Cross-Call Memory + Enhanced Web Search)
 
 ---
 
@@ -66,7 +66,7 @@ Test calls directly from browser without needing a phone.
 
 #### 2.1 V1 Pipeline (Claude + Conversation Director) ✅ **Implemented**
 Production pipeline with 2-layer observer architecture and streaming.
-- **Latency:** ~400ms time-to-first-audio (streaming)
+- **Latency:** ~600ms time-to-first-audio (streaming)
 - **Components:**
   - STT: Deepgram (real-time transcription)
   - LLM: Claude Sonnet 4 (streaming responses)
@@ -290,16 +290,78 @@ Quick call buttons and call management.
 
 ---
 
-### 10. Audio Processing
+### 10. Consumer App (Caregiver Onboarding) ✅ **Implemented**
 
-#### 10.1 Format Conversion ✅ **Implemented**
+#### 10.1 Landing Page ✅ **Implemented**
+Public-facing page for caregivers to discover and sign up for Donna.
+- **Tech:** React + Vite + TypeScript + Tailwind CSS
+- **Auth:** Clerk for registration/login
+- **Deployment:** Vercel
+- **Files:** `apps/consumer/src/pages/Landing.tsx`
+
+#### 10.2 5-Step Onboarding Flow ✅ **Implemented**
+Guided signup that creates a senior profile and configures Donna.
+- **Step 1:** Senior info (name, phone, timezone, city/state/zip)
+- **Step 2:** Relationship (who is signing up - caregiver, family, self)
+- **Step 3:** Interests (select 3-5 topics for conversation)
+- **Step 4:** Additional info (medical notes, preferences)
+- **Step 5:** Reminders (medication, appointments, custom) + call schedule
+- **API:** `POST /api/onboarding` (creates senior + caregiver + reminders)
+- **Files:** `apps/consumer/src/pages/Onboarding.tsx`
+
+#### 10.3 Caregiver Dashboard ✅ **Implemented**
+Post-onboarding view for caregivers to manage their senior.
+- **Features:** Profile summary, reminder management, call history, next scheduled call
+- **Files:** `apps/consumer/src/pages/Dashboard.tsx`
+
+#### 10.4 FAQ Page ✅ **Implemented**
+Frequently asked questions for caregivers and seniors.
+- **Files:** `apps/consumer/src/pages/FAQ.tsx`
+
+---
+
+### 11. Security & Infrastructure ✅ **Implemented**
+
+#### 11.1 Authentication (Clerk) ✅ **Implemented**
+Backend API authentication with Clerk SDK.
+- **Middleware:** `middleware/auth.js` - `requireAuth`, `requireAdmin`
+- **Cofounder fallback:** API key-based access for admin operations
+- **Caregiver table:** `caregivers` table links Clerk users to seniors
+- **Role-based access:** Admin sees all, caregivers see assigned seniors only
+- **Voice webhooks excluded:** `/voice/*` routes bypass auth
+
+#### 11.2 Input Validation (Zod) ✅ **Implemented**
+Schema-based validation for all API inputs.
+- **Schemas:** `validators/schemas.js` - all endpoint schemas
+- **Middleware:** `middleware/validate.js` - validates request body/params
+- **Error format:** Standardized 400 responses with field-level errors
+
+#### 11.3 Rate Limiting ✅ **Implemented**
+Express-rate-limit protecting all endpoints.
+- **Global:** 100 req/min per IP
+- **Call initiation:** 5 calls/min per IP
+- **Write operations:** 30 req/min on POST/PATCH/DELETE
+- **Auth endpoint:** 10 req/min (ready for Clerk)
+- **Files:** `middleware/rate-limit.js`
+
+#### 11.4 Twilio Webhook Verification ✅ **Implemented**
+Validates incoming Twilio webhook signatures.
+- **Middleware:** `middleware/twilio.js`
+- **Dev mode:** Allows localhost requests with warning
+- **Prod mode:** Rejects unsigned requests with 403
+
+---
+
+### 12. Audio Processing
+
+#### 12.1 Format Conversion ✅ **Implemented**
 Convert between Twilio and AI audio formats.
 - **Twilio:** mulaw 8kHz mono
 - **Gemini:** PCM 16kHz (input), 24kHz (output)
 - **ElevenLabs:** PCM 24kHz
 - **Files:** `audio-utils.js`
 
-#### 10.2 Real-Time Streaming ✅ **Implemented**
+#### 12.2 Real-Time Streaming ✅ **Implemented**
 Bidirectional audio streaming via WebSocket.
 - **Chunk size:** 640 bytes (~80ms) for Twilio, 3200 bytes (~400ms) for barge-in
 - **Protocol:** Twilio Media Streams
@@ -308,7 +370,7 @@ Bidirectional audio streaming via WebSocket.
 
 ## Planned Features
 
-### 11. V1 Latency Optimization ✅ **Implemented**
+### 13. V1 Latency Optimization ✅ **Implemented**
 Reduced V1 pipeline latency from ~1.5s to ~400ms time-to-first-audio.
 
 **Phase 1 (Architecture) - ✅ COMPLETE**
@@ -324,7 +386,7 @@ Reduced V1 pipeline latency from ~1.5s to ~400ms time-to-first-audio.
 - [x] ~400ms time-to-first-audio achieved
 
 **Phase 3 (Fine-Tuning) - 📋 PLANNED**
-- [ ] Tune Deepgram endpointing (500ms → 300ms)
+- [x] Tune Deepgram endpointing (500ms → 300ms) ✅
 - [ ] Connection pooling for TTS
 
 **Phase 4 (Alternative Providers) - 💡 FUTURE**
@@ -354,24 +416,24 @@ Comprehensive API security layer.
 
 ---
 
-### 12. Caregiver Authentication 📋 **Planned**
-Secure multi-user access with login system.
+### 14. Caregiver Frontend Authentication ✅ **Implemented**
+Secure multi-user access with Clerk login system.
 
-- **Provider:** Clerk (recommended)
+- **Provider:** Clerk
 - **Database additions:**
   ```sql
   caregivers (id, email, name, auth_id, created_at)
   caregiver_seniors (caregiver_id, senior_id)
   ```
 - **Features:**
-  - [ ] Login/logout UI
-  - [x] ~~Protected API routes~~ (done in Security Hardening)
-  - [ ] Data filtering by caregiver assignment
+  - [x] Login/logout UI
+  - [x] Protected API routes
+  - [x] Data filtering by caregiver assignment
   - [ ] Invite system for family members
 
 ---
 
-### 13. Call Analysis Storage ✅ **Implemented**
+### 15. Call Analysis Storage ✅ **Implemented**
 Persist post-call analysis for caregiver review.
 
 - **Database table:**
@@ -397,7 +459,7 @@ Persist post-call analysis for caregiver review.
 
 ---
 
-### 14. Analytics Dashboard 📋 **Planned**
+### 16. Analytics Dashboard 📋 **Planned**
 Insights and trends for caregivers.
 
 - **Metrics:**
@@ -406,6 +468,119 @@ Insights and trends for caregivers.
   - [ ] Engagement level over time
   - [ ] Reminder delivery success rate
   - [ ] Concern frequency and categories
+
+---
+
+### 29. In-Call Web Search ✅ **Implemented**
+Enable Donna to search the web during calls for current information.
+
+- **Features:**
+  - [x] News/weather/sports detection patterns in Quick Observer (NEWS_PATTERNS)
+  - [x] Buffer response pattern ("Let me check on that...")
+  - [x] Director's `checkCurrentEvents()` + `performWebSearch()` via OpenAI web_search_preview
+  - [x] Results injected as newsContext into system prompt
+  - [x] 18 factual/curiosity patterns ("what year...", "how tall...", "who invented...", "I wonder...", "tell me about...")
+  - [x] Improved search query extraction with factual/curiosity branching
+  - [x] Senior-friendly conversational result formatting
+- **Provider:** OpenAI web search (gpt-4o-mini with web_search_preview tool)
+- **Files:** `pipelines/quick-observer.js` (patterns), `pipelines/fast-observer.js` (search logic)
+- **Value:** More helpful, knowledgeable companion
+
+---
+
+### 30. Graceful Call Ending ✅ **Implemented**
+Donna naturally ends phone calls when appropriate.
+
+- **Triggers:**
+  - Quick Observer detects goodbye signals (12 patterns, strong/medium strength)
+  - Conversation Director tracks `winding_down` phase before `closing`
+  - Mutual goodbye detection (senior + Donna both said goodbye)
+- **Implementation:**
+  - Twilio REST API to programmatically end call after final goodbye
+  - 4-second silence timer after mutual goodbye before termination
+  - Cancel-on-interrupt if senior speaks again
+- **Value:** Natural conversation endings, prevent awkward silences
+
+---
+
+### 31. In-Call Memory (Don't Repeat Within Call) ✅ **Implemented**
+Donna tracks what she has said during a call to avoid repetition.
+
+- **Problem:** If Donna reminds user to do jumping jacks early in call, she shouldn't say it again later as if it's the first time
+- **Reminder Tracking:**
+  - `deliveredReminderSet` tracks all reminders delivered during current call
+  - System prompt includes "REMINDERS ALREADY DELIVERED THIS CALL" section
+  - Acknowledgment detection (8 patterns) marks reminders as delivered
+  - Director instructed: "NEVER recommend delivering a reminder that is in the 'Already delivered' list"
+  - If delivered reminder comes up again, suggest: "As I mentioned earlier..."
+- **Conversation Element Tracking:**
+  - `topicsDiscussed` - Tracks topics via Quick Observer signals + keyword extraction (16 patterns)
+  - `questionsAsked` - Detects and records questions from responses (limit: 8)
+  - `adviceGiven` - Detects advice phrases ("you should", "try to", etc.) (limit: 8)
+  - `storiesShared` - Tracks stories/anecdotes shared (limit: 5)
+  - System prompt includes "CONVERSATION SO FAR THIS CALL" section with all tracked elements
+- **Methods:** `extractConversationElements()`, `trackTopicsFromSignals()`, `recordConversationElements()`, `getConversationTrackingSummary()`
+- **Storage:** In-memory per-session arrays and Sets (not database)
+- **Files:** `pipelines/v1-advanced.js`
+- **Value:** More natural, less robotic conversations
+
+---
+
+### 32. Same-Day Cross-Call Memory ✅ **Implemented**
+If Donna calls a user in the morning and they have another call later that same day, Donna recalls what was discussed.
+
+- **Critical scenario:** If Donna gives a reminder in the morning (e.g., "water your succulent"), she cannot give that same reminder in the afternoon without acknowledging it
+  - **Bad:** "Remember to water your succulent" (again, could kill the plant)
+  - **Good:** "This morning I reminded you to water your succulent - did you get a chance to do that?"
+- **Implementation:**
+  - `daily_call_context` DB table tracks per-call: topics, reminders delivered, advice given, key moments, summary
+  - On call start: `dailyContextService.getTodaysContext()` loads all previous calls from today (timezone-aware)
+  - Aggregates across calls using Sets for uniqueness
+  - System prompt includes "EARLIER TODAY" section with previous call data
+  - Director prompt includes previous call count for reminder awareness
+  - On call end: `dailyContextService.saveCallContext()` persists current call data
+- **Storage:** `daily_call_context` table (PostgreSQL) with timezone-aware date grouping
+- **Files:** `services/daily-context.js`, `db/schema.js`, `pipelines/v1-advanced.js`, `pipelines/fast-observer.js`
+- **Value:** Prevents harmful duplicate reminders, feels more human
+
+---
+
+### 33. Conversation Balance: Interest Usage ✅ **Implemented (Phase 1)**
+Strike a balance between using stored interests and avoiding over-reliance on them.
+
+- **Problem:** If every call Donna asks about the Seahawks and Palm Beach within 60 seconds, it becomes:
+  - Boring and repetitive
+  - Feels fake/overly personalized
+  - Inhuman interaction pattern
+- **Phase 1 (Implemented):** Prompt-based guidance
+  - Instructions to not lead with interests
+  - Let interests emerge naturally from conversation
+  - Use interests to respond, not always initiate
+  - Vary which interests are referenced
+- **Phase 2 (Future):** State-based tracking
+  - Track which interests were mentioned per call in session state
+  - Track last-referenced timestamp per interest in database
+  - Explicit rotation logic across calls
+- **Goal:** Interests guide conversation without dominating it
+- **Value:** More natural, less predictable conversations
+
+---
+
+### 34. Conversation Balance: Question Frequency ✅ **Implemented (Phase 1)**
+Strike a balance between asking questions to drive conversation and avoiding interrogation feel.
+
+- **Problem:** Too many questions in succession feels like an interrogation, not a conversation
+- **Phase 1 (Implemented):** Prompt-based guidance
+  - Limit consecutive questions (max 2)
+  - After 2 questions, share observation/story/reaction
+  - Match senior's energy - talkative = fewer questions
+  - Balance questions with statements and reactions
+- **Phase 2 (Future):** State-based tracking
+  - Track questions asked per call in session state
+  - Question-to-statement ratio metrics
+  - Senior response length tracking (engagement indicator)
+  - Automatic adjustment based on engagement
+- **Value:** Comfortable, natural conversation flow
 
 ---
 
@@ -579,7 +754,8 @@ Connect with Alexa, Google Home, smart displays.
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **3.2** | Feb 5, 2026 | Security hardening: auth, validation, rate limiting, PII-safe logging |
+| **3.3** | Feb 5, 2026 | In-call memory tracking (topics, questions, advice), same-day cross-call memory, enhanced web search (18 factual/curiosity patterns) |
+| **3.2** | Feb 5, 2026 | Consumer app (onboarding + dashboard), security hardening (Clerk, Zod, rate limiting, webhook verification, PII-safe logging) |
 | **3.1** | Jan 20, 2026 | Conversation Director architecture (2-layer + post-call), extensive Quick Observer regex, post-call analysis |
 | **2.5** | Jan 20, 2026 | Barge-in support, queue clearing, streaming pipeline |
 | **2.4** | Jan 18, 2026 | Claude + Observer + ElevenLabs pipeline |
@@ -595,7 +771,7 @@ Connect with Alexa, Google Home, smart displays.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        DONNA SYSTEM v3.1                             │
+│                        DONNA SYSTEM v3.3                             │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐           │
@@ -701,18 +877,35 @@ Connect with Alexa, Google Home, smart displays.
 | Layer 1: Quick Observer | `pipelines/quick-observer.js` |
 | Layer 2: Conversation Director | `pipelines/fast-observer.js` |
 | Post-Call Analysis | `services/call-analysis.js` |
+| Daily Context (Cross-Call) | `services/daily-context.js` |
 | ElevenLabs TTS (REST) | `adapters/elevenlabs.js` |
 | ElevenLabs TTS (Streaming) | `adapters/elevenlabs-streaming.js` |
 | Audio Utils | `audio-utils.js` |
 | Memory | `services/memory.js` |
 | Seniors | `services/seniors.js` |
+| Caregivers | `services/caregivers.js` |
 | Conversations | `services/conversations.js` |
 | Scheduler | `services/scheduler.js` |
 | News | `services/news.js` |
 | Database Schema | `db/schema.js` |
-| Admin UI | `public/admin.html` |
+| Authentication | `middleware/auth.js`, `middleware/clerk.js` |
+| Input Validation | `middleware/validate.js`, `validators/schemas.js` |
+| Rate Limiting | `middleware/rate-limit.js` |
+| Twilio Verification | `middleware/twilio.js` |
+| Admin Dashboard | `apps/admin/` (React + Vite) |
+| Consumer App | `apps/consumer/` (React + Vite + Clerk) |
+| Observability | `apps/observability/` |
 | Browser Call | `public/call.html`, `browser-session.js` |
 
 ---
+
+## Feature Counts
+
+| Status | Count |
+|--------|-------|
+| Implemented | 53 |
+| Partial | 2 |
+| Planned | 9 |
+| Suggested | 14 |
 
 *This is a living document. Update as features are added or plans change.*

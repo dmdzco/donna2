@@ -317,13 +317,36 @@
   </style>
 </head>
 <body>
+  <!-- Login Overlay -->
+  <div id="loginOverlay" style="position:fixed;inset:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;z-index:200;">
+    <div style="background:white;border-radius:16px;padding:40px;width:90%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+      <h1 style="text-align:center;margin-bottom:8px;color:#333;">Donna Admin</h1>
+      <p style="text-align:center;color:#888;margin-bottom:24px;font-size:14px;">Sign in to manage your seniors</p>
+      <form id="loginForm">
+        <div class="form-group">
+          <label for="loginEmail">Email</label>
+          <input type="email" id="loginEmail" required placeholder="admin@donna.com">
+        </div>
+        <div class="form-group">
+          <label for="loginPassword">Password</label>
+          <input type="password" id="loginPassword" required placeholder="Your password">
+        </div>
+        <p id="loginError" style="color:#e74c3c;font-size:13px;margin-bottom:12px;display:none;"></p>
+        <button type="submit" style="width:100%;">Sign In</button>
+      </form>
+    </div>
+  </div>
+
   <div class="container">
     <header>
       <div>
         <h1>Donna Admin</h1>
         <p>Manage seniors, calls, and reminders</p>
       </div>
-      <div class="version-badge">v3.0</div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="version-badge">v3.3</div>
+        <button class="small secondary" onclick="logout()" style="background:#ffffff33;color:white;">Logout</button>
+      </div>
     </header>
 
     <!-- Tabs -->
@@ -332,6 +355,9 @@
       <button class="tab" data-tab="seniors">Seniors</button>
       <button class="tab" data-tab="calls">Calls</button>
       <button class="tab" data-tab="reminders">Reminders</button>
+      <button class="tab" data-tab="analyses">Call Analyses</button>
+      <button class="tab" data-tab="caregivers">Caregivers</button>
+      <button class="tab" data-tab="dailyContext">Daily Context</button>
     </div>
 
     <!-- Dashboard Tab -->
@@ -470,6 +496,37 @@
         <div id="remindersList"></div>
       </div>
     </div>
+
+    <!-- Call Analyses Tab -->
+    <div id="analyses" class="tab-content">
+      <div class="card">
+        <h2>Post-Call Analyses</h2>
+        <div id="analysesList"></div>
+      </div>
+    </div>
+
+    <!-- Caregivers Tab -->
+    <div id="caregivers" class="tab-content">
+      <div class="card">
+        <h2>Caregiver-Senior Links</h2>
+        <div id="caregiversList"></div>
+      </div>
+    </div>
+
+    <!-- Daily Context Tab -->
+    <div id="dailyContext" class="tab-content">
+      <div class="card">
+        <h2>Daily Call Context</h2>
+        <div style="display:flex;gap:12px;margin-bottom:16px;">
+          <select id="contextSenior" style="flex:1;">
+            <option value="">All seniors</option>
+          </select>
+          <input type="date" id="contextDate" style="width:160px;">
+          <button class="small" onclick="loadDailyContext()">Filter</button>
+        </div>
+        <div id="dailyContextList"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Edit Senior Modal -->
@@ -543,6 +600,85 @@
 
   <script>
     const API = window.location.origin;
+    let authToken = localStorage.getItem('donna_admin_token');
+
+    // Authenticated fetch wrapper
+    async function authFetch(url, options = {}) {
+      const headers = { ...options.headers };
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+      if (options.body) {
+        headers['Content-Type'] = 'application/json';
+      }
+      const res = await fetch(url, { ...options, headers });
+      if (res.status === 401) {
+        authToken = null;
+        localStorage.removeItem('donna_admin_token');
+        showLogin();
+        throw new Error('Unauthorized');
+      }
+      return res;
+    }
+
+    function showLogin() {
+      document.getElementById('loginOverlay').style.display = 'flex';
+    }
+
+    function hideLogin() {
+      document.getElementById('loginOverlay').style.display = 'none';
+    }
+
+    function logout() {
+      authToken = null;
+      localStorage.removeItem('donna_admin_token');
+      showLogin();
+    }
+
+    // Login form handler
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('loginEmail').value;
+      const password = document.getElementById('loginPassword').value;
+      const errorEl = document.getElementById('loginError');
+      errorEl.style.display = 'none';
+
+      try {
+        const res = await fetch(`${API}/api/admin/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Login failed';
+          errorEl.style.display = 'block';
+          return;
+        }
+        authToken = data.token;
+        localStorage.setItem('donna_admin_token', data.token);
+        hideLogin();
+        loadAll();
+      } catch (err) {
+        errorEl.textContent = 'Connection error';
+        errorEl.style.display = 'block';
+      }
+    });
+
+    // Check auth on load
+    async function checkAuth() {
+      if (!authToken) { showLogin(); return; }
+      try {
+        const res = await fetch(`${API}/api/admin/me`, {
+          headers: { 'Authorization': `Bearer ${authToken}` },
+        });
+        if (!res.ok) { showLogin(); return; }
+        hideLogin();
+        loadAll();
+      } catch {
+        showLogin();
+      }
+    }
 
     // Toast
     function showToast(message, type = 'success') {
@@ -597,7 +733,7 @@
     // ============ DASHBOARD ============
     async function loadDashboard() {
       try {
-        const res = await fetch(`${API}/api/stats`);
+        const res = await authFetch(`${API}/api/stats`);
         const stats = await res.json();
 
         document.getElementById('statSeniors').textContent = stats.totalSeniors;
@@ -640,14 +776,14 @@
     // ============ SENIORS ============
     async function loadSeniors() {
       try {
-        const res = await fetch(`${API}/api/seniors`);
+        const res = await authFetch(`${API}/api/seniors`);
         const seniors = await res.json();
 
         // Fetch memories for each senior
         const seniorsWithMemories = await Promise.all(
           seniors.map(async (senior) => {
             try {
-              const memRes = await fetch(`${API}/api/seniors/${senior.id}/memories`);
+              const memRes = await authFetch(`${API}/api/seniors/${senior.id}/memories`);
               const memories = await memRes.json();
               return { ...senior, memories: memories.slice(0, 5) };
             } catch {
@@ -700,6 +836,13 @@
       const sel = document.getElementById('reminderSenior');
       sel.innerHTML = '<option value="">Select senior...</option>' +
         seniors.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+
+      // Also populate daily context filter
+      const ctxSel = document.getElementById('contextSenior');
+      if (ctxSel) {
+        ctxSel.innerHTML = '<option value="">All seniors</option>' +
+          seniors.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+      }
     }
 
     document.getElementById('addSeniorForm').addEventListener('submit', async (e) => {
@@ -716,9 +859,8 @@
       };
 
       try {
-        const res = await fetch(`${API}/api/seniors`, {
+        const res = await authFetch(`${API}/api/seniors`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
         if (!res.ok) throw new Error('Failed');
@@ -738,7 +880,7 @@
     async function editSenior(id) {
       currentEditId = id;
       try {
-        const res = await fetch(`${API}/api/seniors/${id}`);
+        const res = await authFetch(`${API}/api/seniors/${id}`);
         const s = await res.json();
         document.getElementById('editSeniorId').value = id;
         document.getElementById('editName').value = s.name;
@@ -755,7 +897,7 @@
 
     async function loadMemories(seniorId) {
       try {
-        const res = await fetch(`${API}/api/seniors/${seniorId}/memories`);
+        const res = await authFetch(`${API}/api/seniors/${seniorId}/memories`);
         const memories = await res.json();
         const container = document.getElementById('memoriesList');
         if (!memories.length) {
@@ -781,9 +923,8 @@
         return;
       }
       try {
-        await fetch(`${API}/api/seniors/${currentEditId}/memories`, {
+        await authFetch(`${API}/api/seniors/${currentEditId}/memories`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type, content, importance: 70 })
         });
         document.getElementById('memoryContent').value = '';
@@ -806,9 +947,8 @@
       };
 
       try {
-        await fetch(`${API}/api/seniors/${id}`, {
+        await authFetch(`${API}/api/seniors/${id}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
         showToast('Senior updated!');
@@ -822,9 +962,8 @@
     async function deleteSenior(id) {
       if (!confirm('Delete this senior?')) return;
       try {
-        await fetch(`${API}/api/seniors/${id}`, {
+        await authFetch(`${API}/api/seniors/${id}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ isActive: false })
         });
         showToast('Senior deleted');
@@ -839,9 +978,8 @@
     async function callSenior(phone, name) {
       if (!confirm(`Call ${name}?`)) return;
       try {
-        const res = await fetch(`${API}/api/call`, {
+        const res = await authFetch(`${API}/api/call`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phoneNumber: phone })
         });
         if (!res.ok) throw new Error('Failed');
@@ -855,7 +993,7 @@
     // ============ CALLS ============
     async function loadCalls() {
       try {
-        const res = await fetch(`${API}/api/conversations`);
+        const res = await authFetch(`${API}/api/conversations`);
         const calls = await res.json();
         renderCalls(calls);
       } catch (e) {
@@ -914,7 +1052,7 @@
     // ============ REMINDERS ============
     async function loadReminders() {
       try {
-        const res = await fetch(`${API}/api/reminders`);
+        const res = await authFetch(`${API}/api/reminders`);
         const reminders = await res.json();
         renderReminders(reminders);
       } catch (e) {
@@ -994,9 +1132,8 @@
       };
 
       try {
-        const res = await fetch(`${API}/api/reminders`, {
+        const res = await authFetch(`${API}/api/reminders`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
         if (!res.ok) throw new Error('Failed');
@@ -1014,7 +1151,7 @@
     async function deleteReminder(id) {
       if (!confirm('Delete this reminder?')) return;
       try {
-        await fetch(`${API}/api/reminders/${id}`, { method: 'DELETE' });
+        await authFetch(`${API}/api/reminders/${id}`, { method: 'DELETE' });
         showToast('Reminder deleted');
         loadReminders();
         loadDashboard();
@@ -1030,14 +1167,128 @@
       });
     });
 
-    // Initial load
-    loadDashboard();
-    loadSeniors();
-    loadCalls();
-    loadReminders();
+    // ============ CALL ANALYSES ============
+    async function loadCallAnalyses() {
+      try {
+        const res = await authFetch(`${API}/api/call-analyses`);
+        const analyses = await res.json();
+        if (!analyses.length) {
+          document.getElementById('analysesList').innerHTML = '<p class="empty-state">No call analyses yet</p>';
+          return;
+        }
+        document.getElementById('analysesList').innerHTML = analyses.map(a => `
+          <div class="list-item" style="flex-direction:column;">
+            <div style="display:flex;justify-content:space-between;width:100%;margin-bottom:8px;">
+              <div>
+                <h3>${esc(a.seniorName || 'Unknown')}</h3>
+                <p class="meta">${formatDate(a.createdAt)}</p>
+              </div>
+              <div style="text-align:right;">
+                <div style="font-size:24px;font-weight:700;color:${a.engagementScore >= 7 ? '#27ae60' : a.engagementScore >= 4 ? '#f39c12' : '#e74c3c'};">
+                  ${a.engagementScore || '-'}/10
+                </div>
+                <p class="meta">Engagement</p>
+              </div>
+            </div>
+            <p style="font-size:13px;color:#555;">${esc(a.summary || 'No summary')}</p>
+            ${a.topics?.length ? `<div style="margin-top:8px;">${a.topics.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
+            ${a.concerns?.length ? `<div style="margin-top:8px;"><strong style="font-size:12px;color:#e74c3c;">Concerns:</strong> <span style="font-size:12px;">${Array.isArray(a.concerns) ? a.concerns.map(c => esc(typeof c === 'string' ? c : c.description || JSON.stringify(c))).join(', ') : ''}</span></div>` : ''}
+            ${a.positiveObservations?.length ? `<div style="margin-top:4px;"><strong style="font-size:12px;color:#27ae60;">Positive:</strong> <span style="font-size:12px;">${a.positiveObservations.map(p => esc(p)).join(', ')}</span></div>` : ''}
+            ${a.followUpSuggestions?.length ? `<div style="margin-top:4px;"><strong style="font-size:12px;color:#667eea;">Follow-up:</strong> <span style="font-size:12px;">${a.followUpSuggestions.map(f => esc(f)).join(', ')}</span></div>` : ''}
+          </div>
+        `).join('');
+      } catch (e) {
+        if (e.message !== 'Unauthorized') console.error('Failed to load analyses', e);
+      }
+    }
 
-    // Refresh dashboard every 30 seconds
-    setInterval(loadDashboard, 30000);
+    // ============ CAREGIVERS ============
+    async function loadCaregivers() {
+      try {
+        const res = await authFetch(`${API}/api/caregivers`);
+        const links = await res.json();
+        if (!links.length) {
+          document.getElementById('caregiversList').innerHTML = '<p class="empty-state">No caregiver links yet</p>';
+          return;
+        }
+        document.getElementById('caregiversList').innerHTML = `
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead>
+              <tr style="border-bottom:2px solid #eee;">
+                <th style="text-align:left;padding:8px;">Clerk User ID</th>
+                <th style="text-align:left;padding:8px;">Senior</th>
+                <th style="text-align:left;padding:8px;">Role</th>
+                <th style="text-align:left;padding:8px;">Added</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${links.map(l => `
+                <tr style="border-bottom:1px solid #f0f0f0;">
+                  <td style="padding:8px;font-family:monospace;font-size:11px;">${esc(l.clerkUserId)}</td>
+                  <td style="padding:8px;">${esc(l.seniorName || l.seniorId)}</td>
+                  <td style="padding:8px;"><span class="tag">${esc(l.role)}</span></td>
+                  <td style="padding:8px;color:#888;">${formatDate(l.createdAt)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (e) {
+        if (e.message !== 'Unauthorized') console.error('Failed to load caregivers', e);
+      }
+    }
+
+    // ============ DAILY CONTEXT ============
+    async function loadDailyContext() {
+      try {
+        const seniorId = document.getElementById('contextSenior')?.value || '';
+        const date = document.getElementById('contextDate')?.value || '';
+        let url = `${API}/api/daily-context`;
+        const params = [];
+        if (seniorId) params.push(`seniorId=${seniorId}`);
+        if (date) params.push(`date=${date}`);
+        if (params.length) url += '?' + params.join('&');
+
+        const res = await authFetch(url);
+        const contexts = await res.json();
+
+        if (!contexts.length) {
+          document.getElementById('dailyContextList').innerHTML = '<p class="empty-state">No daily context entries</p>';
+          return;
+        }
+
+        document.getElementById('dailyContextList').innerHTML = contexts.map(c => `
+          <div class="list-item" style="flex-direction:column;">
+            <div style="display:flex;justify-content:space-between;width:100%;margin-bottom:8px;">
+              <h3>${esc(c.seniorName || 'Unknown')}</h3>
+              <span class="meta">${c.callDate ? new Date(c.callDate).toLocaleDateString() : '-'}</span>
+            </div>
+            ${c.summary ? `<p style="font-size:13px;color:#555;margin-bottom:8px;">${esc(c.summary)}</p>` : ''}
+            ${c.topicsDiscussed?.length ? `<div style="margin-bottom:4px;"><strong style="font-size:12px;">Topics:</strong> ${c.topicsDiscussed.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
+            ${c.remindersDelivered?.length ? `<div style="margin-bottom:4px;"><strong style="font-size:12px;">Reminders:</strong> ${c.remindersDelivered.map(r => `<span class="tag" style="background:#d4edda;color:#155724;">${esc(r)}</span>`).join('')}</div>` : ''}
+            ${c.adviceGiven?.length ? `<div style="margin-bottom:4px;"><strong style="font-size:12px;">Advice:</strong> <span style="font-size:12px;">${c.adviceGiven.map(a => esc(a)).join('; ')}</span></div>` : ''}
+          </div>
+        `).join('');
+      } catch (e) {
+        if (e.message !== 'Unauthorized') console.error('Failed to load daily context', e);
+      }
+    }
+
+    function loadAll() {
+      loadDashboard();
+      loadSeniors();
+      loadCalls();
+      loadReminders();
+      loadCallAnalyses();
+      loadCaregivers();
+      loadDailyContext();
+    }
+
+    // Initial auth check (replaces direct loadX calls)
+    checkAuth();
+
+    // Refresh dashboard every 30 seconds (only if logged in)
+    setInterval(() => { if (authToken) loadDashboard(); }, 30000);
   </script>
 </body>
 </html>

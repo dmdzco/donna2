@@ -4,26 +4,34 @@ AI-powered senior companion assistant with voice calls.
 
 ## Current Version: v3.1 (Conversation Director)
 
+## Task Tracking
+
+**[Todo Dashboard](todos/_dashboard.md)** - Single source of truth for all tasks
+
+| Domain | Link | Description |
+|--------|------|-------------|
+| Dashboard | [_dashboard.md](todos/_dashboard.md) | Progress overview, priority queue |
+| Security | [security.md](todos/security.md) | Infrastructure hardening by priority tier |
+| Architecture | [architecture.md](todos/architecture.md) | 7 cleanup phases with dependencies |
+| Product | [product.md](todos/product.md) | Features by category (planned + suggested) |
+
+---
+
 ## Documentation Index
 
 ### Architecture
 
 - **[Architecture Overview](architecture/OVERVIEW.md)** - Complete system architecture with diagrams
+- **[Architecture Details](ARCHITECTURE.md)** - Technical deep-dive with layer details
 - **[Conversation Director Spec](CONVERSATION_DIRECTOR_SPEC.md)** - Proactive call guidance system
-- **[Architecture Details](ARCHITECTURE.md)** - Technical deep-dive
 
-### Roadmap
+### Product Reference
 
-- **[Next Steps](NEXT_STEPS.md)** - Roadmap and recently completed features
+- **[Product Plan](PRODUCT_PLAN.md)** - Feature descriptions, architecture diagrams, business model
 
-### Configuration
+### Deployment
 
-- **[Dynamic Token Routing](DYNAMIC_MODEL_ROUTING.md)** - Token selection based on context
-
-### Historical Reference
-
-- [Streaming Observer Spec](STREAMING_OBSERVER_SPEC.md) - Original streaming + 4-layer design
-- [Module Reference](architecture/MODULES.md) - Future modular architecture
+- **[Deployment Guide](guides/DEPLOYMENT_PLAN.md)** - Railway deployment instructions
 
 ## Quick Reference
 
@@ -34,23 +42,42 @@ AI-powered senior companion assistant with voice calls.
 | Main pipeline | `pipelines/v1-advanced.js` |
 | Conversation Director | `pipelines/fast-observer.js` |
 | Quick Observer | `pipelines/quick-observer.js` |
-| Post-Turn Agent | `pipelines/post-turn-agent.js` |
 | Post-Call Analysis | `services/call-analysis.js` |
 | Token Selection | `v1-advanced.js` (selectModelConfig) |
+| Admin Dashboard | `apps/admin/` (React) |
+| Context Cache | `services/context-cache.js` |
+| Memory System | `services/memory.js` |
+| Scheduler | `services/scheduler.js` |
 
 ### Architecture Layers
 
 | Layer | Name | Model | Latency |
 |-------|------|-------|---------|
-| 1 | Quick Observer | Regex | 0ms |
+| 1 | Quick Observer | Regex (730+ patterns) | 0ms |
 | 2 | Conversation Director | Gemini 3 Flash | ~150ms |
-| 3 | Post-Turn Agent | Various | After response |
-| Post-Call | Analysis | Gemini Flash | After call |
+| Post-Call | Analysis + Memory | Gemini Flash + GPT-4o-mini | After call |
+
+### Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| Voice AI | Claude Sonnet 4.5 (streaming) |
+| Director | Gemini 3 Flash |
+| TTS | ElevenLabs WebSocket |
+| STT | Deepgram Nova 2 |
+| Database | Neon PostgreSQL + pgvector |
+| Hosting | Railway |
 
 ## External Resources
 
 - [Twilio Docs](https://www.twilio.com/docs)
 - [Anthropic Claude Docs](https://docs.anthropic.com)
 - [Google AI Docs](https://ai.google.dev/docs)
+- [ElevenLabs Docs](https://elevenlabs.io/docs)
+- [Deepgram Docs](https://developers.deepgram.com)
 - [Railway Docs](https://docs.railway.app)
 - [Neon Database Docs](https://neon.tech/docs)
+
+---
+
+*Last updated: January 2026 - v3.1*

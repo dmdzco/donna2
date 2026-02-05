@@ -71,10 +71,12 @@ Your job is to GUIDE the conversation proactively - not just react to what was s
 Senior: {{SENIOR_NAME}}
 Call duration: {{MINUTES_ELAPSED}} minutes (max {{MAX_DURATION}} minutes)
 Call type: {{CALL_TYPE}}
-Pending reminders: {{PENDING_REMINDERS}}
+Pending reminders (NOT yet delivered): {{PENDING_REMINDERS}}
+Already delivered this call (do NOT repeat): {{DELIVERED_REMINDERS}}
 Senior's interests: {{INTERESTS}}
 Senior's family: {{FAMILY_MEMBERS}}
 Important memories: {{MEMORIES}}
+Previous calls today: {{TODAYS_PREVIOUS_CALLS}}
 
 ## CONVERSATION SO FAR
 
@@ -99,10 +101,18 @@ Important memories: {{MEMORIES}}
    - Follow their lead while guiding toward goals
    - Natural conversation flow with purpose
 
-4. **Closing (8-10 min)**:
-   - Wrap up warmly, don't abruptly end
-   - Confirm any action items (medication, appointments)
-   - Express looking forward to next call
+4. **Winding Down (7-9 min)**:
+   - Conversation is naturally slowing - short responses, repeated topics
+   - Summarize what you discussed ("It was so nice hearing about...")
+   - Confirm any action items (medication taken? appointments noted?)
+   - Transition: "Well, it's been so lovely talking with you..."
+
+5. **Closing (9-10 min, or after goodbye detected)**:
+   - Senior said goodbye or is clearly ready to end
+   - Give a warm, brief sign-off referencing something from the call
+   - Mention next call if known ("I'll call you again tomorrow!")
+   - Keep it short - don't prolong after goodbyes
+   - After mutual goodbyes, the call will end automatically
 
 ### Topic Transitions
 
@@ -126,6 +136,9 @@ Never be abrupt. Use natural transition phrases:
 - Interrupt engaging conversation
 - Deliver when engagement is low (re-engage first)
 - Sound clinical or robotic
+- NEVER recommend delivering a reminder that is in the "Already delivered" list
+- If a delivered reminder comes up again, suggest acknowledging with "As I mentioned earlier..."
+- If a reminder was already delivered in a PREVIOUS call today, suggest asking "Did you get a chance to [do it]?" instead of re-delivering
 
 ### Re-engagement Strategies
 
@@ -163,10 +176,10 @@ When they share something emotional (grief, loneliness, worry):
 - Routine check-ins going smoothly
 
 **Token recommendations:**
-- brief (100): Simple acknowledgments, quick answers
-- moderate (150): Normal conversation, standard responses
-- extended (200-250): Emotional support, re-engagement, stories
-- long (300-400): Deep emotional moments, detailed stories
+- brief (100-150): Simple acknowledgments, quick answers
+- moderate (200): Normal conversation, standard responses
+- extended (250-300): Emotional support, re-engagement, stories
+- long (350-500): Deep emotional moments, detailed stories, crisis support
 
 ## OUTPUT FORMAT
 
@@ -174,7 +187,7 @@ Respond with ONLY valid JSON matching this exact schema:
 
 {
   "analysis": {
-    "call_phase": "opening|rapport|main|closing",
+    "call_phase": "opening|rapport|main|winding_down|closing",
     "engagement_level": "high|medium|low",
     "current_topic": "string",
     "topics_covered": ["string"],
@@ -242,9 +255,11 @@ export async function getConversationDirection(
     .replace('{{MAX_DURATION}}', callState?.maxDuration || 10)
     .replace('{{CALL_TYPE}}', callState?.callType || 'check-in')
     .replace('{{PENDING_REMINDERS}}', formatReminders(remainingReminders))
+    .replace('{{DELIVERED_REMINDERS}}', deliveredSet.size > 0 ? [...deliveredSet].join(', ') : 'None')
     .replace('{{INTERESTS}}', seniorContext?.interests?.join(', ') || 'unknown')
     .replace('{{FAMILY_MEMBERS}}', formatFamily(seniorContext?.family))
     .replace('{{MEMORIES}}', formatMemories(memories))
+    .replace('{{TODAYS_PREVIOUS_CALLS}}', callState?.todaysContext || 'None (first call today)')
     .replace('{{CONVERSATION_HISTORY}}', formatHistory(conversationHistory));
 
   try {
@@ -257,7 +272,7 @@ export async function getConversationDirection(
     ];
 
     const text = await adapter.generate(prompt, messages, {
-      maxTokens: 1200, // Increased to avoid JSON truncation
+      maxTokens: 1500, // Generous budget - director runs in background, no latency impact
       temperature: 0.2,
     });
 
@@ -351,7 +366,11 @@ export function formatDirectorGuidance(direction) {
   parts.push(`${phase}/${engagement}/${tone}`);
 
   // Priority action
-  if (direction.reminder?.should_deliver) {
+  if (phase === 'closing') {
+    parts.push('CLOSING: Say a warm goodbye. Keep it brief.');
+  } else if (phase === 'winding_down') {
+    parts.push('WINDING DOWN: Summarize key points, confirm action items, begin warm sign-off.');
+  } else if (direction.reminder?.should_deliver) {
     parts.push(`REMIND: ${direction.reminder.which_reminder}`);
   } else if (direction.analysis?.engagement_level === 'low') {
     parts.push('RE-ENGAGE');
@@ -396,31 +415,103 @@ async function searchRelevantMemories(seniorId, userMessage) {
 }
 
 /**
- * Check for current events if user mentions news/weather/etc
+ * Check if user is asking for web search (news, info lookup, etc)
  */
 async function checkCurrentEvents(userMessage) {
-  const newsKeywords = /\b(news|weather|today|happening|world|president|election)\b/i;
+  // Patterns that trigger web search
+  const searchTriggers = /\b(news|weather|happening|world|president|election|look.{0,10}up|search|can you (find|check)|do you know|what('s| is) the (best|top)|what year did|how many\b.*\b(are there|does|did)|who (was|is|were|invented|discovered|founded|wrote|created)|when did|how long ago|what happened in|how (tall|old|big|far|deep|long|fast|heavy|much does) is|what('s| is) the (population|capital|distance|height|size|age) of|I wonder|I('m| am) curious|have you heard about|tell me about|what do you know about|what is the\b.{3,}|what are the\b.{3,}|where is\b.{3,}\b(located|at))\b/i;
 
-  if (!newsKeywords.test(userMessage)) {
+  if (!searchTriggers.test(userMessage)) {
     return null;
   }
 
   try {
-    const topicMatch = userMessage.match(/(?:about|the|what's)\s+(\w+(?:\s+\w+)?)/i);
-    const topic = topicMatch ? topicMatch[1] : 'general news';
+    // Determine if this is a news request, curiosity/factual question, or general search
+    const isNewsRequest = /\b(news|headline|happening|current events|today)\b/i.test(userMessage);
+    const isFactualOrCuriosity = /\b(what year did|how many|who (was|is|were|invented|discovered|founded|wrote|created)|when did|how long ago|what happened in|how (tall|old|big|far|deep|long|fast|heavy|much does) is|what('s| is) the (population|capital|distance|height|size|age) of|I wonder|I('m| am) curious|have you heard about|tell me about|what do you know about|what is the|what are the|where is\b.{3,}\b(located|at))\b/i.test(userMessage);
 
-    const news = await newsService.getNewsForSenior([topic], 2);
-    if (news) {
-      return {
-        type: 'news',
-        content: news,
-      };
+    if (isNewsRequest) {
+      // Use news service for news-type queries
+      const topicMatch = userMessage.match(/(?:news\s+(?:about|on)|about|on|the)\s+(.{3,40}?)(?:\?|$|\.)/i);
+      const topic = topicMatch ? topicMatch[1].trim() : 'general news';
+
+      const news = await newsService.getNewsForSenior([topic], 2);
+      if (news) {
+        return {
+          type: 'news',
+          content: news,
+        };
+      }
+    } else if (isFactualOrCuriosity) {
+      // Factual / curiosity question - pass the full question as the search query
+      const searchResult = await performWebSearch(userMessage);
+      if (searchResult) {
+        return {
+          type: 'factual',
+          content: searchResult,
+        };
+      }
+    } else {
+      // General web search - use OpenAI directly
+      const searchResult = await performWebSearch(userMessage);
+      if (searchResult) {
+        return {
+          type: 'search',
+          content: searchResult,
+        };
+      }
     }
   } catch (error) {
-    console.error('[ConversationDirector] News fetch error:', error.message);
+    console.error('[ConversationDirector] Search error:', error.message);
   }
 
   return null;
+}
+
+/**
+ * Perform a general web search using OpenAI
+ */
+async function performWebSearch(query) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.log('[ConversationDirector] OpenAI not configured, skipping web search');
+    return null;
+  }
+
+  try {
+    const OpenAI = (await import('openai')).default;
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+    console.log(`[ConversationDirector] Web search: "${query.substring(0, 50)}..."`);
+
+    const response = await client.responses.create({
+      model: 'gpt-4o-mini',
+      tools: [{ type: 'web_search_preview' }],
+      input: `Answer this question in 2-3 short, friendly sentences: ${query}
+
+              This will be spoken aloud to an elderly person during a phone call, so:
+              - Use warm, conversational language (like a friend explaining something)
+              - Avoid jargon, technical terms, or complex numbers
+              - Round numbers to make them easy to remember
+              - If it's a factual question, give the answer right away
+              - If you can't find the answer, just say "I'm not sure about that"`,
+      tool_choice: 'required',
+    });
+
+    const result = response.output_text?.trim();
+
+    if (!result) {
+      console.log('[ConversationDirector] No search result returned');
+      return null;
+    }
+
+    console.log(`[ConversationDirector] Search result: "${result.substring(0, 100)}..."`);
+
+    return result;
+
+  } catch (error) {
+    console.error('[ConversationDirector] Web search error:', error.message);
+    return null;
+  }
 }
 
 /**

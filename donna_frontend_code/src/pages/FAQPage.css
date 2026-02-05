@@ -1,0 +1,149 @@
+/* FAQ Page Styles */
+.faq-page-container {
+    min-height: 100vh;
+    background-color: #fcfcfc;
+    font-family: 'Inter', sans-serif;
+    color: #1a1a1a;
+}
+
+/* Reusing Capsule Nav Style override if needed, but assuming global nav styles work */
+/* We might want a dedicated nav for this page or reuse the one from LandingPage if abstracted. 
+   For now, we will add a simple back link or consistent nav header. */
+
+.faq-nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 40px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.faq-nav-brand {
+    font-weight: 800;
+    font-size: 1.2rem;
+    color: var(--color-sage-green);
+    text-decoration: none;
+}
+
+.faq-hero {
+    text-align: center;
+    padding: 6rem 1rem 4rem;
+    background: radial-gradient(circle at 50% 50%, #f0f7f0 0%, #ffffff 70%);
+}
+
+.faq-hero h1 {
+    font-size: 3rem;
+    font-weight: 800;
+    color: #1a1a1a;
+    margin-bottom: 1rem;
+    letter-spacing: -0.03em;
+}
+
+.faq-hero p {
+    font-size: 1.1rem;
+    color: #666;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.faq-content {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 0 1.5rem 6rem;
+}
+
+.faq-category {
+    margin-bottom: 3rem;
+}
+
+.faq-category-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    color: var(--color-sage-green);
+    border-bottom: 2px solid #eee;
+    padding-bottom: 0.5rem;
+}
+
+.faq-item {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+    transition: all 0.2s ease;
+}
+
+.faq-item:hover {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    border-color: #d1d5db;
+}
+
+.faq-question {
+    padding: 1.25rem 1.5rem;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: #1a1a1a;
+}
+
+.faq-question:hover {
+    color: var(--color-sage-green);
+}
+
+.faq-icon {
+    font-size: 1.25rem;
+    transition: transform 0.3s ease;
+    color: #9ca3af;
+}
+
+.faq-item.active .faq-icon {
+    transform: rotate(180deg);
+    color: var(--color-sage-green);
+}
+
+.faq-answer {
+    padding: 0 1.5rem;
+    height: 0;
+    overflow: hidden;
+    transition: all 0.3s ease-in-out;
+    opacity: 0;
+}
+
+.faq-item.active .faq-answer {
+    padding: 0 1.5rem 1.5rem;
+    height: auto;
+    opacity: 1;
+}
+
+.faq-answer p {
+    margin: 0;
+    line-height: 1.6;
+    color: #4b5563;
+}
+
+.faq-contact {
+    text-align: center;
+    margin-top: 4rem;
+    padding: 3rem;
+    background: #f8fafc;
+    border-radius: 20px;
+}
+
+.faq-contact h3 {
+    margin-bottom: 1rem;
+}
+
+.contact-link {
+    color: var(--color-sage-green);
+    font-weight: 600;
+    text-decoration: underline;
+}

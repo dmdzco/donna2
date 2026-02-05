@@ -13,6 +13,11 @@ export const seniors = pgTable('seniors', {
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+  // Consumer app fields
+  city: varchar('city', { length: 100 }),
+  state: varchar('state', { length: 50 }),
+  zipCode: varchar('zip_code', { length: 20 }),
+  additionalInfo: text('additional_info'),
 });
 
 // Conversations (call history)
@@ -75,6 +80,15 @@ export const reminderDeliveries = pgTable('reminder_deliveries', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// Caregivers - maps Clerk user IDs to seniors they can access
+export const caregivers = pgTable('caregivers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  clerkUserId: varchar('clerk_user_id', { length: 255 }).notNull(), // Clerk user ID
+  seniorId: uuid('senior_id').references(() => seniors.id).notNull(),
+  role: varchar('role', { length: 50 }).default('caregiver'), // caregiver, family, admin
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // Call Analyses - post-call analysis results
 export const callAnalyses = pgTable('call_analyses', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -89,3 +103,28 @@ export const callAnalyses = pgTable('call_analyses', {
   callQuality: json('call_quality'),                              // {rapport, goals_achieved, duration_appropriate}
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+// Daily call context - tracks what happened in each call for same-day cross-call memory
+export const dailyCallContext = pgTable('daily_call_context', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  seniorId: uuid('senior_id').references(() => seniors.id).notNull(),
+  callDate: timestamp('call_date').notNull(),
+  callSid: varchar('call_sid', { length: 100 }),
+  topicsDiscussed: text('topics_discussed').array(),
+  remindersDelivered: text('reminders_delivered').array(),
+  adviceGiven: text('advice_given').array(),
+  keyMoments: json('key_moments'),
+  summary: text('summary'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// Admin users for dashboard authentication
+export const adminUsers = pgTable('admin_users', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  name: varchar('name', { length: 255 }),
+  createdAt: timestamp('created_at').defaultNow(),
+  lastLoginAt: timestamp('last_login_at'),
+});
+

@@ -8,12 +8,13 @@
  * - Recent call summaries
  * - Critical memories (Tier 1)
  * - Important memories (with decay applied)
- * - Pre-generated greeting
+ * - Pre-generated greeting (templated with rotation)
  */
 
 import { memoryService } from './memory.js';
 import { conversationService } from './conversations.js';
 import { seniorService } from './seniors.js';
+import { greetingService } from './greetings.js';
 
 // In-memory cache (could be Redis for multi-instance deployments)
 const cache = new Map();
@@ -23,6 +24,32 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 // Pre-fetch hour in local timezone (5 AM)
 const PREFETCH_HOUR = 5;
+
+// Greeting templates - {name} and {interest} are replaced dynamically
+const GREETING_TEMPLATES = [
+  // Warm & curious
+  "Hey {name}! It's Donna. I was just thinking about your {interest} - how's that going?",
+  // Casual check-in
+  "Hi {name}, Donna here! Have you had a chance to enjoy any {interest} lately?",
+  // Enthusiastic
+  "{name}! So good to talk to you. Tell me - anything new with your {interest}?",
+  // Gentle opener
+  "Hello {name}, it's Donna calling. I'd love to hear what you've been up to with {interest}.",
+  // Direct & friendly
+  "Hey there {name}! Donna checking in. Been doing any {interest} this week?",
+  // Conversational
+  "{name}, hi! It's Donna. I was curious - how's the {interest} going these days?"
+];
+
+// Fallback templates when no interests defined
+const FALLBACK_TEMPLATES = [
+  "Hey {name}! It's Donna. How have you been?",
+  "Hi {name}, Donna here! How are you doing today?",
+  "{name}! So good to talk to you. What's new?",
+  "Hello {name}, it's Donna calling. How's everything going?",
+  "Hey there {name}! Donna checking in. How are you?",
+  "{name}, hi! It's Donna. How's your day been?"
+];
 
 /**
  * Get local hour for a timezone
@@ -43,7 +70,93 @@ function getLocalHour(timezone) {
 }
 
 /**
- * Generate time-appropriate greeting
+ * Select an interest using weighted random selection
+ * Weights are boosted by recency of mention in memories
+ */
+function selectInterest(interests, recentMemories) {
+  if (!interests || interests.length === 0) {
+    return null;
+  }
+
+  // Calculate weights based on memory recency
+  const weights = new Map();
+  const now = Date.now();
+  const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+  const FOURTEEN_DAYS = 14 * 24 * 60 * 60 * 1000;
+
+  // Base weight for all interests
+  for (const interest of interests) {
+    weights.set(interest.toLowerCase(), 1.0);
+  }
+
+  // Boost weights based on recent memory mentions
+  for (const memory of recentMemories || []) {
+    const content = memory.content?.toLowerCase() || '';
+    const memoryAge = now - new Date(memory.createdAt).getTime();
+
+    for (const interest of interests) {
+      const interestLower = interest.toLowerCase();
+      if (content.includes(interestLower)) {
+        const currentWeight = weights.get(interestLower) || 1.0;
+        if (memoryAge <= SEVEN_DAYS) {
+          weights.set(interestLower, currentWeight + 2.0);
+        } else if (memoryAge <= FOURTEEN_DAYS) {
+          weights.set(interestLower, currentWeight + 1.0);
+        }
+      }
+    }
+  }
+
+  // Weighted random selection
+  const totalWeight = Array.from(weights.values()).reduce((a, b) => a + b, 0);
+  let random = Math.random() * totalWeight;
+
+  for (const interest of interests) {
+    const weight = weights.get(interest.toLowerCase()) || 1.0;
+    random -= weight;
+    if (random <= 0) {
+      return interest;
+    }
+  }
+
+  // Fallback to first interest
+  return interests[0];
+}
+
+/**
+ * Generate a templated greeting with rotation
+ * Returns { greeting, templateIndex }
+ */
+function generateTemplatedGreeting(senior, recentMemories, lastGreetingIndex) {
+  const firstName = senior?.name?.split(' ')[0] || 'there';
+  const interests = senior?.interests || [];
+
+  // Select interest with weighted random
+  const selectedInterest = selectInterest(interests, recentMemories);
+
+  // Choose template array based on whether we have interests
+  const templates = selectedInterest ? GREETING_TEMPLATES : FALLBACK_TEMPLATES;
+
+  // Select template index (exclude last used)
+  let availableIndices = templates.map((_, i) => i);
+  if (lastGreetingIndex >= 0 && lastGreetingIndex < templates.length) {
+    availableIndices = availableIndices.filter(i => i !== lastGreetingIndex);
+  }
+  const templateIndex = availableIndices[Math.floor(Math.random() * availableIndices.length)];
+
+  // Fill template
+  let greeting = templates[templateIndex]
+    .replace('{name}', firstName);
+
+  if (selectedInterest) {
+    greeting = greeting.replace('{interest}', selectedInterest);
+  }
+
+  return { greeting, templateIndex, selectedInterest };
+}
+
+/**
+ * Generate simple fallback greeting (legacy, kept for compatibility)
  */
 function generateGreeting(senior, localHour) {
   const firstName = senior?.name?.split(' ')[0] || 'there';
@@ -74,16 +187,28 @@ async function prefetchAndCache(seniorId) {
       return null;
     }
 
-    // Fetch all context in parallel
-    const [summaries, criticalMemories, importantMemories] = await Promise.all([
+    // Fetch all context in parallel (including recent memories for greeting interest weighting)
+    const [summaries, criticalMemories, importantMemories, recentMemories] = await Promise.all([
       conversationService.getRecentSummaries(seniorId, 3),
       memoryService.getCritical(seniorId, 3),
-      memoryService.getImportant(seniorId, 5)
+      memoryService.getImportant(seniorId, 5),
+      memoryService.getRecent(seniorId, 10)
     ]);
 
-    // Generate greeting based on current local time
-    const localHour = getLocalHour(senior.timezone);
-    const greeting = generateGreeting(senior, localHour);
+    // Get last call summary for context-aware greetings
+    const lastCallSummary = summaries || null;
+
+    // Generate greeting using the greeting rotation service
+    const { greeting, period, templateIndex, selectedInterest } = greetingService.getGreeting({
+      seniorName: senior.name,
+      timezone: senior.timezone,
+      interests: senior.interests,
+      lastCallSummary,
+      recentMemories,
+      seniorId: senior.id,
+    });
+
+    console.log(`[ContextCache] Generated greeting for ${senior.name}: period=${period}, template=${templateIndex}, interest=${selectedInterest || 'none'}`);
 
     // Build memory context string (Tier 1 + important)
     const memoryParts = [];
@@ -110,6 +235,7 @@ async function prefetchAndCache(seniorId) {
       importantMemories,
       memoryContext: memoryParts.join('\n'),
       greeting,
+      lastGreetingIndex: templateIndex,
       cachedAt: Date.now(),
       expiresAt: Date.now() + CACHE_TTL_MS
     };
@@ -228,7 +354,11 @@ export const contextCacheService = {
   runDailyPrefetch,
   getStats,
   getLocalHour,
-  generateGreeting
+  generateGreeting,
+  generateTemplatedGreeting,
+  selectInterest,
+  GREETING_TEMPLATES,
+  FALLBACK_TEMPLATES
 };
 
 export default contextCacheService;

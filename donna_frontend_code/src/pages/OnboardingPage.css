@@ -1,0 +1,684 @@
+/* ... Previous styles remain ... */
+.onboarding-container {
+    padding-top: 100px;
+    padding-bottom: 50px;
+    max-width: 900px;
+    min-height: 100vh;
+}
+
+.step-indicator {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 3rem;
+}
+
+.step-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: #E0E0E0;
+    transition: all 0.3s ease;
+}
+
+.step-dot.active {
+    background-color: var(--color-sage-green);
+    transform: scale(1.2);
+}
+
+.step-dot.completed {
+    background-color: var(--color-sage-green);
+}
+
+.form-card {
+    background: rgba(255, 255, 255, 0.95);
+    padding: 3rem;
+    border-radius: 24px;
+    box-shadow: var(--shadow-float);
+    width: 100%;
+    margin: 0 auto;
+}
+
+.form-card h2 {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+    color: var(--color-text-primary);
+}
+
+.form-group {
+    margin-bottom: 2rem;
+}
+
+.form-group label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.8rem;
+    color: #444;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-family: var(--font-body);
+    transition: all 0.2s;
+    background: white;
+}
+
+.form-group textarea {
+    min-height: 120px;
+    resize: vertical;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    border-color: var(--color-sage-green);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(74, 93, 79, 0.1);
+}
+
+/* Topic Grid System (Preserved) */
+.topics-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 2rem;
+}
+
+@media (max-width: 768px) {
+    .topics-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 480px) {
+    .topics-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.topic-card {
+    background: white;
+    border: 1px solid #eee;
+    border-radius: 20px;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
+    min-height: 160px;
+}
+
+.topic-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 20px rgba(0, 0, 0, 0.06);
+    border-color: #ddd;
+}
+
+.topic-card.expanded {
+    grid-column: span 3;
+    background: #F8F9F7;
+    border-color: var(--color-sage-green);
+    align-items: flex-start;
+    padding: 2rem;
+    cursor: default;
+    transform: none;
+    box-shadow: 0 8px 30px rgba(74, 93, 79, 0.1);
+}
+
+.topic-card-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+}
+
+.topic-card.expanded .topic-card-header {
+    flex-direction: row;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    padding-bottom: 1rem;
+}
+
+.topic-icon {
+    width: 48px;
+    height: 48px;
+    background: #f5f5f5;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #555;
+    transition: all 0.3s;
+}
+
+.topic-card.expanded .topic-icon {
+    background: var(--color-sage-green);
+    color: white;
+}
+
+.topic-label {
+    font-weight: 600;
+    font-size: 1.1rem;
+    color: #333;
+}
+
+.topic-remove-btn {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: none;
+    border: none;
+    color: #999;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.topic-remove-btn:hover {
+    background: #FFEBEE;
+    color: #D32F2F;
+}
+
+.topic-details-form {
+    width: 100%;
+    animation: fadeIn 0.4s ease-out;
+}
+
+.topic-question {
+    font-size: 1rem;
+    font-weight: 500;
+    color: #4A5D4F;
+    margin-bottom: 0.5rem;
+}
+
+.topic-helper {
+    font-size: 0.9rem;
+    color: #666;
+    margin-bottom: 1rem;
+    font-style: italic;
+}
+
+.topic-input-area {
+    width: 100%;
+    padding: 16px;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-family: var(--font-body);
+    min-height: 100px;
+    background: white;
+    resize: vertical;
+}
+
+/* Nav & Extra Elements */
+.nav-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 1rem;
+    transition: all 0.2s;
+}
+
+.nav-btn.back {
+    background: #f0f0f0;
+    color: #666;
+}
+
+.nav-btn.next {
+    background: var(--color-sage-green);
+    color: white;
+}
+
+.add-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: 1px dashed #aaa;
+    color: #666;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+    margin-top: 5px;
+}
+
+.tip-text {
+    margin-top: 1rem;
+    font-size: 0.9rem;
+    color: #666;
+    font-style: italic;
+    background: #F8F9F7;
+    padding: 10px;
+    border-radius: 8px;
+    border-left: 3px solid var(--color-sage-green);
+}
+
+/* Tile Grid from Step 3 */
+.tiles-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+/* --- Refined Topic Card Styles (Step 4 Selection) --- */
+.topic-card {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    /* For absolute positioning of X */
+}
+
+.topic-card:hover {
+    border-color: var(--color-sage-green);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.topic-card.selected {
+    background: var(--color-sage-green) !important;
+    border-color: var(--color-sage-green) !important;
+    color: white !important;
+}
+
+/* Header inside card */
+.topic-card-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    text-align: center;
+}
+
+.topic-card.selected .topic-label {
+    /* Ensure label is white when selected */
+    color: white !important;
+}
+
+.topic-remove-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: #EF4444;
+    /* Red-500 */
+    border: none;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s;
+    z-index: 10;
+}
+
+.topic-remove-btn:hover {
+    transform: scale(1.1);
+    background: #DC2626;
+    /* Red-600 */
+}
+
+/* Ensure expanded form text is still readable */
+.topic-details-form {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    /* Lighter border on green bg */
+    text-align: left;
+}
+
+.topic-card.selected .topic-details-form,
+.topic-card.selected .topic-helper,
+.topic-card.selected .topic-question {
+    color: white !important;
+}
+
+.topic-input-area {
+    width: 100%;
+    min-height: 80px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    margin-top: 8px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    resize: vertical;
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+}
+
+.topic-input-area::placeholder {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.topic-input-area:focus {
+    outline: none;
+    background: rgba(255, 255, 255, 0.2);
+    border-color: white;
+}
+
+/* Done button in topic card */
+.topic-done-btn {
+    background: white;
+    color: var(--color-sage-green);
+    border: none;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.topic-done-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    background: #f0f0f0;
+}
+
+.topic-tile {
+    background: white;
+    border: 1px solid #ddd;
+    padding: 16px;
+    border-radius: 12px;
+    font-weight: 500;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 80px;
+}
+
+.topic-tile.selected {
+    background: var(--color-sage-green);
+    color: white;
+    border-color: var(--color-sage-green);
+}
+
+/* --- Weekly Rhythm (Step 5 V2) Styles --- */
+
+.rhythm-section {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 20px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.rhythm-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1.5rem;
+}
+
+.rhythm-header h3,
+.rhythm-section h3 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #1a1a1a;
+    margin: 0 0 4px 0;
+}
+
+.rhythm-header p,
+.rhythm-section p {
+    font-size: 0.95rem;
+    color: #6b7280;
+    margin: 0;
+}
+
+.recurring-badge {
+    background: #F0F4F1;
+    color: var(--color-sage-green);
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 9999px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.day-toggles {
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.day-toggle-btn {
+    flex: 1;
+    min-width: 80px;
+    /* Square/Wide */
+    height: 80px;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+}
+
+.day-toggle-btn.active {
+    background: var(--color-sage-green);
+    border-color: var(--color-sage-green);
+    color: white;
+    /* Ensure white text on active */
+    box-shadow: 0 4px 12px rgba(74, 93, 79, 0.4);
+    transform: translateY(-2px);
+}
+
+.day-name {
+    font-weight: 700;
+    /* Bolder */
+    font-size: 1.1rem;
+    /* Larger font */
+    margin-bottom: 4px;
+    color: var(--color-text-primary);
+    /* Dark for unselected */
+}
+
+.day-toggle-btn.active .day-name {
+    color: white;
+    /* White for selected */
+}
+
+.active-check {
+    margin-top: 4px;
+}
+
+.day-toggle-btn:not(.active):hover {
+    border-color: #d1d5db;
+    background: #f9fafb;
+}
+
+.time-picker-container {
+    background: #f3f4f6;
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.large-time-input {
+    font-size: 3rem;
+    font-weight: 800;
+    color: #111;
+    background: transparent;
+    border: none;
+    outline: none;
+    text-align: center;
+    width: auto;
+    font-family: 'Inter', sans-serif;
+    /* Ensure monospaced/numeric font if possible, or standard */
+    cursor: pointer;
+}
+
+/* Schedule Summary */
+.schedule-summary-box {
+    background: #FFFBEB;
+    /* Beige/Gold light */
+    border: 1px solid #FCD34D;
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+}
+
+.sparkle-icon {
+    background: #FDE68A;
+    padding: 10px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.summary-text {
+    flex: 1;
+}
+
+.summary-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: #92400E;
+    margin-bottom: 4px;
+}
+
+.summary-text div:last-child {
+    color: #4B5563;
+    font-size: 1.05rem;
+    line-height: 1.5;
+}
+
+.footer-tip {
+    text-align: center;
+    margin-top: 2rem;
+    font-size: 0.9rem;
+    color: #9CA3AF;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+@media (max-width: 600px) {
+    .day-toggles {
+        gap: 8px;
+    }
+
+    .day-toggle-btn {
+        min-width: 45px;
+        height: 60px;
+    }
+
+    .day-name {
+        font-size: 0.75rem;
+    }
+}
+
+/* Custom Time Picker */
+.time-picker-container-custom {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: #F8F9F7;
+    /* Input bg */
+    border: 1px solid #E5E7EB;
+    border-radius: 20px;
+    padding: 24px;
+    margin-top: 1rem;
+}
+
+.time-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.time-btn {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    width: 40px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #666;
+    transition: all 0.2s;
+}
+
+.time-btn:hover {
+    background: var(--color-sage-green);
+    color: white;
+    border-color: var(--color-sage-green);
+}
+
+.time-val {
+    font-size: 3rem;
+    font-weight: 700;
+    font-family: 'Inter', sans-serif;
+    color: #1a1a1a;
+    min-width: 60px;
+    text-align: center;
+    line-height: 1;
+}
+
+.time-sep {
+    font-size: 3rem;
+    font-weight: 700;
+    color: #ccc;
+    margin-top: -6px;
+    /* Visual alignment */
+}
+
+.ampm .time-val {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #555;
+    background: #fff;
+    padding: 4px 12px;
+    border-radius: 8px;
+    border: 1px solid #eee;
+    min-width: 50px;
+}

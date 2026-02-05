@@ -1,6 +1,6 @@
 # Donna Architecture
 
-> Comprehensive technical architecture for the AI Senior Companion system (v3.1 - Conversation Director).
+> Comprehensive technical architecture for the AI Senior Companion system (v3.3 - In-Call Memory + Cross-Call Memory + Enhanced Web Search).
 
 ---
 
@@ -8,16 +8,16 @@
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                           DONNA v3.1 - CONVERSATION DIRECTOR                            │
+│                           DONNA v3.3 - CONVERSATION DIRECTOR                            │
 │                                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
 │  │                              CLIENT LAYER                                        │   │
 │  │                                                                                  │   │
-│  │   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                      │   │
-│  │   │   Senior's   │    │    Admin     │    │ Observability│                      │   │
-│  │   │    Phone     │    │  Dashboard   │    │  Dashboard   │                      │   │
-│  │   │  (Twilio)    │    │ /admin.html  │    │ :5174        │                      │   │
-│  │   └──────┬───────┘    └──────┬───────┘    └──────┬───────┘                      │   │
+│  │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │   │
+│  │   │   Senior's   │  │    Admin     │  │  Consumer   │  │ Observability│      │   │
+│  │   │    Phone     │  │  Dashboard   │  │    App      │  │  Dashboard   │      │   │
+│  │   │  (Twilio)    │  │ apps/admin/  │  │apps/consumer│  │ :5174        │      │   │
+│  │   └──────┬───────┘  └──────┬───────┘  └──────┬──────┘  └──────┬───────┘      │   │
 │  │          │                   │                   │                               │   │
 │  └──────────┼───────────────────┼───────────────────┼───────────────────────────────┘   │
 │             │                   │                   │                                    │
@@ -72,7 +72,7 @@
 │  │   │              │   (100-400 tokens)  │                                      │   │   │
 │  │   │              └──────────┬──────────┘                                      │   │   │
 │  │   │                         ▼                                                 │   │   │
-│  │   │              Claude Sonnet Streaming                                      │   │   │
+│  │   │              Claude Sonnet 4.5 Streaming                                  │   │   │
 │  │   │                         │                                                 │   │   │
 │  │   │                         ▼                                                 │   │   │
 │  │   │              Sentence Buffer → ElevenLabs WS → Twilio                    │   │   │
@@ -293,31 +293,53 @@ When a call ends, async batch analysis runs:
 
 ```
 donna/
-├── index.js                    # Main Express server
+├── index.js                    # Main Express server (1,234 LOC)
 ├── pipelines/
-│   ├── v1-advanced.js          # Main pipeline + call state tracking
-│   ├── quick-observer.js       # Layer 1: Instant regex patterns
-│   ├── fast-observer.js        # Layer 2: Conversation Director
+│   ├── v1-advanced.js          # Main pipeline + call state tracking (1,198 LOC)
+│   ├── quick-observer.js       # Layer 1: Instant regex patterns (1,127 LOC)
+│   ├── fast-observer.js        # Layer 2: Conversation Director (615 LOC)
 │   ├── post-turn-agent.js      # Layer 3: Background tasks
 │   └── observer-agent.js       # DEPRECATED (kept for reference)
 ├── adapters/
-│   ├── llm/index.js            # Multi-provider LLM adapter
+│   ├── llm/
+│   │   ├── index.js            # Multi-provider LLM adapter
+│   │   ├── claude.js           # Claude adapter with streaming
+│   │   ├── gemini.js           # Gemini adapter for Director
+│   │   └── base.js             # Base LLM interface
 │   ├── elevenlabs.js           # ElevenLabs REST TTS
 │   └── elevenlabs-streaming.js # ElevenLabs WebSocket TTS
 ├── services/
 │   ├── call-analysis.js        # Post-call batch analysis
+│   ├── caregivers.js           # Caregiver-senior relationships
+│   ├── context-cache.js        # Pre-caches senior context
+│   ├── daily-context.js        # Same-day cross-call memory service
 │   ├── seniors.js              # Senior CRUD operations
 │   ├── memory.js               # Memory storage + search
 │   ├── conversations.js        # Conversation records
 │   ├── scheduler.js            # Reminder scheduler
 │   └── news.js                 # News via OpenAI
+├── middleware/
+│   ├── auth.js                 # Clerk authentication (requireAuth, requireAdmin)
+│   ├── clerk.js                # Clerk middleware initialization
+│   ├── rate-limit.js           # Rate limiting (100/min API, 5/min calls)
+│   ├── twilio.js               # Twilio webhook signature verification
+│   └── validate.js             # Zod schema validation
+├── validators/
+│   └── schemas.js              # Zod schemas for all API inputs
+├── packages/
+│   ├── logger/                 # TypeScript logging package
+│   └── event-bus/              # TypeScript event bus package
 ├── db/
 │   ├── client.js               # Database connection (Drizzle)
-│   └── schema.js               # Table definitions
-├── public/
-│   └── admin.html              # Admin dashboard UI
+│   ├── schema.js               # Table definitions (8 tables)
+│   └── setup-pgvector.js       # pgvector initialization
 ├── apps/
-│   └── observability/          # React observability dashboard
+│   ├── admin/                  # React admin dashboard (Railway)
+│   ├── consumer/               # Caregiver onboarding + dashboard (Vercel)
+│   ├── observability/          # React observability dashboard
+│   └── web/                    # Future placeholder
+├── public/
+│   └── admin.html              # Legacy admin UI (fallback)
 └── docs/
     └── architecture/           # This file and related docs
 ```
@@ -361,27 +383,33 @@ FAST_OBSERVER_MODEL=gemini-3-flash # Director model
 
 ## Latency Budget
 
-| Component | Target |
-|-----------|--------|
-| Deepgram utterance | ~500ms |
-| Quick Observer (L1) | 0ms |
-| Director (L2) | ~150ms (parallel) |
-| Claude first token | ~300ms |
-| TTS first audio | ~150ms |
-| **Total time-to-first-audio** | **~600ms** |
+| Component | Target | Notes |
+|-----------|--------|-------|
+| Deepgram utterance | ~300ms | 300ms endpointing config |
+| Quick Observer (L1) | 0ms | Regex only |
+| Director (L2) | ~150ms | Runs parallel with response |
+| Claude first token | ~200-300ms | Streaming enabled |
+| Sentence buffering | ~50ms | Until punctuation detected |
+| TTS first audio | ~100-150ms | WebSocket pre-connected |
+| **Total time-to-first-audio** | **~400-500ms** | After user stops speaking |
 
 ---
 
-## Cost Summary
+## Cost Summary (15-min call, ~20 turns)
 
 | Component | Model | Per Call |
 |-----------|-------|----------|
 | L1 Quick Observer | Regex | $0 |
-| L2 Director | Gemini 3 Flash | ~$0.0002 |
-| Voice | Claude Sonnet | ~$0.003 |
-| Post-Call Analysis | Gemini Flash | ~$0.0005 |
-| **Total** | | **~$0.004** |
+| L2 Director | Gemini 3 Flash | ~$0.01 |
+| Voice | Claude Sonnet 4.5 | ~$0.08 |
+| Post-Call Analysis | Gemini Flash | ~$0.005 |
+| Memory/Embeddings | OpenAI | ~$0.01 |
+| **AI Total** | | **~$0.11** |
+| Twilio Voice | | ~$0.30 |
+| Deepgram STT | | ~$0.065 |
+| ElevenLabs TTS | | ~$0.18 |
+| **Total per call** | | **~$0.65** |
 
 ---
 
-*Last updated: January 2026 - v3.1 (Conversation Director)*
+*Last updated: February 2026 - v3.3 (In-Call Memory + Cross-Call Memory + Enhanced Web Search)*

@@ -3,7 +3,7 @@ import { useAuth, SignOutButton } from '@clerk/clerk-react';
 import { useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, User, Calendar, Bell, Settings, LogOut, Phone,
-  ChevronRight, Plus, Trash2, Check, X, Clock, CheckCircle2
+  ChevronRight, Plus, Trash2, Check, X, Clock, CheckCircle2, Edit2, Save
 } from 'lucide-react';
 import './Dashboard.css';
 
@@ -38,6 +38,8 @@ interface Call {
   sentiment?: string;
 }
 
+const DAYS_OF_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
 export default function Dashboard() {
   const { getToken, isLoaded } = useAuth();
   const navigate = useNavigate();
@@ -49,9 +51,19 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Reminder editing state
+  // Reminder state
   const [newReminderTitle, setNewReminderTitle] = useState('');
   const [isAddingReminder, setIsAddingReminder] = useState(false);
+  const [editingReminderId, setEditingReminderId] = useState<string | null>(null);
+  const [editingReminderTitle, setEditingReminderTitle] = useState('');
+
+  // Profile editing state
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editedProfile, setEditedProfile] = useState<Partial<Senior>>({});
+
+  // Schedule editing state
+  const [isEditingSchedule, setIsEditingSchedule] = useState(false);
+  const [editedSchedule, setEditedSchedule] = useState<{ days: string[]; time: string }>({ days: [], time: '09:00' });
 
   const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -142,6 +154,28 @@ export default function Dashboard() {
     }
   };
 
+  const handleUpdateReminder = async (id: string, title: string) => {
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/api/reminders/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ title }),
+      });
+
+      if (res.ok) {
+        setReminders(reminders.map(r => r.id === id ? { ...r, title } : r));
+        setEditingReminderId(null);
+        setEditingReminderTitle('');
+      }
+    } catch (err) {
+      console.error('Failed to update reminder:', err);
+    }
+  };
+
   const handleDeleteReminder = async (id: string) => {
     try {
       const token = await getToken();
@@ -168,6 +202,94 @@ export default function Dashboard() {
     } catch (err) {
       alert('Failed to initiate call. Please try again.');
     }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!activeSenior) return;
+
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/api/seniors/${activeSenior.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(editedProfile),
+      });
+
+      if (res.ok) {
+        const updated = await res.json();
+        setActiveSenior(updated);
+        setSeniors(seniors.map(s => s.id === updated.id ? updated : s));
+        setIsEditingProfile(false);
+      }
+    } catch (err) {
+      console.error('Failed to update profile:', err);
+    }
+  };
+
+  const handleSaveSchedule = async () => {
+    if (!activeSenior) return;
+
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/api/seniors/${activeSenior.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          preferredCallTimes: {
+            ...activeSenior.preferredCallTimes,
+            schedule: editedSchedule,
+          },
+        }),
+      });
+
+      if (res.ok) {
+        const updated = await res.json();
+        setActiveSenior(updated);
+        setSeniors(seniors.map(s => s.id === updated.id ? updated : s));
+        setIsEditingSchedule(false);
+      }
+    } catch (err) {
+      console.error('Failed to update schedule:', err);
+    }
+  };
+
+  const startEditingProfile = () => {
+    if (activeSenior) {
+      setEditedProfile({
+        name: activeSenior.name,
+        phone: activeSenior.phone,
+        city: activeSenior.city,
+        state: activeSenior.state,
+      });
+      setIsEditingProfile(true);
+    }
+  };
+
+  const startEditingSchedule = () => {
+    if (activeSenior?.preferredCallTimes?.schedule) {
+      setEditedSchedule({
+        days: [...activeSenior.preferredCallTimes.schedule.days],
+        time: activeSenior.preferredCallTimes.schedule.time,
+      });
+    } else {
+      setEditedSchedule({ days: ['Mon', 'Wed', 'Fri'], time: '09:00' });
+    }
+    setIsEditingSchedule(true);
+  };
+
+  const toggleScheduleDay = (day: string) => {
+    setEditedSchedule(prev => ({
+      ...prev,
+      days: prev.days.includes(day)
+        ? prev.days.filter(d => d !== day)
+        : [...prev.days, day],
+    }));
   };
 
   const formatTime = (timeStr: string) => {
@@ -297,7 +419,7 @@ export default function Dashboard() {
                   {activeSenior.preferredCallTimes?.schedule ? (
                     <>
                       <div className="schedule-days">
-                        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+                        {DAYS_OF_WEEK.map(day => (
                           <span
                             key={day}
                             className={`day-badge ${activeSenior.preferredCallTimes?.schedule?.days?.includes(day) ? 'active' : ''}`}
@@ -351,26 +473,84 @@ export default function Dashboard() {
 
         {activeTab === 'profile' && activeSenior && (
           <div className="profile-page">
-            <h1>Profile</h1>
-            <p className="page-description">Information about {activeSenior.name}</p>
+            <div className="page-header">
+              <div>
+                <h1>Profile</h1>
+                <p className="page-description">Information about {activeSenior.name}</p>
+              </div>
+              {!isEditingProfile ? (
+                <button className="add-btn-primary" onClick={startEditingProfile}>
+                  <Edit2 size={18} /> Edit Profile
+                </button>
+              ) : (
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button className="btn-save" onClick={handleSaveProfile}>
+                    <Save size={16} /> Save
+                  </button>
+                  <button className="btn-cancel" onClick={() => setIsEditingProfile(false)}>
+                    <X size={16} /> Cancel
+                  </button>
+                </div>
+              )}
+            </div>
 
             <div className="profile-card">
               <div className="profile-section">
                 <h3>Basic Information</h3>
+
                 <div className="profile-field">
                   <label>Name</label>
-                  <p>{activeSenior.name}</p>
+                  {isEditingProfile ? (
+                    <input
+                      type="text"
+                      value={editedProfile.name || ''}
+                      onChange={(e) => setEditedProfile({ ...editedProfile, name: e.target.value })}
+                      className="profile-input"
+                    />
+                  ) : (
+                    <p>{activeSenior.name}</p>
+                  )}
                 </div>
+
                 <div className="profile-field">
                   <label>Phone</label>
-                  <p>{activeSenior.phone}</p>
+                  {isEditingProfile ? (
+                    <input
+                      type="tel"
+                      value={editedProfile.phone || ''}
+                      onChange={(e) => setEditedProfile({ ...editedProfile, phone: e.target.value })}
+                      className="profile-input"
+                    />
+                  ) : (
+                    <p>{activeSenior.phone}</p>
+                  )}
                 </div>
-                {activeSenior.city && (
-                  <div className="profile-field">
-                    <label>Location</label>
-                    <p>{activeSenior.city}, {activeSenior.state}</p>
-                  </div>
-                )}
+
+                <div className="profile-field">
+                  <label>Location</label>
+                  {isEditingProfile ? (
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <input
+                        type="text"
+                        placeholder="City"
+                        value={editedProfile.city || ''}
+                        onChange={(e) => setEditedProfile({ ...editedProfile, city: e.target.value })}
+                        className="profile-input"
+                        style={{ flex: 2 }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="State"
+                        value={editedProfile.state || ''}
+                        onChange={(e) => setEditedProfile({ ...editedProfile, state: e.target.value })}
+                        className="profile-input"
+                        style={{ flex: 1 }}
+                      />
+                    </div>
+                  ) : (
+                    <p>{activeSenior.city ? `${activeSenior.city}, ${activeSenior.state}` : 'Not specified'}</p>
+                  )}
+                </div>
               </div>
 
               {activeSenior.interests && activeSenior.interests.length > 0 && (
@@ -425,14 +605,57 @@ export default function Dashboard() {
                   <div key={reminder.id} className="reminder-item">
                     <div className="reminder-content">
                       <Bell size={18} className="reminder-icon" />
-                      <div>
-                        <p className="reminder-title">{reminder.title}</p>
-                        {reminder.description && <p className="reminder-desc">{reminder.description}</p>}
-                      </div>
+                      {editingReminderId === reminder.id ? (
+                        <input
+                          type="text"
+                          value={editingReminderTitle}
+                          onChange={(e) => setEditingReminderTitle(e.target.value)}
+                          className="reminder-edit-input"
+                          autoFocus
+                        />
+                      ) : (
+                        <div>
+                          <p className="reminder-title">{reminder.title}</p>
+                          {reminder.description && <p className="reminder-desc">{reminder.description}</p>}
+                        </div>
+                      )}
                     </div>
-                    <button className="delete-btn" onClick={() => handleDeleteReminder(reminder.id)}>
-                      <Trash2 size={16} />
-                    </button>
+                    <div className="reminder-actions">
+                      {editingReminderId === reminder.id ? (
+                        <>
+                          <button
+                            className="save-btn-small"
+                            onClick={() => handleUpdateReminder(reminder.id, editingReminderTitle)}
+                          >
+                            <Check size={16} />
+                          </button>
+                          <button
+                            className="cancel-btn-small"
+                            onClick={() => {
+                              setEditingReminderId(null);
+                              setEditingReminderTitle('');
+                            }}
+                          >
+                            <X size={16} />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="edit-btn-small"
+                            onClick={() => {
+                              setEditingReminderId(reminder.id);
+                              setEditingReminderTitle(reminder.title);
+                            }}
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button className="delete-btn" onClick={() => handleDeleteReminder(reminder.id)}>
+                            <Trash2 size={16} />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 ))
               ) : (
@@ -448,30 +671,66 @@ export default function Dashboard() {
 
         {activeTab === 'schedule' && activeSenior && (
           <div className="schedule-page">
-            <h1>Call Schedule</h1>
-            <p className="page-description">Configure when Donna calls {activeSenior.name}</p>
+            <div className="page-header">
+              <div>
+                <h1>Call Schedule</h1>
+                <p className="page-description">Configure when Donna calls {activeSenior.name}</p>
+              </div>
+              {!isEditingSchedule ? (
+                <button className="add-btn-primary" onClick={startEditingSchedule}>
+                  <Edit2 size={18} /> Edit Schedule
+                </button>
+              ) : (
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button className="btn-save" onClick={handleSaveSchedule}>
+                    <Save size={16} /> Save
+                  </button>
+                  <button className="btn-cancel" onClick={() => setIsEditingSchedule(false)}>
+                    <X size={16} /> Cancel
+                  </button>
+                </div>
+              )}
+            </div>
 
             <div className="schedule-card">
-              <h3>Current Schedule</h3>
-              {activeSenior.preferredCallTimes?.schedule ? (
-                <>
-                  <div className="schedule-days-large">
-                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
-                      <div
-                        key={day}
-                        className={`day-toggle ${activeSenior.preferredCallTimes?.schedule?.days?.includes(day) ? 'active' : ''}`}
-                      >
-                        {day}
-                      </div>
-                    ))}
+              <h3>Call Days</h3>
+              <p className="schedule-hint">Select which days Donna should call</p>
+
+              <div className="schedule-days-large">
+                {DAYS_OF_WEEK.map(day => (
+                  <div
+                    key={day}
+                    className={`day-toggle ${
+                      isEditingSchedule
+                        ? editedSchedule.days.includes(day) ? 'active' : ''
+                        : activeSenior.preferredCallTimes?.schedule?.days?.includes(day) ? 'active' : ''
+                    } ${isEditingSchedule ? 'editable' : ''}`}
+                    onClick={() => isEditingSchedule && toggleScheduleDay(day)}
+                  >
+                    {day}
                   </div>
+                ))}
+              </div>
+
+              <div className="schedule-time-section">
+                <h3>Call Time</h3>
+                {isEditingSchedule ? (
+                  <input
+                    type="time"
+                    value={editedSchedule.time}
+                    onChange={(e) => setEditedSchedule({ ...editedSchedule, time: e.target.value })}
+                    className="time-input"
+                  />
+                ) : (
                   <p className="current-time">
-                    Calls scheduled at <strong>{formatTime(activeSenior.preferredCallTimes.schedule.time)}</strong>
+                    Calls scheduled at <strong>
+                      {activeSenior.preferredCallTimes?.schedule?.time
+                        ? formatTime(activeSenior.preferredCallTimes.schedule.time)
+                        : 'Not set'}
+                    </strong>
                   </p>
-                </>
-              ) : (
-                <p>No schedule configured. Contact support to update.</p>
-              )}
+                )}
+              </div>
             </div>
           </div>
         )}

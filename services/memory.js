@@ -3,6 +3,9 @@ import { db } from '../db/client.js';
 import { memories } from '../db/schema.js';
 import { eq, sql, desc, and, inArray, lt } from 'drizzle-orm';
 import { newsService } from './news.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('Memory');
 
 // Memory decay constants
 const DECAY_HALF_LIFE_DAYS = 30; // Importance halves every 30 days
@@ -14,7 +17,7 @@ let openai = null;
 const getOpenAI = () => {
   if (!openai) {
     if (!process.env.OPENAI_API_KEY) {
-      console.warn('[Memory] OPENAI_API_KEY not set - memory features disabled');
+      log.warn('OPENAI_API_KEY not set - memory features disabled');
       return null;
     }
     openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -60,7 +63,7 @@ export const memoryService = {
   async store(seniorId, type, content, source = null, importance = 50, metadata = null) {
     const embedding = await this.generateEmbedding(content);
     if (!embedding) {
-      console.log('[Memory] Skipping store - OpenAI not configured');
+      log.info('Skipping store - OpenAI not configured');
       return null;
     }
 
@@ -77,14 +80,14 @@ export const memoryService = {
 
     if (duplicates.rows.length > 0) {
       const existing = duplicates.rows[0];
-      console.log(`[Memory] Dedup: "${content.substring(0, 30)}..." similar to existing (${(existing.similarity * 100).toFixed(0)}% match)`);
+      log.info('Dedup: similar to existing', { content, similarity: `${(existing.similarity * 100).toFixed(0)}%` });
 
       // If new memory is more important, update the existing one
       if (importance > existing.importance) {
         await db.update(memories)
           .set({ importance, lastAccessedAt: new Date() })
           .where(eq(memories.id, existing.id));
-        console.log(`[Memory] Updated importance: ${existing.importance} -> ${importance}`);
+        log.info('Updated importance', { from: existing.importance, to: importance });
       }
       return null; // Don't store duplicate
     }
@@ -99,7 +102,7 @@ export const memoryService = {
       metadata,
     }).returning();
 
-    console.log(`[Memory] Stored: "${content.substring(0, 50)}..." for senior ${seniorId}`);
+    log.info('Stored', { seniorId, content });
     return memory;
   },
 
@@ -270,7 +273,7 @@ export const memoryService = {
           contextParts.push('\n' + newsContext);
         }
       } catch (error) {
-        console.error('[Memory] Error fetching news:', error.message);
+        log.error('Error fetching news', { error: error.message });
       }
     }
 
@@ -297,7 +300,7 @@ Only include genuinely important or memorable information. Be concise.`;
     try {
       const client = getOpenAI();
       if (!client) {
-        console.log('[Memory] Skipping extraction - OpenAI not configured');
+        log.info('Skipping extraction - OpenAI not configured');
         return;
       }
       const response = await client.chat.completions.create({
@@ -319,10 +322,10 @@ Only include genuinely important or memorable information. Be concise.`;
             mem.importance || 50
           );
         }
-        console.log(`[Memory] Extracted ${memoriesArray.length} memories from conversation`);
+        log.info('Extracted memories from conversation', { count: memoriesArray.length });
       }
     } catch (error) {
-      console.error('[Memory] Failed to extract memories:', error);
+      log.error('Failed to extract memories', { error: error.message });
     }
   }
 };

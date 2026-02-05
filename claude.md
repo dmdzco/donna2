@@ -46,7 +46,7 @@
 - Scheduled reminder calls
 - Consumer app (caregiver onboarding + dashboard)
 - Observability dashboard (React)
-- Security: Clerk auth, JWT admin auth, Zod validation, rate limiting, Twilio webhook verification
+- Security: Clerk auth, JWT admin auth, Zod validation, rate limiting, Twilio webhook verification, Helmet headers, API key auth, PII-safe logging
 
 ---
 
@@ -151,9 +151,17 @@ The Director proactively guides each call:
 │   └── news.js                 ← News via OpenAI web search
 ├── middleware/
 │   ├── auth.js                 ← Clerk + JWT + cofounder auth
-│   ├── rate-limit.js           ← Rate limiting
-│   ├── twilio.js               ← Webhook signature verification
-│   └── validate.js             ← Zod validation middleware
+│   ├── security.js             ← Helmet headers + request ID
+│   ├── rate-limit.js           ← Rate limiting (API, call, write, auth, webhook)
+│   ├── api-auth.js             ← API key authentication (DONNA_API_KEY)
+│   ├── twilio.js               ← Webhook signature verification (legacy)
+│   ├── twilio-auth.js          ← Twilio webhook signature validation
+│   ├── validate.js             ← Zod validation middleware
+│   ├── validation.js           ← express-validator schemas
+│   └── error-handler.js        ← Centralized error handler
+├── lib/
+│   ├── logger.js               ← PII-safe structured logger
+│   └── sanitize.js             ← Phone/name/content masking
 ├── validators/
 │   └── schemas.js              ← Zod schemas for all API inputs
 ├── db/
@@ -251,6 +259,7 @@ V1_STREAMING_ENABLED=true   # Set to 'false' to disable streaming
 VOICE_MODEL=claude-sonnet   # Main voice model
 FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
 JWT_SECRET=...              # Admin dashboard JWT signing key
+DONNA_API_KEY=...           # Set to enable API key auth (omit for dev)
 ```
 
 ---
@@ -263,6 +272,7 @@ See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
 - ~~Conversation Director~~ ✓ Completed
 - ~~Post-Call Analysis~~ ✓ Completed
 - ~~Admin Dashboard Separation~~ ✓ Completed (React app in `apps/admin/`)
+- ~~Security Hardening~~ ✓ Completed (Helmet, API key auth, PII-safe logging, input validation)
 - Prompt Caching (Anthropic)
 
 ### Architecture Cleanup

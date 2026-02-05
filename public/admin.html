@@ -317,13 +317,36 @@
   </style>
 </head>
 <body>
+  <!-- Login Overlay -->
+  <div id="loginOverlay" style="position:fixed;inset:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;z-index:200;">
+    <div style="background:white;border-radius:16px;padding:40px;width:90%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+      <h1 style="text-align:center;margin-bottom:8px;color:#333;">Donna Admin</h1>
+      <p style="text-align:center;color:#888;margin-bottom:24px;font-size:14px;">Sign in to manage your seniors</p>
+      <form id="loginForm">
+        <div class="form-group">
+          <label for="loginEmail">Email</label>
+          <input type="email" id="loginEmail" required placeholder="admin@donna.com">
+        </div>
+        <div class="form-group">
+          <label for="loginPassword">Password</label>
+          <input type="password" id="loginPassword" required placeholder="Your password">
+        </div>
+        <p id="loginError" style="color:#e74c3c;font-size:13px;margin-bottom:12px;display:none;"></p>
+        <button type="submit" style="width:100%;">Sign In</button>
+      </form>
+    </div>
+  </div>
+
   <div class="container">
     <header>
       <div>
         <h1>Donna Admin</h1>
         <p>Manage seniors, calls, and reminders</p>
       </div>
-      <div class="version-badge">v3.0</div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="version-badge">v3.3</div>
+        <button class="small secondary" onclick="logout()" style="background:#ffffff33;color:white;">Logout</button>
+      </div>
     </header>
 
     <!-- Tabs -->
@@ -543,6 +566,85 @@
 
   <script>
     const API = window.location.origin;
+    let authToken = localStorage.getItem('donna_admin_token');
+
+    // Authenticated fetch wrapper
+    async function authFetch(url, options = {}) {
+      const headers = { ...options.headers };
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+      if (options.body) {
+        headers['Content-Type'] = 'application/json';
+      }
+      const res = await fetch(url, { ...options, headers });
+      if (res.status === 401) {
+        authToken = null;
+        localStorage.removeItem('donna_admin_token');
+        showLogin();
+        throw new Error('Unauthorized');
+      }
+      return res;
+    }
+
+    function showLogin() {
+      document.getElementById('loginOverlay').style.display = 'flex';
+    }
+
+    function hideLogin() {
+      document.getElementById('loginOverlay').style.display = 'none';
+    }
+
+    function logout() {
+      authToken = null;
+      localStorage.removeItem('donna_admin_token');
+      showLogin();
+    }
+
+    // Login form handler
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('loginEmail').value;
+      const password = document.getElementById('loginPassword').value;
+      const errorEl = document.getElementById('loginError');
+      errorEl.style.display = 'none';
+
+      try {
+        const res = await fetch(`${API}/api/admin/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Login failed';
+          errorEl.style.display = 'block';
+          return;
+        }
+        authToken = data.token;
+        localStorage.setItem('donna_admin_token', data.token);
+        hideLogin();
+        loadAll();
+      } catch (err) {
+        errorEl.textContent = 'Connection error';
+        errorEl.style.display = 'block';
+      }
+    });
+
+    // Check auth on load
+    async function checkAuth() {
+      if (!authToken) { showLogin(); return; }
+      try {
+        const res = await fetch(`${API}/api/admin/me`, {
+          headers: { 'Authorization': `Bearer ${authToken}` },
+        });
+        if (!res.ok) { showLogin(); return; }
+        hideLogin();
+        loadAll();
+      } catch {
+        showLogin();
+      }
+    }
 
     // Toast
     function showToast(message, type = 'success') {
@@ -597,7 +699,7 @@
     // ============ DASHBOARD ============
     async function loadDashboard() {
       try {
-        const res = await fetch(`${API}/api/stats`);
+        const res = await authFetch(`${API}/api/stats`);
         const stats = await res.json();
 
         document.getElementById('statSeniors').textContent = stats.totalSeniors;
@@ -640,14 +742,14 @@
     // ============ SENIORS ============
     async function loadSeniors() {
       try {
-        const res = await fetch(`${API}/api/seniors`);
+        const res = await authFetch(`${API}/api/seniors`);
         const seniors = await res.json();
 
         // Fetch memories for each senior
         const seniorsWithMemories = await Promise.all(
           seniors.map(async (senior) => {
             try {
-              const memRes = await fetch(`${API}/api/seniors/${senior.id}/memories`);
+              const memRes = await authFetch(`${API}/api/seniors/${senior.id}/memories`);
               const memories = await memRes.json();
               return { ...senior, memories: memories.slice(0, 5) };
             } catch {
@@ -716,9 +818,8 @@
       };
 
       try {
-        const res = await fetch(`${API}/api/seniors`, {
+        const res = await authFetch(`${API}/api/seniors`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
         if (!res.ok) throw new Error('Failed');
@@ -738,7 +839,7 @@
     async function editSenior(id) {
       currentEditId = id;
       try {
-        const res = await fetch(`${API}/api/seniors/${id}`);
+        const res = await authFetch(`${API}/api/seniors/${id}`);
         const s = await res.json();
         document.getElementById('editSeniorId').value = id;
         document.getElementById('editName').value = s.name;
@@ -755,7 +856,7 @@
 
     async function loadMemories(seniorId) {
       try {
-        const res = await fetch(`${API}/api/seniors/${seniorId}/memories`);
+        const res = await authFetch(`${API}/api/seniors/${seniorId}/memories`);
         const memories = await res.json();
         const container = document.getElementById('memoriesList');
         if (!memories.length) {
@@ -781,9 +882,8 @@
         return;
       }
       try {
-        await fetch(`${API}/api/seniors/${currentEditId}/memories`, {
+        await authFetch(`${API}/api/seniors/${currentEditId}/memories`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type, content, importance: 70 })
         });
         document.getElementById('memoryContent').value = '';
@@ -806,9 +906,8 @@
       };
 
       try {
-        await fetch(`${API}/api/seniors/${id}`, {
+        await authFetch(`${API}/api/seniors/${id}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
         showToast('Senior updated!');
@@ -822,9 +921,8 @@
     async function deleteSenior(id) {
       if (!confirm('Delete this senior?')) return;
       try {
-        await fetch(`${API}/api/seniors/${id}`, {
+        await authFetch(`${API}/api/seniors/${id}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ isActive: false })
         });
         showToast('Senior deleted');
@@ -839,9 +937,8 @@
     async function callSenior(phone, name) {
       if (!confirm(`Call ${name}?`)) return;
       try {
-        const res = await fetch(`${API}/api/call`, {
+        const res = await authFetch(`${API}/api/call`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phoneNumber: phone })
         });
         if (!res.ok) throw new Error('Failed');
@@ -855,7 +952,7 @@
     // ============ CALLS ============
     async function loadCalls() {
       try {
-        const res = await fetch(`${API}/api/conversations`);
+        const res = await authFetch(`${API}/api/conversations`);
         const calls = await res.json();
         renderCalls(calls);
       } catch (e) {
@@ -914,7 +1011,7 @@
     // ============ REMINDERS ============
     async function loadReminders() {
       try {
-        const res = await fetch(`${API}/api/reminders`);
+        const res = await authFetch(`${API}/api/reminders`);
         const reminders = await res.json();
         renderReminders(reminders);
       } catch (e) {
@@ -994,9 +1091,8 @@
       };
 
       try {
-        const res = await fetch(`${API}/api/reminders`, {
+        const res = await authFetch(`${API}/api/reminders`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
         if (!res.ok) throw new Error('Failed');
@@ -1014,7 +1110,7 @@
     async function deleteReminder(id) {
       if (!confirm('Delete this reminder?')) return;
       try {
-        await fetch(`${API}/api/reminders/${id}`, { method: 'DELETE' });
+        await authFetch(`${API}/api/reminders/${id}`, { method: 'DELETE' });
         showToast('Reminder deleted');
         loadReminders();
         loadDashboard();
@@ -1030,14 +1126,18 @@
       });
     });
 
-    // Initial load
-    loadDashboard();
-    loadSeniors();
-    loadCalls();
-    loadReminders();
+    function loadAll() {
+      loadDashboard();
+      loadSeniors();
+      loadCalls();
+      loadReminders();
+    }
 
-    // Refresh dashboard every 30 seconds
-    setInterval(loadDashboard, 30000);
+    // Initial auth check (replaces direct loadX calls)
+    checkAuth();
+
+    // Refresh dashboard every 30 seconds (only if logged in)
+    setInterval(() => { if (authToken) loadDashboard(); }, 30000);
   </script>
 </body>
 </html>

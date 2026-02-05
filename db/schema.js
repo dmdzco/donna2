@@ -33,6 +33,7 @@ export const conversations = pgTable('conversations', {
   sentiment: varchar('sentiment', { length: 50 }),
   concerns: text('concerns').array(),
   transcript: json('transcript'),
+  callMetrics: json('call_metrics'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

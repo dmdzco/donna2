@@ -28,6 +28,7 @@ export const conversationService = {
         status: data.status || 'completed',
         summary: data.summary,
         transcript: data.transcript,
+        callMetrics: data.callMetrics,
         sentiment: data.sentiment,
         concerns: data.concerns,
       })

@@ -176,10 +176,10 @@ When they share something emotional (grief, loneliness, worry):
 - Routine check-ins going smoothly
 
 **Token recommendations:**
-- brief (100): Simple acknowledgments, quick answers
-- moderate (150): Normal conversation, standard responses
-- extended (200-250): Emotional support, re-engagement, stories
-- long (300-400): Deep emotional moments, detailed stories
+- brief (100-150): Simple acknowledgments, quick answers
+- moderate (200): Normal conversation, standard responses
+- extended (250-300): Emotional support, re-engagement, stories
+- long (350-500): Deep emotional moments, detailed stories, crisis support
 
 ## OUTPUT FORMAT
 
@@ -272,7 +272,7 @@ export async function getConversationDirection(
     ];
 
     const text = await adapter.generate(prompt, messages, {
-      maxTokens: 1200, // Increased to avoid JSON truncation
+      maxTokens: 1500, // Generous budget - director runs in background, no latency impact
       temperature: 0.2,
     });
 

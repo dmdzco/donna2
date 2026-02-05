@@ -24,7 +24,7 @@ const V1_STREAMING_ENABLED = process.env.V1_STREAMING_ENABLED !== 'false';
 
 // Model configuration
 const VOICE_MODEL = process.env.VOICE_MODEL || 'claude-sonnet';  // Main voice model
-const DEFAULT_MAX_TOKENS = 100;
+const DEFAULT_MAX_TOKENS = 150;
 
 // Log available models
 console.log(`[V1] Streaming enabled: ${V1_STREAMING_ENABLED}, ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? 'set' : 'NOT SET'}`);
@@ -1082,7 +1082,7 @@ export class V1AdvancedSession {
 
       // Build messages array
       const messages = this.conversationLog
-        .slice(-10) // Keep last 20 exchanges for context
+        .slice(-20) // Keep last 20 exchanges for better in-conversation memory
         .map(entry => ({
           role: entry.role,
           content: entry.content
@@ -1210,7 +1210,7 @@ export class V1AdvancedSession {
 
       // Build messages array
       const messages = this.conversationLog
-        .slice(-10)
+        .slice(-20) // Keep last 20 exchanges for better in-conversation memory
         .map(entry => ({
           role: entry.role,
           content: entry.content

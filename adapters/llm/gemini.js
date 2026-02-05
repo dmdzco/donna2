@@ -81,7 +81,15 @@ export class GeminiAdapter extends LLMAdapter {
     const chat = model.startChat({ history });
     const result = await chat.sendMessage(lastMessage.parts[0].text);
 
-    return result.response.text();
+    const response = result.response;
+    const usageMetadata = response.usageMetadata;
+    return {
+      text: response.text(),
+      usage: {
+        inputTokens: usageMetadata?.promptTokenCount || 0,
+        outputTokens: usageMetadata?.candidatesTokenCount || 0,
+      },
+    };
   }
 
   async stream(systemPrompt, messages, options = {}, onChunk = () => {}) {
@@ -116,7 +124,17 @@ export class GeminiAdapter extends LLMAdapter {
       }
     }
 
-    return fullResponse;
+    // Get usage from the aggregated response
+    const aggregatedResponse = await result.response;
+    const usageMetadata = aggregatedResponse.usageMetadata;
+
+    return {
+      text: fullResponse,
+      usage: {
+        inputTokens: usageMetadata?.promptTokenCount || 0,
+        outputTokens: usageMetadata?.candidatesTokenCount || 0,
+      },
+    };
   }
 }
 

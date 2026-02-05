@@ -57,12 +57,23 @@ export default function Landing() {
             <a href="/faq" className="hover:text-sage-green transition-colors">FAQ</a>
           </div>
           <div className="flex items-center gap-3">
-            <SignInButton mode="modal">
-              <button className="text-sm text-sage-green hover:underline">Sign In</button>
-            </SignInButton>
-            <SignInButton mode="modal" forceRedirectUrl="/onboarding">
-              <button className="btn-primary text-sm">Get Started</button>
-            </SignInButton>
+            {isSignedIn ? (
+              <button
+                className="btn-primary text-sm"
+                onClick={() => navigate('/onboarding')}
+              >
+                Complete Setup
+              </button>
+            ) : (
+              <>
+                <SignInButton mode="modal">
+                  <button className="text-sm text-sage-green hover:underline">Sign In</button>
+                </SignInButton>
+                <SignInButton mode="modal" forceRedirectUrl="/onboarding">
+                  <button className="btn-primary text-sm">Get Started</button>
+                </SignInButton>
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -83,11 +94,20 @@ export default function Landing() {
             medication reminders, and peace of mind for the whole family.
           </p>
           <div className="flex items-center justify-center gap-4">
-            <SignInButton mode="modal" forceRedirectUrl="/onboarding">
-              <button className="btn-primary text-lg px-8 py-4">
-                Start Free Trial
+            {isSignedIn ? (
+              <button
+                className="btn-primary text-lg px-8 py-4"
+                onClick={() => navigate('/onboarding')}
+              >
+                Complete Setup
               </button>
-            </SignInButton>
+            ) : (
+              <SignInButton mode="modal" forceRedirectUrl="/onboarding">
+                <button className="btn-primary text-lg px-8 py-4">
+                  Start Free Trial
+                </button>
+              </SignInButton>
+            )}
             <a href="#how-it-works" className="btn-secondary text-lg px-8 py-4">
               Learn More
             </a>
@@ -181,11 +201,20 @@ export default function Landing() {
           <p className="text-xl text-gray-600 mb-8">
             Join thousands of families who trust Donna to care for their loved ones.
           </p>
-          <SignInButton mode="modal" forceRedirectUrl="/onboarding">
-            <button className="btn-primary text-lg px-8 py-4">
-              Start Your Free Trial
+          {isSignedIn ? (
+            <button
+              className="btn-primary text-lg px-8 py-4"
+              onClick={() => navigate('/onboarding')}
+            >
+              Complete Setup
             </button>
-          </SignInButton>
+          ) : (
+            <SignInButton mode="modal" forceRedirectUrl="/onboarding">
+              <button className="btn-primary text-lg px-8 py-4">
+                Start Your Free Trial
+              </button>
+            </SignInButton>
+          )}
         </div>
       </section>
 

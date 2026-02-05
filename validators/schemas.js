@@ -261,11 +261,8 @@ export const onboardingSchema = z.object({
     timezone: timezoneSchema.optional(),
   }),
   relation: relationEnum,
-  // Accept interests as strings (topic names) or structured objects
-  interests: z.array(z.union([
-    z.string().max(100),
-    structuredInterestSchema,
-  ])).max(20).optional(),
+  // Accept interests as strings (topic names)
+  interests: z.array(z.string().max(100)).max(20).optional(),
   additionalInfo: z.string().max(5000).optional(),
   reminders: z.array(z.string().max(255)).max(20).optional(),
   updateTopics: z.array(z.string().max(100)).max(10).optional(),

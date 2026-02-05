@@ -228,7 +228,15 @@ export default function Onboarding() {
         },
       };
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/onboarding`, {
+      const apiUrl = import.meta.env.VITE_API_URL;
+      if (!apiUrl) {
+        throw new Error('API URL not configured');
+      }
+
+      console.log('Submitting to:', `${apiUrl}/api/onboarding`);
+      console.log('Payload:', JSON.stringify(payload, null, 2));
+
+      const response = await fetch(`${apiUrl}/api/onboarding`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -237,9 +245,16 @@ export default function Onboarding() {
         body: JSON.stringify(payload),
       });
 
+      const contentType = response.headers.get('content-type');
       if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.message || err.error || 'Failed to complete onboarding');
+        if (contentType && contentType.includes('application/json')) {
+          const err = await response.json();
+          throw new Error(err.message || err.error || 'Failed to complete onboarding');
+        } else {
+          const text = await response.text();
+          console.error('Non-JSON error response:', text);
+          throw new Error(`Server error (${response.status}): ${response.statusText}`);
+        }
       }
 
       setStep(6);

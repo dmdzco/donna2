@@ -1,15 +1,48 @@
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SignInButton, useAuth } from '@clerk/clerk-react';
 import { Phone, Heart, Bell } from 'lucide-react';
 
 export default function Landing() {
   const navigate = useNavigate();
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, getToken } = useAuth();
+  const [checkingProfile, setCheckingProfile] = useState(false);
 
-  // If already signed in, redirect to dashboard
-  if (isSignedIn) {
-    navigate('/dashboard');
-    return null;
+  const API_URL = import.meta.env.VITE_API_URL || '';
+
+  // Only redirect signed-in users who have completed onboarding
+  useEffect(() => {
+    if (!isSignedIn) return;
+
+    const checkProfile = async () => {
+      setCheckingProfile(true);
+      try {
+        const token = await getToken();
+        const res = await fetch(`${API_URL}/api/caregivers/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.ok) {
+          // User has a profile, redirect to dashboard
+          navigate('/dashboard');
+        }
+        // If 404, user needs onboarding - stay on landing page
+      } catch (err) {
+        // On error, stay on landing page
+      } finally {
+        setCheckingProfile(false);
+      }
+    };
+
+    checkProfile();
+  }, [isSignedIn, getToken, navigate, API_URL]);
+
+  if (checkingProfile) {
+    return (
+      <div className="min-h-screen bg-bg-cream flex items-center justify-center">
+        <div className="animate-pulse text-sage-green">Loading...</div>
+      </div>
+    );
   }
 
   return (

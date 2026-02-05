@@ -65,10 +65,10 @@ export const api = {
 
   // Calls
   calls: {
-    list: (seniorId: string) => fetchJson<any[]>(`/api/seniors/${seniorId}/calls`),
-    initiate: (seniorId: string) =>
-      fetchJson<any>(`/api/seniors/${seniorId}/calls`, {
+    initiate: (phoneNumber: string) =>
+      fetchJson<any>(`/api/call`, {
         method: 'POST',
+        body: JSON.stringify({ phoneNumber }),
       }),
   },
 };

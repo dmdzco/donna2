@@ -270,4 +270,4 @@ curl -X POST http://localhost:3001/api/v1/seniors -d '{}'
 
 ---
 
-*Reference: [ARCHITECTURE_CLEANUP_PLAN.md](../ARCHITECTURE_CLEANUP_PLAN.md) (original source)*
+*Migrated from ARCHITECTURE_CLEANUP_PLAN.md (deleted)*

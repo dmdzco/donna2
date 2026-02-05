@@ -94,6 +94,44 @@
 
 ---
 
+## Recently Completed
+
+### ✅ Security Hardening (February 2026)
+
+**Achieved:** Comprehensive API security layer addressing 9 security gaps.
+
+**Implemented:**
+- [x] Security headers via Helmet (CSP, HSTS, X-Frame-Options, etc.)
+- [x] Request ID tracking (X-Request-Id header on every response)
+- [x] Rate limiting - 3 tiers: API (100/15min), calls (10/15min), webhooks (500/1min)
+- [x] API key authentication (`DONNA_API_KEY` env var, dev-mode passthrough)
+- [x] Twilio webhook signature validation (skipped in local dev)
+- [x] Input validation on all POST/PATCH routes (express-validator)
+- [x] Centralized error handler (never leaks internal error details)
+- [x] PII-safe logger with auto-masking (phone, names, content)
+- [x] Request body size limits (1MB)
+
+**New Files:**
+```
+middleware/
+├── security.js       ← Helmet + request ID
+├── rate-limit.js     ← 3-tier rate limiting
+├── twilio-auth.js    ← Webhook signature validation
+├── api-auth.js       ← API key auth (Bearer token)
+├── validation.js     ← Input validation schemas
+└── error-handler.js  ← Validation checker + error handler
+lib/
+├── logger.js         ← PII-safe structured logger
+└── sanitize.js       ← Phone/name/content masking
+```
+
+**Security Notes:**
+- Set `DONNA_API_KEY` in production to enable API auth
+- Twilio auth auto-enables when `RAILWAY_PUBLIC_DOMAIN` is set
+- All service files now use PII-safe logger (no raw phone/name in logs)
+
+---
+
 ## Upcoming Work
 
 ### Cost Optimization: Telnyx Migration
@@ -118,7 +156,7 @@
 - [ ] Integrate Clerk authentication
 - [ ] Create caregiver-senior relationships
 - [ ] Filter data by assigned seniors
-- [ ] Protect API routes
+- [x] ~~Protect API routes~~ (done via API key auth in Security Hardening)
 
 ---
 
@@ -240,6 +278,8 @@ Cache static parts of system prompt, pay only 10% for cached reads.
 | Scheduler | `services/scheduler.js` |
 | Admin UI | `public/admin.html` |
 | Observability | `apps/observability/` |
+| Security Middleware | `middleware/` (auth, validation, rate-limit, headers) |
+| PII-Safe Logger | `lib/logger.js`, `lib/sanitize.js` |
 
 ## Documentation
 

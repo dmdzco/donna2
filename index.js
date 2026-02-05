@@ -17,10 +17,23 @@ import { db } from './db/client.js';
 import { reminders, seniors, conversations } from './db/schema.js';
 import { eq, desc, gte, and, sql } from 'drizzle-orm';
 
+// Security middleware
+import { securityHeaders, requestId } from './middleware/security.js';
+import { apiLimiter, callLimiter, webhookLimiter } from './middleware/rate-limit.js';
+import { validateTwilioWebhook } from './middleware/twilio-auth.js';
+import { requireApiKey } from './middleware/api-auth.js';
+import { validate } from './middleware/error-handler.js';
+import { errorHandler } from './middleware/error-handler.js';
+import * as validators from './middleware/validation.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
+
+// Security: request ID tracking + security headers
+app.use(requestId());
+app.use(securityHeaders());
 
 // CORS - allow admin dashboard, observability, and local development
 app.use(cors({
@@ -34,11 +47,17 @@ app.use(cors({
   credentials: true,
 }));
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(express.json({ limit: '1mb' }));
 
 // Serve static files (admin UI)
 app.use(express.static(join(__dirname, 'public')));
+
+// Security: API key auth + rate limiting for /api/* routes
+app.use('/api', requireApiKey, apiLimiter);
+
+// Security: Twilio webhook validation + rate limiting for /voice/* routes
+app.use('/voice', webhookLimiter, validateTwilioWebhook);
 
 const PORT = process.env.PORT || 3001;
 const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -200,12 +219,8 @@ app.post('/voice/status', async (req, res) => {
 });
 
 // API: Initiate outbound call
-app.post('/api/call', async (req, res) => {
+app.post('/api/call', callLimiter, validators.initiateCall, validate, async (req, res) => {
   const { phoneNumber } = req.body;
-
-  if (!phoneNumber) {
-    return res.status(400).json({ error: 'phoneNumber required' });
-  }
 
   try {
     // PRE-FETCH: Look up senior and build context BEFORE calling Twilio
@@ -227,7 +242,7 @@ app.post('/api/call', async (req, res) => {
 
   } catch (error) {
     console.error('Failed to initiate call:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -245,20 +260,20 @@ app.post('/api/calls/:callSid/end', async (req, res) => {
     await twilioClient.calls(req.params.callSid).update({ status: 'completed' });
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
 // === SENIOR MANAGEMENT APIs ===
 
 // Create a senior profile
-app.post('/api/seniors', async (req, res) => {
+app.post('/api/seniors', validators.createSenior, validate, async (req, res) => {
   try {
     const senior = await seniorService.create(req.body);
     res.json(senior);
   } catch (error) {
     console.error('Failed to create senior:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -268,7 +283,7 @@ app.get('/api/seniors', async (req, res) => {
     const seniors = await seniorService.list();
     res.json(seniors);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -281,24 +296,24 @@ app.get('/api/seniors/:id', async (req, res) => {
     }
     res.json(senior);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
 // Update senior
-app.patch('/api/seniors/:id', async (req, res) => {
+app.patch('/api/seniors/:id', validators.updateSenior, validate, async (req, res) => {
   try {
     const senior = await seniorService.update(req.params.id, req.body);
     res.json(senior);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
 // === MEMORY APIs ===
 
 // Store a memory for a senior
-app.post('/api/seniors/:id/memories', async (req, res) => {
+app.post('/api/seniors/:id/memories', validators.createMemory, validate, async (req, res) => {
   const { type, content, importance } = req.body;
   try {
     const memory = await memoryService.store(
@@ -311,12 +326,12 @@ app.post('/api/seniors/:id/memories', async (req, res) => {
     res.json(memory);
   } catch (error) {
     console.error('Failed to store memory:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
 // Search memories for a senior
-app.get('/api/seniors/:id/memories/search', async (req, res) => {
+app.get('/api/seniors/:id/memories/search', validators.searchMemories, validate, async (req, res) => {
   const { q, limit } = req.query;
   try {
     const memories = await memoryService.search(
@@ -326,7 +341,7 @@ app.get('/api/seniors/:id/memories/search', async (req, res) => {
     );
     res.json(memories);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -336,7 +351,7 @@ app.get('/api/seniors/:id/memories', async (req, res) => {
     const memories = await memoryService.getRecent(req.params.id, 20);
     res.json(memories);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -348,7 +363,7 @@ app.get('/api/seniors/:id/conversations', async (req, res) => {
     const convos = await conversationService.getForSenior(req.params.id, 20);
     res.json(convos);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -358,7 +373,7 @@ app.get('/api/conversations', async (req, res) => {
     const convos = await conversationService.getRecent(50);
     res.json(convos);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -387,12 +402,12 @@ app.get('/api/reminders', async (req, res) => {
     .orderBy(desc(reminders.createdAt));
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
 // Create a reminder
-app.post('/api/reminders', async (req, res) => {
+app.post('/api/reminders', validators.createReminder, validate, async (req, res) => {
   try {
     const { seniorId, type, title, description, scheduledTime, isRecurring, cronExpression } = req.body;
     const [reminder] = await db.insert(reminders).values({
@@ -406,12 +421,12 @@ app.post('/api/reminders', async (req, res) => {
     }).returning();
     res.json(reminder);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
 // Update a reminder
-app.patch('/api/reminders/:id', async (req, res) => {
+app.patch('/api/reminders/:id', validators.updateReminder, validate, async (req, res) => {
   try {
     const { title, description, scheduledTime, isRecurring, cronExpression, isActive } = req.body;
     const updateData = {};
@@ -428,7 +443,7 @@ app.patch('/api/reminders/:id', async (req, res) => {
       .returning();
     res.json(reminder);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -438,7 +453,7 @@ app.delete('/api/reminders/:id', async (req, res) => {
     await db.delete(reminders).where(eq(reminders.id, req.params.id));
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -500,7 +515,7 @@ app.get('/api/stats', async (req, res) => {
       recentCalls,
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -549,7 +564,7 @@ app.get('/api/observability/calls', async (req, res) => {
     res.json({ calls: formattedCalls });
   } catch (error) {
     console.error('Error fetching calls:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -575,7 +590,7 @@ app.get('/api/observability/active', async (req, res) => {
     res.json({ activeCalls });
   } catch (error) {
     console.error('Error fetching active calls:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -622,7 +637,7 @@ app.get('/api/observability/calls/:id', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching call:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -696,7 +711,7 @@ app.get('/api/observability/calls/:id/timeline', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching timeline:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -723,7 +738,7 @@ app.get('/api/observability/calls/:id/turns', async (req, res) => {
     res.json({ turns });
   } catch (error) {
     console.error('Error fetching turns:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
 
@@ -771,9 +786,12 @@ app.get('/api/observability/calls/:id/observer', async (req, res) => {
     res.json({ signals, aggregates });
   } catch (error) {
     console.error('Error fetching observer data:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An internal error occurred' });
   }
 });
+
+// Centralized error handler - MUST be last middleware
+app.use(errorHandler);
 
 // Create HTTP server
 const server = createServer(app);

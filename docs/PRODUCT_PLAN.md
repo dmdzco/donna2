@@ -337,6 +337,23 @@ Reduced V1 pipeline latency from ~1.5s to ~400ms time-to-first-audio.
 
 ---
 
+### 11.5. Security Hardening ✅ **Implemented**
+Comprehensive API security layer.
+
+- **Components:**
+  - [x] Helmet security headers (CSP, HSTS, X-Frame-Options)
+  - [x] Request ID tracking (X-Request-Id)
+  - [x] 3-tier rate limiting (API: 100/15min, calls: 10/15min, webhooks: 500/1min)
+  - [x] API key authentication (DONNA_API_KEY env var)
+  - [x] Twilio webhook signature validation
+  - [x] Input validation on all POST/PATCH routes (express-validator)
+  - [x] Centralized error handler (no internal error leaks)
+  - [x] PII-safe logger (auto-masks phone numbers, names, content)
+  - [x] Request body size limits (1MB)
+- **Files:** `middleware/`, `lib/logger.js`, `lib/sanitize.js`
+
+---
+
 ### 12. Caregiver Authentication 📋 **Planned**
 Secure multi-user access with login system.
 
@@ -348,7 +365,7 @@ Secure multi-user access with login system.
   ```
 - **Features:**
   - [ ] Login/logout UI
-  - [ ] Protected API routes
+  - [x] ~~Protected API routes~~ (done in Security Hardening)
   - [ ] Data filtering by caregiver assignment
   - [ ] Invite system for family members
 
@@ -562,6 +579,7 @@ Connect with Alexa, Google Home, smart displays.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **3.2** | Feb 5, 2026 | Security hardening: auth, validation, rate limiting, PII-safe logging |
 | **3.1** | Jan 20, 2026 | Conversation Director architecture (2-layer + post-call), extensive Quick Observer regex, post-call analysis |
 | **2.5** | Jan 20, 2026 | Barge-in support, queue clearing, streaming pipeline |
 | **2.4** | Jan 18, 2026 | Claude + Observer + ElevenLabs pipeline |
@@ -676,6 +694,9 @@ Connect with Alexa, Google Home, smart displays.
 | Feature Area | Key Files |
 |--------------|-----------|
 | Main Server | `index.js` |
+| Security Middleware | `middleware/security.js`, `middleware/rate-limit.js`, `middleware/api-auth.js`, `middleware/twilio-auth.js` |
+| Input Validation | `middleware/validation.js`, `middleware/error-handler.js` |
+| PII-Safe Logger | `lib/logger.js`, `lib/sanitize.js` |
 | Voice Pipeline | `pipelines/v1-advanced.js` |
 | Layer 1: Quick Observer | `pipelines/quick-observer.js` |
 | Layer 2: Conversation Director | `pipelines/fast-observer.js` |

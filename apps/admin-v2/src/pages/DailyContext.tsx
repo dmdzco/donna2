@@ -54,7 +54,7 @@ export default function DailyContext() {
         />
         <button
           onClick={loadData}
-          className="bg-gradient-to-br from-admin-primary to-admin-primary-dark text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:-translate-y-0.5 hover:shadow-card-hover transition-all"
+          className="bg-admin-accent hover:bg-admin-accent-hover text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:-translate-y-0.5 hover:shadow-card-hover transition-all"
         >
           Filter
         </button>

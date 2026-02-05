@@ -235,7 +235,7 @@ export default function Reminders() {
             <button
               type="submit"
               disabled={submitting}
-              className="bg-gradient-to-br from-admin-primary to-admin-primary-dark text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:-translate-y-0.5 hover:shadow-card-hover transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
+              className="bg-admin-accent hover:bg-admin-accent-hover text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:-translate-y-0.5 hover:shadow-card-hover transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
             >
               {submitting ? 'Adding...' : 'Add Reminder'}
             </button>

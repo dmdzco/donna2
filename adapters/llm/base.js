@@ -18,7 +18,7 @@ export class LLMAdapter {
    * @param {object} options - Generation options
    * @param {number} options.maxTokens - Maximum tokens to generate
    * @param {number} options.temperature - Temperature (0-1)
-   * @returns {Promise<string>} Generated text
+   * @returns {Promise<{text: string, usage: {inputTokens: number, outputTokens: number}}>} Generated text with token usage
    */
   async generate(systemPrompt, messages, options = {}) {
     throw new Error(`generate() not implemented for ${this.constructor.name}`);
@@ -30,7 +30,7 @@ export class LLMAdapter {
    * @param {Array<{role: string, content: string}>} messages - Conversation history
    * @param {object} options - Generation options
    * @param {function(string): void} onChunk - Callback for each text chunk
-   * @returns {Promise<string>} Full generated text
+   * @returns {Promise<{text: string, usage: {inputTokens: number, outputTokens: number}}>} Full generated text with token usage
    */
   async stream(systemPrompt, messages, options = {}, onChunk = () => {}) {
     throw new Error(`stream() not implemented for ${this.constructor.name}`);

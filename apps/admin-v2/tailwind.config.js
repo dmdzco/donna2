@@ -8,27 +8,29 @@ export default {
     extend: {
       colors: {
         admin: {
-          primary: '#667eea',
-          'primary-dark': '#764ba2',
-          bg: '#f5f5f5',
+          primary: '#4A5D4F',
+          'primary-dark': '#3A4A3E',
+          bg: '#FDFCF8',
           card: '#ffffff',
-          text: '#333333',
-          'text-light': '#666666',
+          text: '#1A1A1A',
+          'text-light': '#555555',
           'text-muted': '#888888',
-          border: '#e0e0e0',
-          success: '#27ae60',
-          warning: '#f39c12',
-          danger: '#e74c3c',
-          tag: '#e8e8ff',
+          border: '#E5E7EB',
+          success: '#4A5D4F',
+          warning: '#D4A843',
+          danger: '#C45B52',
+          tag: '#EBF0EC',
+          accent: '#E8A0A0',
+          'accent-hover': '#D89090',
         },
       },
       fontFamily: {
         sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
       },
       boxShadow: {
-        'card': '0 2px 8px rgba(0, 0, 0, 0.08)',
-        'card-hover': '0 4px 12px rgba(102, 126, 234, 0.4)',
-        'float': '0 20px 60px rgba(0, 0, 0, 0.3)',
+        'card': '0 4px 20px rgba(0, 0, 0, 0.05)',
+        'card-hover': '0 4px 12px rgba(74, 93, 79, 0.25)',
+        'float': '0 10px 40px rgba(0, 0, 0, 0.08)',
       },
       keyframes: {
         'fade-in-up': {

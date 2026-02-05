@@ -19,7 +19,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="max-w-[1100px] mx-auto p-5">
       {/* Header */}
-      <header className="bg-gradient-to-br from-admin-primary to-admin-primary-dark text-white p-5 mb-5 rounded-xl flex justify-between items-center">
+      <header className="bg-admin-primary text-white p-5 mb-5 rounded-xl flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">Donna Admin</h1>
           <p className="text-white/90 text-sm">Manage seniors, calls, and reminders</p>

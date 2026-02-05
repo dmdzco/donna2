@@ -31,7 +31,7 @@ export default function Login() {
   }
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-admin-primary to-admin-primary-dark flex items-center justify-center">
+    <div className="fixed inset-0 bg-admin-primary flex items-center justify-center">
       <div className="bg-white rounded-2xl p-10 w-[90%] max-w-[400px] shadow-float">
         <h1 className="text-center text-2xl font-bold text-admin-text mb-2">Donna Admin</h1>
         <p className="text-center text-admin-text-muted text-sm mb-6">Sign in to manage your seniors</p>
@@ -67,7 +67,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gradient-to-br from-admin-primary to-admin-primary-dark text-white py-2.5 rounded-lg text-sm font-semibold hover:shadow-card-hover hover:-translate-y-0.5 transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
+            className="w-full bg-admin-accent hover:bg-admin-accent-hover text-white py-2.5 rounded-full text-sm font-semibold hover:-translate-y-0.5 transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
           >
             {loading ? 'Signing in...' : 'Sign In'}
           </button>

@@ -225,7 +225,7 @@ export default function Seniors() {
           <button
             type="submit"
             disabled={adding}
-            className="mt-4 bg-gradient-to-br from-admin-primary to-admin-primary-dark text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:-translate-y-0.5 hover:shadow-card-hover transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
+            className="mt-4 bg-admin-accent hover:bg-admin-accent-hover text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:-translate-y-0.5 hover:shadow-card-hover transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
           >
             {adding ? 'Adding...' : 'Add Senior'}
           </button>
@@ -261,7 +261,7 @@ export default function Seniors() {
               <div className="flex gap-1.5 shrink-0">
                 <button
                   onClick={() => handleCall(s)}
-                  className="bg-gradient-to-br from-admin-primary to-admin-primary-dark text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:-translate-y-0.5 hover:shadow-card-hover transition-all"
+                  className="bg-admin-accent hover:bg-admin-accent-hover text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:-translate-y-0.5 hover:shadow-card-hover transition-all"
                 >
                   Call
                 </button>
@@ -336,7 +336,7 @@ export default function Seniors() {
           <button
             onClick={handleEditSave}
             disabled={saving}
-            className="mt-4 bg-gradient-to-br from-admin-primary to-admin-primary-dark text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:-translate-y-0.5 hover:shadow-card-hover transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
+            className="mt-4 bg-admin-accent hover:bg-admin-accent-hover text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:-translate-y-0.5 hover:shadow-card-hover transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
           >
             {saving ? 'Saving...' : 'Save Changes'}
           </button>
@@ -385,7 +385,7 @@ export default function Seniors() {
               <button
                 onClick={handleAddMemory}
                 disabled={!newMemoryContent.trim()}
-                className="shrink-0 bg-gradient-to-br from-admin-primary to-admin-primary-dark text-white px-3 py-2.5 rounded-lg text-xs font-semibold hover:-translate-y-0.5 hover:shadow-card-hover transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
+                className="shrink-0 bg-admin-accent hover:bg-admin-accent-hover text-white px-3 py-2.5 rounded-lg text-xs font-semibold hover:-translate-y-0.5 hover:shadow-card-hover transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
               >
                 Add Memory
               </button>

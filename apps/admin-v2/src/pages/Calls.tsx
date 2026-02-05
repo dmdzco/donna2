@@ -86,8 +86,8 @@ export default function Calls() {
                 className={cn(
                   'rounded-lg px-3.5 py-2.5 text-sm leading-relaxed max-w-[85%]',
                   msg.role === 'assistant'
-                    ? 'bg-[#e8e8ff] text-admin-text'
-                    : 'bg-[#f0f0f0] text-admin-text'
+                    ? 'bg-admin-tag text-admin-text'
+                    : 'bg-gray-100 text-admin-text'
                 )}
               >
                 {msg.content}

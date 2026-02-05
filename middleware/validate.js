@@ -11,6 +11,9 @@ import { ZodError } from 'zod';
  * Format Zod errors into a user-friendly structure
  */
 function formatZodErrors(error) {
+  if (!error || !error.errors || !Array.isArray(error.errors)) {
+    return [{ field: 'unknown', message: error?.message || 'Validation failed', code: 'unknown' }];
+  }
   return error.errors.map(err => ({
     field: err.path.join('.') || 'body',
     message: err.message,

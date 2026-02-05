@@ -246,11 +246,12 @@ const callScheduleSchema = z.object({
 });
 
 export const onboardingSchema = z.object({
+  // Caregiver info is optional - we get it from Clerk auth
   caregiver: z.object({
     name: z.string().min(1).max(255).trim(),
     email: z.string().email().max(255),
     clerkUserId: z.string().max(255).optional(),
-  }),
+  }).optional(),
   senior: z.object({
     name: z.string().min(1).max(255).trim(),
     phone: phoneSchema,
@@ -260,11 +261,20 @@ export const onboardingSchema = z.object({
     timezone: timezoneSchema.optional(),
   }),
   relation: relationEnum,
-  interests: z.array(structuredInterestSchema).max(20).optional(),
+  // Accept interests as strings (topic names) or structured objects
+  interests: z.array(z.union([
+    z.string().max(100),
+    structuredInterestSchema,
+  ])).max(20).optional(),
   additionalInfo: z.string().max(5000).optional(),
   reminders: z.array(z.string().max(255)).max(20).optional(),
   updateTopics: z.array(z.string().max(100)).max(10).optional(),
   callSchedule: callScheduleSchema.optional(),
+  // Family info from frontend
+  familyInfo: z.object({
+    relation: z.string().optional(),
+    interestDetails: z.record(z.string()).optional(),
+  }).optional(),
 });
 
 // =============================================================================

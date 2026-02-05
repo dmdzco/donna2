@@ -23,6 +23,7 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
       summary: conversations.summary,
       sentiment: conversations.sentiment,
       concerns: conversations.concerns,
+      callMetrics: conversations.callMetrics,
     })
     .from(conversations)
     .leftJoin(seniors, eq(conversations.seniorId, seniors.id))
@@ -43,6 +44,7 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
       summary: call.summary,
       sentiment: call.sentiment,
       concerns: call.concerns,
+      call_metrics: call.callMetrics || null,
       turn_count: 0, // Will be populated from transcript if available
     }));
 
@@ -273,6 +275,46 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
     res.json({ signals, aggregates });
   } catch (error) {
     console.error('Error fetching observer data:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get call metrics (token usage, latency, cost)
+router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res) => {
+  try {
+    const [call] = await db.select({
+      transcript: conversations.transcript,
+      callMetrics: conversations.callMetrics,
+      durationSeconds: conversations.durationSeconds,
+    })
+    .from(conversations)
+    .where(eq(conversations.id, req.params.id));
+
+    if (!call) {
+      return res.status(404).json({ error: 'Call not found' });
+    }
+
+    // Extract per-turn metrics from transcript
+    const turnMetrics = [];
+    if (call.transcript && Array.isArray(call.transcript)) {
+      call.transcript.forEach((turn, index) => {
+        if (turn.metrics) {
+          turnMetrics.push({
+            turnIndex: index,
+            role: turn.role,
+            ...turn.metrics,
+          });
+        }
+      });
+    }
+
+    res.json({
+      turnMetrics,
+      callMetrics: call.callMetrics || null,
+      durationSeconds: call.durationSeconds,
+    });
+  } catch (error) {
+    console.error('Error fetching metrics:', error);
     res.status(500).json({ error: error.message });
   }
 });

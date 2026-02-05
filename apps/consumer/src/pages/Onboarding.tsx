@@ -59,8 +59,6 @@ export default function Onboarding() {
 
   const [expandedTopic, setExpandedTopic] = useState<string | null>(null);
 
-  const totalSteps = 6;
-
   const topicCategories: TopicCategory[] = [
     { id: 'Sports', icon: <Trophy size={24} />, question: "Which teams or players do they follow?", placeholder: "e.g., Detroit Lions, 1980s Celtics, Serena Williams..." },
     { id: 'History', icon: <History size={24} />, question: "Any specific eras or events they love?", placeholder: "e.g., WWII, Ancient Rome, Civil Rights Movement..." },

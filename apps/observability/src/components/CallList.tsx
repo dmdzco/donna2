@@ -104,6 +104,9 @@ function CallListItem({ call, isSelected, onClick }: CallListItemProps) {
         <span className="call-time">{formatTime(call.started_at)}</span>
         <span className="call-duration">{formatDuration(call.duration_seconds)}</span>
         <span className="turn-count">{call.turn_count || 0} turns</span>
+        {call.call_metrics?.estimatedCost != null && (
+          <span className="call-cost">${call.call_metrics.estimatedCost.toFixed(3)}</span>
+        )}
       </div>
       {call.concerns && call.concerns.length > 0 && (
         <div className="call-concerns">

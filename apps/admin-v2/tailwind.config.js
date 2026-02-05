@@ -8,8 +8,8 @@ export default {
     extend: {
       colors: {
         admin: {
-          primary: '#DA7756',
-          'primary-dark': '#C4664A',
+          primary: '#E8CFC6',
+          'primary-dark': '#D4B5A8',
           bg: '#FDFCF8',
           card: '#ffffff',
           text: '#1A1A1A',
@@ -19,9 +19,9 @@ export default {
           success: '#6B8F71',
           warning: '#D4A843',
           danger: '#C45B52',
-          tag: '#FDF0EA',
-          accent: '#DA7756',
-          'accent-hover': '#C4664A',
+          tag: '#F8EDE8',
+          accent: '#D49A7C',
+          'accent-hover': '#C48B6E',
         },
       },
       fontFamily: {
@@ -29,7 +29,7 @@ export default {
       },
       boxShadow: {
         'card': '0 4px 20px rgba(0, 0, 0, 0.05)',
-        'card-hover': '0 4px 12px rgba(218, 119, 86, 0.3)',
+        'card-hover': '0 4px 12px rgba(212, 154, 124, 0.25)',
         'float': '0 10px 40px rgba(0, 0, 0, 0.08)',
       },
       keyframes: {

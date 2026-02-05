@@ -574,6 +574,9 @@ app.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardingSc
       return res.status(400).json({ error: 'Clerk authentication required for onboarding' });
     }
 
+    // Get familyInfo from request body (contains interestDetails from frontend)
+    const { familyInfo: clientFamilyInfo } = req.body;
+
     // Prepare senior data with structured info in JSON fields
     const seniorCreateData = {
       name: seniorData.name,
@@ -583,15 +586,12 @@ app.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardingSc
       state: seniorData.state,
       zipCode: seniorData.zipCode,
       additionalInfo,
-      // Store interests as flat array (topics only)
-      interests: interests?.map(i => i.topic) || [],
+      // Store interests as flat array (topics) - frontend sends strings
+      interests: interests || [],
       // Store interest details and other consumer data in familyInfo
       familyInfo: {
         relation,
-        interestDetails: interests?.reduce((acc, i) => {
-          if (i.details) acc[i.topic] = i.details;
-          return acc;
-        }, {}),
+        interestDetails: clientFamilyInfo?.interestDetails || {},
       },
       // Store call schedule and update preferences in preferredCallTimes
       preferredCallTimes: {

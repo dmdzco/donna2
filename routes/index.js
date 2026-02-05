@@ -15,6 +15,7 @@ import onboardingRoutes from './onboarding.js';
 import caregiverRoutes from './caregivers.js';
 import statsRoutes from './stats.js';
 import observabilityRoutes from './observability.js';
+import adminAuthRoutes from './admin-auth.js';
 
 export function mountRoutes(app) {
   app.use(healthRoutes);
@@ -28,4 +29,5 @@ export function mountRoutes(app) {
   app.use(caregiverRoutes);
   app.use(statsRoutes);
   app.use(observabilityRoutes);
+  app.use(adminAuthRoutes);
 }

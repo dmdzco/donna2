@@ -374,6 +374,17 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="main-content">
+        {/* No Senior State */}
+        {!activeSenior && (
+          <div className="no-senior-state">
+            <h1>No Senior Profile Found</h1>
+            <p>It looks like you haven't completed the onboarding process yet.</p>
+            <button className="add-btn-primary" onClick={() => navigate('/onboarding')}>
+              Complete Onboarding
+            </button>
+          </div>
+        )}
+
         {activeTab === 'dashboard' && activeSenior && (
           <>
             <div className="dashboard-header">

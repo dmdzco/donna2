@@ -8,6 +8,9 @@
 import { clerkMiddleware, getAuth, clerkClient } from '@clerk/express';
 import jwt from 'jsonwebtoken';
 
+if (!process.env.JWT_SECRET && process.env.RAILWAY_PUBLIC_DOMAIN) {
+  throw new Error('JWT_SECRET environment variable is required in production');
+}
 const JWT_SECRET = process.env.JWT_SECRET || 'donna-admin-secret-change-me';
 
 // Cofounder API keys from environment (comma-separated)

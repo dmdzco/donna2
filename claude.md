@@ -36,16 +36,17 @@
 - **Greeting Rotation** - 24 time-based templates with context-aware followups
 - **In-Call Reminder Tracking** - Delivery tracking with acknowledgment detection
 - **Graceful Call Ending** - Goodbye signal detection + Twilio-based termination
-- **Route Extraction** - 13 modular route files + websocket handler
+- **Route Extraction** - 16 modular route files + websocket handler
+- **Admin Dashboard Auth** - JWT-based login with admin_users table (bcrypt passwords)
+- **Admin Dashboard** - Static HTML with 7 tabs: Dashboard, Seniors, Calls, Reminders, Call Analyses, Caregivers, Daily Context
 - Real-time voice calls (Twilio Media Streams)
 - Speech transcription (Deepgram STT)
 - Memory system with semantic search (pgvector)
 - News updates via OpenAI web search
 - Scheduled reminder calls
-- Admin dashboard (React)
 - Consumer app (caregiver onboarding + dashboard)
 - Observability dashboard (React)
-- Security: Clerk auth, Zod validation, rate limiting, Twilio webhook verification
+- Security: Clerk auth, JWT admin auth, Zod validation, rate limiting, Twilio webhook verification
 
 ---
 
@@ -121,9 +122,12 @@ The Director proactively guides each call:
 │   ├── conversations.js        ← Conversation history
 │   ├── reminders.js            ← Reminder CRUD
 │   ├── onboarding.js           ← Consumer app onboarding
-│   ├── caregivers.js           ← Caregiver management
+│   ├── caregivers.js           ← Caregiver management + admin list
 │   ├── stats.js                ← Dashboard statistics
-│   └── observability.js        ← Observability data
+│   ├── observability.js        ← Observability data
+│   ├── admin-auth.js           ← Admin login + JWT auth
+│   ├── call-analyses.js        ← Post-call analysis data
+│   └── daily-context.js        ← Cross-call daily context data
 ├── websocket/
 │   └── media-stream.js         ← Twilio + Browser WebSocket handlers
 ├── pipelines/
@@ -146,7 +150,7 @@ The Director proactively guides each call:
 │   ├── scheduler.js            ← Reminder scheduler
 │   └── news.js                 ← News via OpenAI web search
 ├── middleware/
-│   ├── auth.js                 ← Clerk authentication
+│   ├── auth.js                 ← Clerk + JWT + cofounder auth
 │   ├── rate-limit.js           ← Rate limiting
 │   ├── twilio.js               ← Webhook signature verification
 │   └── validate.js             ← Zod validation middleware
@@ -154,8 +158,10 @@ The Director proactively guides each call:
 │   └── schemas.js              ← Zod schemas for all API inputs
 ├── db/
 │   ├── client.js               ← Database connection (Neon + Drizzle)
-│   ├── schema.js               ← Database schema (8 tables, Drizzle ORM)
+│   ├── schema.js               ← Database schema (9 tables, Drizzle ORM)
 │   └── setup-pgvector.js       ← pgvector initialization
+├── scripts/
+│   └── create-admin.js         ← Seed script for admin users
 ├── packages/
 │   ├── logger/                 ← TypeScript logging package
 │   └── event-bus/              ← TypeScript event bus package
@@ -190,8 +196,12 @@ The Director proactively guides each call:
 | Modify in-call memory tracking | `pipelines/v1-advanced.js` (extractConversationElements, trackTopicsFromSignals) |
 | Modify cross-call daily context | `services/daily-context.js` |
 | Modify goodbye/call ending | `pipelines/v1-advanced.js` + `pipelines/quick-observer.js` |
-| Update admin UI | `apps/admin/src/pages/*` (React) |
-| Update admin API client | `apps/admin/src/lib/api.ts` |
+| Update admin UI | `public/admin.html` (static HTML) |
+| Update admin API client | `public/admin.html` (authFetch in script) |
+| Admin authentication | `routes/admin-auth.js` + `middleware/auth.js` |
+| Call analyses data | `routes/call-analyses.js` |
+| Daily context data | `routes/daily-context.js` |
+| Create admin user | `node scripts/create-admin.js email password name` |
 | Database changes | `db/schema.js` |
 
 ### Documentation Updates
@@ -240,6 +250,7 @@ DEEPGRAM_API_KEY=...        # STT
 V1_STREAMING_ENABLED=true   # Set to 'false' to disable streaming
 VOICE_MODEL=claude-sonnet   # Main voice model
 FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
+JWT_SECRET=...              # Admin dashboard JWT signing key
 ```
 
 ---

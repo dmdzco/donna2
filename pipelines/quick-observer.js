@@ -771,7 +771,7 @@ function buildModelRecommendation(analysis) {
   if (criticalEndOfLife.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 250,
+      max_tokens: 350,
       reason: 'crisis_support'
     };
   }
@@ -781,7 +781,7 @@ function buildModelRecommendation(analysis) {
   if (highSeveritySafety.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 200,
+      max_tokens: 300,
       reason: 'safety_concern'
     };
   }
@@ -791,7 +791,7 @@ function buildModelRecommendation(analysis) {
   if (highSeverityADL.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 180,
+      max_tokens: 250,
       reason: 'functional_concern'
     };
   }
@@ -801,7 +801,7 @@ function buildModelRecommendation(analysis) {
   if (highSeverityCognitive.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 180,
+      max_tokens: 250,
       reason: 'cognitive_concern'
     };
   }
@@ -811,7 +811,7 @@ function buildModelRecommendation(analysis) {
   if (highSeverityHydration.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 160,
+      max_tokens: 220,
       reason: 'nutrition_concern'
     };
   }
@@ -821,7 +821,7 @@ function buildModelRecommendation(analysis) {
   if (highSeverityHealth.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 180,
+      max_tokens: 250,
       reason: 'health_safety'
     };
   }
@@ -831,7 +831,7 @@ function buildModelRecommendation(analysis) {
   if (mediumSeverityHealth.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 150,
+      max_tokens: 200,
       reason: 'health_mention'
     };
   }
@@ -840,7 +840,7 @@ function buildModelRecommendation(analysis) {
   if (analysis.endOfLifeSignals.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 180,
+      max_tokens: 250,
       reason: 'end_of_life_topic'
     };
   }
@@ -850,7 +850,7 @@ function buildModelRecommendation(analysis) {
   if (mediumSeverityADL.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 140,
+      max_tokens: 200,
       reason: 'functional_mention'
     };
   }
@@ -860,7 +860,7 @@ function buildModelRecommendation(analysis) {
   if (mediumSeverityCognitive.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 140,
+      max_tokens: 200,
       reason: 'cognitive_mention'
     };
   }
@@ -870,7 +870,7 @@ function buildModelRecommendation(analysis) {
   if (highSeverityTransport.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 150,
+      max_tokens: 200,
       reason: 'mobility_isolation'
     };
   }
@@ -879,7 +879,7 @@ function buildModelRecommendation(analysis) {
   if (analysis.helpRequestSignals.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 150,
+      max_tokens: 200,
       reason: 'help_request'
     };
   }
@@ -891,7 +891,7 @@ function buildModelRecommendation(analysis) {
   if (highIntensityNegative.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 180,
+      max_tokens: 250,
       reason: 'emotional_support'
     };
   }
@@ -903,7 +903,7 @@ function buildModelRecommendation(analysis) {
   if (mediumIntensityNegative.length > 0) {
     return {
       use_sonnet: true,
-      max_tokens: 150,
+      max_tokens: 200,
       reason: 'emotional_support'
     };
   }
@@ -912,7 +912,7 @@ function buildModelRecommendation(analysis) {
   if (analysis.engagementLevel === 'low') {
     return {
       use_sonnet: true,
-      max_tokens: 130,
+      max_tokens: 180,
       reason: 'low_engagement'
     };
   }
@@ -921,7 +921,7 @@ function buildModelRecommendation(analysis) {
   if (analysis.timeSignals.includes('reminiscing') || analysis.timeSignals.includes('childhood_memory')) {
     return {
       use_sonnet: false,
-      max_tokens: 120,
+      max_tokens: 170,
       reason: 'memory_sharing'
     };
   }
@@ -930,7 +930,7 @@ function buildModelRecommendation(analysis) {
   if (analysis.engagementLevel === 'high') {
     return {
       use_sonnet: false,
-      max_tokens: 100,
+      max_tokens: 150,
       reason: 'high_engagement'
     };
   }
@@ -939,7 +939,7 @@ function buildModelRecommendation(analysis) {
   if (analysis.isQuestion && analysis.healthSignals.length === 0 && highIntensityNegative.length === 0) {
     return {
       use_sonnet: false,
-      max_tokens: 80,
+      max_tokens: 100,
       reason: 'simple_question'
     };
   }
@@ -948,7 +948,7 @@ function buildModelRecommendation(analysis) {
   if (analysis.familySignals.length > 0) {
     return {
       use_sonnet: false,
-      max_tokens: 100,
+      max_tokens: 150,
       reason: 'family_warmth'
     };
   }

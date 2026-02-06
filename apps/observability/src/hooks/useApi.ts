@@ -40,8 +40,9 @@ async function fetchJson<T>(url: string): Promise<T> {
     headers['Authorization'] = `Bearer ${token}`;
   }
   const response = await fetch(url, { headers });
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 403) {
     clearToken();
+    window.location.reload();
     throw new Error('AUTH_EXPIRED');
   }
   if (!response.ok) {

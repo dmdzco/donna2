@@ -5,7 +5,7 @@ Port of services/conversations.js — CRUD for call records + summary/transcript
 
 import json
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from loguru import logger
 from db import query_one, query_many, execute
 
@@ -18,7 +18,7 @@ async def create(senior_id: str, call_sid: str) -> dict:
            RETURNING *""",
         senior_id,
         call_sid,
-        datetime.now(timezone.utc),
+        datetime.now(timezone.utc).replace(tzinfo=None),
     )
     logger.info("Created conversation {id} callSid={cs}", id=row["id"], cs=call_sid)
     return row
@@ -103,10 +103,13 @@ async def get_recent_summaries(senior_id: str, limit: int = 3) -> str | None:
     if not rows:
         return None
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     lines = []
     for row in rows:
-        delta = now - row["started_at"]
+        started_at = row["started_at"]
+        if started_at.tzinfo is not None:
+            started_at = started_at.replace(tzinfo=None)
+        delta = now - started_at
         days_ago = delta.days
         if days_ago == 0:
             time_ago = "Earlier today"

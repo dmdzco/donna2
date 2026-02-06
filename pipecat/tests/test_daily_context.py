@@ -7,9 +7,11 @@ from services.daily_context import (
 
 
 class TestGetStartOfDay:
-    def test_returns_utc(self):
+    def test_returns_naive_utc(self):
         result = _get_start_of_day("America/New_York")
-        assert result.tzinfo is not None
+        # Returns naive datetime (tzinfo stripped for asyncpg compatibility)
+        assert result.tzinfo is None
+        assert result.hour >= 0  # Sanity: valid datetime
 
     def test_invalid_timezone_fallback(self):
         result = _get_start_of_day("Invalid/Timezone")

@@ -19,7 +19,8 @@ def _get_start_of_day(tz_name: str = "America/New_York") -> datetime:
 
     now = datetime.now(tz)
     midnight_local = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    return midnight_local.astimezone(timezone.utc)
+    # Strip tzinfo — DB columns are `timestamp` (naive), asyncpg rejects aware datetimes
+    return midnight_local.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 async def save_call_context(senior_id: str, call_sid: str, data: dict) -> dict | None:

@@ -37,6 +37,7 @@ app.use(cors({
     'https://admin-v2-liart.vercel.app',
     'https://consumer-ruddy.vercel.app',
     'https://observability-production-3677.up.railway.app',
+    'https://observability-five.vercel.app',
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',  // Observability dashboard (local)

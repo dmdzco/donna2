@@ -35,7 +35,7 @@ def _calculate_effective_importance(
     last_accessed_at: datetime | None,
 ) -> int:
     """Apply exponential decay + recent-access boost."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     age_days = (now - created_at).total_seconds() / 86400
     decay_factor = math.pow(0.5, age_days / DECAY_HALF_LIFE_DAYS)
     effective = base_importance * decay_factor

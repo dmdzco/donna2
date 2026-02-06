@@ -81,10 +81,6 @@ export default function Landing() {
       {/* Hero Section */}
       <section className="pt-32 pb-20 px-6">
         <div className="max-w-4xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 bg-card-beige px-4 py-2 rounded-full text-sm text-gray-600 mb-8">
-            <span className="w-2 h-2 bg-accent-pink rounded-full"></span>
-            Featured on TechCrunch & Forbes
-          </div>
           <h1 className="text-5xl md:text-6xl font-bold text-text-primary mb-6 leading-tight">
             Stay Connected with<br />
             <span className="text-sage-green">Your Loved Ones</span>

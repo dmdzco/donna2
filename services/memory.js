@@ -52,11 +52,16 @@ export const memoryService = {
   async generateEmbedding(text) {
     const client = getOpenAI();
     if (!client) return null;
-    const response = await client.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: text,
-    });
-    return response.data[0].embedding;
+    try {
+      const response = await client.embeddings.create({
+        model: 'text-embedding-3-small',
+        input: text,
+      });
+      return response.data[0].embedding;
+    } catch (error) {
+      log.error('Embedding generation failed', { error: error.message });
+      return null;
+    }
   },
 
   // Store a new memory with embedding (with deduplication)

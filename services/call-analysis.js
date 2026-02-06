@@ -146,6 +146,11 @@ export async function analyzeCompletedCall(transcript, seniorContext) {
       temperature: 0.2,
     });
 
+    if (!text || typeof text !== 'string') {
+      console.log('[CallAnalysis] No valid response from adapter');
+      return getDefaultAnalysis();
+    }
+
     // Parse JSON response (handle markdown, extra text)
     let jsonText = text.trim();
     if (jsonText.includes('```')) {

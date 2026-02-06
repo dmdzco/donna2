@@ -791,11 +791,12 @@ class QuickObserverProcessor(FrameProcessor):
             if len(self._recent_history) > 10:
                 self._recent_history = self._recent_history[-10:]
 
-            # Inject guidance into LLM context if there is any
+            # Inject guidance into LLM context if there is any.
+            # Use "user" role — Anthropic rejects "system" in the messages array.
             if analysis.guidance:
                 guidance_msg = {
-                    "role": "system",
-                    "content": f"<guidance>\n{analysis.guidance}\n</guidance>",
+                    "role": "user",
+                    "content": f"[Internal guidance — do not read aloud]\n{analysis.guidance}",
                 }
                 await self.push_frame(
                     LLMMessagesAppendFrame(messages=[guidance_msg], run_llm=False)

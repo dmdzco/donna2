@@ -4,6 +4,7 @@ Port of services/daily-context.js — tracks what happened in each call
 so subsequent calls on the same day don't repeat topics/reminders/advice.
 """
 
+import json
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from loguru import logger
@@ -43,7 +44,7 @@ async def save_call_context(senior_id: str, call_sid: str, data: dict) -> dict |
             data.get("topics_discussed", []),
             data.get("reminders_delivered", []),
             data.get("advice_given", []),
-            data.get("key_moments", []),
+            json.dumps(data.get("key_moments", [])),
             data.get("summary"),
         )
         logger.info("Saved call context for senior {sid}, call {cs}", sid=senior_id, cs=call_sid)

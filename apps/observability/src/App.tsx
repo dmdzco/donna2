@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { CallList } from './components/CallList';
 import { CallTimeline } from './components/CallTimeline';
 import { ObserverPanel } from './components/ObserverPanel';
 import { MetricsPanel } from './components/MetricsPanel';
 import { LiveCallMonitor } from './components/LiveCallMonitor';
+import { LoginPage } from './components/LoginPage';
+import { getToken, clearToken } from './hooks/useApi';
 import type { Call } from './types';
 import './App.css';
 
@@ -11,9 +13,23 @@ type AppMode = 'history' | 'live';
 type ViewMode = 'timeline' | 'observer' | 'metrics';
 
 export default function App() {
+  const [authenticated, setAuthenticated] = useState<boolean>(!!getToken());
   const [appMode, setAppMode] = useState<AppMode>('history');
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('timeline');
+
+  useEffect(() => {
+    setAuthenticated(!!getToken());
+  }, []);
+
+  if (!authenticated) {
+    return <LoginPage onLogin={() => setAuthenticated(true)} />;
+  }
+
+  function handleLogout() {
+    clearToken();
+    setAuthenticated(false);
+  }
 
   return (
     <div className="app">
@@ -35,6 +51,9 @@ export default function App() {
             Live
           </button>
         </div>
+        <button className="logout-btn" onClick={handleLogout}>
+          Logout
+        </button>
       </header>
 
       {appMode === 'live' ? (

@@ -1,12 +1,49 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Call, Timeline, Turn, ObserverSummary, Continuity, MetricsData } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_URL
-  ? `${import.meta.env.VITE_API_URL}/api/observability`
-  : '/api/observability';
+const API_ROOT = import.meta.env.VITE_API_URL || '';
+const API_BASE = `${API_ROOT}/api/observability`;
+
+const TOKEN_KEY = 'donna_obs_token';
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+export async function login(email: string, password: string): Promise<string> {
+  const response = await fetch(`${API_ROOT}/api/admin/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Login failed');
+  }
+  const data = await response.json();
+  setToken(data.token);
+  return data.token;
+}
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const response = await fetch(url, { headers });
+  if (response.status === 401) {
+    clearToken();
+    throw new Error('AUTH_EXPIRED');
+  }
   if (!response.ok) {
     throw new Error(`API error: ${response.status}`);
   }

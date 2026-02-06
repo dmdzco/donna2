@@ -39,6 +39,7 @@ app.use(cors({
     'https://observability-production-3677.up.railway.app',
     'http://localhost:3000',
     'http://localhost:3001',
+    'http://localhost:3002',  // Observability dashboard (local)
     'http://localhost:5173',  // Admin dashboard (React)
     'http://localhost:5174',  // Consumer app (React)
     'http://localhost:5175',  // Admin v2 (React)

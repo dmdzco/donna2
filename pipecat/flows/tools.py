@@ -103,7 +103,7 @@ def make_tool_handlers(session_state: dict) -> dict:
     async def handle_search_memories(args: dict) -> dict:
         senior_id = session_state.get("senior_id")
         if not senior_id:
-            return {"status": "error", "error": "No senior context available"}
+            return {"status": "success", "result": "No memories available right now. Continue the conversation naturally."}
 
         query = args.get("query", "")
         logger.info("Tool: search_memories query={q} senior={sid}", q=query, sid=senior_id)
@@ -119,7 +119,7 @@ def make_tool_handlers(session_state: dict) -> dict:
             return {"status": "success", "result": formatted}
         except Exception as e:
             logger.error("search_memories error: {err}", err=str(e))
-            return {"status": "error", "error": str(e)}
+            return {"status": "success", "result": "Memory search is temporarily unavailable. Continue the conversation naturally — don't mention any technical issues."}
 
     async def handle_get_news(args: dict) -> dict:
         topic = args.get("topic", "")
@@ -133,7 +133,7 @@ def make_tool_handlers(session_state: dict) -> dict:
             return {"status": "success", "result": news}
         except Exception as e:
             logger.error("get_news error: {err}", err=str(e))
-            return {"status": "error", "error": str(e)}
+            return {"status": "success", "result": f"News search is temporarily unavailable. Continue the conversation naturally — don't mention any technical issues."}
 
     async def handle_mark_reminder(args: dict) -> dict:
         reminder_id = args.get("reminder_id", "")
@@ -151,7 +151,9 @@ def make_tool_handlers(session_state: dict) -> dict:
             return {"status": "success", "result": f"Reminder marked as {status}."}
         except Exception as e:
             logger.error("mark_reminder error: {err}", err=str(e))
-            return {"status": "error", "error": str(e)}
+            # Still track locally even if DB write failed
+            session_state.setdefault("reminders_delivered", set()).add(reminder_id)
+            return {"status": "success", "result": f"Reminder noted. Continue the conversation naturally."}
 
     async def handle_save_detail(args: dict) -> dict:
         senior_id = session_state.get("senior_id")
@@ -160,7 +162,7 @@ def make_tool_handlers(session_state: dict) -> dict:
         logger.info("Tool: save_detail category={c} senior={sid}", c=category, sid=senior_id)
 
         if not senior_id:
-            return {"status": "error", "error": "No senior context available"}
+            return {"status": "success", "result": "Detail noted for this conversation."}
 
         try:
             from services.memory import store
@@ -174,7 +176,7 @@ def make_tool_handlers(session_state: dict) -> dict:
             return {"status": "success", "result": f"Noted: {detail}"}
         except Exception as e:
             logger.error("save_detail error: {err}", err=str(e))
-            return {"status": "error", "error": str(e)}
+            return {"status": "success", "result": "Detail noted for this conversation. Continue naturally."}
 
     return {
         "search_memories": handle_search_memories,

@@ -10,22 +10,26 @@ from loguru import logger
 from db import query_one, query_many, execute
 
 
-async def create(data: dict) -> dict:
+async def create(senior_id: str, call_sid: str) -> dict:
     """Create a new conversation record."""
     row = await query_one(
         """INSERT INTO conversations (senior_id, call_sid, started_at, status)
            VALUES ($1, $2, $3, 'in_progress')
            RETURNING *""",
-        data.get("seniorId"),
-        data.get("callSid"),
-        data.get("startedAt") or datetime.now(timezone.utc),
+        senior_id,
+        call_sid,
+        datetime.now(timezone.utc),
     )
-    logger.info("Created conversation {id} callSid={cs}", id=row["id"], cs=data.get("callSid"))
+    logger.info("Created conversation {id} callSid={cs}", id=row["id"], cs=call_sid)
     return row
 
 
 async def complete(call_sid: str, data: dict) -> dict | None:
-    """Update a conversation when a call ends."""
+    """Update a conversation when a call ends.
+
+    Accepts snake_case keys: duration_seconds, status, summary, transcript,
+    call_metrics, sentiment, concerns.
+    """
     row = await query_one(
         """UPDATE conversations SET
              ended_at = NOW(),
@@ -38,17 +42,17 @@ async def complete(call_sid: str, data: dict) -> dict | None:
              concerns = $7
            WHERE call_sid = $8
            RETURNING *""",
-        data.get("durationSeconds"),
+        data.get("duration_seconds"),
         data.get("status", "completed"),
         data.get("summary"),
         json.dumps(data["transcript"]) if data.get("transcript") else None,
-        json.dumps(data["callMetrics"]) if data.get("callMetrics") else None,
+        json.dumps(data["call_metrics"]) if data.get("call_metrics") else None,
         data.get("sentiment"),
         data.get("concerns"),
         call_sid,
     )
     if row:
-        logger.info("Completed conversation {id} ({dur}s)", id=row["id"], dur=data.get("durationSeconds"))
+        logger.info("Completed conversation {id} ({dur}s)", id=row["id"], dur=data.get("duration_seconds"))
     return row
 
 

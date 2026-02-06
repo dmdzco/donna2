@@ -23,7 +23,11 @@ def _get_start_of_day(tz_name: str = "America/New_York") -> datetime:
 
 
 async def save_call_context(senior_id: str, call_sid: str, data: dict) -> dict | None:
-    """Save context from a completed call."""
+    """Save context from a completed call.
+
+    Accepts snake_case keys: topics_discussed, reminders_delivered,
+    advice_given, key_moments, summary, timezone.
+    """
     try:
         call_date = _get_start_of_day(data.get("timezone", "America/New_York"))
         row = await query_one(
@@ -35,10 +39,10 @@ async def save_call_context(senior_id: str, call_sid: str, data: dict) -> dict |
             senior_id,
             call_date,
             call_sid,
-            data.get("topicsDiscussed", []),
-            data.get("remindersDelivered", []),
-            data.get("adviceGiven", []),
-            data.get("keyMoments", []),
+            data.get("topics_discussed", []),
+            data.get("reminders_delivered", []),
+            data.get("advice_given", []),
+            data.get("key_moments", []),
             data.get("summary"),
         )
         logger.info("Saved call context for senior {sid}, call {cs}", sid=senior_id, cs=call_sid)

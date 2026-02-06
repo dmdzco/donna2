@@ -20,17 +20,19 @@ from starlette.websockets import WebSocket
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.utils import parse_telephony_websocket
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.transports.network.websocket_server import (
-    WebsocketServerTransport,
-    WebsocketServerParams,
+from pipecat.transports.websocket.fastapi import (
+    FastAPIWebsocketTransport,
+    FastAPIWebsocketParams,
 )
 from pipecat_flows import FlowManager
 
@@ -60,31 +62,54 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             - previous_calls_summary: str | None
             - todays_context: str | None
     """
-    call_sid = session_state.get("call_sid", "unknown")
-    senior_name = (session_state.get("senior") or {}).get("name", "unknown")
-    logger.info("[{cs}] Starting pipeline for {name}", cs=call_sid, name=senior_name)
-
     start_time = time.time()
 
     # -------------------------------------------------------------------------
     # Parse Twilio WebSocket handshake
     # -------------------------------------------------------------------------
-    call_data = await parse_telephony_websocket(websocket)
-    stream_sid = call_data.get("stream_sid", "")
-    logger.info("[{cs}] Stream connected: {ss}", cs=call_sid, ss=stream_sid)
+    transport_type, call_data = await parse_telephony_websocket(websocket)
+    stream_sid = call_data.get("stream_id", "")
+    call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "unknown")
+    session_state["call_sid"] = call_sid
 
-    # Merge any custom parameters from TwiML into session_state
+    logger.info("[{cs}] Stream connected: {ss} (type={tt})", cs=call_sid, ss=stream_sid, tt=transport_type)
+
+    # Populate session_state from call_metadata (pre-fetched by /voice/answer)
+    call_meta = session_state.get("_call_metadata", {})
+    metadata = call_meta.get(call_sid, {})
+    if metadata:
+        session_state.setdefault("senior", metadata.get("senior"))
+        session_state.setdefault("senior_id", (metadata.get("senior") or {}).get("id"))
+        session_state.setdefault("memory_context", metadata.get("memory_context"))
+        session_state.setdefault("conversation_id", metadata.get("conversation_id"))
+        session_state.setdefault("reminder_prompt", metadata.get("reminder_prompt"))
+        session_state.setdefault("call_type", metadata.get("call_type", "check-in"))
+        reminder_ctx = metadata.get("reminder_context")
+        if reminder_ctx:
+            session_state.setdefault("reminder_delivery", reminder_ctx.get("delivery"))
+        greeting = metadata.get("pre_generated_greeting")
+        if greeting:
+            session_state.setdefault("greeting", greeting)
+        logger.info("[{cs}] Populated session from call_metadata", cs=call_sid)
+
+    # Also merge custom parameters from TwiML <Stream> params
     body = call_data.get("body", {})
     if body.get("senior_id") and not session_state.get("senior_id"):
         session_state["senior_id"] = body["senior_id"]
     if body.get("conversation_id") and not session_state.get("conversation_id"):
         session_state["conversation_id"] = body["conversation_id"]
+    if body.get("call_type") and session_state.get("call_type") == "check-in":
+        session_state["call_type"] = body["call_type"]
+
+    senior_name = (session_state.get("senior") or {}).get("name", "unknown")
+    logger.info("[{cs}] Starting pipeline for {name}", cs=call_sid, name=senior_name)
 
     # -------------------------------------------------------------------------
-    # Transport (Twilio ↔ WebSocket)
+    # Transport (Twilio ↔ FastAPI WebSocket)
     # -------------------------------------------------------------------------
-    transport = WebsocketServerTransport(
-        params=WebsocketServerParams(
+    transport = FastAPIWebsocketTransport(
+        websocket=websocket,
+        params=FastAPIWebsocketParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
             add_wav_header=False,
@@ -153,9 +178,8 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     # -------------------------------------------------------------------------
     # Context aggregators (user ↔ assistant message pairing)
     # -------------------------------------------------------------------------
-    context_aggregator = llm.create_context_aggregator(
-        llm.create_context(system=None),
-    )
+    context = OpenAILLMContext()
+    context_aggregator = llm.create_context_aggregator(context)
 
     # -------------------------------------------------------------------------
     # Pipeline assembly
@@ -199,8 +223,6 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         task=task,
         llm=llm,
         context_aggregator=context_aggregator,
-        tts=tts,
-        flow_config=None,
         transport=transport,
         global_functions=global_tools,
     )
@@ -212,16 +234,16 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     # Event handlers
     # -------------------------------------------------------------------------
     @transport.event_handler("on_client_connected")
-    async def on_connected(transport, client):
+    async def on_connected(transport_ref, websocket_ref):
         logger.info("[{cs}] Client connected, initializing flow", cs=call_sid)
         await flow_manager.initialize(initial_node)
 
     @transport.event_handler("on_client_disconnected")
-    async def on_disconnected(transport, client):
+    async def on_disconnected(transport_ref, websocket_ref):
         elapsed = round(time.time() - start_time)
         logger.info("[{cs}] Client disconnected after {s}s", cs=call_sid, s=elapsed)
         await _run_post_call(session_state, conversation_tracker, elapsed)
-        await task.queue_frames([])  # Signal pipeline to end
+        await task.queue_frame(EndFrame())
 
     # -------------------------------------------------------------------------
     # Run pipeline
@@ -273,19 +295,24 @@ async def _run_post_call(
         # 3. Extract and store memories
         if transcript and senior_id:
             from services.memory import extract_from_conversation
-            await extract_from_conversation(senior_id, transcript)
+            await extract_from_conversation(
+                senior_id, transcript, conversation_id or "unknown"
+            )
 
         # 4. Save daily context
         if senior_id and conversation_tracker:
             from services.daily_context import save_call_context
+            senior = session_state.get("senior") or {}
             await save_call_context(
                 senior_id=senior_id,
-                call_data={
+                call_sid=call_sid,
+                data={
                     "topics_discussed": conversation_tracker.state.topics_discussed,
                     "advice_given": conversation_tracker.state.advice_given,
                     "reminders_delivered": list(
                         session_state.get("reminders_delivered", set())
                     ),
+                    "timezone": senior.get("timezone", "America/New_York"),
                 },
             )
 

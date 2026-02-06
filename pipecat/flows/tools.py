@@ -144,7 +144,7 @@ def make_tool_handlers(session_state: dict) -> dict:
         try:
             from services.scheduler import mark_reminder_acknowledged
             delivery = session_state.get("reminder_delivery")
-            delivery_id = delivery["id"] if delivery else None
+            delivery_id = delivery.get("id") if delivery else None
             if delivery_id:
                 await mark_reminder_acknowledged(delivery_id, status, user_response)
             session_state.setdefault("reminders_delivered", set()).add(reminder_id)
@@ -166,7 +166,7 @@ def make_tool_handlers(session_state: dict) -> dict:
             from services.memory import store
             await store(
                 senior_id=senior_id,
-                type=category,
+                type_=category,
                 content=detail,
                 source="conversation",
                 importance=70,

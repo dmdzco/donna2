@@ -31,3 +31,10 @@ npm-debug.log*
 # Test
 coverage/
 .turbo/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+pipecat/.venv/

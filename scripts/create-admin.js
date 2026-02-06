@@ -14,11 +14,21 @@ if (!email || !password) {
 
 const passwordHash = await bcrypt.hash(password, 12);
 
-const [admin] = await db.insert(adminUsers).values({
-  email,
-  passwordHash,
-  name,
-}).returning();
+try {
+  const [admin] = await db.insert(adminUsers).values({
+    email,
+    passwordHash,
+    name,
+  }).returning();
 
-console.log(`Admin created: ${admin.email} (${admin.id})`);
+  console.log(`Admin created: ${admin.email} (${admin.id})`);
+} catch (error) {
+  if (error.code === '23505' && error.constraint?.includes('email')) {
+    console.error(`Admin with email "${email}" already exists.`);
+  } else {
+    console.error('Failed to create admin:', error.message);
+  }
+  process.exit(1);
+}
+
 process.exit(0);

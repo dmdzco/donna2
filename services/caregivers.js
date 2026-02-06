@@ -3,8 +3,15 @@ import { caregivers, seniors } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
 
 export const caregiverService = {
-  // Link a Clerk user to a senior (creates caregiver assignment)
+  // Link a Clerk user to a senior (creates caregiver assignment, skips if already linked)
   async linkUserToSenior(clerkUserId, seniorId, role = 'caregiver') {
+    // Check if already linked
+    const existing = await this.getAssignment(clerkUserId, seniorId);
+    if (existing) {
+      console.log(`[Caregiver] User ${clerkUserId} already linked to senior ${seniorId}, skipping`);
+      return existing;
+    }
+
     const [assignment] = await db.insert(caregivers).values({
       clerkUserId,
       seniorId,

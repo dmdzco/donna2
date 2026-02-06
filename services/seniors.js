@@ -19,13 +19,22 @@ export const seniorService = {
 
   // Create a new senior
   async create(data) {
-    const [senior] = await db.insert(seniors).values({
-      ...data,
-      phone: data.phone.replace(/\D/g, '').slice(-10),
-    }).returning();
+    try {
+      const [senior] = await db.insert(seniors).values({
+        ...data,
+        phone: data.phone.replace(/\D/g, '').slice(-10),
+      }).returning();
 
-    log.info('Created senior', { name: senior.name, phone: senior.phone });
-    return senior;
+      log.info('Created senior', { name: senior.name, phone: senior.phone });
+      return senior;
+    } catch (error) {
+      if (error.code === '23505' && error.constraint?.includes('phone')) {
+        const err = new Error('This phone number is already registered for another senior');
+        err.status = 409;
+        throw err;
+      }
+      throw error;
+    }
   },
 
   // Update a senior

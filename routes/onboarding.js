@@ -78,12 +78,10 @@ router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardin
   } catch (error) {
     console.error('Onboarding failed:', error);
 
-    // Handle duplicate phone number
-    if (error.code === '23505' && error.constraint?.includes('phone')) {
-      return res.status(409).json({ error: 'This phone number is already registered for another senior' });
-    }
-
-    res.status(500).json({ error: 'Failed to complete onboarding. Please try again.' });
+    // Pass through service-level errors with status codes (e.g. duplicate phone 409)
+    const status = error.status || 500;
+    const message = status < 500 ? error.message : 'Failed to complete onboarding. Please try again.';
+    res.status(status).json({ error: message });
   }
 });
 

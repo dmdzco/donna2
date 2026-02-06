@@ -19,7 +19,9 @@ router.post('/api/seniors', requireAdmin, writeLimiter, validateBody(createSenio
     res.json(senior);
   } catch (error) {
     console.error('Failed to create senior:', error);
-    res.status(500).json({ error: error.message });
+    const status = error.status || 500;
+    const message = status < 500 ? error.message : 'Failed to create senior';
+    res.status(status).json({ error: message });
   }
 });
 

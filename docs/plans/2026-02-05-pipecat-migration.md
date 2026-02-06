@@ -10,6 +10,8 @@
 
 **Current codebase reference:** `docs/DONNA_ON_PIPECAT.md` has the full architecture and file mapping.
 
+**Development philosophy:** Railway-first. Never test voice pipelines locally with ngrok. Deploy to Railway and test with real Twilio calls. Local development is only for unit tests on pure logic (regex patterns, service functions). The real test is always a phone call to a real phone.
+
 ---
 
 ## Prerequisites
@@ -571,17 +573,16 @@ Follow the code in `docs/DONNA_ON_PIPECAT.md` `bot.py` section. Key sections:
 - `build_base_system_prompt()` — system prompt construction
 - `run_post_call()` — async post-call processing
 
-**Step 2: Test locally with ngrok**
+**Step 2: Deploy to Railway and test with a real call**
+
+Push to Railway and test immediately with a real phone call. Do NOT test locally with ngrok — voice pipelines require real Twilio infrastructure to validate properly. Local testing adds latency, tunnel failures, and doesn't catch production-only issues.
 
 ```bash
-cd pipecat
-cp .env.example .env  # Fill in real values
-ngrok http 7860
-# Update Twilio TwiML to point to ngrok URL
-uv run bot.py -t twilio -x your-ngrok-url.ngrok.io
+git push && railway up
+# Update Twilio TwiML to point to Railway URL
 ```
 
-Make a test call. Verify:
+Make a test call to the Twilio number. Verify:
 - Audio flows both directions
 - Deepgram transcribes speech
 - Claude responds
@@ -776,15 +777,16 @@ Update Twilio webhooks to point to the new Pipecat server URL.
 
 **Commit message:** `feat(pipecat): add Railway deployment config`
 
-### Task 7.3: Deploy and test
+### Task 7.3: Verify full production stack
 
-1. Push to Railway
-2. Verify health endpoint responds
-3. Verify API routes work (test from admin dashboard)
-4. Make test call — verify full voice pipeline works
-5. Test outbound reminder call
-6. Verify post-call analysis saves to database
-7. Verify admin dashboard loads data correctly
+By this point the pipeline is already running on Railway (deployed in Phase 4). Verify the full stack:
+
+1. Verify health endpoint responds
+2. Verify API routes work (test from admin dashboard)
+3. Make test call — verify full voice pipeline works
+4. Test outbound reminder call
+5. Verify post-call analysis saves to database
+6. Verify admin dashboard loads data correctly
 
 ---
 
@@ -886,11 +888,12 @@ The Node.js and Python servers can run side by side during migration. If Pipecat
 
 ### Parallel Running
 
-During Phases 4-8, run both servers:
-- Node.js on port 3001 (current production)
-- Pipecat on port 7860 (testing)
+During Phases 4-8, run both servers on Railway:
+- Node.js service on port 3001 (current production, existing Railway service)
+- Pipecat service on port 7860 (new Railway service, separate domain)
 - Use a test Twilio number for Pipecat calls
-- Compare call quality side by side
+- Compare call quality side by side with real phone calls
+- No local testing — all validation happens on Railway with real Twilio calls
 
 ### Known Risks
 

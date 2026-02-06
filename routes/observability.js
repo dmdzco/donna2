@@ -136,9 +136,11 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
     const [call] = await db.select({
       id: conversations.id,
       callSid: conversations.callSid,
+      seniorId: conversations.seniorId,
       startedAt: conversations.startedAt,
       endedAt: conversations.endedAt,
       durationSeconds: conversations.durationSeconds,
+      status: conversations.status,
       transcript: conversations.transcript,
     })
     .from(conversations)
@@ -149,10 +151,10 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
     }
 
     // Build timeline from transcript
-    const events = [];
+    const timeline = [];
 
     // Add call start event
-    events.push({
+    timeline.push({
       type: 'call.initiated',
       timestamp: call.startedAt,
       data: { callSid: call.callSid },
@@ -162,13 +164,13 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
     if (call.transcript && Array.isArray(call.transcript)) {
       call.transcript.forEach((turn, index) => {
         if (turn.role === 'user') {
-          events.push({
+          timeline.push({
             type: 'turn.transcribed',
             timestamp: turn.timestamp || call.startedAt,
             data: { content: turn.content, turnIndex: index },
           });
         } else if (turn.role === 'assistant') {
-          events.push({
+          timeline.push({
             type: 'turn.response',
             timestamp: turn.timestamp || call.startedAt,
             data: { content: turn.content, turnIndex: index },
@@ -176,7 +178,7 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
         }
         // Add observer signals if present
         if (turn.observer) {
-          events.push({
+          timeline.push({
             type: 'observer.signal',
             timestamp: turn.timestamp || call.startedAt,
             data: turn.observer,
@@ -187,7 +189,7 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
 
     // Add call end event
     if (call.endedAt) {
-      events.push({
+      timeline.push({
         type: 'call.ended',
         timestamp: call.endedAt,
         data: { durationSeconds: call.durationSeconds },
@@ -196,7 +198,12 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
 
     res.json({
       callId: call.id,
-      events,
+      callSid: call.callSid,
+      seniorId: call.seniorId,
+      startedAt: call.startedAt,
+      endedAt: call.endedAt,
+      status: call.status || 'completed',
+      timeline,
     });
   } catch (error) {
     console.error('Error fetching timeline:', error);
@@ -248,31 +255,55 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
 
     // Extract observer signals from transcript
     const signals = [];
+    const engagementDistribution = {};
+    const emotionalStateDistribution = {};
+    const allConcerns = [];
+    let totalConfidence = 0;
+
     if (call.transcript && Array.isArray(call.transcript)) {
-      call.transcript.forEach((turn) => {
+      call.transcript.forEach((turn, index) => {
         if (turn.observer) {
+          const engagementLevel = turn.observer.engagement_level || turn.observer.engagementLevel || 'medium';
+          const emotionalState = turn.observer.emotional_state || turn.observer.emotionalState || 'neutral';
+          const confidenceScore = turn.observer.confidence_score || turn.observer.confidenceScore || 0.5;
+          const concerns = turn.observer.concerns || [];
+
           signals.push({
+            turnId: String(index),
+            speaker: turn.role === 'user' ? 'Senior' : 'Donna',
+            turnContent: turn.content || '',
             timestamp: turn.timestamp,
-            engagementLevel: turn.observer.engagement_level || turn.observer.engagementLevel,
-            emotionalState: turn.observer.emotional_state || turn.observer.emotionalState,
-            concerns: turn.observer.concerns || [],
-            suggestedTopic: turn.observer.suggested_topic || turn.observer.suggestedTopic,
-            shouldDeliverReminder: turn.observer.should_deliver_reminder || turn.observer.shouldDeliverReminder,
-            shouldEndCall: turn.observer.should_end_call || turn.observer.shouldEndCall,
+            signal: {
+              engagementLevel,
+              emotionalState,
+              confidenceScore,
+              concerns,
+              shouldDeliverReminder: turn.observer.should_deliver_reminder || turn.observer.shouldDeliverReminder || false,
+              shouldEndCall: turn.observer.should_end_call || turn.observer.shouldEndCall || false,
+            },
           });
+
+          engagementDistribution[engagementLevel] = (engagementDistribution[engagementLevel] || 0) + 1;
+          emotionalStateDistribution[emotionalState] = (emotionalStateDistribution[emotionalState] || 0) + 1;
+          totalConfidence += confidenceScore;
+          allConcerns.push(...concerns);
         }
       });
     }
 
-    // Calculate aggregates
-    const aggregates = {
-      avgEngagement: 'medium',
-      dominantEmotion: call.sentiment || 'neutral',
-      totalConcerns: (call.concerns || []).length,
-      concerns: call.concerns || [],
-    };
+    const uniqueConcerns = [...new Set([...allConcerns, ...(call.concerns || [])])];
 
-    res.json({ signals, aggregates });
+    res.json({
+      signals,
+      count: signals.length,
+      summary: {
+        averageConfidence: signals.length > 0 ? totalConfidence / signals.length : 0,
+        engagementDistribution,
+        emotionalStateDistribution,
+        totalConcerns: uniqueConcerns.length,
+        uniqueConcerns,
+      },
+    });
   } catch (error) {
     console.error('Error fetching observer data:', error);
     res.status(500).json({ error: error.message });

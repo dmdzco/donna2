@@ -215,18 +215,11 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     flows_tools = make_flows_tools(session_state)
     initial_node = build_initial_node(session_state, flows_tools)
 
-    # Global tools available in ALL nodes
-    global_tools = [
-        flows_tools["search_memories"],
-        flows_tools["save_important_detail"],
-    ]
-
     flow_manager = FlowManager(
         task=task,
         llm=llm,
         context_aggregator=context_aggregator,
         transport=transport,
-        global_functions=global_tools,
     )
 
     # Store flow_manager in session state for processors that need it

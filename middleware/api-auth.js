@@ -6,11 +6,19 @@ import crypto from 'crypto';
  * require Authorization: Bearer <key> header.
  * If DONNA_API_KEY is not set, auth is disabled (development mode).
  */
+// Route prefixes that use JWT auth instead of API key
+const EXEMPT_PREFIXES = ['/admin/', '/observability/'];
+
 export function requireApiKey(req, res, next) {
   const apiKey = process.env.DONNA_API_KEY;
 
   // If no API key configured, skip auth (dev mode)
   if (!apiKey) {
+    return next();
+  }
+
+  // Skip API key for routes that handle their own auth (JWT-based)
+  if (EXEMPT_PREFIXES.some(prefix => req.path.startsWith(prefix))) {
     return next();
   }
 

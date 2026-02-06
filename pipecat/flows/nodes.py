@@ -228,8 +228,11 @@ def build_main_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         "Use search_memories when the senior mentions something you might know about. "
         "Use get_news when they express curiosity about current events. "
         "Use save_important_detail when they share significant life updates.\n\n"
-        "When the conversation naturally winds down, or after about 10 minutes, "
-        "call transition_to_winding_down."
+        "IMPORTANT — ENDING THE CALL:\n"
+        "When the senior says goodbye, wants to go, or the conversation naturally winds down, "
+        "you MUST call transition_to_winding_down. Do NOT just say goodbye in text — "
+        "the call only ends when you use the transition tool. If you say bye without "
+        "calling the tool, the call stays open and the senior hears silence."
     )
 
     if reminder_ctx:
@@ -282,8 +285,9 @@ def build_winding_down_node(session_state: dict, flows_tools: dict) -> NodeConfi
     winding_task = (
         "PHASE: WINDING DOWN\n"
         "The conversation is wrapping up. If there are any undelivered reminders, "
-        "deliver them now in a natural way. Summarize any important points from "
-        "the conversation. When ready, call transition_to_closing."
+        "deliver them now in a natural way. Then say a brief warm goodbye and "
+        "IMMEDIATELY call transition_to_closing. Do NOT wait for another response — "
+        "call the tool right after your goodbye message."
     )
 
     if reminder_ctx:

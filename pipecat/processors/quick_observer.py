@@ -689,9 +689,9 @@ def _build_guidance(r: AnalysisResult) -> str | None:
     if r.goodbye_signals:
         has_strong = any(g["strength"] == "strong" for g in r.goodbye_signals)
         if has_strong:
-            lines.append("[GOODBYE] They said goodbye. Say a warm goodbye back and wrap up naturally.")
+            lines.append("[GOODBYE] They said goodbye. Say a brief warm goodbye and then CALL transition_to_winding_down immediately. You MUST use the tool — do not just say bye in text.")
         else:
-            lines.append("[GOODBYE] They may be wrapping up. Start closing the conversation warmly.")
+            lines.append("[GOODBYE] They may be wrapping up. Start winding down and prepare to call transition_to_winding_down.")
 
     return "\n".join(lines) if lines else None
 

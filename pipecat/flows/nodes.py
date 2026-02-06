@@ -205,7 +205,7 @@ def build_opening_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         ],
         functions=functions,
         context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
-        respond_immediately=bool(greeting),
+        respond_immediately=True,  # Bot always speaks first on phone calls
     )
 
 

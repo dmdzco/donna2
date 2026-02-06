@@ -123,11 +123,12 @@ class TestOpeningNode:
         node = build_opening_node(state, tools)
         assert node.get("respond_immediately") is True
 
-    def test_no_respond_immediately_without_greeting(self):
+    def test_always_respond_immediately(self):
+        """Bot always speaks first on phone calls, even without pre-generated greeting."""
         state = _make_session_state(greeting="")
         tools = make_flows_tools(state)
         node = build_opening_node(state, tools)
-        assert node.get("respond_immediately") is False
+        assert node.get("respond_immediately") is True
 
 
 class TestMainNode:

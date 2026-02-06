@@ -69,6 +69,14 @@ async def voice_answer(request: Request):
             logger.info("[{cs}] Inbound from {name}", cs=call_sid, name=senior.get("name", "?"))
             from services.memory import build_context
             memory_context = await build_context(senior["id"], None, senior)
+            # Generate greeting so the bot speaks first
+            from services.greetings import get_greeting
+            greeting_result = get_greeting(
+                senior_name=senior.get("name", ""),
+                timezone=senior.get("timezone", "America/New_York"),
+                interests=senior.get("interests"),
+            )
+            pre_generated_greeting = greeting_result.get("greeting", "")
 
     # 2. Create conversation record
     conversation_id = None

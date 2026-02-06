@@ -140,7 +140,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             model="nova-3-general",
             language="en",
             sample_rate=8000,
-            encoding="mulaw",
+            encoding="linear16",
             channels=1,
             interim_results=True,
             smart_format=True,
@@ -163,7 +163,6 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
         model="eleven_turbo_v2_5",
-        output_format="ulaw_8000",
     )
 
     # -------------------------------------------------------------------------

@@ -189,6 +189,21 @@ The Director proactively guides each call:
 
 ---
 
+## Development Philosophy
+
+### Railway-First Development
+
+**All development targets Railway (production) from the start.** Do NOT build features locally with ngrok, localhost tunnels, or local server testing for voice/call features. The voice pipeline requires real Twilio infrastructure — local testing adds latency, tunnel failures, and doesn't catch production-only issues.
+
+- **Voice/call features:** Deploy to Railway, test with real phone calls. This is the only test that matters.
+- **API routes:** Deploy to Railway, test with curl/Postman against the Railway URL, or verify via the admin dashboard.
+- **Unit tests (pure logic):** These can run locally — regex patterns, service functions, data transforms. No external services needed.
+- **Frontend apps (admin, consumer):** These run locally against the Railway API, or deploy to Vercel.
+
+**The workflow is:** write code → commit → push → `railway up` → test with a real call. Not: write code → spin up local server → tunnel with ngrok → hope it works → then deploy.
+
+---
+
 ## For AI Assistants
 
 ### When Making Changes
@@ -235,7 +250,7 @@ Keep all docs in sync. If a new file/directory is created, add it to the Key Fil
 
 ### Deployment
 
-**IMPORTANT**: Always deploy after committing and pushing changes:
+**IMPORTANT**: Always deploy to Railway after committing and pushing changes. Railway is the primary development environment for voice/API features — not localhost.
 
 ```bash
 git add . && git commit -m "your message" && git push && git push origin main:master && railway up
@@ -247,6 +262,8 @@ git pushall && railway up
 ```
 
 Railway's GitHub webhook is unreliable - always run `railway up` manually to deploy.
+
+**Do NOT test voice features locally.** Deploy to Railway and test with real phone calls. Local development is only for unit tests and frontend apps.
 
 **Admin v2 (Vercel)**: Deployed separately from `apps/admin-v2/`:
 ```bash

@@ -1,0 +1,91 @@
+"""News service.
+
+Port of services/news.js — fetches senior-friendly news via OpenAI web search.
+"""
+
+import os
+import time
+from loguru import logger
+
+_openai_client = None
+_news_cache: dict[str, dict] = {}
+CACHE_TTL = 3600  # 1 hour in seconds
+
+
+def _get_openai():
+    global _openai_client
+    if _openai_client is None:
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            return None
+        from openai import OpenAI
+        _openai_client = OpenAI(api_key=api_key)
+    return _openai_client
+
+
+def _cache_key(interests: list[str]) -> str:
+    return "|".join(sorted(i.lower() for i in interests))
+
+
+async def get_news_for_senior(interests: list[str], limit: int = 3) -> str | None:
+    """Fetch news relevant to a senior's interests using OpenAI web search."""
+    if not interests:
+        return None
+
+    client = _get_openai()
+    if client is None:
+        logger.info("OpenAI not configured, skipping news fetch")
+        return None
+
+    key = _cache_key(interests)
+    cached = _news_cache.get(key)
+    if cached and time.time() - cached["timestamp"] < CACHE_TTL:
+        logger.info("Using cached news")
+        return cached["news"]
+
+    try:
+        interest_list = ", ".join(interests[:3])
+        logger.info("Fetching news for interests: {il}", il=interest_list)
+
+        response = client.responses.create(
+            model="gpt-4o-mini",
+            tools=[{"type": "web_search_preview"}],
+            input=(
+                f"Find 2-3 brief, positive news stories from today about: {interest_list}.\n"
+                "These are for an elderly person, so:\n"
+                "- Choose uplifting or interesting stories (avoid distressing news)\n"
+                "- Keep each summary to 1-2 sentences\n"
+                "- Focus on human interest, health tips, local events, or hobby-related news\n\n"
+                "Format as a simple list with bullet points."
+            ),
+            tool_choice="required",
+        )
+
+        news_content = (response.output_text or "").strip()
+        if not news_content:
+            logger.info("No news content returned")
+            return None
+
+        formatted = format_news_context(news_content)
+        _news_cache[key] = {"news": formatted, "timestamp": time.time()}
+        logger.info("Fetched and cached news successfully")
+        return formatted
+
+    except Exception as e:
+        logger.error("Error fetching news: {err}", err=str(e))
+        return None
+
+
+def format_news_context(raw_news: str) -> str:
+    """Format news for natural conversation injection."""
+    return (
+        "Here are some recent news items you could mention naturally "
+        f"if the conversation allows:\n{raw_news}\n\n"
+        "Only bring these up if relevant to the conversation - don't force it."
+    )
+
+
+def clear_cache():
+    """Clear the news cache."""
+    _news_cache.clear()
+    logger.info("News cache cleared")

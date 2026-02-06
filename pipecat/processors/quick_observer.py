@@ -781,7 +781,7 @@ class QuickObserverProcessor(FrameProcessor):
 
     # Seconds to wait after goodbye detection before forcing call end.
     # Gives the LLM time to generate and TTS to speak the goodbye audio.
-    GOODBYE_DELAY_SECONDS = 6.0
+    GOODBYE_DELAY_SECONDS = 3.5
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

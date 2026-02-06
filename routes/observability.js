@@ -1,10 +1,24 @@
 import { Router } from 'express';
 import { db } from '../db/client.js';
 import { seniors, conversations } from '../db/schema.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and, sql } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
+
+// One-time cleanup: mark stale in_progress calls (older than 1 hour) as completed
+db.update(conversations)
+  .set({ status: 'completed', endedAt: sql`COALESCE(ended_at, started_at + interval '1 minute')` })
+  .where(and(
+    eq(conversations.status, 'in_progress'),
+    sql`started_at < NOW() - interval '1 hour'`
+  ))
+  .then(result => {
+    if (result.rowCount > 0) {
+      console.log(`[Observability] Cleaned up ${result.rowCount} stale in_progress calls`);
+    }
+  })
+  .catch(err => console.error('[Observability] Cleanup error:', err.message));
 
 // Get recent calls for observability dashboard
 router.get('/api/observability/calls', requireAdmin, async (req, res) => {
@@ -24,6 +38,7 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
       sentiment: conversations.sentiment,
       concerns: conversations.concerns,
       callMetrics: conversations.callMetrics,
+      transcript: conversations.transcript,
     })
     .from(conversations)
     .leftJoin(seniors, eq(conversations.seniorId, seniors.id))
@@ -45,7 +60,7 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
       sentiment: call.sentiment,
       concerns: call.concerns,
       call_metrics: call.callMetrics || null,
-      turn_count: 0, // Will be populated from transcript if available
+      turn_count: Array.isArray(call.transcript) ? call.transcript.length : 0,
     }));
 
     res.json({ calls: formattedCalls });

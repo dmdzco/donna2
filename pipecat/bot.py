@@ -209,6 +209,10 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         ),
     )
 
+    # Give Quick Observer a reference to the task so it can force-end calls
+    # on goodbye detection (LLM tool calls are unreliable for this)
+    quick_observer.set_pipeline_task(task)
+
     # -------------------------------------------------------------------------
     # Flow Manager (call phase management)
     # -------------------------------------------------------------------------

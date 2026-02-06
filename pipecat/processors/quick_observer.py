@@ -5,9 +5,11 @@ Runs synchronously on each TranscriptionFrame before the LLM processes it.
 Injects guidance via LLMMessagesAppendFrame for the current response.
 """
 
+import asyncio
 import re
 from dataclasses import dataclass, field
-from pipecat.frames.frames import Frame, TranscriptionFrame, LLMMessagesAppendFrame
+from loguru import logger
+from pipecat.frames.frames import EndFrame, Frame, TranscriptionFrame, LLMMessagesAppendFrame
 from pipecat.processors.frame_processor import FrameProcessor
 
 
@@ -771,12 +773,40 @@ def _build_model_recommendation(r: AnalysisResult) -> dict | None:
 
 class QuickObserverProcessor(FrameProcessor):
     """Pipecat FrameProcessor that runs quick_analyze on each TranscriptionFrame
-    and injects guidance into the LLM context via LLMMessagesAppendFrame."""
+    and injects guidance into the LLM context via LLMMessagesAppendFrame.
+
+    When a strong goodbye is detected, schedules a forced call end after a delay
+    to ensure the call actually terminates (LLM tool calls are unreliable for this).
+    """
+
+    # Seconds to wait after goodbye detection before forcing call end.
+    # Gives the LLM time to generate and TTS to speak the goodbye audio.
+    GOODBYE_DELAY_SECONDS = 6.0
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._recent_history: list[dict] = []
         self.last_analysis: AnalysisResult | None = None
+        self._pipeline_task = None  # Set via set_pipeline_task() after pipeline creation
+        self._goodbye_task: asyncio.Task | None = None
+
+    def set_pipeline_task(self, task):
+        """Set the pipeline task reference for programmatic call ending."""
+        self._pipeline_task = task
+
+    async def _force_end_call(self):
+        """Wait for goodbye audio to play, then end the call via EndFrame."""
+        try:
+            await asyncio.sleep(self.GOODBYE_DELAY_SECONDS)
+            if self._pipeline_task:
+                logger.info("[QuickObserver] Goodbye timeout reached — ending call programmatically")
+                await self._pipeline_task.queue_frame(EndFrame())
+            else:
+                logger.warning("[QuickObserver] No pipeline_task set — cannot force end call")
+        except asyncio.CancelledError:
+            logger.info("[QuickObserver] Goodbye end-call timer cancelled")
+        except Exception as e:
+            logger.error("[QuickObserver] Error forcing call end: {err}", err=str(e))
 
     async def process_frame(self, frame: Frame, direction):
         await super().process_frame(frame, direction)
@@ -801,6 +831,18 @@ class QuickObserverProcessor(FrameProcessor):
                 await self.push_frame(
                     LLMMessagesAppendFrame(messages=[guidance_msg], run_llm=False)
                 )
+
+            # PROGRAMMATIC GOODBYE: When strong goodbye detected, schedule forced
+            # call end. The LLM will still generate its goodbye response normally,
+            # but we don't rely on it to call the transition tools.
+            if analysis.goodbye_signals and self._goodbye_task is None:
+                has_strong = any(g["strength"] == "strong" for g in analysis.goodbye_signals)
+                if has_strong:
+                    logger.info(
+                        "[QuickObserver] Strong goodbye detected — scheduling forced end in {d}s",
+                        d=self.GOODBYE_DELAY_SECONDS,
+                    )
+                    self._goodbye_task = asyncio.create_task(self._force_end_call())
 
         # Always pass frames through
         await self.push_frame(frame, direction)

@@ -77,7 +77,13 @@ router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardin
     });
   } catch (error) {
     console.error('Onboarding failed:', error);
-    res.status(500).json({ error: error.message });
+
+    // Handle duplicate phone number
+    if (error.code === '23505' && error.constraint?.includes('phone')) {
+      return res.status(409).json({ error: 'This phone number is already registered for another senior' });
+    }
+
+    res.status(500).json({ error: 'Failed to complete onboarding. Please try again.' });
   }
 });
 

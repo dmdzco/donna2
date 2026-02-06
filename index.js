@@ -14,7 +14,7 @@ import { startScheduler } from './services/scheduler.js';
 // Security middleware
 import { securityHeaders, requestId } from './middleware/security.js';
 import { webhookLimiter } from './middleware/rate-limit.js';
-import { validateTwilioWebhook } from './middleware/twilio-auth.js';
+import { validateTwilioWebhook } from './middleware/twilio.js';
 import { requireApiKey } from './middleware/api-auth.js';
 import { errorHandler } from './middleware/error-handler.js';
 
@@ -36,7 +36,7 @@ app.use(cors({
     'https://donna-admin.vercel.app',
     'https://admin-v2-liart.vercel.app',
     'https://consumer-ruddy.vercel.app',
-    'https://observability-production-3677.up.railway.app',
+    'https://observability-five.vercel.app',
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',  // Observability dashboard (local)

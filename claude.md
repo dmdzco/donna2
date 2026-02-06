@@ -38,7 +38,8 @@
 - **Graceful Call Ending** - Goodbye signal detection + Twilio-based termination
 - **Route Extraction** - 16 modular route files + websocket handler
 - **Admin Dashboard Auth** - JWT-based login with admin_users table (bcrypt passwords)
-- **Admin Dashboard** - Static HTML with 7 tabs: Dashboard, Seniors, Calls, Reminders, Call Analyses, Caregivers, Daily Context
+- **Admin Dashboard (v2)** - React + Vite + Tailwind app (`apps/admin-v2/`) deployed on Vercel with 7 pages: Dashboard, Seniors, Calls, Reminders, Call Analyses, Caregivers, Daily Context. JWT auth, same backend API.
+- **Admin Dashboard (legacy)** - Static HTML at `public/admin.html` (kept as fallback)
 - Real-time voice calls (Twilio Media Streams)
 - Speech transcription (Deepgram STT)
 - Memory system with semantic search (pgvector)
@@ -46,7 +47,7 @@
 - Scheduled reminder calls
 - Consumer app (caregiver onboarding + dashboard)
 - Observability dashboard (React)
-- Security: Clerk auth, JWT admin auth, Zod validation, rate limiting, Twilio webhook verification, Helmet headers, API key auth, PII-safe logging
+- Security: Clerk auth, JWT admin auth (enforced in prod), Zod validation, rate limiting (incl. admin login brute-force), Twilio webhook verification, Helmet headers (HSTS 1yr), API key auth, PII-safe logging
 
 ---
 
@@ -150,14 +151,12 @@ The Director proactively guides each call:
 │   ├── scheduler.js            ← Reminder scheduler
 │   └── news.js                 ← News via OpenAI web search
 ├── middleware/
-│   ├── auth.js                 ← Clerk + JWT + cofounder auth
-│   ├── security.js             ← Helmet headers + request ID
+│   ├── auth.js                 ← Clerk + JWT + cofounder auth (JWT_SECRET enforced in prod)
+│   ├── security.js             ← Helmet headers + request ID + HSTS 1yr
 │   ├── rate-limit.js           ← Rate limiting (API, call, write, auth, webhook)
 │   ├── api-auth.js             ← API key authentication (DONNA_API_KEY)
-│   ├── twilio.js               ← Webhook signature verification (legacy)
-│   ├── twilio-auth.js          ← Twilio webhook signature validation
+│   ├── twilio.js               ← Twilio webhook signature validation
 │   ├── validate.js             ← Zod validation middleware
-│   ├── validation.js           ← express-validator schemas
 │   └── error-handler.js        ← Centralized error handler
 ├── lib/
 │   ├── logger.js               ← PII-safe structured logger
@@ -174,12 +173,34 @@ The Director proactively guides each call:
 │   ├── logger/                 ← TypeScript logging package
 │   └── event-bus/              ← TypeScript event bus package
 ├── apps/
-│   ├── admin/                  ← Admin dashboard (React + Vite)
+│   ├── admin/                  ← Admin dashboard legacy (React + Vite)
+│   ├── admin-v2/               ← Admin dashboard v2 (React + Vite + Tailwind, Vercel)
+│   │   ├── src/
+│   │   │   ├── components/     ← Layout, Modal, Toast
+│   │   │   ├── pages/          ← Dashboard, Seniors, Calls, Reminders, CallAnalyses, Caregivers, DailyContext, Login
+│   │   │   └── lib/            ← api.ts (JWT fetch wrapper), auth.ts (AuthProvider), utils.ts
+│   │   ├── tailwind.config.js  ← Admin color palette (admin-* namespace)
+│   │   └── vercel.json         ← SPA rewrite config
 │   ├── consumer/               ← Consumer app (React + Vite + Clerk, Vercel)
 │   ├── observability/          ← Observability dashboard (React)
 │   └── web/                    ← Future web app placeholder
 └── audio-utils.js              ← Audio format conversion
 ```
+
+---
+
+## Development Philosophy
+
+### Railway-First Development
+
+**All development targets Railway (production) from the start.** Do NOT build features locally with ngrok, localhost tunnels, or local server testing for voice/call features. The voice pipeline requires real Twilio infrastructure — local testing adds latency, tunnel failures, and doesn't catch production-only issues.
+
+- **Voice/call features:** Deploy to Railway, test with real phone calls. This is the only test that matters.
+- **API routes:** Deploy to Railway, test with curl/Postman against the Railway URL, or verify via the admin dashboard.
+- **Unit tests (pure logic):** These can run locally — regex patterns, service functions, data transforms. No external services needed.
+- **Frontend apps (admin, consumer):** These run locally against the Railway API, or deploy to Vercel.
+
+**The workflow is:** write code → commit → push → `railway up` → test with a real call. Not: write code → spin up local server → tunnel with ngrok → hope it works → then deploy.
 
 ---
 
@@ -204,8 +225,11 @@ The Director proactively guides each call:
 | Modify in-call memory tracking | `pipelines/v1-advanced.js` (extractConversationElements, trackTopicsFromSignals) |
 | Modify cross-call daily context | `services/daily-context.js` |
 | Modify goodbye/call ending | `pipelines/v1-advanced.js` + `pipelines/quick-observer.js` |
-| Update admin UI | `public/admin.html` (static HTML) |
-| Update admin API client | `public/admin.html` (authFetch in script) |
+| Update admin UI (v2) | `apps/admin-v2/src/pages/` (React components) |
+| Update admin API client (v2) | `apps/admin-v2/src/lib/api.ts` (authFetch wrapper) |
+| Update admin colors/theme | `apps/admin-v2/tailwind.config.js` (admin-* color namespace) |
+| Update admin layout/nav | `apps/admin-v2/src/components/Layout.tsx` |
+| Update legacy admin UI | `public/admin.html` (static HTML) |
 | Admin authentication | `routes/admin-auth.js` + `middleware/auth.js` |
 | Call analyses data | `routes/call-analyses.js` |
 | Daily context data | `routes/daily-context.js` |
@@ -226,7 +250,7 @@ Keep all docs in sync. If a new file/directory is created, add it to the Key Fil
 
 ### Deployment
 
-**IMPORTANT**: Always deploy after committing and pushing changes:
+**IMPORTANT**: Always deploy to Railway after committing and pushing changes. Railway is the primary development environment for voice/API features — not localhost.
 
 ```bash
 git add . && git commit -m "your message" && git push && git push origin main:master && railway up
@@ -238,6 +262,16 @@ git pushall && railway up
 ```
 
 Railway's GitHub webhook is unreliable - always run `railway up` manually to deploy.
+
+**Do NOT test voice features locally.** Deploy to Railway and test with real phone calls. Local development is only for unit tests and frontend apps.
+
+**Admin v2 (Vercel)**: Deployed separately from `apps/admin-v2/`:
+```bash
+cd apps/admin-v2 && npx vercel --prod --yes
+```
+Live URL: https://admin-v2-liart.vercel.app
+Backend API: https://donna-api-production-2450.up.railway.app (configured in `.env.production`)
+CORS: Admin v2 origin is allowlisted in `index.js`.
 
 ### Environment Variables
 
@@ -272,6 +306,7 @@ See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
 - ~~Conversation Director~~ ✓ Completed
 - ~~Post-Call Analysis~~ ✓ Completed
 - ~~Admin Dashboard Separation~~ ✓ Completed (React app in `apps/admin/`)
+- ~~Admin Dashboard v2~~ ✓ Completed (React + Vite + Tailwind in `apps/admin-v2/`, deployed on Vercel at https://admin-v2-liart.vercel.app)
 - ~~Security Hardening~~ ✓ Completed (Helmet, API key auth, PII-safe logging, input validation)
 - Prompt Caching (Anthropic)
 

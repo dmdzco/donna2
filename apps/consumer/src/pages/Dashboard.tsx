@@ -3,7 +3,8 @@ import { useAuth, SignOutButton } from '@clerk/clerk-react';
 import { useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, User, Calendar, Bell, Settings, LogOut, Phone,
-  ChevronRight, Plus, Trash2, Check, X, Clock, CheckCircle2, Edit2, Save
+  ChevronRight, Plus, Trash2, Check, X, Clock, CheckCircle2, Edit2, Save,
+  ArrowLeft, ArrowRight
 } from 'lucide-react';
 import './Dashboard.css';
 
@@ -56,6 +57,21 @@ export default function Dashboard() {
   const [isAddingReminder, setIsAddingReminder] = useState(false);
   const [editingReminderId, setEditingReminderId] = useState<string | null>(null);
   const [editingReminderTitle, setEditingReminderTitle] = useState('');
+
+  // Add senior modal state
+  const [showAddSenior, setShowAddSenior] = useState(false);
+  const [addSeniorStep, setAddSeniorStep] = useState(1);
+  const [isAddingSenior, setIsAddingSenior] = useState(false);
+  const [newSeniorData, setNewSeniorData] = useState({
+    name: '',
+    phone: '',
+    relation: 'Mother',
+    city: '',
+    state: '',
+    reminders: [''],
+    callDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+    callTime: '10:00',
+  });
 
   // Profile editing state
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -263,6 +279,95 @@ export default function Dashboard() {
     }
   };
 
+  const handleSwitchSenior = async (senior: Senior) => {
+    setActiveSenior(senior);
+    try {
+      const token = await getToken();
+      const [remindersRes, callsRes] = await Promise.all([
+        fetch(`${API_URL}/api/seniors/${senior.id}/reminders`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(`${API_URL}/api/seniors/${senior.id}/calls`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
+      if (remindersRes.ok) setReminders(await remindersRes.json());
+      if (callsRes.ok) setCalls(await callsRes.json());
+    } catch (err) {
+      console.error('Failed to load senior data:', err);
+    }
+  };
+
+  const resetAddSeniorModal = () => {
+    setShowAddSenior(false);
+    setAddSeniorStep(1);
+    setNewSeniorData({
+      name: '', phone: '', relation: 'Mother', city: '', state: '',
+      reminders: [''], callDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], callTime: '10:00',
+    });
+  };
+
+  const handleAddSenior = async () => {
+    setIsAddingSenior(true);
+    try {
+      const token = await getToken();
+      const payload = {
+        senior: {
+          name: newSeniorData.name,
+          phone: newSeniorData.phone,
+          city: newSeniorData.city,
+          state: newSeniorData.state,
+          timezone: 'America/New_York',
+        },
+        relation: newSeniorData.relation,
+        interests: [],
+        reminders: newSeniorData.reminders.filter(r => r.trim()),
+        updateTopics: [],
+        callSchedule: {
+          days: newSeniorData.callDays,
+          time: newSeniorData.callTime,
+        },
+        familyInfo: {
+          relation: newSeniorData.relation,
+          interestDetails: {},
+        },
+      };
+
+      const res = await fetch(`${API_URL}/api/onboarding`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Failed to add senior' }));
+        throw new Error(err.error || err.message || 'Failed to add');
+      }
+
+      const data = await res.json();
+      const newSenior = { ...data.senior, role: newSeniorData.relation };
+      setSeniors([...seniors, newSenior]);
+      setActiveSenior(newSenior);
+      setCalls([]);
+
+      // Fetch reminders that were just created
+      const remindersRes = await fetch(`${API_URL}/api/seniors/${data.senior.id}/reminders`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (remindersRes.ok) setReminders(await remindersRes.json());
+      else setReminders([]);
+
+      resetAddSeniorModal();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to add loved one');
+    } finally {
+      setIsAddingSenior(false);
+    }
+  };
+
   const startEditingProfile = () => {
     if (activeSenior) {
       setEditedProfile({
@@ -360,12 +465,25 @@ export default function Dashboard() {
           ))}
         </nav>
 
-        <div className="user-profile-mini">
-          <div className="user-avatar-mini"></div>
-          <div className="user-info-mini">
-            <h4>{activeSenior?.name || 'Caregiver'}</h4>
-            <span>Managing {seniors.length} senior{seniors.length !== 1 ? 's' : ''}</span>
-          </div>
+        <div className="senior-switcher">
+          <div className="senior-switcher-label">Your Loved Ones</div>
+          {seniors.map((senior) => (
+            <div
+              key={senior.id}
+              className={`senior-switcher-item ${activeSenior?.id === senior.id ? 'active' : ''}`}
+              onClick={() => handleSwitchSenior(senior)}
+            >
+              <div className="senior-avatar">{senior.name.charAt(0)}</div>
+              <div className="senior-switcher-info">
+                <span className="senior-switcher-name">{senior.name}</span>
+                <span className="senior-switcher-role">{senior.role}</span>
+              </div>
+            </div>
+          ))}
+          <button className="add-senior-btn" onClick={() => setShowAddSenior(true)}>
+            <Plus size={16} />
+            Add Loved One
+          </button>
         </div>
 
         <SignOutButton redirectUrl="/">
@@ -393,7 +511,7 @@ export default function Dashboard() {
           <>
             <div className="dashboard-header">
               <h1>{getGreeting()}!</h1>
-              <p>Here's how things are going with {activeSenior.name}.</p>
+              <p>Here's how things are going with <strong>{activeSenior.name}</strong>.</p>
             </div>
 
             {/* Quick Actions */}
@@ -770,6 +888,161 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      {/* Add Senior Modal */}
+      {showAddSenior && (
+        <div className="modal-overlay" onClick={resetAddSeniorModal}>
+          <div className="modal-content add-senior-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Add a Loved One</h2>
+              <button className="modal-close" onClick={resetAddSeniorModal}>
+                <X size={20} />
+              </button>
+            </div>
+
+            {addSeniorStep === 1 && (
+              <div className="modal-body">
+                <p className="modal-description">Who will Donna be calling?</p>
+
+                <div className="modal-field">
+                  <label>Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Martha"
+                    value={newSeniorData.name}
+                    onChange={(e) => setNewSeniorData({ ...newSeniorData, name: e.target.value })}
+                    autoFocus
+                  />
+                </div>
+
+                <div className="modal-field">
+                  <label>Phone Number</label>
+                  <input
+                    type="tel"
+                    placeholder="(555) 123-4567"
+                    value={newSeniorData.phone}
+                    onChange={(e) => setNewSeniorData({ ...newSeniorData, phone: e.target.value })}
+                  />
+                </div>
+
+                <div className="modal-field">
+                  <label>Relationship</label>
+                  <select
+                    value={newSeniorData.relation}
+                    onChange={(e) => setNewSeniorData({ ...newSeniorData, relation: e.target.value })}
+                  >
+                    <option>Mother</option>
+                    <option>Father</option>
+                    <option>Client</option>
+                    <option>Other Loved One</option>
+                  </select>
+                </div>
+
+                <div className="modal-field">
+                  <label>Location</label>
+                  <div className="modal-location-row">
+                    <input
+                      type="text"
+                      placeholder="City"
+                      value={newSeniorData.city}
+                      onChange={(e) => setNewSeniorData({ ...newSeniorData, city: e.target.value })}
+                    />
+                    <input
+                      type="text"
+                      placeholder="State"
+                      value={newSeniorData.state}
+                      onChange={(e) => setNewSeniorData({ ...newSeniorData, state: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {addSeniorStep === 2 && (
+              <div className="modal-body">
+                <p className="modal-description">Set up reminders and call schedule</p>
+
+                <div className="modal-field">
+                  <label>Daily Reminders</label>
+                  {newSeniorData.reminders.map((reminder, index) => (
+                    <input
+                      key={index}
+                      type="text"
+                      placeholder={index === 0 ? "e.g. Take medication at 9am" : `Reminder ${index + 1}`}
+                      value={reminder}
+                      onChange={(e) => {
+                        const updated = [...newSeniorData.reminders];
+                        updated[index] = e.target.value;
+                        setNewSeniorData({ ...newSeniorData, reminders: updated });
+                      }}
+                      style={{ marginBottom: '8px' }}
+                    />
+                  ))}
+                  <button className="add-reminder-link" onClick={() => setNewSeniorData({ ...newSeniorData, reminders: [...newSeniorData.reminders, ''] })}>
+                    <Plus size={14} /> Add another reminder
+                  </button>
+                </div>
+
+                <div className="modal-field">
+                  <label>Call Days</label>
+                  <div className="modal-days-row">
+                    {DAYS_OF_WEEK.map(day => (
+                      <div
+                        key={day}
+                        className={`modal-day-toggle ${newSeniorData.callDays.includes(day) ? 'active' : ''}`}
+                        onClick={() => {
+                          const days = newSeniorData.callDays.includes(day)
+                            ? newSeniorData.callDays.filter(d => d !== day)
+                            : [...newSeniorData.callDays, day];
+                          setNewSeniorData({ ...newSeniorData, callDays: days });
+                        }}
+                      >
+                        {day}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="modal-field">
+                  <label>Call Time</label>
+                  <input
+                    type="time"
+                    value={newSeniorData.callTime}
+                    onChange={(e) => setNewSeniorData({ ...newSeniorData, callTime: e.target.value })}
+                    className="time-input"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="modal-footer">
+              {addSeniorStep > 1 && (
+                <button className="btn-cancel" onClick={() => setAddSeniorStep(addSeniorStep - 1)}>
+                  <ArrowLeft size={16} /> Back
+                </button>
+              )}
+              <div style={{ flex: 1 }} />
+              {addSeniorStep === 1 ? (
+                <button
+                  className="add-btn-primary"
+                  onClick={() => setAddSeniorStep(2)}
+                  disabled={!newSeniorData.name || !newSeniorData.phone}
+                >
+                  Next <ArrowRight size={16} />
+                </button>
+              ) : (
+                <button
+                  className="add-btn-primary"
+                  onClick={handleAddSenior}
+                  disabled={isAddingSenior}
+                >
+                  {isAddingSenior ? 'Adding...' : 'Add Loved One'} <Check size={16} />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

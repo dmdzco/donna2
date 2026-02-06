@@ -19,16 +19,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="max-w-[1100px] mx-auto p-5">
       {/* Header */}
-      <header className="bg-admin-primary text-white p-5 mb-5 rounded-xl flex justify-between items-center">
+      <header className="bg-admin-primary text-admin-text p-5 mb-5 rounded-xl flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">Donna Admin</h1>
-          <p className="text-white/90 text-sm">Manage seniors, calls, and reminders</p>
+          <p className="text-admin-text-light text-sm">Manage seniors, calls, and reminders</p>
         </div>
         <div className="flex items-center gap-3">
-          <span className="bg-white/15 px-3.5 py-2 rounded-lg text-xs font-semibold text-white/90">v3.3</span>
+          <span className="bg-admin-primary-dark/30 px-3.5 py-2 rounded-lg text-xs font-semibold text-admin-text-light">v3.3</span>
           <button
             onClick={logout}
-            className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 bg-admin-primary-dark/30 hover:bg-admin-primary-dark/50 text-admin-text text-xs font-semibold px-3 py-2 rounded-lg transition-colors"
           >
             <LogOut size={14} />
             Logout

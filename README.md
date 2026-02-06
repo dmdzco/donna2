@@ -24,31 +24,40 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Enhanced web search (factual/curiosity questions + news)
 - News updates (OpenAI web search)
 - Scheduled reminder calls with delivery tracking
-- Admin dashboard (React, 4 tabs)
+- Admin dashboard v2 (React + Vite + Tailwind, Vercel) - 7 pages: Dashboard, Seniors, Calls, Reminders, Call Analyses, Caregivers, Daily Context
 - Consumer app (caregiver onboarding + dashboard)
 - Observability dashboard (React)
 
 ### Security
-- Authentication (Clerk) with role-based access
+- Authentication (Clerk for consumer, JWT for admin dashboard)
 - Input validation (Zod schemas)
 - Rate limiting (express-rate-limit)
 - Twilio webhook signature verification
 
 ## Quick Start
 
+### Railway-First Development
+
+Voice and API features are developed directly against Railway — not localhost. Local servers can't meaningfully test Twilio calls, WebSocket audio streams, or real STT/TTS latency.
+
 ```bash
 npm install
-npm run dev
+git push && railway up    # Deploy to Railway
 ```
 
 Test health:
 ```bash
-curl http://localhost:3001/health
+curl https://your-railway-domain.up.railway.app/health
 ```
 
-Admin dashboard: `http://localhost:5173` (run `npm run dev` in `apps/admin/`)
-Consumer app: `http://localhost:5175` (run `npm run dev` in `apps/consumer/`)
-Observability: `http://localhost:5174` (run `npm run dev` in `apps/observability/`)
+**Voice features:** Deploy to Railway, test with a real phone call. This is the only test that matters.
+
+**Frontend apps** (these run locally against the Railway API):
+- Admin dashboard: `http://localhost:5175` (run `npm run dev` in `apps/admin-v2/`)
+- Consumer app: `http://localhost:5173` (run `npm run dev` in `apps/consumer/`)
+- Observability: `http://localhost:5174` (run `npm run dev` in `apps/observability/`)
+
+**Unit tests** (pure logic, no external services): can run locally.
 
 ## Architecture
 
@@ -142,7 +151,11 @@ donna/
 │   ├── logger/                 # TypeScript logging package
 │   └── event-bus/              # TypeScript event bus package
 ├── apps/
-│   ├── admin/                  # React admin dashboard (Railway)
+│   ├── admin/                  # Legacy admin dashboard (React + Vite)
+│   ├── admin-v2/               # Admin dashboard v2 (React + Vite + Tailwind, Vercel)
+│   │   ├── src/components/     # Layout, Modal, Toast
+│   │   ├── src/pages/          # Dashboard, Seniors, Calls, Reminders, etc.
+│   │   └── src/lib/            # API client, auth context, utils
 │   ├── consumer/               # Caregiver onboarding + dashboard (Vercel)
 │   ├── observability/          # React observability dashboard
 │   └── web/                    # Future placeholder
@@ -186,11 +199,15 @@ FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
 | `/api/reminders` | GET/POST/PATCH/DELETE | Manage reminders |
 | `/api/onboarding` | POST | Consumer app onboarding |
 | `/api/caregivers` | GET/POST | Caregiver management |
+| `/api/admin/login` | POST | Admin JWT login |
+| `/api/admin/me` | GET | Verify admin token |
+| `/api/call-analyses` | GET | Post-call analysis data |
+| `/api/daily-context` | GET | Cross-call daily context |
 | `/api/observability/*` | GET | Observability data |
 
 ## Deployment
 
-**API Server (Railway):**
+**API Server (Railway)** — this is the primary development target, not just production:
 
 ```bash
 # Deploy manually (recommended - webhook unreliable)
@@ -199,6 +216,14 @@ git push && git push origin main:master && railway up
 # Or use alias after committing
 git pushall && railway up
 ```
+
+> **Do NOT test voice/call features locally.** Deploy to Railway and test with real Twilio phone calls. Local development is only useful for unit tests on pure logic and running frontend apps.
+
+**Admin Dashboard v2 (Vercel):**
+```bash
+cd apps/admin-v2 && npx vercel --prod --yes
+```
+- Live: https://admin-v2-liart.vercel.app
 
 **Consumer App (Vercel):**
 - Auto-deploys from `apps/consumer/` on push

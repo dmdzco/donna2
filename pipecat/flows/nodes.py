@@ -196,13 +196,15 @@ def build_opening_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         handler=_make_transition_to_main(session_state, flows_tools),
     ))
 
+    # Anthropic only extracts the FIRST system message from the messages array.
+    # Combine base prompt + senior context into one system message, and put
+    # task instructions in a user message.
+    system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
+
     return NodeConfig(
         name="opening",
-        role_messages=[{"role": "system", "content": BASE_SYSTEM_PROMPT}],
-        task_messages=[
-            {"role": "system", "content": senior_ctx},
-            {"role": "system", "content": opening_task},
-        ],
+        role_messages=[{"role": "system", "content": system_content}],
+        task_messages=[{"role": "user", "content": opening_task}],
         functions=functions,
         context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
         respond_immediately=True,  # Bot always speaks first on phone calls
@@ -248,13 +250,12 @@ def build_main_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         handler=_make_transition_to_winding_down(session_state, flows_tools),
     ))
 
+    system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
+
     return NodeConfig(
         name="main",
-        role_messages=[{"role": "system", "content": BASE_SYSTEM_PROMPT}],
-        task_messages=[
-            {"role": "system", "content": senior_ctx},
-            {"role": "system", "content": main_task},
-        ],
+        role_messages=[{"role": "system", "content": system_content}],
+        task_messages=[{"role": "user", "content": main_task}],
         functions=functions,
         context_strategy=ContextStrategyConfig(
             strategy=ContextStrategy.RESET_WITH_SUMMARY,
@@ -302,13 +303,12 @@ def build_winding_down_node(session_state: dict, flows_tools: dict) -> NodeConfi
         handler=_make_transition_to_closing(session_state),
     ))
 
+    system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
+
     return NodeConfig(
         name="winding_down",
-        role_messages=[{"role": "system", "content": BASE_SYSTEM_PROMPT}],
-        task_messages=[
-            {"role": "system", "content": senior_ctx},
-            {"role": "system", "content": winding_task},
-        ],
+        role_messages=[{"role": "system", "content": system_content}],
+        task_messages=[{"role": "user", "content": winding_task}],
         functions=functions,
         context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
         respond_immediately=False,
@@ -334,7 +334,7 @@ def build_closing_node(session_state: dict) -> NodeConfig:
     return NodeConfig(
         name="closing",
         role_messages=[{"role": "system", "content": BASE_SYSTEM_PROMPT}],
-        task_messages=[{"role": "system", "content": closing_task}],
+        task_messages=[{"role": "user", "content": closing_task}],
         functions=[],
         post_actions=[{"type": "end_conversation"}],
         context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),

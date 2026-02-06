@@ -1,13 +1,16 @@
 """Tests for database connection layer.
 
 These tests validate the module structure and query helper signatures.
-Integration tests (requiring DATABASE_URL) are skipped locally.
+Integration tests (requiring a real database) are skipped unless
+RUN_DB_TESTS=1 is set explicitly.
 """
 
 import os
 import pytest
 
 from db.client import get_pool, query_one, query_many, execute, close_pool
+
+_skip_db = not os.environ.get("RUN_DB_TESTS")
 
 
 def test_module_exports():
@@ -20,10 +23,7 @@ def test_module_exports():
     assert callable(close_pool)
 
 
-@pytest.mark.skipif(
-    not os.environ.get("DATABASE_URL"),
-    reason="DATABASE_URL not set - skip integration tests"
-)
+@pytest.mark.skipif(_skip_db, reason="RUN_DB_TESTS not set - skip integration tests")
 @pytest.mark.asyncio
 async def test_pool_creation():
     """Pool can be created and closed."""
@@ -32,10 +32,7 @@ async def test_pool_creation():
     await close_pool()
 
 
-@pytest.mark.skipif(
-    not os.environ.get("DATABASE_URL"),
-    reason="DATABASE_URL not set - skip integration tests"
-)
+@pytest.mark.skipif(_skip_db, reason="RUN_DB_TESTS not set - skip integration tests")
 @pytest.mark.asyncio
 async def test_query_one_returns_dict_or_none():
     """query_one returns a dict for existing rows, None for no results."""
@@ -47,10 +44,7 @@ async def test_query_one_returns_dict_or_none():
     await close_pool()
 
 
-@pytest.mark.skipif(
-    not os.environ.get("DATABASE_URL"),
-    reason="DATABASE_URL not set - skip integration tests"
-)
+@pytest.mark.skipif(_skip_db, reason="RUN_DB_TESTS not set - skip integration tests")
 @pytest.mark.asyncio
 async def test_query_many_returns_list():
     """query_many returns a list of dicts."""

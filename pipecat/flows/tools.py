@@ -125,11 +125,31 @@ def make_tool_handlers(session_state: dict) -> dict:
         topic = args.get("topic", "")
         logger.info("Tool: get_news topic={t}", t=topic)
 
+        # Build interest list: requested topic + senior profile interests + current call topics
+        interests = [topic] if topic else []
+
+        senior = session_state.get("senior") or {}
+        profile_interests = senior.get("interests") or []
+        for i in profile_interests:
+            if i.lower() not in {x.lower() for x in interests}:
+                interests.append(i)
+
+        tracker = session_state.get("_conversation_tracker")
+        if tracker and hasattr(tracker, "state"):
+            for t in tracker.state.topics_discussed:
+                if t.lower() not in {x.lower() for x in interests}:
+                    interests.append(t)
+
+        if not interests:
+            return {"status": "success", "result": "I couldn't find any relevant news right now."}
+
+        logger.info("Tool: get_news combined interests={i}", i=interests[:5])
+
         try:
-            from services.news import get_news_for_topic
-            news = await get_news_for_topic(topic, limit=2)
+            from services.news import get_news_for_senior
+            news = await get_news_for_senior(interests[:5], limit=3)
             if not news:
-                return {"status": "success", "result": f"I couldn't find recent news about {topic}."}
+                return {"status": "success", "result": f"I couldn't find recent news about {topic or 'those topics'}."}
             return {"status": "success", "result": news}
         except Exception as e:
             logger.error("get_news error: {err}", err=str(e))

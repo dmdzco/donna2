@@ -23,9 +23,7 @@ export default defineConfig({
       reporter: ['text', 'html', 'lcov'],
       reportsDirectory: './coverage',
       include: [
-        'pipelines/**/*.js',
         'services/**/*.js',
-        'adapters/**/*.js',
       ],
       exclude: [
         'node_modules/**',

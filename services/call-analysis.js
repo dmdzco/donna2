@@ -11,12 +11,13 @@
  * - Follow-up suggestions for next call
  */
 
-import { getAdapter } from '../adapters/llm/index.js';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { db } from '../db/client.js';
 import { callAnalyses } from '../db/schema.js';
 
 // Use Gemini Flash for cost-efficient batch analysis
-const ANALYSIS_MODEL = process.env.CALL_ANALYSIS_MODEL || 'gemini-3-flash';
+const ANALYSIS_MODEL = process.env.CALL_ANALYSIS_MODEL || 'gemini-2.0-flash';
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
 /**
  * Repair malformed JSON from LLM responses
@@ -133,18 +134,12 @@ export async function analyzeCompletedCall(transcript, seniorContext) {
     .replace('{{TRANSCRIPT}}', formatTranscript(transcript));
 
   try {
-    const adapter = getAdapter(ANALYSIS_MODEL);
-    const messages = [
-      {
-        role: 'user',
-        content: 'Please analyze this call transcript.',
-      },
-    ];
-
-    const text = await adapter.generate(prompt, messages, {
-      maxTokens: 1500,
-      temperature: 0.2,
+    const model = genAI.getGenerativeModel({
+      model: ANALYSIS_MODEL,
+      generationConfig: { maxOutputTokens: 1500, temperature: 0.2 },
     });
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
 
     if (!text || typeof text !== 'string') {
       console.log('[CallAnalysis] No valid response from adapter');

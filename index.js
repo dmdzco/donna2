@@ -3,12 +3,9 @@ import express from 'express';
 import cors from 'cors';
 import twilio from 'twilio';
 import { createServer } from 'http';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 import { apiLimiter } from './middleware/rate-limit.js';
 import { clerkMiddleware } from './middleware/auth.js';
 import { mountRoutes } from './routes/index.js';
-import { setupWebSockets } from './websocket/media-stream.js';
 import { startScheduler } from './services/scheduler.js';
 
 // Security middleware
@@ -17,9 +14,6 @@ import { webhookLimiter } from './middleware/rate-limit.js';
 import { validateTwilioWebhook } from './middleware/twilio.js';
 import { requireApiKey } from './middleware/api-auth.js';
 import { errorHandler } from './middleware/error-handler.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 const app = express();
 
@@ -49,9 +43,6 @@ app.use(cors({
 
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
-
-// Serve static files (admin UI)
-app.use(express.static(join(__dirname, 'public')));
 
 // Security: API key auth + rate limiting for /api/* routes
 app.use('/api', requireApiKey, apiLimiter);
@@ -93,9 +84,8 @@ mountRoutes(app);
 // Centralized error handler - MUST be last middleware
 app.use(errorHandler);
 
-// Create HTTP server and set up WebSockets
+// Create HTTP server
 const server = createServer(app);
-setupWebSockets(server, sessions, callMetadata);
 
 server.listen(PORT, () => {
   console.log(`Donna v3.0 listening on port ${PORT}`);

@@ -79,18 +79,19 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     call_meta = session_state.get("_call_metadata", {})
     metadata = call_meta.get(call_sid, {})
     if metadata:
-        session_state.setdefault("senior", metadata.get("senior"))
-        session_state.setdefault("senior_id", (metadata.get("senior") or {}).get("id"))
-        session_state.setdefault("memory_context", metadata.get("memory_context"))
-        session_state.setdefault("conversation_id", metadata.get("conversation_id"))
-        session_state.setdefault("reminder_prompt", metadata.get("reminder_prompt"))
-        session_state.setdefault("call_type", metadata.get("call_type", "check-in"))
+        # Use `or` assignment — setdefault won't overwrite pre-initialized None values
+        session_state["senior"] = session_state.get("senior") or metadata.get("senior")
+        session_state["senior_id"] = session_state.get("senior_id") or (metadata.get("senior") or {}).get("id")
+        session_state["memory_context"] = session_state.get("memory_context") or metadata.get("memory_context")
+        session_state["conversation_id"] = session_state.get("conversation_id") or metadata.get("conversation_id")
+        session_state["reminder_prompt"] = session_state.get("reminder_prompt") or metadata.get("reminder_prompt")
+        session_state["call_type"] = session_state.get("call_type") or metadata.get("call_type", "check-in")
         reminder_ctx = metadata.get("reminder_context")
         if reminder_ctx:
-            session_state.setdefault("reminder_delivery", reminder_ctx.get("delivery"))
+            session_state["reminder_delivery"] = session_state.get("reminder_delivery") or reminder_ctx.get("delivery")
         greeting = metadata.get("pre_generated_greeting")
         if greeting:
-            session_state.setdefault("greeting", greeting)
+            session_state["greeting"] = session_state.get("greeting") or greeting
         logger.info(
             "[{cs}] Populated session: senior={name}, memory={mem_len}ch, greeting={gr}, reminder={rem}",
             cs=call_sid,

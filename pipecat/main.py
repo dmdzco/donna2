@@ -16,18 +16,23 @@ import os
 import sys
 import warnings
 
-# Suppress ALL DeprecationWarnings — they're all from pipecat internals
-# (OpenAILLMContext, vad_analyzer, EmulateUser*Frame, etc.) and show as
-# red stderr lines in Railway. None are actionable in pipecat v0.0.101.
-# See claude.md roadmap for migration plan.
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-
 from loguru import logger
 
 # Configure log level: INFO in production, DEBUG locally
 _log_level = os.getenv("LOG_LEVEL", "INFO" if os.getenv("RAILWAY_PUBLIC_DOMAIN") else "DEBUG")
 logger.remove()
 logger.add(sys.stderr, level=_log_level)
+
+# Route Python warnings through loguru instead of raw stderr.
+# This gives them a proper @level tag in Railway so they can be filtered.
+# DeprecationWarnings → DEBUG (hidden at INFO), other warnings → WARNING.
+def _warning_handler(message, category, filename, lineno, file=None, line=None):
+    if issubclass(category, DeprecationWarning):
+        logger.debug("{msg}", msg=str(message))
+    else:
+        logger.warning("{cat}: {msg}", cat=category.__name__, msg=str(message))
+
+warnings.showwarning = _warning_handler
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware

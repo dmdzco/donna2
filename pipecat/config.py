@@ -41,8 +41,8 @@ class Settings:
     openai_api_key: str = ""
 
     # ---- Model Selection ----
-    fast_observer_model: str = "gemini-3-flash"
-    call_analysis_model: str = "gemini-3-flash"
+    fast_observer_model: str = "gemini-3-flash-preview"
+    call_analysis_model: str = "gemini-3-flash-preview"
     anthropic_model: str = "claude-sonnet-4-5-20250929"
 
     # ---- Auth ----
@@ -87,8 +87,8 @@ def _load_settings() -> Settings:
         google_api_key=_env("GOOGLE_API_KEY"),
         openai_api_key=_env("OPENAI_API_KEY"),
         # Model Selection
-        fast_observer_model=_env("FAST_OBSERVER_MODEL", "gemini-3-flash"),
-        call_analysis_model=_env("CALL_ANALYSIS_MODEL", "gemini-3-flash"),
+        fast_observer_model=_env("FAST_OBSERVER_MODEL", "gemini-3-flash-preview"),
+        call_analysis_model=_env("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview"),
         anthropic_model=_env("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"),
         # Auth
         jwt_secret=_env("JWT_SECRET", "donna-admin-secret-change-me"),

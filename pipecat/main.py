@@ -16,10 +16,12 @@ import os
 import sys
 import warnings
 
-# Suppress pipecat/pipecat_flows deprecation warnings (shows as red stderr in Railway)
+# Suppress pipecat/pipecat_flows deprecation warnings (shows as red stderr in Railway).
+# The module filter catches named modules; the message filters catch <string>:4 warnings
+# from dynamically generated code inside pipecat internals.
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"pipecat.*")
-warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*OpenAI.*deprecated.*")
-warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*is deprecated.*pipecat.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*deprecated.*will be removed.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*Parameter.*deprecated.*")
 
 from loguru import logger
 

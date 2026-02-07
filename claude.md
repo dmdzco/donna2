@@ -289,7 +289,8 @@ DONNA_API_KEY=...
 SCHEDULER_ENABLED=false          # MUST be false (Node.js runs scheduler)
 
 # Optional
-FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
+FAST_OBSERVER_MODEL=gemini-3-flash-preview  # Director model
+LOG_LEVEL=INFO                       # DEBUG for verbose pipecat logs
 ```
 
 ---
@@ -311,6 +312,7 @@ Both share the same Neon PostgreSQL database. Dual service implementations (e.g.
 - ~~Admin Dashboard v2~~ ✓ Completed (Vercel)
 - ~~Security Hardening~~ ✓ Completed
 - ~~Pipecat Migration~~ ✓ Completed (voice pipeline ported, Director ported)
+- Pipecat context migration: `OpenAILLMContext` → `LLMContext` + `LLMContextAggregatorPair` (blocked — `AnthropicLLMService.create_context_aggregator()` requires `set_llm_adapter()` which only exists on `OpenAILLMContext` in v0.0.101. Revisit when pipecat updates the Anthropic adapter. Deprecation warnings are suppressed in `main.py`.)
 - Prompt Caching (Anthropic)
 - Telnyx Migration (65% cost savings)
 

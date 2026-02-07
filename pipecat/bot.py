@@ -24,7 +24,7 @@ from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.utils import parse_telephony_websocket
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.anthropic.llm import AnthropicLLMService
@@ -195,7 +195,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     # -------------------------------------------------------------------------
     # Context aggregators (user ↔ assistant message pairing)
     # -------------------------------------------------------------------------
-    context = LLMContext()
+    context = OpenAILLMContext()
     context_aggregator = llm.create_context_aggregator(context)
 
     # -------------------------------------------------------------------------

@@ -20,8 +20,10 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService)
 - Text-to-speech (ElevenLabs via Pipecat)
 - Semantic memory with decay + deduplication (pgvector)
+- Full in-call context retention (APPEND strategy, no summary truncation)
+- Cross-call turn history (recent turns from previous calls in system prompt)
 - In-call memory tracking (topics, questions, advice per call)
-- Same-day cross-call memory (timezone-aware daily context)
+- Same-day cross-call memory (timezone-aware daily context + call summaries)
 - News via OpenAI web search (1hr cache)
 - Scheduled reminder calls with delivery tracking
 - Context pre-caching at 5 AM local time
@@ -66,34 +68,70 @@ cd pipecat && python -m pytest tests/
 
 ## Architecture
 
+### Pipecat Voice Pipeline (bot.py)
+
+Each box is a Pipecat `FrameProcessor` in a linear `Pipeline`. Frames flow top-to-bottom.
+
 ```
-Phone Call → Twilio → WebSocket → Pipecat Pipeline
-                                       │
-                                  Deepgram STT (Nova 3)
-                                       │ TranscriptionFrame
-                                       ▼
-                             ┌─────────────────────┐
-                             │   Quick Observer     │  Layer 1 (0ms)
-                             │   268 regex patterns │  Goodbye → EndFrame
-                             └─────────┬───────────┘
-                                       ▼
-                             ┌─────────────────────┐
-                             │   Conversation       │  Layer 2 (~150ms)
-                             │   Director           │  NON-BLOCKING
-                             │   (Gemini Flash)     │  Prev-turn guidance
-                             └─────────┬───────────┘
-                                       ▼
-                             Context Aggregator (user)
-                                       ▼
-                             Claude Sonnet 4.5 + Pipecat Flows
-                                       │ TextFrame
-                                       ▼
-                             Conversation Tracker → Guidance Stripper
-                                       ▼
-                             ElevenLabs TTS → Twilio Audio Out
-                                       │
-                                       ▼ (on disconnect)
-                             Post-Call: Analysis + Memory + Daily Context
+Phone Call → Twilio Media Streams → WebSocket
+                      │
+               ┌──────▼──────────────┐
+               │  Deepgram STT        │  Speech → TranscriptionFrame
+               │  (Nova 3, 8kHz)      │  interim results + smart format
+               └──────┬──────────────┘
+                      │ TranscriptionFrame
+               ┌──────▼──────────────┐
+               │  Quick Observer      │  Layer 1 (0ms): 268 regex patterns
+               │                      │  Injects [HEALTH]/[SAFETY]/etc. guidance
+               │                      │  via LLMMessagesAppendFrame
+               │                      │  Strong goodbye → EndFrame in 3.5s
+               └──────┬──────────────┘
+                      │
+               ┌──────▼──────────────┐
+               │  Conversation        │  Layer 2 (~150ms): Gemini 3 Flash
+               │  Director            │  NON-BLOCKING (asyncio.create_task)
+               │                      │  Injects PREVIOUS turn's guidance
+               │                      │  Force winding-down at 9min
+               │                      │  Force call end at 12min
+               └──────┬──────────────┘
+                      │
+               ┌──────▼──────────────┐
+               │  Context Aggregator  │  Pairs user transcriptions with
+               │  (user side)         │  assistant responses for LLM context
+               └──────┬──────────────┘
+                      │
+               ┌──────▼──────────────┐
+               │  Claude Sonnet 4.5   │  Streaming LLM responses
+               │  + FlowManager       │  4-phase call state machine
+               │  + 4 LLM tools       │  (opening → main → winding → closing)
+               └──────┬──────────────┘
+                      │ TextFrame
+               ┌──────▼──────────────┐
+               │  Conversation        │  Tracks topics, questions, advice
+               │  Tracker             │  Maintains shared transcript
+               └──────┬──────────────┘
+                      │
+               ┌──────▼──────────────┐
+               │  Guidance Stripper   │  Strips <guidance> tags and
+               │                      │  [BRACKETED] directives before TTS
+               └──────┬──────────────┘
+                      │
+               ┌──────▼──────────────┐
+               │  ElevenLabs TTS      │  Text → AudioFrame (streaming)
+               └──────┬──────────────┘
+                      │
+               ┌──────▼──────────────┐
+               │  Twilio Transport    │  AudioFrame → mulaw 8kHz → phone
+               │  (output)            │
+               └──────┬──────────────┘
+                      │
+               ┌──────▼──────────────┐
+               │  Context Aggregator  │  Tracks assistant responses
+               │  (assistant side)    │  for conversation history
+               └──────────────────────┘
+
+                      ▼ (on disconnect)
+               Post-Call: Analysis → Memory Extraction → Daily Context
 ```
 
 ## Conversation Director
@@ -135,7 +173,7 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── quick_observer.py               # Layer 1: analysis + goodbye EndFrame
 │   ├── conversation_director.py        # Layer 2: Gemini Flash non-blocking
 │   ├── conversation_tracker.py         # Topic/question/advice tracking
-│   ├── goodbye_gate.py                 # False-goodbye grace period
+│   ├── goodbye_gate.py                 # False-goodbye grace period (not in active pipeline)
 │   └── guidance_stripper.py            # Strip <guidance> tags before TTS
 ├── services/
 │   ├── post_call.py                    # Post-call orchestration

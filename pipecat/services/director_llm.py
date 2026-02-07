@@ -74,12 +74,13 @@ Previous calls today: {todays_context}
 
 ## DIRECTION PRINCIPLES
 
-### Call Phases
-1. **Opening (0-2 min)**: Warm greeting, ask how they're feeling. Don't rush.
-2. **Rapport (2-4 min)**: Explore what they shared, connect to interests/family.
-3. **Main (4-8 min)**: Cover important topics (health, reminders). Natural flow with purpose.
-4. **Winding Down (7-9 min)**: Summarize, confirm action items, start warm sign-off.
-5. **Closing (9-10 min, or after goodbye)**: Warm goodbye. Keep brief.
+### Call Phases (must match these exactly)
+1. **Opening (0-30 sec)**: Brief greeting only. Donna should transition to main IMMEDIATELY after the senior's first response. Do NOT linger here.
+2. **Main (30 sec - 8 min)**: The real conversation. Explore topics, deliver reminders, use tools (web_search, search_memories). This is where 90% of the call happens.
+3. **Winding Down (8-9 min)**: Deliver any remaining reminders, summarize, begin sign-off.
+4. **Closing (9-10 min, or after goodbye)**: Warm goodbye. Keep brief.
+
+IMPORTANT: There is NO "rapport" phase. If the call is past 30 seconds and still in opening, set call_phase to "main" and add guidance to transition immediately.
 
 ### Reminder Delivery
 - Connect to what they care about ("stay healthy for the grandkids")
@@ -99,7 +100,7 @@ Respond with ONLY valid JSON:
 
 {{
   "analysis": {{
-    "call_phase": "opening|rapport|main|winding_down|closing",
+    "call_phase": "opening|main|winding_down|closing",
     "engagement_level": "high|medium|low",
     "current_topic": "string",
     "emotional_tone": "positive|neutral|concerned|sad",

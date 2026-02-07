@@ -123,6 +123,86 @@ async def get_recent_summaries(senior_id: str, limit: int = 3) -> str | None:
     return "\n".join(lines)
 
 
+async def get_recent_turns(senior_id: str, max_calls: int = 3, turns_per_call: int = 7, max_turns: int = 20) -> str | None:
+    """Get recent turns from previous calls as formatted text for system prompt.
+
+    Pulls the last `max_calls` completed calls with transcripts, takes the last
+    `turns_per_call` turns from each, and formats them with time labels.
+    Returns None if no history found.
+    """
+    rows = await query_many(
+        """SELECT transcript, started_at, duration_seconds
+           FROM conversations
+           WHERE senior_id = $1
+             AND status = 'completed'
+             AND transcript IS NOT NULL
+           ORDER BY started_at DESC
+           LIMIT $2""",
+        senior_id,
+        max_calls,
+    )
+    if not rows:
+        return None
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    sections: list[str] = []
+    total_turns = 0
+
+    for row in rows:
+        try:
+            transcript = row["transcript"]
+            if isinstance(transcript, str):
+                transcript = json.loads(transcript)
+            if not isinstance(transcript, list) or not transcript:
+                continue
+
+            # Take last N turns from this call
+            recent = transcript[-turns_per_call:]
+
+            # Time label
+            started_at = row["started_at"]
+            if started_at.tzinfo is not None:
+                started_at = started_at.replace(tzinfo=None)
+            delta = now - started_at
+            days_ago = delta.days
+            if days_ago == 0:
+                time_label = "Earlier today"
+            elif days_ago == 1:
+                time_label = "Yesterday"
+            else:
+                time_label = f"{days_ago} days ago"
+
+            duration = row.get("duration_seconds")
+            dur_str = f" ({math.ceil(duration / 60)} min)" if duration else ""
+
+            lines: list[str] = [f"[{time_label}{dur_str}]"]
+            for turn in recent:
+                if not isinstance(turn, dict):
+                    continue
+                role = turn.get("role", "unknown")
+                content = turn.get("content", "").strip()
+                if not content:
+                    continue
+                speaker = "Donna" if role == "assistant" else "Senior"
+                lines.append(f"  {speaker}: {content}")
+                total_turns += 1
+
+            if len(lines) > 1:  # has at least one turn beyond the header
+                sections.append("\n".join(lines))
+        except Exception:
+            continue
+
+        if total_turns >= max_turns:
+            break
+
+    if not sections:
+        return None
+
+    header = "RECENT CONVERSATIONS (from previous calls):"
+    footer = "(Reference these naturally — show you remember without repeating exactly.)"
+    return f"{header}\n" + "\n".join(sections) + f"\n{footer}"
+
+
 async def get_recent_history(senior_id: str, message_limit: int = 6) -> list[dict]:
     """Legacy: get recent conversation messages for context."""
     rows = await query_many(

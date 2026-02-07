@@ -98,6 +98,22 @@ Twilio Audio ──► FastAPIWebsocketTransport
               └─────────────────────┘
 ```
 
+## How Pipeline Components Communicate
+
+The pipeline processors don't call each other directly. They communicate through two mechanisms:
+
+1. **Frame injection** — Quick Observer and Conversation Director inject guidance into the LLM context by pushing `LLMMessagesAppendFrame` frames. These get appended to Claude's message history before it generates a response, but they don't trigger an LLM call on their own (`run_llm=False`). The next `TranscriptionFrame` reaching the Context Aggregator triggers the actual LLM call, at which point all injected guidance is already in context.
+
+2. **Shared `session_state` dict** — A mutable dictionary initialized in `main.py` and passed to every processor. Key shared state:
+   - `_transcript` — Rolling conversation history (max 40 turns), written by ConversationTracker, read by ConversationDirector for its Gemini analysis
+   - `_goodbye_in_progress` — Set by QuickObserver when strong goodbye detected, read by Director to suppress stale guidance injection
+   - `_call_start_time` — Set in bot.py, read by Director for time-based fallbacks
+   - `_conversation_tracker` — Reference to the ConversationTracker processor, read by Flow nodes to build tracking summaries
+
+3. **Pipeline task reference** — Both QuickObserver and Director receive a `set_pipeline_task(task)` call after pipeline creation. This lets them queue `EndFrame` directly to force call termination, bypassing the normal frame flow.
+
+---
+
 ## 2-Layer Observer Architecture
 
 ### Layer 1: Quick Observer (0ms)
@@ -115,7 +131,11 @@ Instant regex-based analysis with 268 patterns across 19 categories:
 | **Factual/Curiosity** | 18 patterns ("what year", "how tall") | Web search trigger |
 | **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 
-**Programmatic Goodbye**: When a strong goodbye signal is detected (e.g., "goodbye", "talk to you later"), Quick Observer schedules an `EndFrame` after 3.5 seconds. This bypasses unreliable LLM tool-calling for call termination.
+**Guidance injection**: When patterns match, Quick Observer builds a guidance string (e.g., `[HEALTH] They mentioned pain. Ask how they are feeling.`) and pushes it as an `LLMMessagesAppendFrame` with `run_llm=False`. This appends a user-role message to Claude's context before the next LLM call, steering the response without adding latency.
+
+**Model recommendations**: Quick Observer also generates token budget recommendations based on signal priority (16 ordered rules). Crisis situations get 350 tokens; simple questions get 100. This data is available on the `AnalysisResult` but is not currently consumed by the pipeline — it's designed for future dynamic token routing.
+
+**Programmatic Goodbye**: When a strong goodbye signal is detected (e.g., "goodbye", "talk to you later"), Quick Observer schedules an `EndFrame` after 3.5 seconds via the pipeline task reference. This bypasses unreliable LLM tool-calling for call termination. It also sets `session_state["_goodbye_in_progress"] = True` to suppress Director guidance injection during the goodbye.
 
 ### Layer 2: Conversation Director (~150ms, non-blocking)
 
@@ -134,6 +154,8 @@ Runs Gemini Flash per turn via `asyncio.create_task()` — never blocks the pipe
 - **Force closing** when Director says closing + call > 8min — EndFrame after 5s
 
 #### Director Output Schema
+
+The Director classifies calls into 5 analytical phases (including "rapport" between opening and main), while the Flows state machine uses 4 phases (opening, main, winding_down, closing). The Director's `call_phase` is informational guidance — it doesn't directly control Flows transitions.
 
 ```json
 {
@@ -186,8 +208,8 @@ closing/medium/warm | CLOSING: Say a warm goodbye. Keep it brief.
 │ • Warm start  │                            │ • Reminders   │
 │ • respond_    │                            │ • Memory tools│
 │   immediately │                            │ • News search │
-│               │                            │ • RESET_WITH_ │
-│               │                            │   SUMMARY     │
+│               │                            │ • APPEND      │
+│               │                            │   context      │
 └──────────────┘                            └───────┬───────┘
                                                      │
                                     transition_to_winding_down
@@ -219,7 +241,7 @@ closing/medium/warm | CLOSING: Say a warm goodbye. Keep it brief.
 |-------|-------|
 | **Opening** | `search_memories`, `save_important_detail`, `transition_to_main` |
 | **Main** | `search_memories`, `get_news`, `save_important_detail`, `mark_reminder_acknowledged`, `transition_to_winding_down` |
-| **Winding Down** | `mark_reminder_acknowledged`, `transition_to_closing` |
+| **Winding Down** | `mark_reminder_acknowledged`, `save_important_detail`, `transition_to_closing` |
 | **Closing** | *(none — post_action ends call)* |
 
 ### Tool Descriptions
@@ -237,10 +259,11 @@ When the Twilio client disconnects, `run_post_call()` in `services/post_call.py`
 
 1. **Complete conversation** — Updates DB with duration, status, transcript
 2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions
-3. **Memory extraction** — OpenAI extracts facts/preferences/events from transcript, stores with embeddings
-4. **Daily context** — Saves topics, advice, reminders for same-day cross-call memory
-5. **Reminder cleanup** — Marks unacknowledged reminders for retry
-6. **Cache clearing** — Clears senior context cache and reminder context
+3. **Summary persistence** — Writes analysis summary to `conversations.summary` (enables `get_recent_summaries()` and cross-call context)
+4. **Memory extraction** — OpenAI extracts facts/preferences/events from transcript, stores with embeddings
+5. **Daily context** — Saves topics, advice, reminders, and summary for same-day cross-call memory
+6. **Reminder cleanup** — Marks unacknowledged reminders for retry
+7. **Cache clearing** — Clears senior context cache and reminder context
 
 ## Directory Structure
 
@@ -274,7 +297,7 @@ pipecat/
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame
 │   ├── conversation_director.py     ← Layer 2: Gemini Flash guidance (non-blocking)
 │   ├── conversation_tracker.py      ← In-call topic/question/advice tracking + transcript
-│   ├── goodbye_gate.py              ← False-goodbye grace period
+│   ├── goodbye_gate.py              ← False-goodbye grace period (NOT in active pipeline — available but unused)
 │   └── guidance_stripper.py         ← Strips <guidance> tags and [BRACKETED] directives
 │
 ├── services/
@@ -364,8 +387,8 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Hosting** | Railway | Docker, port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
 | **Voice LLM** | Claude Sonnet 4.5 | AnthropicLLMService |
-| **Director** | Gemini 2.0 Flash | ~150ms non-blocking analysis |
-| **Post-Call** | Gemini 2.0 Flash | Summary, concerns, engagement |
+| **Director** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | ~150ms non-blocking analysis |
+| **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
 | **STT** | Deepgram Nova 3 | Real-time, interim results |
 | **TTS** | ElevenLabs | `eleven_turbo_v2_5` |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |

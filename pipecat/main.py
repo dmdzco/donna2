@@ -118,6 +118,7 @@ async def websocket_endpoint(websocket: WebSocket):
         "call_type": "check-in",
         "is_outbound": True,
         "previous_calls_summary": None,
+        "recent_turns": None,
         "todays_context": None,
         "_transcript": [],
         "_call_metadata": call_metadata,

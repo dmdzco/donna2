@@ -97,6 +97,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         if greeting:
             session_state["greeting"] = session_state.get("greeting") or greeting
         session_state["previous_calls_summary"] = session_state.get("previous_calls_summary") or metadata.get("previous_calls_summary")
+        session_state["recent_turns"] = session_state.get("recent_turns") or metadata.get("recent_turns")
         session_state["todays_context"] = session_state.get("todays_context") or metadata.get("todays_context")
         session_state["news_context"] = session_state.get("news_context") or metadata.get("news_context")
         if "is_outbound" in metadata:

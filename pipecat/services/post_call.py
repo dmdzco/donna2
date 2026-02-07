@@ -33,6 +33,8 @@ async def run_post_call(
     # Collect transcript from session
     transcript = session_state.get("_transcript", [])
 
+    analysis = None
+
     try:
         # 1. Complete conversation record
         if conversation_id:
@@ -49,6 +51,13 @@ async def run_post_call(
             analysis = await analyze_completed_call(transcript, senior)
             if conversation_id and senior_id:
                 await save_call_analysis(conversation_id, senior_id, analysis)
+
+            # Persist summary to conversations table so get_recent_summaries() works
+            summary = analysis.get("summary") if analysis else None
+            if summary and summary != "Analysis unavailable":
+                from services.conversations import update_summary
+                await update_summary(call_sid, summary)
+                logger.info("[{cs}] Persisted call summary ({n} chars)", cs=call_sid, n=len(summary))
 
         # 3. Extract and store memories
         if transcript and senior_id:
@@ -80,6 +89,7 @@ async def run_post_call(
                         session_state.get("reminders_delivered", set())
                     ),
                     "timezone": senior.get("timezone", "America/New_York"),
+                    "summary": analysis.get("summary") if analysis else None,
                 },
             )
 

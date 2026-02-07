@@ -272,11 +272,16 @@ async def prefetch_for_phone(phone_number: str, senior: dict | None) -> dict:
             from services.memory import build_context
             memory_context = await build_context(senior["id"], None, senior)
 
+    recent_turns = None
+    if cached:
+        recent_turns = cached.get("recent_turns")
+
     normalized = _normalize_phone(phone_number)
     prefetched_context_by_phone[normalized] = {
         "senior": senior,
         "memory_context": memory_context,
         "pre_generated_greeting": pre_generated_greeting,
+        "recent_turns": recent_turns,
         "fetched_at": datetime.now(timezone.utc),
     }
 

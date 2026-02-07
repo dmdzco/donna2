@@ -126,7 +126,7 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
 
     try:
         from services.seniors import get_by_id
-        from services.conversations import get_recent_summaries
+        from services.conversations import get_recent_summaries, get_recent_turns
         from services.memory import get_critical, get_important, get_recent, group_by_type, format_grouped_memories
         from services.greetings import get_greeting
 
@@ -136,8 +136,9 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
             return None
 
         # Parallel fetches
-        summaries, critical, important, recent_mems = await asyncio.gather(
+        summaries, recent_turns, critical, important, recent_mems = await asyncio.gather(
             get_recent_summaries(senior_id, 3),
+            get_recent_turns(senior_id),
             get_critical(senior_id, 3),
             get_important(senior_id, 5),
             get_recent(senior_id, 10),
@@ -191,6 +192,7 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
             "senior_id": senior_id,
             "senior": senior,
             "summaries": summaries,
+            "recent_turns": recent_turns,
             "critical_memories": critical,
             "important_memories": important,
             "memory_context": "\n".join(memory_parts),

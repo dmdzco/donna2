@@ -41,8 +41,10 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **4 LLM Tools** - search_memories, get_news, save_important_detail, mark_reminder_acknowledged
 - **Programmatic Call Ending** - Quick Observer detects goodbye → EndFrame after 3.5s (bypasses LLM)
 - **Director Fallback Actions** - Force winding-down at 9min, force end at 12min
+- **Full In-Call Context Retention** - APPEND strategy keeps complete conversation history (no summary truncation)
+- **Cross-Call Turn History** - Recent turns from previous calls loaded into system prompt via `get_recent_turns()`
 - **In-Call Memory Tracking** - Topics, questions, advice tracked per call (ConversationTracker)
-- **Same-Day Cross-Call Memory** - Daily context persists across calls per senior per day
+- **Same-Day Cross-Call Memory** - Daily context + call summaries persist across calls per senior per day
 - **Greeting Rotation** - Time-based templates with interest/context followups
 - **Semantic Memory** - pgvector with decay + deduplication + tiered retrieval
 - **Scheduled Reminder Calls** - Polling scheduler with prefetch + delivery tracking
@@ -68,51 +70,57 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 
 ### Pipecat Pipeline (bot.py)
 
+Linear pipeline — each processor is a Pipecat `FrameProcessor`. Frames flow top to bottom.
+
 ```
 Twilio Audio ──► FastAPIWebsocketTransport
                         │
-                   Deepgram STT (Nova 3)
+                   Deepgram STT (Nova 3, 8kHz)
                         │ TranscriptionFrame
                         ▼
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1 (0ms): 268 regex patterns
-              │                      │  Goodbye → EndFrame in 3.5s
+              │                      │  Injects guidance via LLMMessagesAppendFrame
+              │                      │  Strong goodbye → EndFrame in 3.5s
               └─────────┬───────────┘
                         ▼
               ┌─────────────────────┐
-              │ Conversation         │  Layer 2 (~150ms): Gemini Flash
-              │ Director             │  NON-BLOCKING async analysis
-              │                      │  Injects cached guidance per turn
+              │ Conversation         │  Layer 2 (~150ms): Gemini 3 Flash Preview
+              │ Director             │  NON-BLOCKING (asyncio.create_task)
+              │                      │  Injects PREVIOUS turn's cached guidance
+              │                      │  Force winding-down at 9min, end at 12min
               └─────────┬───────────┘
                         ▼
-              Context Aggregator (user)
+              Context Aggregator (user) ← builds LLM context from transcriptions
                         ▼
-              Claude Sonnet 4.5 + Pipecat Flows
+              Claude Sonnet 4.5 + FlowManager (4-phase state machine)
                         │ TextFrame
                         ▼
-              Conversation Tracker (topics, questions, advice)
+              Conversation Tracker (topics, questions, advice + shared transcript)
                         ▼
-              Guidance Stripper (removes <guidance> tags)
+              Guidance Stripper (strips <guidance> tags + [BRACKETED] directives)
                         ▼
-              ElevenLabs TTS
+              ElevenLabs TTS (eleven_turbo_v2_5)
                         ▼
-              FastAPIWebsocketTransport ──► Twilio Audio
+              FastAPIWebsocketTransport ──► Twilio Audio (mulaw 8kHz)
                         ▼
-              Context Aggregator (assistant)
+              Context Aggregator (assistant) ← tracks assistant responses
 ```
+
+**Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. The guidance appears as user-role messages in Claude's context before the next LLM call is triggered by the Context Aggregator.
 
 ### Call Phase State Machine (Pipecat Flows)
 
 | Phase | Tools | Context Strategy |
 |-------|-------|-----------------|
-| **Opening** | search_memories, save_important_detail, transition_to_main | respond_immediately |
-| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | RESET_WITH_SUMMARY |
-| **Winding Down** | mark_reminder_acknowledged, transition_to_closing | — |
-| **Closing** | *(none — post_action ends call)* | — |
+| **Opening** | search_memories, save_important_detail, transition_to_main | APPEND, respond_immediately |
+| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | APPEND |
+| **Winding Down** | mark_reminder_acknowledged, save_important_detail, transition_to_closing | APPEND |
+| **Closing** | *(none — post_action: end_conversation)* | APPEND |
 
 ### Post-Call Processing
 
-On disconnect: complete conversation → call analysis (Gemini) → memory extraction (OpenAI) → daily context save → reminder cleanup → cache clear.
+On disconnect: complete conversation → call analysis (Gemini) → summary persistence → memory extraction (OpenAI) → daily context save → reminder cleanup → cache clear.
 
 ---
 
@@ -121,21 +129,21 @@ On disconnect: complete conversation → call analysis (Gemini) → memory extra
 ```
 pipecat/
 ├── main.py                          ← FastAPI entry point, /health, /ws, middleware
-├── bot.py                           ← Pipeline assembly + run_bot() (280 LOC)
-├── config.py                        ← All env vars centralized (95 LOC)
-├── prompts.py                       ← System prompts + phase task instructions (92 LOC)
+├── bot.py                           ← Pipeline assembly + run_bot() (277 LOC)
+├── config.py                        ← All env vars centralized (105 LOC)
+├── prompts.py                       ← System prompts + phase task instructions (91 LOC)
 │
 ├── flows/
-│   ├── nodes.py                     ← 4 call phase NodeConfigs (imports prompts.py) (315 LOC)
-│   └── tools.py                     ← 4 LLM tool schemas + async handlers (227 LOC)
+│   ├── nodes.py                     ← 4 call phase NodeConfigs (imports prompts.py) (314 LOC)
+│   └── tools.py                     ← 4 LLM tool schemas + closure-based handlers (230 LOC)
 │
 ├── processors/
 │   ├── patterns.py                  ← Pattern data: 268 regex patterns, 19 categories (503 LOC)
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame (374 LOC)
-│   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking (180 LOC)
+│   ├── conversation_director.py     ← Layer 2: Gemini 3 Flash Preview non-blocking (180 LOC)
 │   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (239 LOC)
-│   ├── goodbye_gate.py              ← False-goodbye grace period (135 LOC)
-│   └── guidance_stripper.py         ← Strip <guidance> tags before TTS (74 LOC)
+│   ├── goodbye_gate.py              ← False-goodbye grace period — NOT in active pipeline (135 LOC)
+│   └── guidance_stripper.py         ← Strip <guidance> tags + [BRACKETED] directives (74 LOC)
 │
 ├── services/
 │   ├── scheduler.py                 ← Reminder polling + outbound calls (403 LOC)

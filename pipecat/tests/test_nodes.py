@@ -30,6 +30,7 @@ def _make_session_state(**overrides):
         "call_type": "check-in",
         "is_outbound": True,
         "previous_calls_summary": "Yesterday: Discussed gardening",
+        "recent_turns": None,
         "todays_context": None,
         "conversation_tracking": None,
     }
@@ -96,6 +97,24 @@ class TestSeniorContext:
         state = _make_session_state(news_context=None)
         ctx = _build_senior_context(state)
         assert "recent news" not in ctx
+
+    def test_includes_recent_turns(self):
+        turns = (
+            "RECENT CONVERSATIONS (from previous calls):\n"
+            "[Yesterday (5 min)]\n"
+            "  Senior: I went to the doctor yesterday\n"
+            "  Donna: Oh, how did that go?\n"
+            "(Reference these naturally — show you remember without repeating exactly.)"
+        )
+        state = _make_session_state(recent_turns=turns)
+        ctx = _build_senior_context(state)
+        assert "RECENT CONVERSATIONS" in ctx
+        assert "doctor" in ctx
+
+    def test_no_recent_turns_when_none(self):
+        state = _make_session_state(recent_turns=None)
+        ctx = _build_senior_context(state)
+        assert "RECENT CONVERSATIONS" not in ctx
 
 
 class TestReminderContext:
@@ -179,14 +198,14 @@ class TestMainNode:
         func_names = _get_func_names(node)
         assert "get_news" not in func_names
 
-    def test_node_has_reset_strategy(self):
+    def test_node_has_append_strategy(self):
         state = _make_session_state()
         tools = make_flows_tools(state)
         node = build_main_node(state, tools)
         ctx_strategy = node.get("context_strategy")
         assert ctx_strategy is not None
         from pipecat_flows import ContextStrategy
-        assert ctx_strategy.strategy == ContextStrategy.RESET_WITH_SUMMARY
+        assert ctx_strategy.strategy == ContextStrategy.APPEND
 
 
 class TestWindingDownNode:

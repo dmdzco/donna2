@@ -165,7 +165,7 @@ def make_tool_handlers(session_state: dict) -> dict:
         reminder_label = user_response or reminder_id
 
         try:
-            from services.scheduler import mark_reminder_acknowledged
+            from services.reminder_delivery import mark_reminder_acknowledged
             delivery = session_state.get("reminder_delivery")
             delivery_id = delivery.get("id") if delivery else None
             if delivery_id:

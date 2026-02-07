@@ -42,6 +42,7 @@ from processors.conversation_director import ConversationDirectorProcessor
 from processors.conversation_tracker import ConversationTrackerProcessor
 from processors.guidance_stripper import GuidanceStripperProcessor
 from processors.quick_observer import QuickObserverProcessor
+from services.post_call import run_post_call
 
 
 async def run_bot(websocket: WebSocket, session_state: dict) -> None:
@@ -262,7 +263,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     async def on_disconnected(transport_ref, websocket_ref):
         elapsed = round(time.time() - start_time)
         logger.info("[{cs}] Client disconnected after {s}s", cs=call_sid, s=elapsed)
-        await _run_post_call(session_state, conversation_tracker, elapsed)
+        await run_post_call(session_state, conversation_tracker, elapsed)
         await task.queue_frame(EndFrame())
 
     # -------------------------------------------------------------------------
@@ -276,92 +277,3 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     logger.info("[{cs}] Pipeline ended", cs=call_sid)
 
 
-async def _run_post_call(
-    session_state: dict,
-    conversation_tracker: ConversationTrackerProcessor,
-    duration_seconds: int,
-) -> None:
-    """Run post-call processing: analysis, memory extraction, DB updates.
-
-    Called after the Twilio client disconnects.
-    """
-    call_sid = session_state.get("call_sid", "unknown")
-    conversation_id = session_state.get("conversation_id")
-    senior_id = session_state.get("senior_id")
-    senior = session_state.get("senior")
-
-    logger.info("[{cs}] Running post-call processing", cs=call_sid)
-
-    # Collect transcript from session
-    transcript = session_state.get("_transcript", [])
-
-    try:
-        # 1. Complete conversation record
-        if conversation_id:
-            from services.conversations import complete
-            await complete(call_sid, {
-                "duration_seconds": duration_seconds,
-                "status": "completed",
-                "transcript": transcript,
-            })
-
-        # 2. Run call analysis (Gemini Flash)
-        if transcript and senior:
-            from services.call_analysis import analyze_completed_call, save_call_analysis
-            analysis = await analyze_completed_call(transcript, senior)
-            if conversation_id and senior_id:
-                await save_call_analysis(conversation_id, senior_id, analysis)
-
-        # 3. Extract and store memories
-        if transcript and senior_id:
-            from services.memory import extract_from_conversation
-            # Format transcript list into readable text for LLM extraction
-            if isinstance(transcript, list):
-                formatted_transcript = "\n".join(
-                    f"{turn.get('role', 'unknown')}: {turn.get('content', '')}"
-                    for turn in transcript
-                    if isinstance(turn, dict)
-                )
-            else:
-                formatted_transcript = str(transcript)
-            await extract_from_conversation(
-                senior_id, formatted_transcript, conversation_id or "unknown"
-            )
-
-        # 4. Save daily context
-        if senior_id and conversation_tracker:
-            from services.daily_context import save_call_context
-            senior = session_state.get("senior") or {}
-            await save_call_context(
-                senior_id=senior_id,
-                call_sid=call_sid,
-                data={
-                    "topics_discussed": conversation_tracker.state.topics_discussed,
-                    "advice_given": conversation_tracker.state.advice_given,
-                    "reminders_delivered": list(
-                        session_state.get("reminders_delivered", set())
-                    ),
-                    "timezone": senior.get("timezone", "America/New_York"),
-                },
-            )
-
-        # 5. Handle reminder cleanup
-        reminder_delivery = session_state.get("reminder_delivery")
-        if reminder_delivery:
-            delivered_set = session_state.get("reminders_delivered", set())
-            if not delivered_set:
-                from services.scheduler import mark_call_ended_without_acknowledgment
-                await mark_call_ended_without_acknowledgment(reminder_delivery["id"])
-
-        # 6. Clear caches
-        if senior_id:
-            from services.context_cache import clear_cache
-            clear_cache(senior_id)
-        if call_sid:
-            from services.scheduler import clear_reminder_context
-            clear_reminder_context(call_sid)
-
-        logger.info("[{cs}] Post-call processing complete", cs=call_sid)
-
-    except Exception as e:
-        logger.error("[{cs}] Post-call error: {err}", cs=call_sid, err=str(e))

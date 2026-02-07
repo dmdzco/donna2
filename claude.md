@@ -2,6 +2,16 @@
 
 > **AI Assistants**: You have permission to update this file as the project evolves. Keep it accurate and current.
 
+## MANDATORY: Read Before Coding
+
+**Before writing or modifying any code, read [`DIRECTORY.md`](DIRECTORY.md).** It tells you:
+- What each directory does and whether it's active or legacy
+- Which backend (Pipecat Python vs Node.js Express) owns which functionality
+- Exactly which file to open for any given task
+- Which files are large and should only be loaded when necessary
+
+Do NOT confuse the Node.js `services/` with `pipecat/services/` — they are separate implementations sharing the same database.
+
 ---
 
 ## Project Goal
@@ -111,23 +121,28 @@ On disconnect: complete conversation → call analysis (Gemini) → memory extra
 ```
 pipecat/
 ├── main.py                          ← FastAPI entry point, /health, /ws, middleware
-├── bot.py                           ← Pipeline assembly + run_bot() + _run_post_call()
+├── bot.py                           ← Pipeline assembly + run_bot() (280 LOC)
+├── config.py                        ← All env vars centralized (95 LOC)
+├── prompts.py                       ← System prompts + phase task instructions (92 LOC)
 │
 ├── flows/
-│   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts (359 LOC)
-│   └── tools.py                     ← 4 LLM tool schemas + async handlers (208 LOC)
+│   ├── nodes.py                     ← 4 call phase NodeConfigs (imports prompts.py) (315 LOC)
+│   └── tools.py                     ← 4 LLM tool schemas + async handlers (227 LOC)
 │
 ├── processors/
-│   ├── quick_observer.py            ← Layer 1: 252 regex patterns + goodbye EndFrame (560+ LOC)
-│   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking (178 LOC)
+│   ├── patterns.py                  ← Pattern data: 268 regex patterns, 19 categories (570 LOC)
+│   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame (375 LOC)
+│   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking (180 LOC)
 │   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (240 LOC)
 │   └── guidance_stripper.py         ← Strip <guidance> tags before TTS (75 LOC)
 │
 ├── services/
+│   ├── scheduler.py                 ← Reminder polling + outbound calls (403 LOC)
+│   ├── reminder_delivery.py         ← Delivery CRUD + prompt formatting (85 LOC)
+│   ├── post_call.py                 ← Post-call: analysis, memory, cleanup (97 LOC)
 │   ├── director_llm.py              ← Gemini Flash analysis for Director (340 LOC)
 │   ├── call_analysis.py             ← Post-call analysis (Gemini Flash) (222 LOC)
-│   ├── memory.py                    ← Semantic memory (pgvector, decay) (351 LOC)
-│   ├── scheduler.py                 ← Reminder scheduling + outbound calls (482 LOC)
+│   ├── memory.py                    ← Semantic memory (pgvector, decay) (356 LOC)
 │   ├── context_cache.py             ← Pre-cache at 5 AM local (261 LOC)
 │   ├── conversations.py             ← Conversation CRUD (169 LOC)
 │   ├── daily_context.py             ← Cross-call same-day memory (160 LOC)
@@ -145,27 +160,26 @@ pipecat/
 │
 ├── db/client.py                     ← asyncpg pool + query helpers
 ├── lib/sanitize.py                  ← PII-safe logging
-├── tests/                           ← 13 test files, 163+ tests
+├── tests/                           ← 14 test files, 163+ tests
 ├── pyproject.toml                   ← Python 3.12, Pipecat v0.0.101+
 └── Dockerfile                       ← python:3.12-slim + uv
 ```
 
-### Legacy Node.js (repo root — being replaced)
+### Node.js Admin API (repo root — still serves frontend APIs)
 
 ```
 /
-├── index.js                    ← Express server (legacy)
-├── pipelines/v1-advanced.js    ← Legacy voice pipeline
-├── pipelines/quick-observer.js ← Legacy Quick Observer (JS)
-├── pipelines/fast-observer.js  ← Legacy Conversation Director (JS)
-├── services/                   ← Legacy services (JS)
-├── routes/                     ← 16 route modules (JS)
-├── middleware/                  ← 7 middleware files (JS)
+├── index.js                    ← Express server (port 3001, admin/consumer APIs)
+├── services/                   ← 10 service files (dual implementation with pipecat/services/)
+├── routes/                     ← 16 route modules (all /api/* endpoints)
+├── middleware/                  ← 7 middleware files (auth, rate-limit, security)
 └── apps/                       ← Frontend apps (still active)
     ├── admin-v2/               ← Admin dashboard (Vercel)
     ├── consumer/               ← Consumer app (Vercel)
     └── observability/          ← Observability dashboard
 ```
+
+> Legacy voice pipeline code (`pipelines/`, `adapters/`, `websocket/`) was removed in `93ce8d1`.
 
 ---
 
@@ -189,19 +203,20 @@ pipecat/
 
 | Task | Where to Look |
 |------|---------------|
-| Change conversation behavior | `pipecat/flows/nodes.py` (system prompts per phase) |
+| Change conversation behavior | `pipecat/prompts.py` (prompt text) + `pipecat/flows/nodes.py` (flow logic) |
 | Add/modify LLM tools | `pipecat/flows/tools.py` (schemas + handlers) |
-| Modify Quick Observer patterns | `pipecat/processors/quick_observer.py` |
+| Modify Quick Observer patterns | `pipecat/processors/patterns.py` (data) + `pipecat/processors/quick_observer.py` (logic) |
 | Modify Conversation Director | `pipecat/processors/conversation_director.py` + `pipecat/services/director_llm.py` |
 | Modify call ending behavior | `pipecat/processors/quick_observer.py` (goodbye EndFrame) + `pipecat/processors/conversation_director.py` (time-based) |
 | Change pipeline assembly | `pipecat/bot.py` |
-| Modify post-call processing | `pipecat/bot.py` (_run_post_call) |
+| Modify post-call processing | `pipecat/services/post_call.py` |
 | Modify post-call analysis | `pipecat/services/call_analysis.py` |
 | Modify memory system | `pipecat/services/memory.py` |
 | Modify greeting templates | `pipecat/services/greetings.py` |
 | Modify context pre-caching | `pipecat/services/context_cache.py` |
 | Modify cross-call daily context | `pipecat/services/daily_context.py` |
-| Modify reminder scheduling | `pipecat/services/scheduler.py` |
+| Modify reminder scheduling | `pipecat/services/scheduler.py` (polling) + `pipecat/services/reminder_delivery.py` (CRUD) |
+| Check/add environment variables | `pipecat/config.py` |
 | Modify in-call tracking | `pipecat/processors/conversation_tracker.py` |
 | Modify guidance stripping | `pipecat/processors/guidance_stripper.py` |
 | Add API routes | `pipecat/api/routes/` |
@@ -215,10 +230,11 @@ pipecat/
 
 After each commit that adds features or changes architecture, update:
 
-1. **`pipecat/docs/ARCHITECTURE.md`** - Pipeline diagrams, file structure, tech stack
-2. **`claude.md`** (this file) - Working features, key files, AI assistant reference
-3. **`README.md`** - Features, quick start, project structure
-4. **`docs/architecture/OVERVIEW.md`** - High-level architecture overview
+1. **`DIRECTORY.md`** - Directory map and wayfinding (agents read this FIRST)
+2. **`pipecat/docs/ARCHITECTURE.md`** - Pipeline diagrams, file structure, tech stack
+3. **`CLAUDE.md`** (this file) - Working features, key files, AI assistant reference
+4. **`README.md`** - Features, quick start, project structure
+5. **`docs/architecture/OVERVIEW.md`** - High-level architecture overview
 
 ### Deployment
 

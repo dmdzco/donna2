@@ -35,7 +35,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         │
                         ▼
                 ┌───────────────┐
-                │  Deepgram STT  │  (Speech-to-Text)
+                │  Deepgram STT  │  (Speech-to-Text, Nova 3)
                 └───────┬───────┘
                         │ TranscriptionFrame
                         ▼
@@ -43,18 +43,18 @@ Twilio Audio ──► FastAPIWebsocketTransport
               │   Quick Observer     │  Layer 1: Instant regex (0ms)
               │   (252 patterns)     │  → health, goodbye, emotion,
               │                      │    cognitive, activity signals
-              └─────────┬───────────┘
-                        │ + AnalysisResult
-                        ▼
-              ┌─────────────────────┐
-              │   Goodbye Gate       │  4s silence timer
-              │                      │  Prevents premature ending
+              │   Programmatic hang- │  → Strong goodbye detected:
+              │   up: EndFrame after │    schedules EndFrame in 3.5s
+              │   3.5s delay         │
               └─────────┬───────────┘
                         │
                         ▼
               ┌─────────────────────┐
-              │ Conversation Tracker │  Tracks topics, questions,
-              │                      │  advice, stories per call
+              │ Conversation         │  Layer 2: Gemini Flash (~150ms)
+              │ Director             │  NON-BLOCKING: async analysis
+              │                      │  → Injects PREVIOUS turn guidance
+              │                      │  → Background: analyzes THIS turn
+              │                      │  → Fallback: force call end at 12min
               └─────────┬───────────┘
                         │
                         ▼
@@ -65,20 +65,22 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         │
                         ▼
               ┌─────────────────────┐
-              │   Anthropic LLM      │  Claude Sonnet (streaming)
+              │   Anthropic LLM      │  Claude Sonnet 4.5 (streaming)
               │   + Flow Manager     │  Guided by Pipecat Flows
               └─────────┬───────────┘
                         │ TextFrame
                         ▼
               ┌─────────────────────┐
-              │  Guidance Stripper   │  Removes [HEALTH]/[GOODBYE]
-              │                      │  tags before TTS
+              │ Conversation Tracker │  Tracks topics, questions,
+              │                      │  advice per call. Shares
+              │                      │  transcript via session_state
               └─────────┬───────────┘
                         │
                         ▼
               ┌─────────────────────┐
-              │  Context Aggregator  │  Tracks assistant responses
-              │  (assistant side)    │  for conversation history
+              │  Guidance Stripper   │  Removes <guidance>...</guidance>
+              │                      │  tags and [BRACKETED] directives
+              │                      │  before TTS
               └─────────┬───────────┘
                         │
                         ▼
@@ -88,6 +90,90 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         │ AudioFrame
                         ▼
               FastAPIWebsocketTransport ──► Twilio Audio
+                        │
+                        ▼
+              ┌─────────────────────┐
+              │  Context Aggregator  │  Tracks assistant responses
+              │  (assistant side)    │  for conversation history
+              └─────────────────────┘
+```
+
+## 2-Layer Observer Architecture
+
+### Layer 1: Quick Observer (0ms)
+
+Instant regex-based analysis with 252 patterns across 19 categories:
+
+| Category | Patterns | Effect |
+|----------|----------|--------|
+| **Health** | 30+ patterns (pain, falls, medication, symptoms) | Health signals in context |
+| **Emotion** | 25+ patterns with valence/intensity | Emotional tone detection |
+| **Family** | 25+ relationship patterns including pets | Context enrichment |
+| **Safety** | Scams, strangers, emergencies | Safety concern flags |
+| **Engagement** | Response length analysis | Engagement level tracking |
+| **Goodbye** | Strong/weak goodbye detection | **Programmatic call end (3.5s)** |
+| **Factual/Curiosity** | 18 patterns ("what year", "how tall") | Web search trigger |
+| **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
+
+**Programmatic Goodbye**: When a strong goodbye signal is detected (e.g., "goodbye", "talk to you later"), Quick Observer schedules an `EndFrame` after 3.5 seconds. This bypasses unreliable LLM tool-calling for call termination.
+
+### Layer 2: Conversation Director (~150ms, non-blocking)
+
+Runs Gemini Flash per turn via `asyncio.create_task()` — never blocks the pipeline:
+
+1. On each `TranscriptionFrame`:
+   - Injects **PREVIOUS** turn's cached guidance via `LLMMessagesAppendFrame`
+   - Takes fallback actions (force end, wrap-up injection)
+   - Starts NEW background analysis for this turn
+2. Background analysis calls Gemini Flash with full conversation context
+3. Result is cached and applied on the next turn
+
+**Fallback Actions** (when Claude misses things):
+- **Force winding-down** at 9 minutes — overrides call phase to winding_down
+- **Force call end** at 12 minutes — queues EndFrame after 3s delay
+- **Force closing** when Director says closing + call > 8min — EndFrame after 5s
+
+#### Director Output Schema
+
+```json
+{
+  "analysis": {
+    "call_phase": "opening|rapport|main|winding_down|closing",
+    "engagement_level": "high|medium|low",
+    "current_topic": "string",
+    "emotional_tone": "positive|neutral|concerned|sad"
+  },
+  "direction": {
+    "stay_or_shift": "stay|transition|wrap_up",
+    "next_topic": "string or null",
+    "pacing_note": "good|too_fast|dragging|time_to_close"
+  },
+  "reminder": {
+    "should_deliver": false,
+    "which_reminder": "string or null",
+    "delivery_approach": "how to weave in naturally"
+  },
+  "guidance": {
+    "tone": "warm|empathetic|cheerful|gentle|serious",
+    "priority_action": "main thing to do",
+    "specific_instruction": "actionable guidance"
+  },
+  "model_recommendation": {
+    "use_sonnet": false,
+    "max_tokens": 150,
+    "reason": "why this token count"
+  }
+}
+```
+
+#### Compact Guidance Injection
+
+Director output is condensed into a single-line string injected as a `[Director guidance]` user message:
+
+```
+main/medium/warm | REMIND: Take medication | (concerned)
+winding_down/high/gentle | WINDING DOWN: Summarize key points, begin warm sign-off.
+closing/medium/warm | CLOSING: Say a warm goodbye. Keep it brief.
 ```
 
 ## Pipecat Flows — Call Phase Management
@@ -131,17 +217,37 @@ Twilio Audio ──► FastAPIWebsocketTransport
 
 | Phase | Tools |
 |-------|-------|
-| **Opening** | `transition_to_main` |
+| **Opening** | `search_memories`, `save_important_detail`, `transition_to_main` |
 | **Main** | `search_memories`, `get_news`, `save_important_detail`, `mark_reminder_acknowledged`, `transition_to_winding_down` |
 | **Winding Down** | `mark_reminder_acknowledged`, `transition_to_closing` |
 | **Closing** | *(none — post_action ends call)* |
+
+### Tool Descriptions
+
+| Tool | Purpose |
+|------|---------|
+| `search_memories` | Semantic search of senior's memory bank (pgvector) |
+| `get_news` | Web search for current events via OpenAI |
+| `save_important_detail` | Store new memories (health, family, preference, life_event, emotional, activity) |
+| `mark_reminder_acknowledged` | Track reminder delivery with acknowledgment status |
+
+## Post-Call Processing
+
+When the Twilio client disconnects, `_run_post_call()` in bot.py executes:
+
+1. **Complete conversation** — Updates DB with duration, status, transcript
+2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions
+3. **Memory extraction** — OpenAI extracts facts/preferences/events from transcript, stores with embeddings
+4. **Daily context** — Saves topics, advice, reminders for same-day cross-call memory
+5. **Reminder cleanup** — Marks unacknowledged reminders for retry
+6. **Cache clearing** — Clears senior context cache and reminder context
 
 ## Directory Structure
 
 ```
 pipecat/
-├── main.py                          ← FastAPI entry point, /health, /ws
-├── bot.py                           ← Pipeline assembly + run_bot()
+├── main.py                          ← FastAPI entry point, /health, /ws, middleware
+├── bot.py                           ← Pipeline assembly + run_bot() + _run_post_call()
 │
 ├── api/
 │   ├── routes/
@@ -158,26 +264,27 @@ pipecat/
 │       └── schemas.py               ← Pydantic input validation
 │
 ├── flows/
-│   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompt
-│   └── tools.py                     ← LLM tool schemas + async handlers
+│   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts
+│   └── tools.py                     ← LLM tool schemas + async handlers (4 tools)
 │
 ├── processors/
-│   ├── quick_observer.py            ← Layer 1: 252 regex patterns (0ms)
-│   ├── goodbye_gate.py              ← 4s silence timer for call ending
-│   ├── conversation_tracker.py      ← In-call topic/question/advice tracking
-│   └── guidance_stripper.py         ← Strips [TAG] guidance from LLM output
+│   ├── quick_observer.py            ← Layer 1: 252 regex patterns (0ms) + programmatic goodbye
+│   ├── conversation_director.py     ← Layer 2: Gemini Flash guidance (non-blocking)
+│   ├── conversation_tracker.py      ← In-call topic/question/advice tracking + transcript
+│   └── guidance_stripper.py         ← Strips <guidance> tags and [BRACKETED] directives
 │
 ├── services/
-│   ├── greetings.py                 ← 24 time-based greeting templates
+│   ├── director_llm.py              ← Gemini Flash analysis for Director (non-blocking)
+│   ├── greetings.py                 ← Time-based greeting templates + rotation
 │   ├── daily_context.py             ← Cross-call same-day memory
-│   ├── call_analysis.py             ← Post-call analysis (JSON repair, formatting)
-│   ├── memory.py                    ← Semantic memory (pgvector)
-│   ├── conversations.py             ← Conversation CRUD
-│   ├── seniors.py                   ← Senior profile lookup
+│   ├── call_analysis.py             ← Post-call analysis (Gemini Flash)
+│   ├── memory.py                    ← Semantic memory (pgvector, decay, dedup)
+│   ├── conversations.py             ← Conversation CRUD + transcript history
+│   ├── seniors.py                   ← Senior profile CRUD
 │   ├── caregivers.py                ← Caregiver-senior relationships
-│   ├── scheduler.py                 ← Reminder scheduling
+│   ├── scheduler.py                 ← Reminder scheduling + outbound calls
 │   ├── context_cache.py             ← Pre-cache senior context (5 AM local)
-│   └── news.py                      ← News via OpenAI web search
+│   └── news.py                      ← News via OpenAI web search (1hr cache)
 │
 ├── db/
 │   └── client.py                    ← asyncpg pool + query helpers
@@ -185,20 +292,25 @@ pipecat/
 ├── lib/
 │   └── sanitize.py                  ← PII-safe logging (phone, name masking)
 │
-└── tests/                           ← 13 test files, 163+ tests
-    ├── test_quick_observer.py       ← Regex pattern matching
-    ├── test_conversation_tracker.py ← Topic/question extraction
-    ├── test_goodbye_gate.py         ← Silence timer & callbacks
-    ├── test_nodes.py                ← Flow node definitions
-    ├── test_tools.py                ← LLM tool schemas & handlers
-    ├── test_api_routes.py           ← Health, voice, auth endpoints
-    ├── test_call_analysis.py        ← JSON repair, transcript formatting
-    ├── test_daily_context.py        ← Context formatting & timezone
-    ├── test_greetings.py            ← Greeting templates & rotation
-    ├── test_validators.py           ← Pydantic schema validation
-    ├── test_sanitize.py             ← PII masking
-    ├── test_guidance_stripper.py    ← Tag stripping
-    └── test_db.py                   ← DB client (integration, skipped locally)
+├── docs/
+│   └── ARCHITECTURE.md              ← This file
+│
+├── tests/                           ← 13 test files, 163+ tests
+│   ├── test_quick_observer.py
+│   ├── test_conversation_tracker.py
+│   ├── test_nodes.py
+│   ├── test_tools.py
+│   ├── test_api_routes.py
+│   ├── test_call_analysis.py
+│   ├── test_daily_context.py
+│   ├── test_greetings.py
+│   ├── test_validators.py
+│   ├── test_sanitize.py
+│   ├── test_guidance_stripper.py
+│   └── test_db.py
+│
+├── pyproject.toml                   ← Dependencies + project config
+└── Dockerfile                       ← python:3.12-slim + uv
 ```
 
 ## Parallel Deployment (Node.js + Pipecat)
@@ -212,14 +324,13 @@ pipecat/
 │  • v1-advanced.js                │    │  • Pipecat Flows (4 phases)       │
 │  • Quick Observer (JS)           │    │  • Quick Observer (Python, same   │
 │  • Conversation Director (L2)    │    │    252 patterns)                  │
-│  • ElevenLabs WS TTS             │    │  • ElevenLabs TTS (Pipecat)       │
-│  • Deepgram STT                  │    │  • Deepgram STT (Pipecat)         │
-│  • Express + WS                  │    │  • FastAPI + WebSocket            │
-│  • SCHEDULER_ENABLED=true        │    │  • SCHEDULER_ENABLED=false        │
-│                                  │    │                                   │
-│  Twilio phone → this service     │    │  Twilio phone → this service      │
-│  Admin v2 → this API             │    │  (separate Twilio number or       │
-│                                  │    │   switched after validation)      │
+│  • ElevenLabs WS TTS             │    │  • Conversation Director (L2)     │
+│  • Deepgram STT                  │    │  • ElevenLabs TTS (Pipecat)       │
+│  • Express + WS                  │    │  • Deepgram STT (Pipecat)         │
+│  • SCHEDULER_ENABLED=true        │    │  • FastAPI + WebSocket            │
+│                                  │    │  • SCHEDULER_ENABLED=false        │
+│  Twilio phone → this service     │    │                                   │
+│  Admin v2 → this API             │    │  Twilio phone → this service      │
 └─────────────────────────────────┘    └──────────────────────────────────┘
                 │                                       │
                 └───────────┬───────────────────────────┘
@@ -240,14 +351,33 @@ pipecat/
 | Aspect | Node.js | Pipecat |
 |--------|---------|---------|
 | **Pipeline** | Custom streaming (v1-advanced.js) | Pipecat FrameProcessor pipeline |
-| **Call phases** | Conversation Director (Gemini Flash L2) | Pipecat Flows (4 NodeConfigs) |
+| **Call phases** | Custom state machine in pipeline | Pipecat Flows (4 NodeConfigs) |
+| **Director** | Inline in v1-advanced.js | Separate non-blocking FrameProcessor |
 | **Transport** | Raw Twilio WebSocket | FastAPIWebsocketTransport + TwilioFrameSerializer |
-| **LLM** | Claude Sonnet (streaming, sentence-by-sentence) | AnthropicLLMService (Pipecat managed) |
+| **LLM** | Claude (streaming, sentence-by-sentence) | AnthropicLLMService (Pipecat managed) |
 | **TTS** | ElevenLabs WebSocket (custom) | ElevenLabs via Pipecat |
 | **STT** | Deepgram (custom integration) | DeepgramSTTService (Pipecat managed) |
-| **Token routing** | Dynamic (100-400, Quick Observer driven) | Flow-node-based with model_recommendation |
-| **Goodbye** | Custom timer in v1-advanced.js | GoodbyeGateProcessor (FrameProcessor) |
+| **Goodbye** | Custom timer in v1-advanced.js | Quick Observer → EndFrame (3.5s) |
 | **Scheduler** | Active (SCHEDULER_ENABLED=true) | Disabled (prevents dual-scheduler) |
+
+## Tech Stack
+
+| Component | Technology | Details |
+|-----------|------------|---------|
+| **Runtime** | Python 3.12 | asyncio, FastAPI |
+| **Framework** | Pipecat v0.0.101+ | FrameProcessor pipeline |
+| **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
+| **Hosting** | Railway | Docker, port 7860 |
+| **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
+| **Voice LLM** | Claude Sonnet 4.5 | AnthropicLLMService |
+| **Director** | Gemini 2.0 Flash | ~150ms non-blocking analysis |
+| **Post-Call** | Gemini 2.0 Flash | Summary, concerns, engagement |
+| **STT** | Deepgram Nova 3 | Real-time, interim results |
+| **TTS** | ElevenLabs | `eleven_turbo_v2_5` |
+| **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
+| **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
+| **News** | OpenAI GPT-4o-mini | Web search tool, 1hr cache |
+| **VAD** | Silero | confidence=0.6, stop_secs=1.2, min_volume=0.5 |
 
 ## Database Schema (shared)
 
@@ -256,8 +386,8 @@ pipecat/
 | Table | Purpose |
 |-------|---------|
 | `seniors` | Senior profiles (name, phone, interests, timezone) |
-| `conversations` | Call records (duration, metrics) |
-| `memories` | Semantic memories (pgvector embeddings) |
+| `conversations` | Call records (duration, metrics, transcript) |
+| `memories` | Semantic memories (pgvector embeddings, decay) |
 | `reminders` | Scheduled reminders |
 | `reminder_deliveries` | Delivery tracking per call |
 | `caregivers` | Caregiver-senior relationships |
@@ -281,8 +411,10 @@ DATABASE_URL=...
 
 # AI Services
 ANTHROPIC_API_KEY=...            # Claude Sonnet (voice LLM)
+GOOGLE_API_KEY=...               # Gemini Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...             # STT
 ELEVENLABS_API_KEY=...           # TTS
+ELEVENLABS_VOICE_ID=...          # Voice ID (optional, has default)
 OPENAI_API_KEY=...               # Embeddings + news search
 
 # Auth (shared with Node.js)
@@ -292,10 +424,13 @@ DONNA_API_KEY=...
 # Scheduler (MUST be false to prevent conflicts)
 SCHEDULER_ENABLED=false
 
+# Director model (optional)
+FAST_OBSERVER_MODEL=gemini-2.0-flash
+
 # Testing
 RUN_DB_TESTS=1                   # Set to run DB integration tests
 ```
 
 ---
 
-*Last updated: February 2026 — Pipecat migration v0.1*
+*Last updated: February 2026 — Pipecat migration with Conversation Director*

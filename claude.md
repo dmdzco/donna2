@@ -18,173 +18,153 @@
 
 ---
 
-## Current Status: v3.3
+## Current Status: Pipecat Migration (v4.0)
 
-### Working Features
-- **Conversation Director Architecture (2-Layer + Post-Call)**
-  - Layer 1: Quick Observer (0ms) - Instant regex patterns + goodbye detection + factual/curiosity patterns
-  - Layer 2: Conversation Director (~150ms) - Proactive call guidance (Gemini 3 Flash)
-  - Post-Call Analysis - Async batch analysis when call ends
-- **Dynamic Token Routing** - Automatic token adjustment (100-400 tokens)
-- **Streaming Pipeline** (~600ms time-to-first-audio)
-  - Claude streaming responses (sentence-by-sentence)
-  - ElevenLabs WebSocket TTS
-  - Parallel connection startup
-- **In-Call Memory Tracking** - Topics, questions, advice, stories tracked per call to prevent repetition
-- **Same-Day Cross-Call Memory** - Daily context persists across multiple calls per senior per day
-- **Enhanced Web Search** - 18 factual/curiosity patterns + improved search triggers and senior-friendly prompts
-- **Greeting Rotation** - 24 time-based templates with context-aware followups
-- **In-Call Reminder Tracking** - Delivery tracking with acknowledgment detection
-- **Graceful Call Ending** - Goodbye signal detection + Twilio-based termination
-- **Route Extraction** - 16 modular route files + websocket handler
-- **Admin Dashboard Auth** - JWT-based login with admin_users table (bcrypt passwords)
-- **Admin Dashboard (v2)** - React + Vite + Tailwind app (`apps/admin-v2/`) deployed on Vercel with 7 pages: Dashboard, Seniors, Calls, Reminders, Call Analyses, Caregivers, Daily Context. JWT auth, same backend API.
-- **Admin Dashboard (legacy)** - Static HTML at `public/admin.html` (kept as fallback)
-- Real-time voice calls (Twilio Media Streams)
-- Speech transcription (Deepgram STT)
-- Memory system with semantic search (pgvector)
-- News updates via OpenAI web search
-- Scheduled reminder calls
-- Consumer app (caregiver onboarding + dashboard)
-- Observability dashboard (React)
-- Security: Clerk auth, JWT admin auth (enforced in prod), Zod validation, rate limiting (incl. admin login brute-force), Twilio webhook verification, Helmet headers (HSTS 1yr), API key auth, PII-safe logging
+The voice pipeline has been migrated from Node.js to **Python Pipecat** (`pipecat/` directory). The Node.js legacy code remains in the repo root but is being replaced.
+
+### Working Features (Pipecat)
+- **2-Layer Observer Architecture + Post-Call**
+  - Layer 1: Quick Observer (0ms) - 252 regex patterns + programmatic goodbye (3.5s EndFrame)
+  - Layer 2: Conversation Director (~150ms) - Non-blocking Gemini Flash per-turn analysis
+  - Post-Call: Analysis, memory extraction, daily context (Gemini Flash)
+- **Pipecat Flows** - 4-phase call state machine (opening → main → winding_down → closing)
+- **4 LLM Tools** - search_memories, get_news, save_important_detail, mark_reminder_acknowledged
+- **Programmatic Call Ending** - Quick Observer detects goodbye → EndFrame after 3.5s (bypasses LLM)
+- **Director Fallback Actions** - Force winding-down at 9min, force end at 12min
+- **In-Call Memory Tracking** - Topics, questions, advice tracked per call (ConversationTracker)
+- **Same-Day Cross-Call Memory** - Daily context persists across calls per senior per day
+- **Greeting Rotation** - Time-based templates with interest/context followups
+- **Semantic Memory** - pgvector with decay + deduplication + tiered retrieval
+- **Scheduled Reminder Calls** - Polling scheduler with prefetch + delivery tracking
+- **Context Pre-caching** - Senior context cached at 5 AM local time
+- Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
+- Speech transcription (Deepgram Nova 3 via Pipecat)
+- LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService)
+- TTS (ElevenLabs via Pipecat)
+- VAD (Silero — confidence=0.6, stop_secs=1.2, min_volume=0.5)
+- News via OpenAI web search (1hr cache)
+- Security: JWT admin auth, API key auth, Twilio webhook validation, rate limiting, security headers
+
+### Frontend Apps (unchanged, on Vercel/separate)
+- **Admin Dashboard (v2)** - React + Vite + Tailwind (`apps/admin-v2/`) on Vercel
+- **Consumer App** - React + Vite + Clerk (`apps/consumer/`) on Vercel
+- **Observability Dashboard** - React (`apps/observability/`)
 
 ---
 
 ## Architecture
 
-**Full documentation**: [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md)
+**Full documentation**: [pipecat/docs/ARCHITECTURE.md](pipecat/docs/ARCHITECTURE.md)
 
-### Conversation Director Architecture
+### Pipecat Pipeline (bot.py)
 
 ```
-User speaks → Deepgram STT → Process utterance
-                                  │
-                  ┌───────────────┼───────────────┐
-                  ▼               ▼
-            Layer 1 (0ms)   Layer 2 (~150ms)
-            Quick Observer  Conversation Director
-            (regex)         (Gemini 3 Flash)
-                  │               │
-                  └───────┬───────┘
-                          ▼
+Twilio Audio ──► FastAPIWebsocketTransport
+                        │
+                   Deepgram STT (Nova 3)
+                        │ TranscriptionFrame
+                        ▼
               ┌─────────────────────┐
-              │ Dynamic Token Select│
-              │   (100-400 tokens)  │
-              └──────────┬──────────┘
-                         ▼
-              Claude Sonnet Streaming
-                         │
-                         ▼
-              Sentence Buffer → ElevenLabs WS → Twilio
-                         │
-                         ▼ (on call end)
-              Post-Call Analysis (Gemini Flash)
-              - Summary, concerns, engagement score
+              │   Quick Observer     │  Layer 1 (0ms): 252 regex patterns
+              │                      │  Goodbye → EndFrame in 3.5s
+              └─────────┬───────────┘
+                        ▼
+              ┌─────────────────────┐
+              │ Conversation         │  Layer 2 (~150ms): Gemini Flash
+              │ Director             │  NON-BLOCKING async analysis
+              │                      │  Injects cached guidance per turn
+              └─────────┬───────────┘
+                        ▼
+              Context Aggregator (user)
+                        ▼
+              Claude Sonnet 4.5 + Pipecat Flows
+                        │ TextFrame
+                        ▼
+              Conversation Tracker (topics, questions, advice)
+                        ▼
+              Guidance Stripper (removes <guidance> tags)
+                        ▼
+              ElevenLabs TTS
+                        ▼
+              FastAPIWebsocketTransport ──► Twilio Audio
+                        ▼
+              Context Aggregator (assistant)
 ```
 
-### Conversation Director
+### Call Phase State Machine (Pipecat Flows)
 
-The Director proactively guides each call:
+| Phase | Tools | Context Strategy |
+|-------|-------|-----------------|
+| **Opening** | search_memories, save_important_detail, transition_to_main | respond_immediately |
+| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | RESET_WITH_SUMMARY |
+| **Winding Down** | mark_reminder_acknowledged, transition_to_closing | — |
+| **Closing** | *(none — post_action ends call)* | — |
 
-| Feature | Description |
-|---------|-------------|
-| **Call Phase Tracking** | opening → rapport → main → closing |
-| **Topic Management** | When to stay, transition, or wrap up |
-| **Reminder Delivery** | Natural moments to deliver reminders |
-| **Engagement Monitoring** | Detect low engagement, suggest re-engagement |
-| **Emotional Detection** | Adjust tone for sad/concerned seniors |
-| **Token Recommendations** | 100-400 tokens based on context |
+### Post-Call Processing
 
-### Dynamic Token Selection
+On disconnect: complete conversation → call analysis (Gemini) → memory extraction (OpenAI) → daily context save → reminder cleanup → cache clear.
 
-| Situation | Tokens | Trigger |
-|-----------|--------|---------|
-| Normal conversation | 100 | Default |
-| Health mention | 150 | Quick Observer |
-| Emotional support | 200-250 | Director |
-| Low engagement | 200 | Director |
-| Reminder delivery | 150 | Director |
-| Call closing | 150 | Director |
+---
 
-### Key Files
+## Key Files (Pipecat)
+
+```
+pipecat/
+├── main.py                          ← FastAPI entry point, /health, /ws, middleware
+├── bot.py                           ← Pipeline assembly + run_bot() + _run_post_call()
+│
+├── flows/
+│   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts (359 LOC)
+│   └── tools.py                     ← 4 LLM tool schemas + async handlers (208 LOC)
+│
+├── processors/
+│   ├── quick_observer.py            ← Layer 1: 252 regex patterns + goodbye EndFrame (560+ LOC)
+│   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking (178 LOC)
+│   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (240 LOC)
+│   └── guidance_stripper.py         ← Strip <guidance> tags before TTS (75 LOC)
+│
+├── services/
+│   ├── director_llm.py              ← Gemini Flash analysis for Director (340 LOC)
+│   ├── call_analysis.py             ← Post-call analysis (Gemini Flash) (222 LOC)
+│   ├── memory.py                    ← Semantic memory (pgvector, decay) (351 LOC)
+│   ├── scheduler.py                 ← Reminder scheduling + outbound calls (482 LOC)
+│   ├── context_cache.py             ← Pre-cache at 5 AM local (261 LOC)
+│   ├── conversations.py             ← Conversation CRUD (169 LOC)
+│   ├── daily_context.py             ← Cross-call same-day memory (160 LOC)
+│   ├── greetings.py                 ← Greeting templates + rotation (219 LOC)
+│   ├── seniors.py                   ← Senior profile CRUD (100 LOC)
+│   ├── caregivers.py                ← Caregiver relationships
+│   └── news.py                      ← OpenAI web search (92 LOC)
+│
+├── api/
+│   ├── routes/
+│   │   ├── voice.py                 ← /voice/answer (TwiML), /voice/status
+│   │   └── calls.py                 ← /api/call, /api/calls
+│   ├── middleware/                   ← auth, api_auth, rate_limit, security, twilio, error_handler
+│   └── validators/schemas.py        ← Pydantic input validation
+│
+├── db/client.py                     ← asyncpg pool + query helpers
+├── lib/sanitize.py                  ← PII-safe logging
+├── tests/                           ← 13 test files, 163+ tests
+├── pyproject.toml                   ← Python 3.12, Pipecat v0.0.101+
+└── Dockerfile                       ← python:3.12-slim + uv
+```
+
+### Legacy Node.js (repo root — being replaced)
 
 ```
 /
-├── index.js                    ← Server setup + middleware mounting (~90 lines)
-├── routes/
-│   ├── index.js                ← Route aggregator (mountRoutes)
-│   ├── helpers.js              ← Shared auth helpers
-│   ├── health.js               ← Health check
-│   ├── voice.js                ← Twilio voice webhooks
-│   ├── calls.js                ← Call initiation
-│   ├── seniors.js              ← Senior CRUD
-│   ├── memories.js             ← Memory management
-│   ├── conversations.js        ← Conversation history
-│   ├── reminders.js            ← Reminder CRUD
-│   ├── onboarding.js           ← Consumer app onboarding
-│   ├── caregivers.js           ← Caregiver management + admin list
-│   ├── stats.js                ← Dashboard statistics
-│   ├── observability.js        ← Observability data
-│   ├── admin-auth.js           ← Admin login + JWT auth
-│   ├── call-analyses.js        ← Post-call analysis data
-│   └── daily-context.js        ← Cross-call daily context data
-├── websocket/
-│   └── media-stream.js         ← Twilio + Browser WebSocket handlers
-├── pipelines/
-│   ├── v1-advanced.js          ← Main voice pipeline + call state
-│   ├── quick-observer.js       ← Layer 1: Instant regex patterns + goodbye detection
-│   └── fast-observer.js        ← Layer 2: Conversation Director
-├── adapters/
-│   ├── llm/index.js            ← Multi-provider LLM adapter (model registry)
-│   ├── elevenlabs.js           ← ElevenLabs REST TTS adapter
-│   └── elevenlabs-streaming.js ← ElevenLabs WebSocket TTS
-├── services/
-│   ├── greetings.js            ← Greeting rotation (24 templates)
-│   ├── daily-context.js        ← Same-day cross-call memory service
-│   ├── call-analysis.js        ← Post-call batch analysis
-│   ├── caregivers.js           ← Caregiver-senior relationships
-│   ├── context-cache.js        ← Pre-caches senior context (5 AM local)
-│   ├── memory.js               ← Memory storage + semantic search
-│   ├── seniors.js              ← Senior profile CRUD
-│   ├── conversations.js        ← Conversation history
-│   ├── scheduler.js            ← Reminder scheduler
-│   └── news.js                 ← News via OpenAI web search
-├── middleware/
-│   ├── auth.js                 ← Clerk + JWT + cofounder auth (JWT_SECRET enforced in prod)
-│   ├── security.js             ← Helmet headers + request ID + HSTS 1yr
-│   ├── rate-limit.js           ← Rate limiting (API, call, write, auth, webhook)
-│   ├── api-auth.js             ← API key authentication (DONNA_API_KEY)
-│   ├── twilio.js               ← Twilio webhook signature validation
-│   ├── validate.js             ← Zod validation middleware
-│   └── error-handler.js        ← Centralized error handler
-├── lib/
-│   ├── logger.js               ← PII-safe structured logger
-│   └── sanitize.js             ← Phone/name/content masking
-├── validators/
-│   └── schemas.js              ← Zod schemas for all API inputs
-├── db/
-│   ├── client.js               ← Database connection (Neon + Drizzle)
-│   ├── schema.js               ← Database schema (9 tables, Drizzle ORM)
-│   └── setup-pgvector.js       ← pgvector initialization
-├── scripts/
-│   └── create-admin.js         ← Seed script for admin users
-├── packages/
-│   ├── logger/                 ← TypeScript logging package
-│   └── event-bus/              ← TypeScript event bus package
-├── apps/
-│   ├── admin/                  ← Admin dashboard legacy (React + Vite)
-│   ├── admin-v2/               ← Admin dashboard v2 (React + Vite + Tailwind, Vercel)
-│   │   ├── src/
-│   │   │   ├── components/     ← Layout, Modal, Toast
-│   │   │   ├── pages/          ← Dashboard, Seniors, Calls, Reminders, CallAnalyses, Caregivers, DailyContext, Login
-│   │   │   └── lib/            ← api.ts (JWT fetch wrapper), auth.ts (AuthProvider), utils.ts
-│   │   ├── tailwind.config.js  ← Admin color palette (admin-* namespace)
-│   │   └── vercel.json         ← SPA rewrite config
-│   ├── consumer/               ← Consumer app (React + Vite + Clerk, Vercel)
-│   ├── observability/          ← Observability dashboard (React)
-│   └── web/                    ← Future web app placeholder
-└── audio-utils.js              ← Audio format conversion
+├── index.js                    ← Express server (legacy)
+├── pipelines/v1-advanced.js    ← Legacy voice pipeline
+├── pipelines/quick-observer.js ← Legacy Quick Observer (JS)
+├── pipelines/fast-observer.js  ← Legacy Conversation Director (JS)
+├── services/                   ← Legacy services (JS)
+├── routes/                     ← 16 route modules (JS)
+├── middleware/                  ← 7 middleware files (JS)
+└── apps/                       ← Frontend apps (still active)
+    ├── admin-v2/               ← Admin dashboard (Vercel)
+    ├── consumer/               ← Consumer app (Vercel)
+    └── observability/          ← Observability dashboard
 ```
 
 ---
@@ -193,137 +173,124 @@ The Director proactively guides each call:
 
 ### Railway-First Development
 
-**All development targets Railway (production) from the start.** Do NOT build features locally with ngrok, localhost tunnels, or local server testing for voice/call features. The voice pipeline requires real Twilio infrastructure — local testing adds latency, tunnel failures, and doesn't catch production-only issues.
+**All development targets Railway (production) from the start.** Do NOT build features locally with ngrok or local server testing for voice/call features.
 
-- **Voice/call features:** Deploy to Railway, test with real phone calls. This is the only test that matters.
-- **API routes:** Deploy to Railway, test with curl/Postman against the Railway URL, or verify via the admin dashboard.
-- **Unit tests (pure logic):** These can run locally — regex patterns, service functions, data transforms. No external services needed.
-- **Frontend apps (admin, consumer):** These run locally against the Railway API, or deploy to Vercel.
+- **Voice/call features:** Deploy to Railway, test with real phone calls
+- **Unit tests (pure logic):** Run locally — `cd pipecat && python -m pytest tests/`
+- **Frontend apps:** Run locally against Railway API, or deploy to Vercel
 
-**The workflow is:** write code → commit → push → `railway up` → test with a real call. Not: write code → spin up local server → tunnel with ngrok → hope it works → then deploy.
+**Workflow:** write code → commit → push → `cd pipecat && railway up` → test with real call
 
 ---
 
 ## For AI Assistants
 
-### When Making Changes
+### When Making Changes (Pipecat)
 
 | Task | Where to Look |
 |------|---------------|
-| Change conversation behavior | `pipelines/v1-advanced.js` |
-| Modify streaming TTS | `adapters/elevenlabs-streaming.js` |
-| Add instant analysis patterns | `pipelines/quick-observer.js` |
-| Modify Conversation Director | `pipelines/fast-observer.js` |
-| Modify post-call analysis | `services/call-analysis.js` |
-| Change token selection logic | `pipelines/v1-advanced.js` (selectModelConfig) |
-| Modify system prompts | `pipelines/v1-advanced.js` (buildSystemPrompt) |
-| Pre-cache senior context | `services/context-cache.js` |
-| Add new LLM model | `adapters/llm/index.js` (MODEL_REGISTRY) |
-| Add new API endpoint | `routes/` (create new route file, register in `routes/index.js`) |
-| Modify greeting templates | `services/greetings.js` |
-| Change reminder tracking | `pipelines/v1-advanced.js` (deliveredReminderSet) |
-| Modify in-call memory tracking | `pipelines/v1-advanced.js` (extractConversationElements, trackTopicsFromSignals) |
-| Modify cross-call daily context | `services/daily-context.js` |
-| Modify goodbye/call ending | `pipelines/v1-advanced.js` + `pipelines/quick-observer.js` |
-| Update admin UI (v2) | `apps/admin-v2/src/pages/` (React components) |
-| Update admin API client (v2) | `apps/admin-v2/src/lib/api.ts` (authFetch wrapper) |
-| Update admin colors/theme | `apps/admin-v2/tailwind.config.js` (admin-* color namespace) |
-| Update admin layout/nav | `apps/admin-v2/src/components/Layout.tsx` |
-| Update legacy admin UI | `public/admin.html` (static HTML) |
-| Admin authentication | `routes/admin-auth.js` + `middleware/auth.js` |
-| Call analyses data | `routes/call-analyses.js` |
-| Daily context data | `routes/daily-context.js` |
-| Create admin user | `node scripts/create-admin.js email password name` |
-| Database changes | `db/schema.js` |
+| Change conversation behavior | `pipecat/flows/nodes.py` (system prompts per phase) |
+| Add/modify LLM tools | `pipecat/flows/tools.py` (schemas + handlers) |
+| Modify Quick Observer patterns | `pipecat/processors/quick_observer.py` |
+| Modify Conversation Director | `pipecat/processors/conversation_director.py` + `pipecat/services/director_llm.py` |
+| Modify call ending behavior | `pipecat/processors/quick_observer.py` (goodbye EndFrame) + `pipecat/processors/conversation_director.py` (time-based) |
+| Change pipeline assembly | `pipecat/bot.py` |
+| Modify post-call processing | `pipecat/bot.py` (_run_post_call) |
+| Modify post-call analysis | `pipecat/services/call_analysis.py` |
+| Modify memory system | `pipecat/services/memory.py` |
+| Modify greeting templates | `pipecat/services/greetings.py` |
+| Modify context pre-caching | `pipecat/services/context_cache.py` |
+| Modify cross-call daily context | `pipecat/services/daily_context.py` |
+| Modify reminder scheduling | `pipecat/services/scheduler.py` |
+| Modify in-call tracking | `pipecat/processors/conversation_tracker.py` |
+| Modify guidance stripping | `pipecat/processors/guidance_stripper.py` |
+| Add API routes | `pipecat/api/routes/` |
+| Modify auth/middleware | `pipecat/api/middleware/` |
+| Database queries | `pipecat/db/client.py` |
+| Server setup | `pipecat/main.py` |
+| Update admin UI (v2) | `apps/admin-v2/src/pages/` |
+| Update admin API client | `apps/admin-v2/src/lib/api.ts` |
 
 ### Documentation Updates
 
-**IMPORTANT**: After each commit that adds features, changes architecture, or modifies the project structure, update the following documentation files to reflect the changes:
+After each commit that adds features or changes architecture, update:
 
-1. **`README.md`** - Update features, project structure, API endpoints, Quick Start
-2. **`docs/architecture/OVERVIEW.md`** - Update architecture diagrams, key files, DB schema
-3. **`docs/ARCHITECTURE.md`** - Update architecture diagrams, key files
-4. **`docs/PRODUCT_PLAN.md`** - Mark features as implemented, update version, add new entries
-5. **`CLAUDE.md`** (this file) - Update working features, key files, roadmap status
-
-Keep all docs in sync. If a new file/directory is created, add it to the Key Files sections. If a feature is completed, mark it done in the roadmap and PRODUCT_PLAN.
+1. **`pipecat/docs/ARCHITECTURE.md`** - Pipeline diagrams, file structure, tech stack
+2. **`claude.md`** (this file) - Working features, key files, AI assistant reference
+3. **`README.md`** - Features, quick start, project structure
+4. **`docs/architecture/OVERVIEW.md`** - High-level architecture overview
 
 ### Deployment
 
-**IMPORTANT**: Always deploy to Railway after committing and pushing changes. Railway is the primary development environment for voice/API features — not localhost.
-
+**Pipecat (Railway):**
 ```bash
-git add . && git commit -m "your message" && git push && git push origin main:master && railway up
+cd pipecat && railway up
 ```
 
-Or use the alias after committing:
+Railway project: `36e40dcb-ada1-4df5-9465-627d3cfdff71`
+Service: `donna-pipecat` (port 7860)
+URL: `https://donna-pipecat-production.up.railway.app`
+
+**Node.js legacy (Railway):**
 ```bash
-git pushall && railway up
+# From repo root
+railway up
 ```
 
-Railway's GitHub webhook is unreliable - always run `railway up` manually to deploy.
-
-**Do NOT test voice features locally.** Deploy to Railway and test with real phone calls. Local development is only for unit tests and frontend apps.
-
-**Admin v2 (Vercel)**: Deployed separately from `apps/admin-v2/`:
+**Admin v2 (Vercel):**
 ```bash
 cd apps/admin-v2 && npx vercel --prod --yes
 ```
-Live URL: https://admin-v2-liart.vercel.app
-Backend API: https://donna-api-production-2450.up.railway.app (configured in `.env.production`)
-CORS: Admin v2 origin is allowlisted in `index.js`.
+Live: https://admin-v2-liart.vercel.app
 
 ### Environment Variables
 
 ```bash
-# Required
-PORT=3001
+# Server
+PORT=7860
+
+# Twilio
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=+1...
-DATABASE_URL=...
-OPENAI_API_KEY=...          # Embeddings + news
-ANTHROPIC_API_KEY=...       # Claude Sonnet (voice)
-GOOGLE_API_KEY=...          # Gemini Flash (Director + Analysis)
-ELEVENLABS_API_KEY=...      # TTS
-DEEPGRAM_API_KEY=...        # STT
+
+# Database
+DATABASE_URL=...                 # Neon PostgreSQL
+
+# AI Services
+ANTHROPIC_API_KEY=...            # Claude Sonnet (voice LLM)
+GOOGLE_API_KEY=...               # Gemini Flash (Director + Analysis)
+DEEPGRAM_API_KEY=...             # STT
+ELEVENLABS_API_KEY=...           # TTS
+ELEVENLABS_VOICE_ID=...          # Voice ID (optional)
+OPENAI_API_KEY=...               # Embeddings + news search
+
+# Auth
+JWT_SECRET=...
+DONNA_API_KEY=...
+
+# Scheduler
+SCHEDULER_ENABLED=false          # MUST be false (Node.js runs scheduler)
 
 # Optional
-V1_STREAMING_ENABLED=true   # Set to 'false' to disable streaming
-VOICE_MODEL=claude-sonnet   # Main voice model
-FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
-JWT_SECRET=...              # Admin dashboard JWT signing key
-DONNA_API_KEY=...           # Set to enable API key auth (omit for dev)
+FAST_OBSERVER_MODEL=gemini-2.0-flash  # Director model
 ```
 
 ---
 
 ## Roadmap
 
-See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for upcoming work:
-- ~~Streaming Pipeline~~ ✓ Completed (~600ms latency)
+- ~~Streaming Pipeline~~ ✓ Completed
 - ~~Dynamic Token Routing~~ ✓ Completed
-- ~~Conversation Director~~ ✓ Completed
+- ~~Conversation Director~~ ✓ Completed (both Node.js and Pipecat)
 - ~~Post-Call Analysis~~ ✓ Completed
-- ~~Admin Dashboard Separation~~ ✓ Completed (React app in `apps/admin/`)
-- ~~Admin Dashboard v2~~ ✓ Completed (React + Vite + Tailwind in `apps/admin-v2/`, deployed on Vercel at https://admin-v2-liart.vercel.app)
-- ~~Security Hardening~~ ✓ Completed (Helmet, API key auth, PII-safe logging, input validation)
+- ~~Admin Dashboard v2~~ ✓ Completed (Vercel)
+- ~~Security Hardening~~ ✓ Completed
+- ~~Pipecat Migration~~ ✓ In progress (voice pipeline ported, Director ported)
 - Prompt Caching (Anthropic)
-
-### Architecture Cleanup
-
-See [docs/ARCHITECTURE_CLEANUP_PLAN.md](docs/ARCHITECTURE_CLEANUP_PLAN.md) for the 7-phase restructuring plan:
-- **Phase 1** ✓ Frontend Separation (Admin Dashboard → React)
-- **Phase 2** ✓ Route Extraction (Split index.js → 13 route modules)
-- **Phase 3** Shared Packages (Turborepo monorepo)
-- **Phase 4** TypeScript Migration
-- **Phase 5** Testing Infrastructure
-- **Phase 6** API Improvements (Zod, versioning)
-- **Phase 7** Authentication (Clerk)
-- Memory Context Improvements
-- Caregiver Authentication (Clerk)
+- Full Pipecat cutover (disable Node.js, enable scheduler on Pipecat)
 - Telnyx Migration (65% cost savings)
 
 ---
 
-*Last updated: February 2026 - v3.3*
+*Last updated: February 2026 — Pipecat migration v4.0 with Conversation Director*

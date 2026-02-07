@@ -66,7 +66,10 @@ class ConversationDirectorProcessor(FrameProcessor):
             self._turn_count += 1
 
             # 1. Inject PREVIOUS turn's Director guidance (if available)
-            if self._last_result:
+            #    Skip if goodbye is in progress — Quick Observer handles ending
+            goodbye_in_progress = self._session_state.get("_goodbye_in_progress", False)
+
+            if self._last_result and not goodbye_in_progress:
                 guidance_text = format_director_guidance(self._last_result)
                 if guidance_text:
                     await self.push_frame(

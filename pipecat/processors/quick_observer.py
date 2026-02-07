@@ -335,11 +335,13 @@ GOODBYE_PATTERNS = [
     _p(r"\b(see you (later|soon|tomorrow|next time))\b", "see_you", strength="strong"),
     _p(r"\b(take care( of yourself)?)\b", "take_care", strength="strong"),
     _p(r"\b(have a (good|great|nice|lovely|wonderful) (day|night|evening|afternoon|one))\b", "have_good_day", strength="strong"),
-    _p(r"\b(i('ll| will) let you go)\b", "let_you_go", strength="medium"),
-    _p(r"\b(i (should|gotta|got to|have to|need to|better) go)\b", "need_to_go", strength="medium"),
+    _p(r"\b(i('ll| will) let you go)\b", "let_you_go", strength="strong"),
+    _p(r"\b(i (should|gotta|got to|have to|need to|better) go)\b", "need_to_go", strength="strong"),
     _p(r"\b(thanks for (calling|the call|chatting|talking))\b", "thanks_for_call", strength="strong"),
     _p(r"\b(nice (talking|chatting|speaking) (to|with) you)\b", "nice_talking", strength="strong"),
     _p(r"\b(it was (nice|great|lovely|good) (talking|chatting))\b", "nice_talking", strength="strong"),
+    _p(r"\b(i('m| am) (going to|gonna) (go|leave|hang up))\b", "going_to_go", strength="strong"),
+    _p(r"\b(let me go|do you mind if i (go|leave))\b", "let_me_go", strength="strong"),
 ]
 
 # --- QUESTION (5) ---
@@ -783,10 +785,11 @@ class QuickObserverProcessor(FrameProcessor):
     # Gives the LLM time to generate and TTS to speak the goodbye audio.
     GOODBYE_DELAY_SECONDS = 3.5
 
-    def __init__(self, **kwargs):
+    def __init__(self, session_state: dict | None = None, **kwargs):
         super().__init__(**kwargs)
         self._recent_history: list[dict] = []
         self.last_analysis: AnalysisResult | None = None
+        self._session_state = session_state
         self._pipeline_task = None  # Set via set_pipeline_task() after pipeline creation
         self._goodbye_task: asyncio.Task | None = None
 
@@ -843,6 +846,9 @@ class QuickObserverProcessor(FrameProcessor):
                         d=self.GOODBYE_DELAY_SECONDS,
                     )
                     self._goodbye_task = asyncio.create_task(self._force_end_call())
+                    # Signal to Director to suppress stale guidance
+                    if self._session_state is not None:
+                        self._session_state["_goodbye_in_progress"] = True
 
         # Always pass frames through
         await self.push_frame(frame, direction)

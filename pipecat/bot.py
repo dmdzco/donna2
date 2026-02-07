@@ -169,7 +169,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     # -------------------------------------------------------------------------
     # Custom processors
     # -------------------------------------------------------------------------
-    quick_observer = QuickObserverProcessor()
+    quick_observer = QuickObserverProcessor(session_state=session_state)
     conversation_director = ConversationDirectorProcessor(session_state=session_state)
     conversation_tracker = ConversationTrackerProcessor(session_state=session_state)
     guidance_stripper = GuidanceStripperProcessor()

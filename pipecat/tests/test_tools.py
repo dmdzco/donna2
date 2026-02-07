@@ -59,15 +59,16 @@ class TestToolHandlerFactory:
         session_state = {"senior_id": None}
         handlers = make_tool_handlers(session_state)
         result = await handlers["search_memories"]({"query": "gardening"})
-        assert result["status"] == "error"
-        assert "No senior" in result["error"]
+        # Handlers return success with friendly message (not error) to avoid confusing voice LLM
+        assert result["status"] == "success"
+        assert "No memories" in result["result"]
 
     @pytest.mark.asyncio
     async def test_save_detail_no_senior(self):
         session_state = {"senior_id": None}
         handlers = make_tool_handlers(session_state)
         result = await handlers["save_important_detail"]({"detail": "test", "category": "fact"})
-        assert result["status"] == "error"
+        assert result["status"] == "success"
 
     @pytest.mark.asyncio
     async def test_mark_reminder_no_delivery(self):

@@ -167,7 +167,7 @@ class TestOpeningNode:
         tools = make_flows_tools(state)
         node = build_opening_node(state, tools)
         task_content = node["task_messages"][0]["content"]
-        assert "PHASE: OPENING\n" in task_content
+        assert "PHASE: OPENING" in task_content
         assert "INBOUND" not in task_content
 
     def test_inbound_uses_inbound_opening_task(self):
@@ -176,7 +176,7 @@ class TestOpeningNode:
         node = build_opening_node(state, tools)
         task_content = node["task_messages"][0]["content"]
         assert "INBOUND" in task_content
-        assert "let them lead" in task_content
+        assert "transition_to_main" in task_content
 
 
 class TestMainNode:

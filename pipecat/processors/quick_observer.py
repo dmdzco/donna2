@@ -3,7 +3,7 @@
 Runs synchronously on each TranscriptionFrame before the LLM processes it.
 Injects guidance via LLMMessagesAppendFrame for the current response.
 
-Pattern data lives in processors/patterns.py (252 patterns, 19 categories).
+Pattern data lives in processors/patterns.py (268 patterns, 19 categories).
 This file contains only analysis logic and the FrameProcessor wrapper.
 """
 
@@ -60,7 +60,7 @@ class AnalysisResult:
 # =============================================================================
 
 def quick_analyze(user_message: str, recent_history: list[dict] | None = None) -> AnalysisResult:
-    """Analyze user message with 252 regex patterns. Returns AnalysisResult with guidance."""
+    """Analyze user message with 268 regex patterns. Returns AnalysisResult with guidance."""
     result = AnalysisResult()
     if not user_message:
         return result

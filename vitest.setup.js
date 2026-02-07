@@ -15,8 +15,6 @@ process.env.OPENAI_API_KEY = 'test-openai-key';
 process.env.TWILIO_ACCOUNT_SID = 'test-twilio-sid';
 process.env.TWILIO_AUTH_TOKEN = 'test-twilio-token';
 process.env.TWILIO_PHONE_NUMBER = '+15551234567';
-process.env.ELEVENLABS_API_KEY = 'test-elevenlabs-key';
-process.env.DEEPGRAM_API_KEY = 'test-deepgram-key';
 
 // Global test utilities
 beforeAll(() => {

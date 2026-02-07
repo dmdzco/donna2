@@ -298,17 +298,6 @@ async def build_context(
             formatted = format_grouped_memories(groups)
             parts.append(f"\nBackground:\n{formatted}")
 
-    # News (first turn only)
-    if is_first_turn and senior and senior.get("interests"):
-        try:
-            from services.news import get_news_for_senior
-
-            news_ctx = await get_news_for_senior(senior["interests"])
-            if news_ctx:
-                parts.append(f"\n{news_ctx}")
-        except Exception as e:
-            logger.error("Error fetching news: {err}", err=str(e))
-
     result = "\n".join(parts)
     logger.info("build_context({sid}): total={n} chars, {m} memories included", sid=str(senior_id)[:8], n=len(result), m=len(included_ids))
     return result

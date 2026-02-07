@@ -47,6 +47,7 @@ async def voice_answer(request: Request):
     memory_context = None
     reminder_prompt = None
     pre_generated_greeting = None
+    news_context = None
     call_type = "check-in"
 
     # 1. Check for reminder call (pre-fetched context)
@@ -64,6 +65,7 @@ async def voice_answer(request: Request):
         senior = prefetched.get("senior")
         memory_context = prefetched.get("memory_context")
         pre_generated_greeting = prefetched.get("pre_generated_greeting")
+        news_context = prefetched.get("news_context")
         logger.info("[{cs}] Manual outbound with pre-fetched context", cs=call_sid)
     else:
         # Inbound — look up senior by phone
@@ -77,12 +79,18 @@ async def voice_answer(request: Request):
             logger.info("[{cs}] Inbound from {name}", cs=call_sid, name=senior.get("name", "?"))
             from services.memory import build_context
             memory_context = await build_context(senior["id"], None, senior)
-            # Generate greeting so the bot speaks first
-            from services.greetings import get_greeting
-            greeting_result = get_greeting(
+            # Fetch news for inbound calls (not pre-cached)
+            if senior.get("interests"):
+                try:
+                    from services.news import get_news_for_senior
+                    news_context = await get_news_for_senior(senior["interests"], limit=3)
+                except Exception as e:
+                    logger.error("[{cs}] Error fetching news for inbound: {err}", cs=call_sid, err=str(e))
+            # Inbound: use short, receptive greeting — let the senior lead
+            from services.greetings import get_inbound_greeting
+            greeting_result = get_inbound_greeting(
                 senior_name=senior.get("name", ""),
-                timezone=senior.get("timezone", "America/New_York"),
-                interests=senior.get("interests"),
+                senior_id=senior.get("id"),
             )
             pre_generated_greeting = greeting_result.get("greeting", "")
 
@@ -132,6 +140,8 @@ async def voice_answer(request: Request):
         "pre_generated_greeting": pre_generated_greeting,
         "previous_calls_summary": previous_calls_summary,
         "todays_context": todays_context,
+        "news_context": news_context,
+        "is_outbound": is_outbound,
         "call_type": call_type,
         "target_phone": target_phone,
     }

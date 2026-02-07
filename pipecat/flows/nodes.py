@@ -20,6 +20,7 @@ from pipecat_flows import (
 from prompts import (
     BASE_SYSTEM_PROMPT,
     OPENING_TASK,
+    INBOUND_OPENING_TASK,
     MAIN_TASK,
     WINDING_DOWN_TASK,
     CLOSING_TASK_TEMPLATE,
@@ -57,6 +58,10 @@ def _build_senior_context(session_state: dict) -> str:
         logger.info("System prompt includes memory context ({n} chars)", n=len(memory_ctx))
     else:
         logger.warning("No memory context in session_state for system prompt")
+
+    news_ctx = session_state.get("news_context")
+    if news_ctx:
+        parts.append(f"\n{news_ctx}")
 
     return "\n".join(parts)
 
@@ -155,8 +160,9 @@ def build_opening_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     """
     senior_ctx = _build_senior_context(session_state)
     greeting = session_state.get("greeting", "")
+    is_outbound = session_state.get("is_outbound", True)
 
-    opening_task = OPENING_TASK
+    opening_task = OPENING_TASK if is_outbound else INBOUND_OPENING_TASK
 
     if greeting:
         opening_task += f'\n\nUse this greeting to start: "{greeting}"'

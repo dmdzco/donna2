@@ -98,6 +98,9 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             session_state["greeting"] = session_state.get("greeting") or greeting
         session_state["previous_calls_summary"] = session_state.get("previous_calls_summary") or metadata.get("previous_calls_summary")
         session_state["todays_context"] = session_state.get("todays_context") or metadata.get("todays_context")
+        session_state["news_context"] = session_state.get("news_context") or metadata.get("news_context")
+        if "is_outbound" in metadata:
+            session_state["is_outbound"] = metadata["is_outbound"]
         logger.info(
             "[{cs}] Populated session: senior={name}, memory={mem_len}ch, greeting={gr}, reminder={rem}",
             cs=call_sid,
@@ -226,6 +229,9 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             audio_out_sample_rate=8000,
         ),
     )
+
+    # Store pipeline task in session_state for tool handlers (e.g. typing sound)
+    session_state["_pipeline_task"] = task
 
     # Give processors references to the task so they can force-end calls
     # Quick Observer: instant goodbye detection (regex, 3.5s delay)

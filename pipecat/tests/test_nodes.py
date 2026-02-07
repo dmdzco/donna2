@@ -20,6 +20,7 @@ def _make_session_state(**overrides):
         "senior_id": "test-senior-1",
         "senior": {"name": "Margaret Smith", "interests": ["gardening", "reading"]},
         "memory_context": "Tier 1: Has arthritis in hands",
+        "news_context": None,
         "greeting": "Good morning, Margaret!",
         "reminder_prompt": "Remind Margaret to take her blood pressure medication at 2pm.",
         "reminder_delivery": None,
@@ -27,6 +28,7 @@ def _make_session_state(**overrides):
         "conversation_id": "conv-1",
         "call_sid": "CA123",
         "call_type": "check-in",
+        "is_outbound": True,
         "previous_calls_summary": "Yesterday: Discussed gardening",
         "todays_context": None,
         "conversation_tracking": None,
@@ -84,6 +86,17 @@ class TestSeniorContext:
         ctx = _build_senior_context(state)
         assert "arthritis" in ctx
 
+    def test_includes_news_context(self):
+        state = _make_session_state(news_context="Here are some recent news items about gardening...")
+        ctx = _build_senior_context(state)
+        assert "gardening" in ctx
+        assert "recent news" in ctx
+
+    def test_no_news_context_when_none(self):
+        state = _make_session_state(news_context=None)
+        ctx = _build_senior_context(state)
+        assert "recent news" not in ctx
+
 
 class TestReminderContext:
     def test_includes_reminder_prompt(self):
@@ -130,6 +143,22 @@ class TestOpeningNode:
         node = build_opening_node(state, tools)
         assert node.get("respond_immediately") is True
 
+    def test_outbound_uses_opening_task(self):
+        state = _make_session_state(is_outbound=True)
+        tools = make_flows_tools(state)
+        node = build_opening_node(state, tools)
+        task_content = node["task_messages"][0]["content"]
+        assert "PHASE: OPENING\n" in task_content
+        assert "INBOUND" not in task_content
+
+    def test_inbound_uses_inbound_opening_task(self):
+        state = _make_session_state(is_outbound=False)
+        tools = make_flows_tools(state)
+        node = build_opening_node(state, tools)
+        task_content = node["task_messages"][0]["content"]
+        assert "INBOUND" in task_content
+        assert "let them lead" in task_content
+
 
 class TestMainNode:
     def test_node_has_all_tools(self):
@@ -138,10 +167,17 @@ class TestMainNode:
         node = build_main_node(state, tools)
         func_names = _get_func_names(node)
         assert "search_memories" in func_names
-        assert "get_news" in func_names
+        assert "web_search" in func_names
         assert "mark_reminder_acknowledged" in func_names
         assert "save_important_detail" in func_names
         assert "transition_to_winding_down" in func_names
+
+    def test_node_does_not_have_get_news(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_main_node(state, tools)
+        func_names = _get_func_names(node)
+        assert "get_news" not in func_names
 
     def test_node_has_reset_strategy(self):
         state = _make_session_state()

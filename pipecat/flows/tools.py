@@ -2,7 +2,7 @@
 
 Defines four tools available during calls:
 - search_memories: Semantic search over senior's memory bank
-- get_news: Web search for current events/topics
+- web_search: General web search with typing sound UX
 - mark_reminder_acknowledged: Track reminder delivery status
 - save_important_detail: Store new memories from conversation
 
@@ -12,7 +12,11 @@ to senior context without Pipecat's non-existent set_function_call_context().
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+
 from loguru import logger
+from pipecat.frames.frames import OutputAudioRawFrame
 from pipecat_flows import FlowsFunctionSchema
 
 
@@ -32,16 +36,21 @@ SEARCH_MEMORIES_SCHEMA = {
     "required": ["query"],
 }
 
-GET_NEWS_SCHEMA = {
-    "name": "get_news",
-    "description": "Search for current news or information about a topic the senior is curious about. Use when they ask about current events, want to know about something happening in the world, or express curiosity about a topic.",
+WEB_SEARCH_SCHEMA = {
+    "name": "web_search",
+    "description": (
+        "Search the web to answer a question the senior asked. "
+        "IMPORTANT: Before calling this tool, ALWAYS say something natural like "
+        "'Let me look that up for you' or 'Good question, let me check' — "
+        "this fills the silence while the search runs."
+    ),
     "properties": {
-        "topic": {
+        "query": {
             "type": "string",
-            "description": "The topic to search for news about",
+            "description": "What to search for",
         },
     },
-    "required": ["topic"],
+    "required": ["query"],
 }
 
 MARK_REMINDER_SCHEMA = {
@@ -84,6 +93,37 @@ SAVE_DETAIL_SCHEMA = {
 
 
 # ---------------------------------------------------------------------------
+# Typing sound UX (plays while web_search runs)
+# ---------------------------------------------------------------------------
+
+_TYPING_SOUND: bytes | None = None
+
+
+def _load_typing_sound() -> bytes | None:
+    global _TYPING_SOUND
+    if _TYPING_SOUND is None:
+        path = Path(__file__).parent.parent / "assets" / "typing.raw"
+        if path.exists():
+            _TYPING_SOUND = path.read_bytes()
+    return _TYPING_SOUND
+
+
+async def _play_typing_loop(pipeline_task, interval: float = 1.0) -> None:
+    """Play typing sound on loop until cancelled."""
+    sound = _load_typing_sound()
+    if not sound:
+        return
+    try:
+        while True:
+            await pipeline_task.queue_frame(
+                OutputAudioRawFrame(audio=sound, sample_rate=8000, num_channels=1)
+            )
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Tool handler factory (closure over session_state)
 # ---------------------------------------------------------------------------
 
@@ -121,39 +161,28 @@ def make_tool_handlers(session_state: dict) -> dict:
             logger.error("search_memories error: {err}", err=str(e))
             return {"status": "success", "result": "Memory search is temporarily unavailable. Continue the conversation naturally — don't mention any technical issues."}
 
-    async def handle_get_news(args: dict) -> dict:
-        topic = args.get("topic", "")
-        logger.info("Tool: get_news topic={t}", t=topic)
+    async def handle_web_search(args: dict) -> dict:
+        query = args.get("query", "")
+        logger.info("Tool: web_search query={q}", q=query)
 
-        # Build interest list: requested topic + senior profile interests + current call topics
-        interests = [topic] if topic else []
-
-        senior = session_state.get("senior") or {}
-        profile_interests = senior.get("interests") or []
-        for i in profile_interests:
-            if i.lower() not in {x.lower() for x in interests}:
-                interests.append(i)
-
-        tracker = session_state.get("_conversation_tracker")
-        if tracker and hasattr(tracker, "state"):
-            for t in tracker.state.topics_discussed:
-                if t.lower() not in {x.lower() for x in interests}:
-                    interests.append(t)
-
-        if not interests:
-            return {"status": "success", "result": "I couldn't find any relevant news right now."}
-
-        logger.info("Tool: get_news combined interests={i}", i=interests[:5])
+        # Start typing sound in background while search runs
+        task = session_state.get("_pipeline_task")
+        typing_task = None
+        if task:
+            typing_task = asyncio.create_task(_play_typing_loop(task))
 
         try:
             from services.news import get_news_for_senior
-            news = await get_news_for_senior(interests[:5], limit=3)
-            if not news:
-                return {"status": "success", "result": f"I couldn't find recent news about {topic or 'those topics'}."}
-            return {"status": "success", "result": news}
+            result = await get_news_for_senior([query], limit=3)
+            if not result:
+                return {"status": "success", "result": f"I couldn't find information about {query}."}
+            return {"status": "success", "result": result}
         except Exception as e:
-            logger.error("get_news error: {err}", err=str(e))
-            return {"status": "success", "result": f"News search is temporarily unavailable. Continue the conversation naturally — don't mention any technical issues."}
+            logger.error("web_search error: {err}", err=str(e))
+            return {"status": "success", "result": "Search unavailable. Continue naturally."}
+        finally:
+            if typing_task:
+                typing_task.cancel()
 
     async def handle_mark_reminder(args: dict) -> dict:
         reminder_id = args.get("reminder_id", "")
@@ -203,7 +232,7 @@ def make_tool_handlers(session_state: dict) -> dict:
 
     return {
         "search_memories": handle_search_memories,
-        "get_news": handle_get_news,
+        "web_search": handle_web_search,
         "mark_reminder_acknowledged": handle_mark_reminder,
         "save_important_detail": handle_save_detail,
     }
@@ -217,7 +246,7 @@ def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
     handlers = make_tool_handlers(session_state)
 
     schemas = {}
-    for schema_def in [SEARCH_MEMORIES_SCHEMA, GET_NEWS_SCHEMA, MARK_REMINDER_SCHEMA, SAVE_DETAIL_SCHEMA]:
+    for schema_def in [SEARCH_MEMORIES_SCHEMA, WEB_SEARCH_SCHEMA, MARK_REMINDER_SCHEMA, SAVE_DETAIL_SCHEMA]:
         name = schema_def["name"]
         schemas[name] = FlowsFunctionSchema(
             name=name,

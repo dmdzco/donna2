@@ -1,33 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
-import { useActiveCalls } from '../hooks/useApi';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { useActiveCalls, useCallTimeline } from '../hooks/useApi';
 import type { Call, TimelineEvent } from '../types';
 
 export function LiveCallMonitor() {
   const { activeCalls, loading: loadingCalls } = useActiveCalls();
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
-  const [liveEvents, setLiveEvents] = useState<TimelineEvent[]>([]);
+  const { timeline } = useCallTimeline(selectedCall?.id);
   const eventsEndRef = useRef<HTMLDivElement>(null);
 
-  const { connected, subscribe, clearEvents } = useWebSocket({
-    onEvent: (event) => {
-      setLiveEvents((prev) => [...prev, event]);
-    },
-  });
+  const liveEvents: TimelineEvent[] = timeline?.timeline || [];
 
   // Auto-scroll to bottom when new events arrive
   useEffect(() => {
     eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [liveEvents]);
-
-  // Subscribe to selected call
-  useEffect(() => {
-    if (selectedCall) {
-      clearEvents();
-      setLiveEvents([]);
-      subscribe('call', selectedCall.id);
-    }
-  }, [selectedCall, subscribe, clearEvents]);
 
   // Auto-select first active call
   useEffect(() => {
@@ -39,10 +25,6 @@ export function LiveCallMonitor() {
   return (
     <div className="live-monitor">
       <div className="live-header">
-        <div className="live-status">
-          <span className={`status-dot ${connected ? 'connected' : 'disconnected'}`} />
-          <span>{connected ? 'Live' : 'Connecting...'}</span>
-        </div>
         <h2>Live Call Monitor</h2>
       </div>
 

@@ -294,6 +294,14 @@ FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
 
 ---
 
+## Architecture Decision: Two Backends
+
+Running separate Python (Pipecat) and Node.js (Express) backends is an **explicit decision**, not tech debt. Each backend owns a clear responsibility:
+- **Pipecat (Python)** — Real-time voice pipeline (STT, Observer, Director, Claude, TTS)
+- **Node.js (Express)** — REST APIs for frontends, reminder scheduler, call initiation
+
+Both share the same Neon PostgreSQL database. Dual service implementations (e.g. `services/memory.js` and `pipecat/services/memory.py`) exist because each backend needs database access for its own purpose — they are not redundant.
+
 ## Roadmap
 
 - ~~Streaming Pipeline~~ ✓ Completed
@@ -302,9 +310,8 @@ FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
 - ~~Post-Call Analysis~~ ✓ Completed
 - ~~Admin Dashboard v2~~ ✓ Completed (Vercel)
 - ~~Security Hardening~~ ✓ Completed
-- ~~Pipecat Migration~~ ✓ In progress (voice pipeline ported, Director ported)
+- ~~Pipecat Migration~~ ✓ Completed (voice pipeline ported, Director ported)
 - Prompt Caching (Anthropic)
-- Full Pipecat cutover (disable Node.js, enable scheduler on Pipecat)
 - Telnyx Migration (65% cost savings)
 
 ---

@@ -139,10 +139,7 @@ apps/
 │   ├── src/pages/   Landing, Onboarding, Dashboard, FAQ
 │   └── Auth: Clerk OAuth
 │
-├── observability/   Call monitoring dashboard (designed for v3.0 — still works, low use)
-│
-├── admin/           OLD admin dashboard — superseded by admin-v2, ignore
-└── web/             Empty shell — ignore
+└── observability/   Call monitoring dashboard (REST polling, low use)
 ```
 
 ### Root Node.js — Admin APIs + Scheduler (Active, ~4.4k LOC)
@@ -200,7 +197,7 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 └── tests/                 4 test files + fixtures/mocks/helpers
 ```
 
-**Dual implementation warning:** Every `services/*.js` file has an equivalent `pipecat/services/*.py`. Both read/write the same database. If you change DB schema or query logic, check both.
+**Dual implementations (by design):** Every `services/*.js` file has an equivalent `pipecat/services/*.py`. Both read/write the same database. This is intentional — each backend needs DB access for its own responsibilities. If you change DB schema or query logic, check both.
 
 ### `docs/` — Documentation
 
@@ -213,8 +210,6 @@ docs/
 │   └── 2026-02-05-multi-senior-management.md   Feature plan (may be active)
 ├── guides/
 │   └── DEPLOYMENT_PLAN.md        Railway deployment guide
-├── todos/                        4 checklists (stale — reference deleted JS code)
-│   ├── _dashboard.md, architecture.md, product.md, security.md
 └── decisions/                    Historical decisions + completed plans (reference only):
     ├── DONNA_ON_PIPECAT.md, DONNA_ON_LIVEKIT.md, VOICE_AI_FRAMEWORK_ANALYSIS.md
     ├── ARCHITECTURE.md, ARCHITECTURE_ASSESSMENT.md

@@ -88,6 +88,16 @@ async def voice_answer(request: Request):
         except Exception as e:
             logger.error("[{cs}] Error creating conversation: {err}", cs=call_sid, err=str(e))
 
+    # Log memory status
+    logger.info(
+        "[{cs}] Memory status: has_context={has}, length={ln}, has_greeting={gr}, call_type={ct}",
+        cs=call_sid,
+        has=memory_context is not None,
+        ln=len(memory_context) if memory_context else 0,
+        gr=pre_generated_greeting is not None,
+        ct=call_type,
+    )
+
     # 3. Store metadata for WebSocket handler
     call_metadata[call_sid] = {
         "senior": senior,

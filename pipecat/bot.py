@@ -91,7 +91,14 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         greeting = metadata.get("pre_generated_greeting")
         if greeting:
             session_state.setdefault("greeting", greeting)
-        logger.info("[{cs}] Populated session from call_metadata", cs=call_sid)
+        logger.info(
+            "[{cs}] Populated session: senior={name}, memory={mem_len}ch, greeting={gr}, reminder={rem}",
+            cs=call_sid,
+            name=(session_state.get("senior") or {}).get("name", "none"),
+            mem_len=len(session_state.get("memory_context") or ""),
+            gr=bool(session_state.get("greeting")),
+            rem=bool(session_state.get("reminder_prompt")),
+        )
 
     # Also merge custom parameters from TwiML <Stream> params
     body = call_data.get("body", {})

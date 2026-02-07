@@ -260,6 +260,7 @@ async def build_context(
 
     # Tier 1: Critical
     critical = await get_critical(senior_id, 3)
+    logger.info("build_context({sid}): tier1_critical={n}", sid=senior_id[:8], n=len(critical))
     if critical:
         parts.append("Critical to know:")
         for m in critical:
@@ -267,6 +268,7 @@ async def build_context(
             included_ids.add(m["id"])
 
     # Tier 2: Contextual
+    logger.info("build_context({sid}): tier2 topic={t}", sid=senior_id[:8], t=current_topic or "none")
     if current_topic:
         relevant = await search(senior_id, current_topic, 3, 0.7)
         new_relevant = [m for m in relevant if m["id"] not in included_ids]
@@ -277,6 +279,7 @@ async def build_context(
                 included_ids.add(m["id"])
 
     # Tier 3: Background (first turn only)
+    logger.info("build_context({sid}): tier3 is_first_turn={ft}", sid=senior_id[:8], ft=is_first_turn)
     if is_first_turn:
         background = []
         important = await get_important(senior_id, 5)
@@ -306,16 +309,19 @@ async def build_context(
         except Exception as e:
             logger.error("Error fetching news: {err}", err=str(e))
 
-    return "\n".join(parts)
+    result = "\n".join(parts)
+    logger.info("build_context({sid}): total={n} chars, {m} memories included", sid=senior_id[:8], n=len(result), m=len(included_ids))
+    return result
 
 
 async def extract_from_conversation(
     senior_id: str, transcript: str, conversation_id: str
 ) -> None:
     """Extract and store memories from a conversation transcript via OpenAI."""
+    logger.info("extract_from_conversation({sid}): transcript_len={n}", sid=senior_id[:8], n=len(transcript) if transcript else 0)
     client = _get_openai()
     if client is None:
-        logger.info("Skipping extraction — OpenAI not configured")
+        logger.warning("Skipping extraction — OPENAI_API_KEY not set")
         return
 
     prompt = (

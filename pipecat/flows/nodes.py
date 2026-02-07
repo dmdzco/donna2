@@ -86,6 +86,9 @@ def _build_senior_context(session_state: dict) -> str:
     memory_ctx = session_state.get("memory_context")
     if memory_ctx:
         parts.append(f"\n{memory_ctx}")
+        logger.info("System prompt includes memory context ({n} chars)", n=len(memory_ctx))
+    else:
+        logger.warning("No memory context in session_state for system prompt")
 
     return "\n".join(parts)
 

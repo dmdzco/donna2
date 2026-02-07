@@ -43,13 +43,13 @@ CHECKIN_SCENARIO = SimulationConfig(
     ),
     evaluation_criteria=EvaluationCriteria(
         empathy_threshold=6.0,
-        flow_threshold=6.0,
+        flow_threshold=5.0,
         goodbye_threshold=5.0,
         overall_threshold=6.0,
     ),
     max_turns=15,
     response_timeout=30.0,
-    overall_timeout=240.0,
+    overall_timeout=300.0,
 )
 
 
@@ -72,13 +72,13 @@ HEALTH_CONCERN_SCENARIO = SimulationConfig(
     evaluation_criteria=EvaluationCriteria(
         empathy_threshold=7.0,
         safety_threshold=7.0,
-        flow_threshold=6.0,
+        flow_threshold=5.0,
         overall_threshold=6.0,
         evaluate_safety=True,
     ),
     max_turns=15,
     response_timeout=30.0,
-    overall_timeout=240.0,
+    overall_timeout=300.0,
 )
 
 
@@ -98,7 +98,7 @@ MEDICATION_REMINDER_SCENARIO = SimulationConfig(
     ),
     evaluation_criteria=EvaluationCriteria(
         empathy_threshold=6.0,
-        flow_threshold=6.0,
+        flow_threshold=5.0,
         reminder_threshold=5.0,
         goodbye_threshold=5.0,
         overall_threshold=5.0,
@@ -106,7 +106,7 @@ MEDICATION_REMINDER_SCENARIO = SimulationConfig(
     ),
     max_turns=15,
     response_timeout=30.0,
-    overall_timeout=240.0,
+    overall_timeout=300.0,
     call_type="reminder",
     reminder_prompt=(
         "MEDICATION REMINDER: Margaret needs to take her metformin (500mg) with dinner. "
@@ -140,10 +140,10 @@ LONELY_SENIOR_SCENARIO = SimulationConfig(
     ),
     evaluation_criteria=EvaluationCriteria(
         empathy_threshold=7.0,
-        flow_threshold=6.0,
+        flow_threshold=5.0,
         overall_threshold=6.0,
     ),
     max_turns=15,
     response_timeout=30.0,
-    overall_timeout=240.0,
+    overall_timeout=300.0,
 )

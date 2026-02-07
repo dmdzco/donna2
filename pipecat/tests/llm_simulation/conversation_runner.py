@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMessagesUpdateFrame,
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -91,19 +92,54 @@ class ConversationResult:
 # ResponseCollector — aggregates streamed LLM text into full responses
 # ---------------------------------------------------------------------------
 
+class ContextResetDetector(FrameProcessor):
+    """Detects LLMMessagesUpdateFrame (context resets) before the user aggregator.
+
+    The user aggregator consumes LLMMessagesUpdateFrame without forwarding it,
+    so the ResponseCollector downstream never sees it. This processor sits
+    BEFORE the aggregator and tracks when context resets occur, allowing the
+    conversation runner to detect when RESET_WITH_SUMMARY has wiped injected
+    speech and re-inject it.
+    """
+
+    def __init__(self, activity_event: asyncio.Event, **kwargs):
+        super().__init__(**kwargs)
+        self._activity = activity_event
+        self._reset_count = 0
+
+    @property
+    def reset_count(self) -> int:
+        return self._reset_count
+
+    async def process_frame(self, frame: Frame, direction):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMMessagesUpdateFrame):
+            self._reset_count += 1
+            logger.debug("[ContextResetDetector] LLMMessagesUpdateFrame ({} msgs), count={}",
+                         len(frame.messages), self._reset_count)
+            self._activity.set()
+        await self.push_frame(frame, direction)
+
+
 class ResponseCollector(FrameProcessor):
     """Watches for LLM response frames and aggregates streamed text.
 
     Sets an asyncio.Event when a complete response (between
     LLMFullResponseStartFrame and LLMFullResponseEndFrame) is collected.
+
+    Accepts an external ``activity_event`` (shared with ContextResetDetector)
+    that fires on ANY pipeline activity — text responses, context resets, etc.
+    The idle-wait mechanism uses this to detect async operations like
+    RESET_WITH_SUMMARY that don't produce visible text responses.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, activity_event: asyncio.Event | None = None, **kwargs):
         super().__init__(**kwargs)
         self._current_chunks: list[str] = []
         self._collecting = False
         self._latest_response: str = ""
         self._response_ready = asyncio.Event()
+        self._activity = activity_event or asyncio.Event()
 
     async def process_frame(self, frame: Frame, direction):
         await super().process_frame(frame, direction)
@@ -111,12 +147,14 @@ class ResponseCollector(FrameProcessor):
         if isinstance(frame, LLMFullResponseStartFrame):
             self._collecting = True
             self._current_chunks = []
+            self._activity.set()
         elif isinstance(frame, LLMFullResponseEndFrame):
             if self._collecting:
                 self._latest_response = "".join(self._current_chunks).strip()
                 self._collecting = False
                 if self._latest_response:
                     self._response_ready.set()
+                self._activity.set()
         elif isinstance(frame, TextFrame) and self._collecting:
             self._current_chunks.append(frame.text)
 
@@ -128,10 +166,20 @@ class ResponseCollector(FrameProcessor):
         await asyncio.wait_for(self._response_ready.wait(), timeout=timeout)
         return self._latest_response
 
+    async def wait_for_activity(self, timeout: float = 2.0) -> bool:
+        """Wait for any pipeline activity. Returns True if activity detected."""
+        self._activity.clear()
+        try:
+            await asyncio.wait_for(self._activity.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
     def drain(self) -> None:
         """Discard any pending/stale response so the next wait_for_response
         blocks until a truly new response arrives."""
         self._response_ready.clear()
+        self._activity.clear()
         self._latest_response = ""
         self._current_chunks = []
         self._collecting = False
@@ -236,7 +284,11 @@ class ConversationRunner:
         conversation_director = ConversationDirectorProcessor(session_state=session_state)
         conversation_tracker = ConversationTrackerProcessor(session_state=session_state)
         guidance_stripper = GuidanceStripperProcessor()
-        response_collector = ResponseCollector()
+        # Shared event: fires when either the ResponseCollector sees LLM
+        # output OR the ContextResetDetector sees LLMMessagesUpdateFrame
+        pipeline_activity = asyncio.Event()
+        context_reset_detector = ContextResetDetector(activity_event=pipeline_activity)
+        response_collector = ResponseCollector(activity_event=pipeline_activity)
         tts = MockTTSProcessor()
 
         session_state["_conversation_tracker"] = conversation_tracker
@@ -255,6 +307,7 @@ class ConversationRunner:
                 input_transport,
                 quick_observer,
                 conversation_director,
+                context_reset_detector,
                 context_aggregator.user(),
                 llm,
                 conversation_tracker,
@@ -355,16 +408,44 @@ class ConversationRunner:
 
                 # 3. Reactive loop
                 for turn in range(cfg.max_turns - 1):
+                    # Record reset count before injection so we can detect
+                    # if RESET_WITH_SUMMARY wiped our speech
+                    pre_inject_resets = context_reset_detector.reset_count
+
                     # Inject senior's speech as transcription
                     await _inject_speech(senior_reply)
 
-                    # Wait for Donna's response
-                    try:
-                        donna_response = await response_collector.wait_for_response(
-                            timeout=cfg.response_timeout
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning("[SIM] Donna response timeout at turn {}", turn + 2)
+                    # Wait for Donna's response, with RESET retry logic.
+                    # If RESET_WITH_SUMMARY arrives AFTER our injection, it
+                    # wipes the context (including our speech). In that case,
+                    # re-inject and wait again.
+                    donna_response = None
+                    for attempt in range(3):
+                        try:
+                            donna_response = await response_collector.wait_for_response(
+                                timeout=cfg.response_timeout
+                            )
+                            break
+                        except asyncio.TimeoutError:
+                            resets_since = context_reset_detector.reset_count - pre_inject_resets
+                            if resets_since > 0 and attempt < 2:
+                                # RESET wiped our speech — re-inject after settle
+                                logger.info(
+                                    "[SIM] RESET detected after injection (attempt {}), "
+                                    "re-injecting speech", attempt + 1,
+                                )
+                                await _wait_for_pipeline_idle(response_collector)
+                                response_collector.drain()
+                                pre_inject_resets = context_reset_detector.reset_count
+                                await _inject_speech(senior_reply)
+                            else:
+                                logger.warning(
+                                    "[SIM] Donna response timeout at turn {} "
+                                    "(resets_since={})", turn + 2, resets_since,
+                                )
+                                break
+
+                    if donna_response is None:
                         break
 
                     transcript.append({"role": "donna", "content": donna_response})
@@ -473,26 +554,36 @@ class ConversationRunner:
 
 async def _wait_for_pipeline_idle(
     collector: ResponseCollector,
-    idle_timeout: float = 2.0,
-    max_wait: float = 15.0,
+    idle_timeout: float = 3.0,
+    post_activity_timeout: float = 2.0,
+    max_wait: float = 20.0,
 ) -> None:
-    """Wait until the pipeline stops producing LLM responses.
+    """Wait until the pipeline stops producing activity.
 
     After Donna's text response, tool calls (transition_to_main, search_memories)
     may still be processing asynchronously. RESET_WITH_SUMMARY in particular
-    generates additional LLM responses as it summarises context. This function
-    drains those extra responses and returns only when no new response has
-    arrived for ``idle_timeout`` seconds, meaning the pipeline has settled.
+    generates a summary via a separate LLM API call (~5s) and then sends an
+    LLMMessagesUpdateFrame to reset context — arriving ~8s after the text
+    response.
+
+    Strategy:
+    - Wait up to ``idle_timeout`` (10s) for the first sign of activity
+      (context reset, new LLM response, etc.)
+    - Once activity is detected, switch to a shorter ``post_activity_timeout``
+      (2s) — once the reset arrives, the pipeline settles quickly
+    - Return when no activity is detected within the current timeout
     """
     start = time.time()
+    current_timeout = idle_timeout
     while time.time() - start < max_wait:
-        collector.drain()
-        try:
-            await asyncio.wait_for(collector._response_ready.wait(), timeout=idle_timeout)
-            # Got a response — pipeline still active, drain and keep waiting
-            logger.debug("[SIM] Pipeline still active (got response during settle)")
-        except asyncio.TimeoutError:
-            # No response within idle_timeout — pipeline is idle
+        active = await collector.wait_for_activity(timeout=current_timeout)
+        if active:
+            # Got activity — pipeline still active. Use shorter timeout now
+            # since once activity starts, follow-up activity arrives quickly.
+            current_timeout = post_activity_timeout
+            logger.debug("[SIM] Pipeline still active (activity during settle)")
+        else:
+            # No activity within timeout — pipeline is idle
             elapsed = time.time() - start
             logger.debug("[SIM] Pipeline idle after {:.1f}s", elapsed)
             collector.drain()

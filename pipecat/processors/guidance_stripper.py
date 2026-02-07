@@ -21,6 +21,8 @@ _PARTIAL_OPEN = re.compile(r"<guidance>[\s\S]*$", re.IGNORECASE)
 _ORPHAN_CLOSE = re.compile(r"</guidance>", re.IGNORECASE)
 _BRACKETED = re.compile(r"\[[A-Z][A-Z _]+\]")
 _MULTI_SPACE = re.compile(r"\s{2,}")
+# Quick check: does text contain anything worth stripping?
+_NEEDS_STRIP = re.compile(r"</?guidance>|\[[A-Z][A-Z _]+\]", re.IGNORECASE)
 
 
 def strip_guidance(text: str) -> str:
@@ -67,6 +69,12 @@ class GuidanceStripperProcessor(FrameProcessor):
         if has_unclosed_guidance_tag(text):
             # Buffer until the closing tag arrives
             self._buffer = text
+            return
+
+        if not _NEEDS_STRIP.search(text):
+            # No guidance content — pass through unchanged to preserve
+            # inter-token whitespace (e.g. leading space in " Margaret")
+            await self.push_frame(frame, direction)
             return
 
         cleaned = strip_guidance(text)

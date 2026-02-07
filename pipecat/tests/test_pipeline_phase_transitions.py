@@ -38,7 +38,7 @@ class TestPhaseNodeConfigs:
         assert node["name"] == "main"
         func_names = [f.name for f in node["functions"]]
         assert "search_memories" in func_names
-        assert "get_news" in func_names
+        assert "web_search" in func_names
         assert "save_important_detail" in func_names
         assert "mark_reminder_acknowledged" in func_names
         assert "transition_to_winding_down" in func_names

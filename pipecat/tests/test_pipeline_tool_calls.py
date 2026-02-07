@@ -27,13 +27,13 @@ class TestToolHandlerIntegration:
         mock_search.assert_awaited_once_with("senior-test-001", "roses", limit=3)
 
     @pytest.mark.asyncio
-    async def test_get_news_calls_service(self, session_state):
-        """get_news should call services.news.get_news_for_senior."""
+    async def test_web_search_calls_service(self, session_state):
+        """web_search should call services.news.get_news_for_senior."""
         handlers = make_tool_handlers(session_state)
 
         with patch("services.news.get_news_for_senior", new_callable=AsyncMock) as mock_news:
             mock_news.return_value = "Garden show this weekend"
-            result = await handlers["get_news"]({"topic": "gardening"})
+            result = await handlers["web_search"]({"query": "gardening"})
 
         assert result["status"] == "success"
         assert "Garden show" in result["result"]

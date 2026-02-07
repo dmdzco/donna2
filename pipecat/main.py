@@ -16,12 +16,11 @@ import os
 import sys
 import warnings
 
-# Suppress pipecat/pipecat_flows deprecation warnings (shows as red stderr in Railway).
-# The module filter catches named modules; the message filters catch <string>:4 warnings
-# from dynamically generated code inside pipecat internals.
-warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"pipecat.*")
-warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*deprecated.*will be removed.*")
-warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*Parameter.*deprecated.*")
+# Suppress ALL DeprecationWarnings — they're all from pipecat internals
+# (OpenAILLMContext, vad_analyzer, EmulateUser*Frame, etc.) and show as
+# red stderr lines in Railway. None are actionable in pipecat v0.0.101.
+# See claude.md roadmap for migration plan.
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 from loguru import logger
 

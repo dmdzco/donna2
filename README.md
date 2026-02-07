@@ -20,8 +20,10 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService)
 - Text-to-speech (ElevenLabs via Pipecat)
 - Semantic memory with decay + deduplication (pgvector)
+- Full in-call context retention (APPEND strategy, no summary truncation)
+- Cross-call turn history (recent turns from previous calls in system prompt)
 - In-call memory tracking (topics, questions, advice per call)
-- Same-day cross-call memory (timezone-aware daily context)
+- Same-day cross-call memory (timezone-aware daily context + call summaries)
 - News via OpenAI web search (1hr cache)
 - Scheduled reminder calls with delivery tracking
 - Context pre-caching at 5 AM local time

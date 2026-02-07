@@ -66,6 +66,7 @@ async def voice_answer(request: Request):
         memory_context = prefetched.get("memory_context")
         pre_generated_greeting = prefetched.get("pre_generated_greeting")
         news_context = prefetched.get("news_context")
+        recent_turns = prefetched.get("recent_turns")
         logger.info("[{cs}] Manual outbound with pre-fetched context", cs=call_sid)
     else:
         # Inbound — look up senior by phone
@@ -94,18 +95,21 @@ async def voice_answer(request: Request):
             )
             pre_generated_greeting = greeting_result.get("greeting", "")
 
-    # 1b. Fetch call summaries and daily context for any identified senior
+    # 1b. Fetch call summaries, recent turns, and daily context for any identified senior
     previous_calls_summary = None
     todays_context = None
+    recent_turns = None
     if senior:
         try:
-            from services.conversations import get_recent_summaries
+            from services.conversations import get_recent_summaries, get_recent_turns
             from services.daily_context import get_todays_context, format_todays_context
             previous_calls_summary = await get_recent_summaries(senior["id"], 3)
+            recent_turns = await get_recent_turns(senior["id"])
             raw_ctx = await get_todays_context(senior["id"], senior.get("timezone", "America/New_York"))
             todays_context = format_todays_context(raw_ctx)
-            logger.info("[{cs}] Summaries={s}ch, daily_ctx={d}ch", cs=call_sid,
+            logger.info("[{cs}] Summaries={s}ch, recent_turns={rt}ch, daily_ctx={d}ch", cs=call_sid,
                         s=len(previous_calls_summary) if previous_calls_summary else 0,
+                        rt=len(recent_turns) if recent_turns else 0,
                         d=len(todays_context) if todays_context else 0)
         except Exception as e:
             logger.error("[{cs}] Error fetching summaries/daily context: {err}", cs=call_sid, err=str(e))
@@ -139,6 +143,7 @@ async def voice_answer(request: Request):
         "reminder_context": reminder_context,
         "pre_generated_greeting": pre_generated_greeting,
         "previous_calls_summary": previous_calls_summary,
+        "recent_turns": recent_turns,
         "todays_context": todays_context,
         "news_context": news_context,
         "is_outbound": is_outbound,

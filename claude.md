@@ -41,8 +41,10 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **4 LLM Tools** - search_memories, get_news, save_important_detail, mark_reminder_acknowledged
 - **Programmatic Call Ending** - Quick Observer detects goodbye → EndFrame after 3.5s (bypasses LLM)
 - **Director Fallback Actions** - Force winding-down at 9min, force end at 12min
+- **Full In-Call Context Retention** - APPEND strategy keeps complete conversation history (no summary truncation)
+- **Cross-Call Turn History** - Recent turns from previous calls loaded into system prompt via `get_recent_turns()`
 - **In-Call Memory Tracking** - Topics, questions, advice tracked per call (ConversationTracker)
-- **Same-Day Cross-Call Memory** - Daily context persists across calls per senior per day
+- **Same-Day Cross-Call Memory** - Daily context + call summaries persist across calls per senior per day
 - **Greeting Rotation** - Time-based templates with interest/context followups
 - **Semantic Memory** - pgvector with decay + deduplication + tiered retrieval
 - **Scheduled Reminder Calls** - Polling scheduler with prefetch + delivery tracking
@@ -112,13 +114,13 @@ Twilio Audio ──► FastAPIWebsocketTransport
 | Phase | Tools | Context Strategy |
 |-------|-------|-----------------|
 | **Opening** | search_memories, save_important_detail, transition_to_main | APPEND, respond_immediately |
-| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | RESET_WITH_SUMMARY |
+| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | APPEND |
 | **Winding Down** | mark_reminder_acknowledged, save_important_detail, transition_to_closing | APPEND |
 | **Closing** | *(none — post_action: end_conversation)* | APPEND |
 
 ### Post-Call Processing
 
-On disconnect: complete conversation → call analysis (Gemini) → memory extraction (OpenAI) → daily context save → reminder cleanup → cache clear.
+On disconnect: complete conversation → call analysis (Gemini) → summary persistence → memory extraction (OpenAI) → daily context save → reminder cleanup → cache clear.
 
 ---
 

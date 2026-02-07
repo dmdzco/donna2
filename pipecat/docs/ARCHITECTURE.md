@@ -208,8 +208,8 @@ closing/medium/warm | CLOSING: Say a warm goodbye. Keep it brief.
 │ • Warm start  │                            │ • Reminders   │
 │ • respond_    │                            │ • Memory tools│
 │   immediately │                            │ • News search │
-│               │                            │ • RESET_WITH_ │
-│               │                            │   SUMMARY     │
+│               │                            │ • APPEND      │
+│               │                            │   context      │
 └──────────────┘                            └───────┬───────┘
                                                      │
                                     transition_to_winding_down
@@ -259,10 +259,11 @@ When the Twilio client disconnects, `run_post_call()` in `services/post_call.py`
 
 1. **Complete conversation** — Updates DB with duration, status, transcript
 2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions
-3. **Memory extraction** — OpenAI extracts facts/preferences/events from transcript, stores with embeddings
-4. **Daily context** — Saves topics, advice, reminders for same-day cross-call memory
-5. **Reminder cleanup** — Marks unacknowledged reminders for retry
-6. **Cache clearing** — Clears senior context cache and reminder context
+3. **Summary persistence** — Writes analysis summary to `conversations.summary` (enables `get_recent_summaries()` and cross-call context)
+4. **Memory extraction** — OpenAI extracts facts/preferences/events from transcript, stores with embeddings
+5. **Daily context** — Saves topics, advice, reminders, and summary for same-day cross-call memory
+6. **Reminder cleanup** — Marks unacknowledged reminders for retry
+7. **Cache clearing** — Clears senior context cache and reminder context
 
 ## Directory Structure
 

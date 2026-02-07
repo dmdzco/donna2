@@ -24,7 +24,6 @@ from prompts import (
     MAIN_TASK,
     WINDING_DOWN_TASK,
     CLOSING_TASK_TEMPLATE,
-    CONTEXT_SUMMARY_PROMPT,
 )
 
 
@@ -47,6 +46,10 @@ def _build_senior_context(session_state: dict) -> str:
     summaries = session_state.get("previous_calls_summary")
     if summaries:
         parts.append(f"\nRecent calls:\n{summaries}")
+
+    recent_turns = session_state.get("recent_turns")
+    if recent_turns:
+        parts.append(f"\n{recent_turns}")
 
     todays_ctx = session_state.get("todays_context")
     if todays_ctx:
@@ -202,7 +205,7 @@ def build_main_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     """Build the main conversation node — free-form conversation + reminders.
 
     Tools: all 4 tools + transition_to_winding_down.
-    Context strategy: RESET_WITH_SUMMARY (manage context window size).
+    Context strategy: APPEND (keep full conversation — 12-min calls ≈ 4k tokens max).
     """
     senior_ctx = _build_senior_context(session_state)
     reminder_ctx = _build_reminder_context(session_state)
@@ -235,10 +238,7 @@ def build_main_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         role_messages=[{"role": "system", "content": system_content}],
         task_messages=[{"role": "user", "content": main_task}],
         functions=functions,
-        context_strategy=ContextStrategyConfig(
-            strategy=ContextStrategy.RESET_WITH_SUMMARY,
-            summary_prompt=CONTEXT_SUMMARY_PROMPT,
-        ),
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
         respond_immediately=False,
     )
 

@@ -97,6 +97,8 @@ CLOSING_TASK_TEMPLATE = (
     "Do NOT ask any more questions — just say goodbye."
 )
 
+# Retained for reference — no longer used since main phase switched to APPEND strategy.
+# A 12-minute call generates ~4k tokens, well within Claude's 200k context window.
 CONTEXT_SUMMARY_PROMPT = (
     "Summarize the conversation so far in 2-3 sentences, noting: "
     "key topics discussed, the senior's mood/engagement, any reminders "

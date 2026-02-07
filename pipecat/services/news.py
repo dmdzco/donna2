@@ -85,6 +85,55 @@ def format_news_context(raw_news: str) -> str:
     )
 
 
+async def web_search_query(query: str) -> str | None:
+    """General-purpose web search for answering a senior's question.
+
+    Unlike get_news_for_senior (which finds curated news), this answers
+    any question the senior might ask during a call.
+    """
+    if not query:
+        return None
+
+    client = _get_openai()
+    if client is None:
+        logger.info("OpenAI not configured, skipping web search")
+        return None
+
+    # Check cache (short TTL for general queries)
+    key = f"ws:{query.lower().strip()}"
+    cached = _news_cache.get(key)
+    if cached and time.time() - cached["timestamp"] < CACHE_TTL:
+        logger.info("Using cached web search result")
+        return cached["news"]
+
+    try:
+        logger.info("Web search query: {q}", q=query)
+
+        response = client.responses.create(
+            model="gpt-4o-mini",
+            tools=[{"type": "web_search_preview"}],
+            input=(
+                f"Answer this question concisely: {query}\n\n"
+                "Keep the answer to 2-3 sentences max. "
+                "Use simple, clear language suitable for an elderly person. "
+                "If the question is about current events, include today's date context."
+            ),
+        )
+
+        content = (response.output_text or "").strip()
+        if not content:
+            logger.info("No web search content returned")
+            return None
+
+        _news_cache[key] = {"news": content, "timestamp": time.time()}
+        logger.info("Web search completed successfully")
+        return content
+
+    except Exception as e:
+        logger.error("Web search error: {err}", err=str(e))
+        return None
+
+
 def clear_cache():
     """Clear the news cache."""
     _news_cache.clear()

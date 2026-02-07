@@ -165,6 +165,9 @@ def make_tool_handlers(session_state: dict) -> dict:
         query = args.get("query", "")
         logger.info("Tool: web_search query={q}", q=query)
 
+        if not query:
+            return {"status": "success", "result": "No query provided."}
+
         # Start typing sound in background while search runs
         task = session_state.get("_pipeline_task")
         typing_task = None
@@ -172,8 +175,8 @@ def make_tool_handlers(session_state: dict) -> dict:
             typing_task = asyncio.create_task(_play_typing_loop(task))
 
         try:
-            from services.news import get_news_for_senior
-            result = await get_news_for_senior([query], limit=3)
+            from services.news import web_search_query
+            result = await web_search_query(query)
             if not result:
                 return {"status": "success", "result": f"I couldn't find information about {query}."}
             return {"status": "success", "result": result}

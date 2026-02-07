@@ -178,7 +178,7 @@ DONNA_API_KEY=...                       # API key auth
 SCHEDULER_ENABLED=false                 # Must be false (Node.js runs scheduler)
 
 # Optional
-FAST_OBSERVER_MODEL=gemini-3-flash    # Director model
+FAST_OBSERVER_MODEL=gemini-2.0-flash   # Director model
 ELEVENLABS_VOICE_ID=...                 # Voice ID (has default)
 ```
 
@@ -213,7 +213,6 @@ cd apps/admin-v2 && npx vercel --prod --yes
 - [pipecat/docs/ARCHITECTURE.md](./pipecat/docs/ARCHITECTURE.md) - Pipecat pipeline architecture
 - [docs/architecture/OVERVIEW.md](./docs/architecture/OVERVIEW.md) - System architecture overview
 - [docs/PRODUCT_PLAN.md](./docs/PRODUCT_PLAN.md) - Product plan and feature log
-- [docs/CONVERSATION_DIRECTOR_SPEC.md](./docs/CONVERSATION_DIRECTOR_SPEC.md) - Director specification
 - [claude.md](./claude.md) - AI assistant context
 
 ## License

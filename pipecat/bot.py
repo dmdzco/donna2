@@ -24,7 +24,7 @@ from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.runner.utils import parse_telephony_websocket
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.anthropic.llm import AnthropicLLMService
@@ -128,7 +128,6 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             audio_in_enabled=True,
             audio_out_enabled=True,
             add_wav_header=False,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(
                     confidence=0.6,
@@ -136,7 +135,6 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
                     min_volume=0.5,
                 ),
             ),
-            vad_audio_passthrough=True,
             serializer=TwilioFrameSerializer(
                 stream_sid=stream_sid,
                 call_sid=call_sid,
@@ -197,7 +195,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     # -------------------------------------------------------------------------
     # Context aggregators (user ↔ assistant message pairing)
     # -------------------------------------------------------------------------
-    context = OpenAILLMContext()
+    context = LLMContext()
     context_aggregator = llm.create_context_aggregator(context)
 
     # -------------------------------------------------------------------------

@@ -13,10 +13,23 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
+import warnings
+
+# Suppress pipecat/pipecat_flows deprecation warnings (shows as red stderr in Railway)
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"pipecat.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*OpenAI.*deprecated.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*is deprecated.*pipecat.*")
+
+from loguru import logger
+
+# Configure log level: INFO in production, DEBUG locally
+_log_level = os.getenv("LOG_LEVEL", "INFO" if os.getenv("RAILWAY_PUBLIC_DOMAIN") else "DEBUG")
+logger.remove()
+logger.add(sys.stderr, level=_log_level)
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from loguru import logger
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 

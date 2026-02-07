@@ -38,6 +38,7 @@ from pipecat_flows import FlowManager
 
 from flows.nodes import build_initial_node
 from flows.tools import make_flows_tools
+from processors.conversation_director import ConversationDirectorProcessor
 from processors.conversation_tracker import ConversationTrackerProcessor
 from processors.guidance_stripper import GuidanceStripperProcessor
 from processors.quick_observer import QuickObserverProcessor
@@ -168,9 +169,13 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     # -------------------------------------------------------------------------
     # Custom processors
     # -------------------------------------------------------------------------
-    quick_observer = QuickObserverProcessor()
-    conversation_tracker = ConversationTrackerProcessor()
+    quick_observer = QuickObserverProcessor(session_state=session_state)
+    conversation_director = ConversationDirectorProcessor(session_state=session_state)
+    conversation_tracker = ConversationTrackerProcessor(session_state=session_state)
     guidance_stripper = GuidanceStripperProcessor()
+
+    # Record call start time for Director's phase timing
+    session_state["_call_start_time"] = time.time()
 
     # Store conversation tracker in session_state for Flow nodes to reference
     session_state["_conversation_tracker"] = conversation_tracker
@@ -189,6 +194,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             transport.input(),
             stt,
             quick_observer,
+            conversation_director,
             context_aggregator.user(),
             llm,
             conversation_tracker,
@@ -208,6 +214,12 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             audio_out_sample_rate=8000,
         ),
     )
+
+    # Give processors references to the task so they can force-end calls
+    # Quick Observer: instant goodbye detection (regex, 3.5s delay)
+    # Director: time-based call ending + phase-based fallbacks
+    quick_observer.set_pipeline_task(task)
+    conversation_director.set_pipeline_task(task)
 
     # -------------------------------------------------------------------------
     # Flow Manager (call phase management)

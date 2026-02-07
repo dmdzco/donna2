@@ -163,12 +163,16 @@ class ConversationTrackerProcessor(FrameProcessor):
 
     All frames pass through unchanged — this processor only observes.
     The tracked state is available via .state and .get_summary().
+
+    If *session_state* is provided, also maintains a shared ``_transcript``
+    list that the Conversation Director reads for full conversation context.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, session_state: dict | None = None, **kwargs):
         super().__init__(**kwargs)
         self.state = ConversationState()
-        self._llm_buffer = ""
+        self._session_state = session_state
+        self._assistant_buffer = ""
 
     def get_summary(self) -> str | None:
         """Get formatted tracking summary for system prompt injection."""
@@ -184,10 +188,30 @@ class ConversationTrackerProcessor(FrameProcessor):
         if len(self.state.topics_discussed) > _MAX_TOPICS:
             self.state.topics_discussed = self.state.topics_discussed[-_MAX_TOPICS:]
 
+    def _flush_assistant_buffer(self):
+        """Flush buffered assistant text into shared transcript."""
+        text = self._assistant_buffer.strip()
+        if text and self._session_state is not None:
+            transcript = self._session_state.setdefault("_transcript", [])
+            transcript.append({"role": "assistant", "content": text})
+            if len(transcript) > 40:
+                self._session_state["_transcript"] = transcript[-40:]
+        self._assistant_buffer = ""
+
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TranscriptionFrame):
+            # Flush any buffered assistant text from previous turn
+            self._flush_assistant_buffer()
+
+            # Track user message in shared transcript
+            if self._session_state is not None:
+                transcript = self._session_state.setdefault("_transcript", [])
+                transcript.append({"role": "user", "content": frame.text})
+                if len(transcript) > 40:
+                    self._session_state["_transcript"] = transcript[-40:]
+
             # User message → extract topics
             topics = extract_topics(frame.text)
             for t in topics:
@@ -197,6 +221,9 @@ class ConversationTrackerProcessor(FrameProcessor):
                 self.state.topics_discussed = self.state.topics_discussed[-_MAX_TOPICS:]
 
         elif isinstance(frame, TextFrame):
+            # Buffer assistant text (flushed when next TranscriptionFrame arrives)
+            self._assistant_buffer += frame.text
+
             # LLM output → extract questions and advice
             text = frame.text
             questions = extract_questions(text)

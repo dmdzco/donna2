@@ -54,11 +54,13 @@ Donna runs two backend services. Change the wrong one and nothing happens.
   Frontends (Vercel) ──► Node.js APIs only ──► never talk to Pipecat directly
 ```
 
-**Call lifecycle across both backends:**
-1. Caregiver hits "Call" → Node.js `/api/call` prefetches context → creates Twilio call
-2. Twilio answers → Node.js `/voice/answer` returns TwiML pointing to Pipecat WebSocket
-3. Call connects → **Pipecat handles all voice** (STT, Quick Observer, Director, Claude, TTS)
-4. Call ends → Pipecat runs post-call analysis, saves memories, updates daily context
+**Call lifecycle (Pipecat path — primary):**
+1. Call arrives (inbound, scheduled, or manual via Pipecat `/api/call`)
+2. Pipecat `/voice/answer` fetches senior context, creates conversation record, returns TwiML `<Stream url="/ws">`
+3. Twilio connects WebSocket → **Pipecat runs full pipeline** (STT → Observer → Director → Claude → TTS)
+4. Call ends → Pipecat `services/post_call.py` runs analysis, memory extraction, daily context save
+
+**Note:** Node.js also has `/voice/answer` and `/api/call` routes (legacy path). Both backends can initiate calls — which path is used depends on which service URL is in the Twilio callback. Frontends hit Node.js APIs for call initiation.
 
 ---
 
@@ -78,20 +80,20 @@ pipecat/
 ├── flows/               Call state machine (Pipecat Flows)
 │   ├── nodes.py         4 phases: opening → main → winding_down → closing (315 LOC)
 │   │                    Imports prompts from prompts.py
-│   └── tools.py         4 LLM tool schemas + closure-based handlers (227 LOC)
+│   └── tools.py         4 LLM tool schemas + closure-based handlers (230 LOC)
 │
 ├── processors/          Frame processors in the audio pipeline
 │   ├── patterns.py             Pattern data: 268 regex patterns, 19 categories (503 LOC)
 │   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (374 LOC)
 │   ├── conversation_director.py Layer 2: Gemini Flash guidance injection (180 LOC)
 │   ├── conversation_tracker.py  Tracks topics/questions/advice per call (239 LOC)
-│   ├── goodbye_gate.py          False-goodbye grace period (135 LOC)
+│   ├── goodbye_gate.py          False-goodbye grace period — NOT in active pipeline (135 LOC)
 │   └── guidance_stripper.py     Strips <guidance> tags before TTS (74 LOC)
 │
 ├── services/            Business logic — mostly independent, DB-only deps
 │   ├── scheduler.py         Reminder polling + outbound calls (403 LOC)
-│   ├── reminder_delivery.py Delivery CRUD + prompt formatting (85 LOC)
-│   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup (97 LOC)
+│   ├── reminder_delivery.py Delivery CRUD + prompt formatting (93 LOC)
+│   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup (105 LOC)
 │   ├── memory.py            Semantic memory: pgvector, decay, dedup (356 LOC)
 │   ├── director_llm.py      Gemini Flash analysis prompts (339 LOC)
 │   ├── context_cache.py     Pre-cache senior context at 5 AM (260 LOC)

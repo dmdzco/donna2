@@ -32,35 +32,42 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 │   │                    Pipecat Pipeline (bot.py)                         │   │
 │   ├─────────────────────────────────────────────────────────────────────┤   │
 │   │                                                                      │   │
-│   │   Audio In → Deepgram STT (Nova 3)                                  │   │
+│   │   Audio In → Deepgram STT (Nova 3, 8kHz)                             │   │
 │   │                     │ TranscriptionFrame                             │   │
 │   │                     ▼                                                │   │
 │   │         ┌───────────────────────┐                                    │   │
 │   │         │  Layer 1: Quick       │  0ms — 268 regex patterns          │   │
-│   │         │  Observer             │  Goodbye → EndFrame (3.5s)         │   │
+│   │         │  Observer             │  Injects guidance via              │   │
+│   │         │                       │  LLMMessagesAppendFrame            │   │
+│   │         │                       │  Goodbye → EndFrame (3.5s)         │   │
 │   │         └───────────┬───────────┘                                    │   │
 │   │                     ▼                                                │   │
 │   │         ┌───────────────────────┐                                    │   │
-│   │         │  Layer 2: Conversation│  ~150ms — Gemini 3 Flash         │   │
+│   │         │  Layer 2: Conversation│  ~150ms — Gemini 3 Flash Preview  │   │
 │   │         │  Director             │  NON-BLOCKING (asyncio.create_task)│   │
-│   │         │                       │  Injects prev-turn guidance        │   │
+│   │         │                       │  Injects PREVIOUS turn's guidance  │   │
+│   │         │                       │  via LLMMessagesAppendFrame        │   │
 │   │         └───────────┬───────────┘  Fallback: force end at 12min     │   │
 │   │                     ▼                                                │   │
-│   │         Context Aggregator (user) → LLM Context                     │   │
+│   │         Context Aggregator (user) ← builds LLM context              │   │
 │   │                     ▼                                                │   │
-│   │         Claude Sonnet 4.5 + Pipecat Flows                           │   │
+│   │         Claude Sonnet 4.5 + FlowManager                             │   │
 │   │         (4 phases: opening → main → winding_down → closing)         │   │
 │   │                     │ TextFrame                                      │   │
 │   │                     ▼                                                │   │
-│   │         Conversation Tracker → Guidance Stripper                     │   │
+│   │         Conversation Tracker (topics + shared transcript)            │   │
+│   │                     ▼                                                │   │
+│   │         Guidance Stripper (strips <guidance> + [BRACKETED])          │   │
 │   │                     ▼                                                │   │
 │   │         ElevenLabs TTS → Audio Out → Twilio (mulaw 8kHz)            │   │
+│   │                     ▼                                                │   │
+│   │         Context Aggregator (assistant) ← tracks responses            │   │
 │   │                                                                      │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                        │                                                     │
 │                        ▼ (on disconnect)                                     │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │              Post-Call Processing (_run_post_call)                    │   │
+│   │              Post-Call Processing (services/post_call.py)             │   │
 │   │              1. Complete conversation record (DB)                     │   │
 │   │              2. Call analysis — Gemini Flash (summary, concerns)     │   │
 │   │              3. Memory extraction — OpenAI (facts, preferences)      │   │
@@ -97,13 +104,13 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 | Layer | File | Model | Latency | Purpose |
 |-------|------|-------|---------|---------|
 | **1** | `processors/quick_observer.py` | Regex | 0ms | 268 patterns: health, goodbye, emotion, safety + programmatic call end |
-| **2** | `processors/conversation_director.py` + `services/director_llm.py` | Gemini 3 Flash | ~150ms | Non-blocking call guidance (phase, topic, reminders, fallback actions) |
+| **2** | `processors/conversation_director.py` + `services/director_llm.py` | Gemini 3 Flash Preview | ~150ms | Non-blocking call guidance (phase, topic, reminders, fallback actions) |
 
 ### Post-Call Analysis (Async)
 
 | Process | File | Model | Trigger | Output |
 |---------|------|-------|---------|--------|
-| Call Analysis | `services/call_analysis.py` | Gemini 3 Flash | Call ends | Summary, concerns, engagement score, follow-ups |
+| Call Analysis | `services/call_analysis.py` | Gemini 3 Flash Preview | Call ends | Summary, concerns, engagement score, follow-ups |
 | Memory Extraction | `services/memory.py` | OpenAI GPT-4o-mini | Call ends | Facts, preferences, events stored with embeddings |
 
 ---
@@ -170,10 +177,10 @@ The Director runs **non-blocking** via `asyncio.create_task()`:
 
 | Phase | Tools | Context Strategy |
 |-------|-------|-----------------|
-| **Opening** | search_memories, save_important_detail, transition_to_main | respond_immediately |
+| **Opening** | search_memories, save_important_detail, transition_to_main | APPEND, respond_immediately |
 | **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | RESET_WITH_SUMMARY |
-| **Winding Down** | mark_reminder_acknowledged, transition_to_closing | — |
-| **Closing** | *(none — post_action ends call)* | — |
+| **Winding Down** | mark_reminder_acknowledged, save_important_detail, transition_to_closing | APPEND |
+| **Closing** | *(none — post_action: end_conversation)* | APPEND |
 
 ---
 
@@ -186,11 +193,11 @@ The Director runs **non-blocking** via `asyncio.create_task()`:
 | **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
-| **Voice LLM** | Claude Sonnet 4.5 | AnthropicLLMService |
-| **Director** | Gemini 3 Flash | ~150ms non-blocking analysis |
-| **Post-Call** | Gemini 3 Flash | Summary, concerns, engagement |
-| **STT** | Deepgram Nova 3 | Real-time, interim results |
-| **TTS** | ElevenLabs | `eleven_turbo_v2_5` |
+| **Voice LLM** | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | AnthropicLLMService |
+| **Director** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | ~150ms non-blocking analysis |
+| **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
+| **STT** | Deepgram Nova 3 (`nova-3-general`) | Real-time, interim results, 8kHz |
+| **TTS** | ElevenLabs (`eleven_turbo_v2_5`) | Streaming voice synthesis |
 | **VAD** | Silero | confidence=0.6, stop_secs=1.2, min_volume=0.5 |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |

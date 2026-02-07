@@ -64,6 +64,8 @@ class ConversationDirectorProcessor(FrameProcessor):
 
         if isinstance(frame, TranscriptionFrame):
             self._turn_count += 1
+            # Record speech time for turn latency metrics
+            self._session_state["_last_user_speech_time"] = time.time()
 
             # 1. Inject PREVIOUS turn's Director guidance (if available)
             #    Skip if goodbye is in progress — Quick Observer handles ending

@@ -41,6 +41,7 @@ from flows.tools import make_flows_tools
 from processors.conversation_director import ConversationDirectorProcessor
 from processors.conversation_tracker import ConversationTrackerProcessor
 from processors.guidance_stripper import GuidanceStripperProcessor
+from processors.metrics_logger import MetricsLoggerProcessor
 from processors.quick_observer import QuickObserverProcessor
 from services.post_call import run_post_call
 
@@ -180,6 +181,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
         model="eleven_turbo_v2_5",
+        params=ElevenLabsTTSService.InputParams(speed=0.9),
     )
 
     # -------------------------------------------------------------------------
@@ -189,6 +191,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     conversation_director = ConversationDirectorProcessor(session_state=session_state)
     conversation_tracker = ConversationTrackerProcessor(session_state=session_state)
     guidance_stripper = GuidanceStripperProcessor()
+    metrics_logger = MetricsLoggerProcessor(session_state=session_state)
 
     # Record call start time for Director's phase timing
     session_state["_call_start_time"] = time.time()
@@ -218,6 +221,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             tts,
             transport.output(),
             context_aggregator.assistant(),
+            metrics_logger,
         ]
     )
 
@@ -226,6 +230,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         params=PipelineParams(
             allow_interruptions=True,
             enable_metrics=True,
+            enable_usage_metrics=True,
             audio_in_sample_rate=8000,
             audio_out_sample_rate=8000,
         ),

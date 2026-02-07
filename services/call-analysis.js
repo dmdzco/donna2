@@ -16,7 +16,7 @@ import { db } from '../db/client.js';
 import { callAnalyses } from '../db/schema.js';
 
 // Use Gemini Flash for cost-efficient batch analysis
-const ANALYSIS_MODEL = process.env.CALL_ANALYSIS_MODEL || 'gemini-2.0-flash';
+const ANALYSIS_MODEL = process.env.CALL_ANALYSIS_MODEL || 'gemini-3-flash';
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
 /**

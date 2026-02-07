@@ -155,7 +155,7 @@ async def analyze_completed_call(
 
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model=ANALYSIS_MODEL,
             contents=prompt,
             config={"max_output_tokens": 1500, "temperature": 0.2},
         )

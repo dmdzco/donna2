@@ -178,7 +178,7 @@ DONNA_API_KEY=...                       # API key auth
 SCHEDULER_ENABLED=false                 # Must be false (Node.js runs scheduler)
 
 # Optional
-FAST_OBSERVER_MODEL=gemini-2.0-flash    # Director model
+FAST_OBSERVER_MODEL=gemini-3-flash    # Director model
 ELEVENLABS_VOICE_ID=...                 # Voice ID (has default)
 ```
 

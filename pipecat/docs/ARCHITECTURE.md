@@ -425,7 +425,7 @@ DONNA_API_KEY=...
 SCHEDULER_ENABLED=false
 
 # Director model (optional)
-FAST_OBSERVER_MODEL=gemini-2.0-flash
+FAST_OBSERVER_MODEL=gemini-3-flash
 
 # Testing
 RUN_DB_TESTS=1                   # Set to run DB integration tests

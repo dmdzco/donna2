@@ -36,12 +36,12 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 │   │                     │ TranscriptionFrame                             │   │
 │   │                     ▼                                                │   │
 │   │         ┌───────────────────────┐                                    │   │
-│   │         │  Layer 1: Quick       │  0ms — 252 regex patterns          │   │
+│   │         │  Layer 1: Quick       │  0ms — 268 regex patterns          │   │
 │   │         │  Observer             │  Goodbye → EndFrame (3.5s)         │   │
 │   │         └───────────┬───────────┘                                    │   │
 │   │                     ▼                                                │   │
 │   │         ┌───────────────────────┐                                    │   │
-│   │         │  Layer 2: Conversation│  ~150ms — Gemini 2.0 Flash         │   │
+│   │         │  Layer 2: Conversation│  ~150ms — Gemini 3 Flash         │   │
 │   │         │  Director             │  NON-BLOCKING (asyncio.create_task)│   │
 │   │         │                       │  Injects prev-turn guidance        │   │
 │   │         └───────────┬───────────┘  Fallback: force end at 12min     │   │
@@ -96,14 +96,14 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 
 | Layer | File | Model | Latency | Purpose |
 |-------|------|-------|---------|---------|
-| **1** | `processors/quick_observer.py` | Regex | 0ms | 252 patterns: health, goodbye, emotion, safety + programmatic call end |
-| **2** | `processors/conversation_director.py` + `services/director_llm.py` | Gemini 2.0 Flash | ~150ms | Non-blocking call guidance (phase, topic, reminders, fallback actions) |
+| **1** | `processors/quick_observer.py` | Regex | 0ms | 268 patterns: health, goodbye, emotion, safety + programmatic call end |
+| **2** | `processors/conversation_director.py` + `services/director_llm.py` | Gemini 3 Flash | ~150ms | Non-blocking call guidance (phase, topic, reminders, fallback actions) |
 
 ### Post-Call Analysis (Async)
 
 | Process | File | Model | Trigger | Output |
 |---------|------|-------|---------|--------|
-| Call Analysis | `services/call_analysis.py` | Gemini 2.0 Flash | Call ends | Summary, concerns, engagement score, follow-ups |
+| Call Analysis | `services/call_analysis.py` | Gemini 3 Flash | Call ends | Summary, concerns, engagement score, follow-ups |
 | Memory Extraction | `services/memory.py` | OpenAI GPT-4o-mini | Call ends | Facts, preferences, events stored with embeddings |
 
 ---
@@ -152,7 +152,7 @@ The Director runs **non-blocking** via `asyncio.create_task()`:
 
 ### Quick Observer (Layer 1)
 
-252 regex patterns across 19 categories:
+268 regex patterns across 19 categories:
 
 | Category | Patterns | Effect |
 |----------|----------|--------|
@@ -187,8 +187,8 @@ The Director runs **non-blocking** via `asyncio.create_task()`:
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
 | **Voice LLM** | Claude Sonnet 4.5 | AnthropicLLMService |
-| **Director** | Gemini 2.0 Flash | ~150ms non-blocking analysis |
-| **Post-Call** | Gemini 2.0 Flash | Summary, concerns, engagement |
+| **Director** | Gemini 3 Flash | ~150ms non-blocking analysis |
+| **Post-Call** | Gemini 3 Flash | Summary, concerns, engagement |
 | **STT** | Deepgram Nova 3 | Real-time, interim results |
 | **TTS** | ElevenLabs | `eleven_turbo_v2_5` |
 | **VAD** | Silero | confidence=0.6, stop_secs=1.2, min_volume=0.5 |
@@ -208,7 +208,7 @@ pipecat/
 │   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts
 │   └── tools.py                     ← 4 LLM tool schemas + async handlers
 ├── processors/
-│   ├── quick_observer.py            ← Layer 1: 252 regex patterns + goodbye EndFrame
+│   ├── quick_observer.py            ← Layer 1: 268 regex patterns + goodbye EndFrame
 │   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking guidance
 │   ├── conversation_tracker.py      ← In-call topic/question/advice tracking
 │   └── guidance_stripper.py         ← Strip <guidance> tags before TTS

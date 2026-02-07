@@ -48,7 +48,7 @@ Donna runs two backend services. Change the wrong one and nothing happens.
                                  │
                   ┌──────────────┴──────────────────┐
   Admin UI ─────► │  Node.js (Express, Railway:3001) │  Admin/consumer APIs, scheduler,
-  Consumer UI ──► │  repo root: index.js              │  call initiation, post-call analysis
+  Consumer UI ──► │  repo root: index.js              │  call initiation
                   └─────────────────────────────────┘
 
   Frontends (Vercel) ──► Node.js APIs only ──► never talk to Pipecat directly
@@ -81,8 +81,8 @@ pipecat/
 │   └── tools.py         4 LLM tool schemas + closure-based handlers (227 LOC)
 │
 ├── processors/          Frame processors in the audio pipeline
-│   ├── patterns.py             Pattern data: 268 regex patterns, 19 categories (570 LOC)
-│   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (375 LOC)
+│   ├── patterns.py             Pattern data: 268 regex patterns, 19 categories (503 LOC)
+│   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (374 LOC)
 │   ├── conversation_director.py Layer 2: Gemini Flash guidance injection (180 LOC)
 │   ├── conversation_tracker.py  Tracks topics/questions/advice per call (239 LOC)
 │   ├── goodbye_gate.py          False-goodbye grace period (135 LOC)
@@ -166,11 +166,10 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   ├── call-analyses.js Analysis results (37 LOC)
 │   └── health.js, helpers.js, index.js
 │
-├── services/            10 files, 2.5k LOC — dual implementation with pipecat/services/
+├── services/            9 files — dual implementation with pipecat/services/
 │   ├── scheduler.js     Reminder polling + outbound calls (489 LOC)
 │   ├── context-cache.js Pre-cache senior context (364 LOC)
 │   ├── memory.js        Semantic memory, pgvector (336 LOC)
-│   ├── call-analysis.js Post-call Gemini analysis (256 LOC)
 │   ├── greetings.js     Greeting templates (257 LOC)
 │   ├── daily-context.js Cross-call memory (196 LOC)
 │   ├── conversations.js Conversation CRUD (175 LOC)
@@ -204,7 +203,6 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 ```
 docs/
 ├── PRODUCT_PLAN.md               Product roadmap (40KB)
-├── README.md                     Documentation index
 ├── architecture/OVERVIEW.md      v4.0 high-level architecture (current)
 ├── plans/
 │   └── 2026-02-05-multi-senior-management.md   Feature plan (may be active)

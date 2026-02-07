@@ -48,9 +48,8 @@ In Railway dashboard → Variables:
 **Optional:**
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `V1_STREAMING_ENABLED` | `true` | Enable streaming pipeline |
-| `VOICE_MODEL` | `claude-sonnet` | Main voice model |
-| `FAST_OBSERVER_MODEL` | `gemini-3-flash` | Conversation Director model |
+| `FAST_OBSERVER_MODEL` | `gemini-3-flash-preview` | Conversation Director model |
+| `CALL_ANALYSIS_MODEL` | `gemini-3-flash-preview` | Post-call analysis model |
 
 ### 4. Get Your Public URL
 

@@ -6,8 +6,8 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ### Voice Pipeline (Pipecat)
 - **2-Layer Conversation Director Architecture**
-  - Layer 1: Quick Observer (0ms) - 252 regex patterns for health, emotion, safety, goodbye
-  - Layer 2: Conversation Director (~150ms) - Gemini 2.0 Flash for non-blocking call guidance
+  - Layer 1: Quick Observer (0ms) - 268 regex patterns for health, emotion, safety, goodbye
+  - Layer 2: Conversation Director (~150ms) - Gemini 3 Flash for non-blocking call guidance
   - Post-Call Analysis - Summary, concerns, engagement score (Gemini Flash)
 - **Pipecat Flows** - 4-phase call state machine (opening → main → winding_down → closing)
 - **Programmatic Call Ending** - Goodbye detection → EndFrame after 3.5s (bypasses unreliable LLM tool calls)
@@ -74,7 +74,7 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                                        ▼
                              ┌─────────────────────┐
                              │   Quick Observer     │  Layer 1 (0ms)
-                             │   252 regex patterns │  Goodbye → EndFrame
+                             │   268 regex patterns │  Goodbye → EndFrame
                              └─────────┬───────────┘
                                        ▼
                              ┌─────────────────────┐
@@ -102,7 +102,7 @@ The Director runs non-blocking per turn via `asyncio.create_task()`:
 
 | Feature | Description |
 |---------|-------------|
-| **Call Phase Tracking** | opening → rapport → main → winding_down → closing |
+| **Call Phase Tracking** | opening → main → winding_down → closing |
 | **Topic Management** | When to stay, transition, or wrap up |
 | **Reminder Delivery** | Natural moments to deliver reminders |
 | **Engagement Monitoring** | Detect low engagement, suggest re-engagement |
@@ -110,43 +110,65 @@ The Director runs non-blocking per turn via `asyncio.create_task()`:
 | **Goodbye Suppression** | Skips guidance when Quick Observer detects goodbye |
 | **Time-Based Fallbacks** | Force winding-down at 9min, force end at 12min |
 
+## Architecture Decision: Two Backends
+
+Donna runs two backend services by design — each owns a clear responsibility:
+
+- **Pipecat (Python, Railway:7860)** — Real-time voice pipeline (STT, Observer, Director, Claude, TTS)
+- **Node.js (Express, Railway:3001)** — REST APIs for frontends, reminder scheduler, call initiation
+
+Both share the same Neon PostgreSQL database.
+
 ## Project Structure
 
 ```
 pipecat/                                # Voice pipeline (Python, Railway port 7860)
 ├── main.py                             # FastAPI entry point, /health, /ws
-├── bot.py                              # Pipeline assembly + run_bot() + post-call
+├── bot.py                              # Pipeline assembly + run_bot()
+├── config.py                           # All env vars centralized
+├── prompts.py                          # System prompts + phase instructions
 ├── flows/
-│   ├── nodes.py                        # 4 call phase NodeConfigs + system prompts
+│   ├── nodes.py                        # 4 call phase NodeConfigs
 │   └── tools.py                        # 4 LLM tool schemas + async handlers
 ├── processors/
-│   ├── quick_observer.py               # Layer 1: 252 regex + goodbye EndFrame
+│   ├── patterns.py                     # 268 regex patterns, 19 categories
+│   ├── quick_observer.py               # Layer 1: analysis + goodbye EndFrame
 │   ├── conversation_director.py        # Layer 2: Gemini Flash non-blocking
 │   ├── conversation_tracker.py         # Topic/question/advice tracking
+│   ├── goodbye_gate.py                 # False-goodbye grace period
 │   └── guidance_stripper.py            # Strip <guidance> tags before TTS
 ├── services/
-│   ├── director_llm.py                 # Gemini Flash analysis for Director
+│   ├── post_call.py                    # Post-call orchestration
 │   ├── call_analysis.py                # Post-call analysis (Gemini Flash)
+│   ├── director_llm.py                 # Gemini Flash analysis for Director
 │   ├── memory.py                       # Semantic memory (pgvector, decay)
 │   ├── scheduler.py                    # Reminder scheduling + outbound calls
+│   ├── reminder_delivery.py            # Delivery CRUD + prompt formatting
 │   ├── context_cache.py                # Pre-cache at 5 AM local
 │   ├── conversations.py                # Conversation CRUD
 │   ├── daily_context.py                # Cross-call same-day memory
 │   ├── greetings.py                    # Greeting templates + rotation
-│   ├── seniors.py                      # Senior profile CRUD
+│   ├── seniors.py, caregivers.py       # Profile CRUD
 │   └── news.py                         # OpenAI web search (1hr cache)
 ├── api/
 │   ├── routes/                         # voice.py, calls.py
 │   └── middleware/                      # auth, rate_limit, security, twilio
 ├── db/client.py                        # asyncpg pool + query helpers
-├── tests/                              # 13 test files, 163+ tests
+├── tests/                              # 13 test files
 ├── pyproject.toml                      # Python 3.12, Pipecat v0.0.101+
 └── Dockerfile                          # python:3.12-slim + uv
+
+/                                       # Node.js admin API (Express, Railway port 3001)
+├── index.js                            # Express server entry
+├── routes/                             # 16 route modules (all /api/* endpoints)
+├── services/                           # 9 service files (DB access for admin APIs)
+├── middleware/                          # auth, rate-limit, security, twilio
+└── db/                                 # Drizzle ORM schema + client
 
 apps/                                   # Frontend apps (Vercel)
 ├── admin-v2/                           # Admin dashboard (React + Vite + Tailwind)
 ├── consumer/                           # Caregiver onboarding + dashboard
-└── observability/                      # React observability dashboard
+└── observability/                      # Call monitoring dashboard
 ```
 
 ## Environment Variables
@@ -178,7 +200,7 @@ DONNA_API_KEY=...                       # API key auth
 SCHEDULER_ENABLED=false                 # Must be false (Node.js runs scheduler)
 
 # Optional
-FAST_OBSERVER_MODEL=gemini-2.0-flash   # Director model
+FAST_OBSERVER_MODEL=gemini-3-flash-preview  # Director model
 ELEVENLABS_VOICE_ID=...                 # Voice ID (has default)
 ```
 

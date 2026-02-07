@@ -88,12 +88,10 @@ app.use(errorHandler);
 const server = createServer(app);
 
 server.listen(PORT, () => {
-  console.log(`Donna v3.0 listening on port ${PORT}`);
+  console.log(`Donna v4.0 listening on port ${PORT}`);
   console.log(`Voice webhook: ${BASE_URL}/voice/answer`);
-  console.log(`Media stream: ${WS_URL}/media-stream`);
-  console.log(`Browser call: ${WS_URL}/browser-call`);
-  console.log(`Pipeline: Claude + 4-layer observer + ElevenLabs streaming`);
-  console.log(`Features: Dynamic model routing, Post-turn agent, Streaming TTS`);
+  console.log(`Pipeline: Pipecat voice + 2-layer observer + Gemini Director`);
+  console.log(`Features: Admin APIs, Reminder scheduler, Call initiation`);
 
   // Start the reminder scheduler (check every minute)
   startScheduler(BASE_URL, 60000);

@@ -7,10 +7,10 @@ router.get('/health', (req, res) => {
   const sessions = req.app.get('sessions');
   res.json({
     status: 'ok',
-    version: '3.0',
+    version: '4.0',
     activeSessions: sessions.size,
-    pipeline: 'claude-streaming + 4-layer-observer + elevenlabs',
-    features: ['dynamic-model-routing', 'post-turn-agent', 'streaming-tts'],
+    pipeline: 'pipecat + 2-layer-observer + gemini-director',
+    features: ['pipecat-voice-pipeline', 'conversation-director', 'scheduled-reminders'],
   });
 });
 

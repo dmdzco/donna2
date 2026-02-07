@@ -14,10 +14,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.71.2",
     "@clerk/express": "^1.7.64",
-    "@deepgram/sdk": "^3.9.0",
-    "@google/genai": "^1.37.0",
     "@google/generative-ai": "^0.24.1",
     "@neondatabase/serverless": "^1.0.2",
     "bcrypt": "^6.0.0",
@@ -26,12 +23,10 @@
     "drizzle-orm": "^0.45.1",
     "express": "^4.21.0",
     "express-rate-limit": "^8.2.1",
-    "express-validator": "^7.3.1",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "openai": "^6.16.0",
     "twilio": "^5.4.0",
-    "ws": "^8.19.0",
     "zod": "^3.23.8"
   },
   "engines": {

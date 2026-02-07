@@ -41,7 +41,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1: Instant regex (0ms)
-              │   (252 patterns)     │  → health, goodbye, emotion,
+              │   (268 patterns)     │  → health, goodbye, emotion,
               │                      │    cognitive, activity signals
               │   Programmatic hang- │  → Strong goodbye detected:
               │   up: EndFrame after │    schedules EndFrame in 3.5s
@@ -102,7 +102,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
 
 ### Layer 1: Quick Observer (0ms)
 
-Instant regex-based analysis with 252 patterns across 19 categories:
+Instant regex-based analysis with 268 patterns across 19 categories:
 
 | Category | Patterns | Effect |
 |----------|----------|--------|
@@ -233,7 +233,7 @@ closing/medium/warm | CLOSING: Say a warm goodbye. Keep it brief.
 
 ## Post-Call Processing
 
-When the Twilio client disconnects, `_run_post_call()` in bot.py executes:
+When the Twilio client disconnects, `run_post_call()` in `services/post_call.py` executes:
 
 1. **Complete conversation** — Updates DB with duration, status, transcript
 2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions
@@ -247,7 +247,9 @@ When the Twilio client disconnects, `_run_post_call()` in bot.py executes:
 ```
 pipecat/
 ├── main.py                          ← FastAPI entry point, /health, /ws, middleware
-├── bot.py                           ← Pipeline assembly + run_bot() + _run_post_call()
+├── bot.py                           ← Pipeline assembly + run_bot()
+├── config.py                        ← All env vars centralized
+├── prompts.py                       ← System prompts + phase task instructions
 │
 ├── api/
 │   ├── routes/
@@ -268,17 +270,21 @@ pipecat/
 │   └── tools.py                     ← LLM tool schemas + async handlers (4 tools)
 │
 ├── processors/
-│   ├── quick_observer.py            ← Layer 1: 252 regex patterns (0ms) + programmatic goodbye
+│   ├── patterns.py                  ← 268 regex patterns, 19 categories (data only)
+│   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame
 │   ├── conversation_director.py     ← Layer 2: Gemini Flash guidance (non-blocking)
 │   ├── conversation_tracker.py      ← In-call topic/question/advice tracking + transcript
+│   ├── goodbye_gate.py              ← False-goodbye grace period
 │   └── guidance_stripper.py         ← Strips <guidance> tags and [BRACKETED] directives
 │
 ├── services/
 │   ├── director_llm.py              ← Gemini Flash analysis for Director (non-blocking)
-│   ├── greetings.py                 ← Time-based greeting templates + rotation
-│   ├── daily_context.py             ← Cross-call same-day memory
+│   ├── post_call.py                 ← Post-call orchestration (analysis, memory, cleanup)
+│   ├── reminder_delivery.py         ← Reminder delivery CRUD + prompt formatting
 │   ├── call_analysis.py             ← Post-call analysis (Gemini Flash)
 │   ├── memory.py                    ← Semantic memory (pgvector, decay, dedup)
+│   ├── greetings.py                 ← Time-based greeting templates + rotation
+│   ├── daily_context.py             ← Cross-call same-day memory
 │   ├── conversations.py             ← Conversation CRUD + transcript history
 │   ├── seniors.py                   ← Senior profile CRUD
 │   ├── caregivers.py                ← Caregiver-senior relationships
@@ -295,9 +301,11 @@ pipecat/
 ├── docs/
 │   └── ARCHITECTURE.md              ← This file
 │
-├── tests/                           ← 13 test files, 163+ tests
+├── tests/                           ← 13 test files
 │   ├── test_quick_observer.py
 │   ├── test_conversation_tracker.py
+│   ├── test_goodbye_gate.py
+│   ├── test_guidance_stripper.py
 │   ├── test_nodes.py
 │   ├── test_tools.py
 │   ├── test_api_routes.py
@@ -306,31 +314,29 @@ pipecat/
 │   ├── test_greetings.py
 │   ├── test_validators.py
 │   ├── test_sanitize.py
-│   ├── test_guidance_stripper.py
 │   └── test_db.py
 │
 ├── pyproject.toml                   ← Dependencies + project config
 └── Dockerfile                       ← python:3.12-slim + uv
 ```
 
-## Parallel Deployment (Node.js + Pipecat)
+## Two-Backend Architecture (by design)
 
 ```
 ┌─────────────────────────────────┐    ┌──────────────────────────────────┐
-│    Node.js (existing)            │    │    Pipecat (new)                  │
-│    Railway — PORT 3001           │    │    Railway — PORT 7860            │
+│    Pipecat (Python)              │    │    Node.js (Express)              │
+│    Railway — PORT 7860           │    │    Railway — PORT 3001            │
 │                                  │    │                                   │
-│  • Custom streaming pipeline     │    │  • Pipecat FrameProcessor pipeline│
-│  • v1-advanced.js                │    │  • Pipecat Flows (4 phases)       │
-│  • Quick Observer (JS)           │    │  • Quick Observer (Python, same   │
-│  • Conversation Director (L2)    │    │    252 patterns)                  │
-│  • ElevenLabs WS TTS             │    │  • Conversation Director (L2)     │
-│  • Deepgram STT                  │    │  • ElevenLabs TTS (Pipecat)       │
-│  • Express + WS                  │    │  • Deepgram STT (Pipecat)         │
-│  • SCHEDULER_ENABLED=true        │    │  • FastAPI + WebSocket            │
-│                                  │    │  • SCHEDULER_ENABLED=false        │
-│  Twilio phone → this service     │    │                                   │
-│  Admin v2 → this API             │    │  Twilio phone → this service      │
+│  • Pipecat FrameProcessor pipe   │    │  • REST APIs for frontends       │
+│  • Pipecat Flows (4 phases)      │    │  • Reminder scheduler            │
+│  • Quick Observer (268 patterns) │    │  • Call initiation (Twilio)      │
+│  • Conversation Director (L2)    │    │  • Admin/consumer/observability  │
+│  • ElevenLabs TTS (Pipecat)      │    │    API endpoints                 │
+│  • Deepgram STT (Pipecat)        │    │                                   │
+│  • FastAPI + WebSocket           │    │  SCHEDULER_ENABLED=true           │
+│  • SCHEDULER_ENABLED=false       │    │                                   │
+│                                  │    │  Frontends → this API             │
+│  Twilio voice → this service     │    │                                   │
 └─────────────────────────────────┘    └──────────────────────────────────┘
                 │                                       │
                 └───────────┬───────────────────────────┘
@@ -346,19 +352,7 @@ pipecat/
                 └────────────────────────┘
 ```
 
-### Key Differences from Node.js Stack
-
-| Aspect | Node.js | Pipecat |
-|--------|---------|---------|
-| **Pipeline** | Custom streaming (v1-advanced.js) | Pipecat FrameProcessor pipeline |
-| **Call phases** | Custom state machine in pipeline | Pipecat Flows (4 NodeConfigs) |
-| **Director** | Inline in v1-advanced.js | Separate non-blocking FrameProcessor |
-| **Transport** | Raw Twilio WebSocket | FastAPIWebsocketTransport + TwilioFrameSerializer |
-| **LLM** | Claude (streaming, sentence-by-sentence) | AnthropicLLMService (Pipecat managed) |
-| **TTS** | ElevenLabs WebSocket (custom) | ElevenLabs via Pipecat |
-| **STT** | Deepgram (custom integration) | DeepgramSTTService (Pipecat managed) |
-| **Goodbye** | Custom timer in v1-advanced.js | Quick Observer → EndFrame (3.5s) |
-| **Scheduler** | Active (SCHEDULER_ENABLED=true) | Disabled (prevents dual-scheduler) |
+Running separate backends is an explicit decision. Pipecat handles real-time voice, Node.js handles REST APIs and scheduling.
 
 ## Tech Stack
 
@@ -425,7 +419,7 @@ DONNA_API_KEY=...
 SCHEDULER_ENABLED=false
 
 # Director model (optional)
-FAST_OBSERVER_MODEL=gemini-3-flash
+FAST_OBSERVER_MODEL=gemini-3-flash-preview
 
 # Testing
 RUN_DB_TESTS=1                   # Set to run DB integration tests

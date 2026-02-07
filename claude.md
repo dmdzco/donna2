@@ -28,13 +28,13 @@ Do NOT confuse the Node.js `services/` with `pipecat/services/` — they are sep
 
 ---
 
-## Current Status: Pipecat Migration (v4.0)
+## Current Status: v4.0
 
-The voice pipeline has been migrated from Node.js to **Python Pipecat** (`pipecat/` directory). The Node.js legacy code remains in the repo root but is being replaced.
+The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (repo root) serves admin/consumer APIs and the reminder scheduler. See "Architecture Decision: Two Backends" below.
 
 ### Working Features (Pipecat)
 - **2-Layer Observer Architecture + Post-Call**
-  - Layer 1: Quick Observer (0ms) - 252 regex patterns + programmatic goodbye (3.5s EndFrame)
+  - Layer 1: Quick Observer (0ms) - 268 regex patterns + programmatic goodbye (3.5s EndFrame)
   - Layer 2: Conversation Director (~150ms) - Non-blocking Gemini Flash per-turn analysis
   - Post-Call: Analysis, memory extraction, daily context (Gemini Flash)
 - **Pipecat Flows** - 4-phase call state machine (opening → main → winding_down → closing)
@@ -75,7 +75,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         │ TranscriptionFrame
                         ▼
               ┌─────────────────────┐
-              │   Quick Observer     │  Layer 1 (0ms): 252 regex patterns
+              │   Quick Observer     │  Layer 1 (0ms): 268 regex patterns
               │                      │  Goodbye → EndFrame in 3.5s
               └─────────┬───────────┘
                         ▼
@@ -130,26 +130,27 @@ pipecat/
 │   └── tools.py                     ← 4 LLM tool schemas + async handlers (227 LOC)
 │
 ├── processors/
-│   ├── patterns.py                  ← Pattern data: 268 regex patterns, 19 categories (570 LOC)
-│   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame (375 LOC)
+│   ├── patterns.py                  ← Pattern data: 268 regex patterns, 19 categories (503 LOC)
+│   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame (374 LOC)
 │   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking (180 LOC)
-│   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (240 LOC)
-│   └── guidance_stripper.py         ← Strip <guidance> tags before TTS (75 LOC)
+│   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (239 LOC)
+│   ├── goodbye_gate.py              ← False-goodbye grace period (135 LOC)
+│   └── guidance_stripper.py         ← Strip <guidance> tags before TTS (74 LOC)
 │
 ├── services/
 │   ├── scheduler.py                 ← Reminder polling + outbound calls (403 LOC)
-│   ├── reminder_delivery.py         ← Delivery CRUD + prompt formatting (85 LOC)
-│   ├── post_call.py                 ← Post-call: analysis, memory, cleanup (97 LOC)
-│   ├── director_llm.py              ← Gemini Flash analysis for Director (340 LOC)
-│   ├── call_analysis.py             ← Post-call analysis (Gemini Flash) (222 LOC)
+│   ├── reminder_delivery.py         ← Delivery CRUD + prompt formatting (93 LOC)
+│   ├── post_call.py                 ← Post-call: analysis, memory, cleanup (105 LOC)
+│   ├── director_llm.py              ← Gemini Flash analysis for Director (339 LOC)
+│   ├── call_analysis.py             ← Post-call analysis (Gemini Flash) (221 LOC)
 │   ├── memory.py                    ← Semantic memory (pgvector, decay) (356 LOC)
-│   ├── context_cache.py             ← Pre-cache at 5 AM local (261 LOC)
-│   ├── conversations.py             ← Conversation CRUD (169 LOC)
-│   ├── daily_context.py             ← Cross-call same-day memory (160 LOC)
-│   ├── greetings.py                 ← Greeting templates + rotation (219 LOC)
-│   ├── seniors.py                   ← Senior profile CRUD (100 LOC)
-│   ├── caregivers.py                ← Caregiver relationships
-│   └── news.py                      ← OpenAI web search (92 LOC)
+│   ├── context_cache.py             ← Pre-cache at 5 AM local (260 LOC)
+│   ├── conversations.py             ← Conversation CRUD (168 LOC)
+│   ├── daily_context.py             ← Cross-call same-day memory (159 LOC)
+│   ├── greetings.py                 ← Greeting templates + rotation (218 LOC)
+│   ├── seniors.py                   ← Senior profile CRUD (99 LOC)
+│   ├── caregivers.py                ← Caregiver relationships (76 LOC)
+│   └── news.py                      ← OpenAI web search (91 LOC)
 │
 ├── api/
 │   ├── routes/
@@ -160,17 +161,17 @@ pipecat/
 │
 ├── db/client.py                     ← asyncpg pool + query helpers
 ├── lib/sanitize.py                  ← PII-safe logging
-├── tests/                           ← 14 test files, 163+ tests
+├── tests/                           ← 13 test files
 ├── pyproject.toml                   ← Python 3.12, Pipecat v0.0.101+
 └── Dockerfile                       ← python:3.12-slim + uv
 ```
 
-### Node.js Admin API (repo root — still serves frontend APIs)
+### Node.js Admin API (repo root)
 
 ```
 /
 ├── index.js                    ← Express server (port 3001, admin/consumer APIs)
-├── services/                   ← 10 service files (dual implementation with pipecat/services/)
+├── services/                   ← 9 service files (dual implementation with pipecat/services/)
 ├── routes/                     ← 16 route modules (all /api/* endpoints)
 ├── middleware/                  ← 7 middleware files (auth, rate-limit, security)
 └── apps/                       ← Frontend apps (still active)
@@ -178,8 +179,6 @@ pipecat/
     ├── consumer/               ← Consumer app (Vercel)
     └── observability/          ← Observability dashboard
 ```
-
-> Legacy voice pipeline code (`pipelines/`, `adapters/`, `websocket/`) was removed in `93ce8d1`.
 
 ---
 
@@ -247,7 +246,7 @@ Railway project: `36e40dcb-ada1-4df5-9465-627d3cfdff71`
 Service: `donna-pipecat` (port 7860)
 URL: `https://donna-pipecat-production.up.railway.app`
 
-**Node.js legacy (Railway):**
+**Node.js admin API (Railway):**
 ```bash
 # From repo root
 railway up
@@ -289,10 +288,20 @@ DONNA_API_KEY=...
 SCHEDULER_ENABLED=false          # MUST be false (Node.js runs scheduler)
 
 # Optional
-FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
+FAST_OBSERVER_MODEL=gemini-3-flash-preview   # Director model
+CALL_ANALYSIS_MODEL=gemini-3-flash-preview   # Post-call analysis model
+LOG_LEVEL=INFO                               # DEBUG for verbose pipecat logs
 ```
 
 ---
+
+## Architecture Decision: Two Backends
+
+Running separate Python (Pipecat) and Node.js (Express) backends is an **explicit decision**, not tech debt. Each backend owns a clear responsibility:
+- **Pipecat (Python)** — Real-time voice pipeline (STT, Observer, Director, Claude, TTS)
+- **Node.js (Express)** — REST APIs for frontends, reminder scheduler, call initiation
+
+Both share the same Neon PostgreSQL database. Dual service implementations (e.g. `services/memory.js` and `pipecat/services/memory.py`) exist because each backend needs database access for its own purpose — they are not redundant.
 
 ## Roadmap
 
@@ -302,9 +311,9 @@ FAST_OBSERVER_MODEL=gemini-3-flash  # Director model
 - ~~Post-Call Analysis~~ ✓ Completed
 - ~~Admin Dashboard v2~~ ✓ Completed (Vercel)
 - ~~Security Hardening~~ ✓ Completed
-- ~~Pipecat Migration~~ ✓ In progress (voice pipeline ported, Director ported)
+- ~~Pipecat Migration~~ ✓ Completed (voice pipeline ported, Director ported)
+- Pipecat context migration: `OpenAILLMContext` → `LLMContext` + `LLMContextAggregatorPair` (blocked — `AnthropicLLMService.create_context_aggregator()` requires `set_llm_adapter()` which only exists on `OpenAILLMContext` in v0.0.101. Revisit when pipecat updates the Anthropic adapter. Deprecation warnings are suppressed in `main.py`.)
 - Prompt Caching (Anthropic)
-- Full Pipecat cutover (disable Node.js, enable scheduler on Pipecat)
 - Telnyx Migration (65% cost savings)
 
 ---

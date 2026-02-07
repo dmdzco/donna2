@@ -12,7 +12,7 @@ from loguru import logger
 from db import query_one
 
 
-ANALYSIS_MODEL = os.environ.get("CALL_ANALYSIS_MODEL", "gemini-3-flash")
+ANALYSIS_MODEL = os.environ.get("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview")
 
 ANALYSIS_PROMPT = """You are analyzing a completed phone call between Donna (an AI companion) and an elderly individual.
 

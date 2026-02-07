@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 # Per-senior last-used index (resets on process restart)
 _last_used_index: dict[str, int] = {}
+_inbound_last_used_index: dict[str, int] = {}
 
 # ── Morning templates (5 AM – 11:59 AM) ──────────────────────────
 MORNING_TEMPLATES = [
@@ -65,6 +66,25 @@ CONTEXT_FOLLOWUPS = [
     "I've been curious about {context} since our last chat.",
     "How did things turn out with {context}?",
     "Any news about {context} since we last spoke?",
+]
+
+# ── News-based followups ──────────────────────────────────────────
+NEWS_FOLLOWUPS = [
+    "I saw something interesting about {topic} today - have you heard?",
+    "There's some neat news about {topic} - want to hear about it?",
+    "I came across something about {topic} I think you'd enjoy hearing about.",
+    "Did you happen to catch any news about {topic} today?",
+    "I read something about {topic} that made me think of you.",
+]
+
+# ── Inbound call templates (short, receptive) ────────────────────
+INBOUND_TEMPLATES = [
+    "Hello, {name}! So nice to hear from you. What's on your mind?",
+    "Hi {name}! I'm so glad you called. How can I help?",
+    "{name}! What a nice surprise. How are you doing?",
+    "Hey {name}, it's so good to hear your voice! What's going on?",
+    "Hi there, {name}! I was hoping I'd hear from you. What's up?",
+    "Oh, {name}! How wonderful that you called. Tell me, what's new?",
 ]
 
 
@@ -132,6 +152,23 @@ def select_interest(
     return interests[0]
 
 
+def _extract_news_topic(news_context: str | None, interests: list[str] | None) -> str | None:
+    """Extract a short topic from news context for use in a followup.
+
+    Tries to find an interest mentioned in the news, otherwise returns the
+    first interest.
+    """
+    if not news_context or not interests:
+        return None
+
+    news_lower = news_context.lower()
+    for interest in interests:
+        if interest.lower() in news_lower:
+            return interest
+
+    return interests[0] if interests else None
+
+
 def _extract_context_phrase(summary: str | None) -> str | None:
     """Extract a short, conversational context phrase from a call summary."""
     if not summary or len(summary) < 10:
@@ -161,6 +198,7 @@ def get_greeting(
     last_call_summary: str | None = None,
     recent_memories: list[dict] | None = None,
     senior_id: str | None = None,
+    news_context: str | None = None,
 ) -> dict:
     """Generate a greeting for a senior.
 
@@ -198,6 +236,20 @@ def get_greeting(
                 "selected_interest": None,
             }
 
+    # News followup — 33% chance when news is available (vs interest followup)
+    if add_followup and news_context and interests:
+        if random.random() < 0.33:
+            topic = _extract_news_topic(news_context, interests)
+            if topic:
+                followup = random.choice(NEWS_FOLLOWUPS).replace("{topic}", topic)
+                greeting += " " + followup
+                return {
+                    "greeting": greeting,
+                    "period": period,
+                    "template_index": template_index,
+                    "selected_interest": None,
+                }
+
     if add_followup and interests:
         selected = select_interest(interests, recent_memories)
         if selected:
@@ -215,4 +267,28 @@ def get_greeting(
         "period": period,
         "template_index": template_index,
         "selected_interest": None,
+    }
+
+
+def get_inbound_greeting(
+    *,
+    senior_name: str,
+    senior_id: str | None = None,
+) -> dict:
+    """Generate a short, receptive greeting for when the senior calls Donna.
+
+    Returns dict with keys: greeting, template_index.
+    """
+    first_name = (senior_name or "there").split(" ")[0]
+
+    cache_key = f"inbound_{senior_id or first_name}"
+    last_index = _inbound_last_used_index.get(cache_key, -1)
+    template_index = _pick_index(len(INBOUND_TEMPLATES), last_index)
+    _inbound_last_used_index[cache_key] = template_index
+
+    greeting = INBOUND_TEMPLATES[template_index].replace("{name}", first_name)
+
+    return {
+        "greeting": greeting,
+        "template_index": template_index,
     }

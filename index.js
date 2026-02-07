@@ -27,7 +27,6 @@ app.use(securityHeaders());
 // CORS - allow admin dashboard, consumer app, observability, and local development
 app.use(cors({
   origin: [
-    'https://donna-admin.vercel.app',
     'https://admin-v2-liart.vercel.app',
     'https://consumer-ruddy.vercel.app',
     'https://observability-five.vercel.app',

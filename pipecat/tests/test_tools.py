@@ -4,7 +4,7 @@ import pytest
 
 from flows.tools import (
     SEARCH_MEMORIES_SCHEMA,
-    GET_NEWS_SCHEMA,
+    WEB_SEARCH_SCHEMA,
     MARK_REMINDER_SCHEMA,
     SAVE_DETAIL_SCHEMA,
     make_tool_handlers,
@@ -18,10 +18,13 @@ class TestToolSchemas:
         assert "query" in SEARCH_MEMORIES_SCHEMA["properties"]
         assert "query" in SEARCH_MEMORIES_SCHEMA["required"]
 
-    def test_get_news_schema_valid(self):
-        assert GET_NEWS_SCHEMA["name"] == "get_news"
-        assert "topic" in GET_NEWS_SCHEMA["properties"]
-        assert "topic" in GET_NEWS_SCHEMA["required"]
+    def test_web_search_schema_valid(self):
+        assert WEB_SEARCH_SCHEMA["name"] == "web_search"
+        assert "query" in WEB_SEARCH_SCHEMA["properties"]
+        assert "query" in WEB_SEARCH_SCHEMA["required"]
+
+    def test_web_search_description_mentions_filler(self):
+        assert "before calling this tool" in WEB_SEARCH_SCHEMA["description"].lower()
 
     def test_mark_reminder_schema_valid(self):
         assert MARK_REMINDER_SCHEMA["name"] == "mark_reminder_acknowledged"
@@ -40,7 +43,7 @@ class TestToolHandlerFactory:
         session_state = {"senior_id": "test-123", "senior": {"name": "Test"}}
         handlers = make_tool_handlers(session_state)
         assert "search_memories" in handlers
-        assert "get_news" in handlers
+        assert "web_search" in handlers
         assert "mark_reminder_acknowledged" in handlers
         assert "save_important_detail" in handlers
 
@@ -84,7 +87,8 @@ class TestFlowsTools:
         tools = make_flows_tools(session_state)
         assert len(tools) == 4
         assert "search_memories" in tools
-        assert "get_news" in tools
+        assert "web_search" in tools
+        assert "get_news" not in tools
         assert "mark_reminder_acknowledged" in tools
         assert "save_important_detail" in tools
 

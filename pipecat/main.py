@@ -16,17 +16,23 @@ import os
 import sys
 import warnings
 
-# Suppress pipecat/pipecat_flows deprecation warnings (shows as red stderr in Railway)
-warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"pipecat.*")
-warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*OpenAI.*deprecated.*")
-warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*is deprecated.*pipecat.*")
-
 from loguru import logger
 
 # Configure log level: INFO in production, DEBUG locally
 _log_level = os.getenv("LOG_LEVEL", "INFO" if os.getenv("RAILWAY_PUBLIC_DOMAIN") else "DEBUG")
 logger.remove()
 logger.add(sys.stderr, level=_log_level)
+
+# Route Python warnings through loguru instead of raw stderr.
+# This gives them a proper @level tag in Railway so they can be filtered.
+# DeprecationWarnings → DEBUG (hidden at INFO), other warnings → WARNING.
+def _warning_handler(message, category, filename, lineno, file=None, line=None):
+    if issubclass(category, DeprecationWarning):
+        logger.debug("{msg}", msg=str(message))
+    else:
+        logger.warning("{cat}: {msg}", cat=category.__name__, msg=str(message))
+
+warnings.showwarning = _warning_handler
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -102,6 +108,7 @@ async def websocket_endpoint(websocket: WebSocket):
         "senior_id": None,
         "senior": None,
         "memory_context": None,
+        "news_context": None,
         "greeting": None,
         "reminder_prompt": None,
         "reminder_delivery": None,
@@ -109,6 +116,7 @@ async def websocket_endpoint(websocket: WebSocket):
         "conversation_id": None,
         "call_sid": None,
         "call_type": "check-in",
+        "is_outbound": True,
         "previous_calls_summary": None,
         "todays_context": None,
         "_transcript": [],

@@ -143,6 +143,15 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
             get_recent(senior_id, 10),
         )
 
+        # Fetch news for seniors with interests
+        news_context = None
+        if senior.get("interests"):
+            try:
+                from services.news import get_news_for_senior
+                news_context = await get_news_for_senior(senior["interests"], limit=3)
+            except Exception as e:
+                logger.error("Error fetching news for cache: {err}", err=str(e))
+
         # Generate greeting using the greeting rotation service
         greeting_result = get_greeting(
             senior_name=senior.get("name", ""),
@@ -151,6 +160,7 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
             last_call_summary=summaries,
             recent_memories=recent_mems,
             senior_id=senior_id,
+            news_context=news_context,
         )
 
         logger.info(
@@ -184,6 +194,7 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
             "critical_memories": critical,
             "important_memories": important,
             "memory_context": "\n".join(memory_parts),
+            "news_context": news_context,
             "greeting": greeting_result["greeting"],
             "last_greeting_index": greeting_result["template_index"],
             "cached_at": now,

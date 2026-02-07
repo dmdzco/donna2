@@ -39,10 +39,9 @@ SEARCH_MEMORIES_SCHEMA = {
 WEB_SEARCH_SCHEMA = {
     "name": "web_search",
     "description": (
-        "Search the web to answer a question the senior asked. "
-        "IMPORTANT: Before calling this tool, ALWAYS say something natural like "
-        "'Let me look that up for you' or 'Good question, let me check' — "
-        "this fills the silence while the search runs."
+        "Search the web for current information. Use this whenever the senior "
+        "asks about news, weather, sports, facts, or anything you're unsure about. "
+        "Say something brief like 'Let me check on that' before calling this tool."
     ),
     "properties": {
         "query": {

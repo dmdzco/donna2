@@ -23,8 +23,8 @@ class TestToolSchemas:
         assert "query" in WEB_SEARCH_SCHEMA["properties"]
         assert "query" in WEB_SEARCH_SCHEMA["required"]
 
-    def test_web_search_description_mentions_filler(self):
-        assert "before calling this tool" in WEB_SEARCH_SCHEMA["description"].lower()
+    def test_web_search_description_mentions_current_info(self):
+        assert "current information" in WEB_SEARCH_SCHEMA["description"].lower()
 
     def test_mark_reminder_schema_valid(self):
         assert MARK_REMINDER_SCHEMA["name"] == "mark_reminder_acknowledged"

@@ -1,96 +1,90 @@
 # Donna Architecture Overview
 
-This document describes the Donna v3.3 system architecture with the **Conversation Director**, in-call memory tracking, same-day cross-call memory, enhanced web search, consumer app, and security hardening.
+This document describes the Donna v4.0 system architecture with the **Pipecat voice pipeline**, **2-Layer Conversation Director**, and **Pipecat Flows** call state machine.
 
 ---
 
 ## High-Level Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│              DONNA v3.3 - CONVERSATION DIRECTOR ARCHITECTURE                 │
-├─────────────────────────────────────────────────────────────────────────────┤
+┌──────────────────────────────────────────────────────────────────────────────┐
+│              DONNA v4.0 — PIPECAT VOICE PIPELINE                            │
+├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐              │
-│   │  Admin Dashboard │  │  Consumer App  │  │  Observability  │              │
-│   │  apps/admin/     │  │ apps/consumer/ │  │   Dashboard     │              │
-│   └────────┬─────────┘  └────────┬───────┘  └────────┬────────┘              │
-│            │                      │                                          │
-│            ▼                      ▼                                          │
+│   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐            │
+│   │  Admin Dashboard │  │  Consumer App   │  │  Observability  │            │
+│   │  apps/admin-v2/  │  │ apps/consumer/  │  │   Dashboard     │            │
+│   └────────┬─────────┘  └────────┬────────┘  └────────┬────────┘            │
+│            │                     │                                           │
+│            ▼                     ▼                                           │
 │   ┌──────────────────┐        ┌──────────────────┐                          │
-│   │  Senior's Phone  │        │    /api/call     │                          │
-│   └────────┬─────────┘        └────────┬─────────┘                          │
+│   │  Senior's Phone  │        │    /api/call      │                          │
+│   └────────┬─────────┘        └────────┬──────────┘                          │
 │            │                           │                                     │
 │            ▼                           ▼                                     │
-│   ┌────────────────────────────────────────────────┐                        │
-│   │              Twilio Media Streams               │                        │
-│   │           (WebSocket /media-stream)             │                        │
-│   └────────────────────┬───────────────────────────┘                        │
-│                        │                                                     │
+│   ┌──────────────────────────────────────────────────┐                      │
+│   │              Twilio Media Streams                 │                      │
+│   │         /voice/answer → <Stream url="/ws">        │                      │
+│   └────────────────────┬─────────────────────────────┘                      │
+│                        │ WebSocket                                           │
 │                        ▼                                                     │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │                      V1AdvancedSession                               │   │
-│   │                  (pipelines/v1-advanced.js)                          │   │
+│   │                    Pipecat Pipeline (bot.py)                         │   │
 │   ├─────────────────────────────────────────────────────────────────────┤   │
 │   │                                                                      │   │
-│   │   Audio In → Deepgram STT → Process Utterance                       │   │
-│   │                                   │                                  │   │
-│   │               ┌───────────────────┼───────────────────┐             │   │
-│   │               ▼                   ▼                                  │   │
-│   │         Layer 1 (0ms)     Layer 2 (~150ms)                          │   │
-│   │         Quick Observer    Conversation Director                      │   │
-│   │         (regex patterns)  (Gemini 3 Flash)                          │   │
-│   │               │                   │                                  │   │
-│   │               └─────────┬─────────┘                                  │   │
-│   │                         ▼                                            │   │
-│   │              ┌─────────────────────┐                                 │   │
-│   │              │ Dynamic Token Select│                                 │   │
-│   │              │  (selectModelConfig)│                                 │   │
-│   │              │   100-400 tokens    │                                 │   │
-│   │              └──────────┬──────────┘                                 │   │
-│   │                         ▼                                            │   │
-│   │              Claude Sonnet 4.5 Streaming                             │   │
-│   │                         │                                            │   │
-│   │                         ▼                                            │   │
-│   │              Sentence Buffer + <guidance> stripping                  │   │
-│   │                         │                                            │   │
-│   │                         ▼                                            │   │
-│   │              ElevenLabs WebSocket TTS                                │   │
-│   │                         │                                            │   │
-│   │                         ▼                                            │   │
-│   │              Audio Out → Twilio (mulaw 8kHz)                         │   │
+│   │   Audio In → Deepgram STT (Nova 3)                                  │   │
+│   │                     │ TranscriptionFrame                             │   │
+│   │                     ▼                                                │   │
+│   │         ┌───────────────────────┐                                    │   │
+│   │         │  Layer 1: Quick       │  0ms — 252 regex patterns          │   │
+│   │         │  Observer             │  Goodbye → EndFrame (3.5s)         │   │
+│   │         └───────────┬───────────┘                                    │   │
+│   │                     ▼                                                │   │
+│   │         ┌───────────────────────┐                                    │   │
+│   │         │  Layer 2: Conversation│  ~150ms — Gemini 2.0 Flash         │   │
+│   │         │  Director             │  NON-BLOCKING (asyncio.create_task)│   │
+│   │         │                       │  Injects prev-turn guidance        │   │
+│   │         └───────────┬───────────┘  Fallback: force end at 12min     │   │
+│   │                     ▼                                                │   │
+│   │         Context Aggregator (user) → LLM Context                     │   │
+│   │                     ▼                                                │   │
+│   │         Claude Sonnet 4.5 + Pipecat Flows                           │   │
+│   │         (4 phases: opening → main → winding_down → closing)         │   │
+│   │                     │ TextFrame                                      │   │
+│   │                     ▼                                                │   │
+│   │         Conversation Tracker → Guidance Stripper                     │   │
+│   │                     ▼                                                │   │
+│   │         ElevenLabs TTS → Audio Out → Twilio (mulaw 8kHz)            │   │
 │   │                                                                      │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                        │                                                     │
-│                        ▼ (on call end)                                       │
+│                        ▼ (on disconnect)                                     │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │              Post-Call Analysis (Async Batch)                        │   │
-│   │              (services/call-analysis.js)                             │   │
-│   │              - Call summary generation                               │   │
-│   │              - Caregiver alerts (health/cognitive/safety)            │   │
-│   │              - Engagement metrics (1-10 score)                       │   │
-│   │              - Follow-up suggestions                                 │   │
-│   │              - Memory extraction                                     │   │
+│   │              Post-Call Processing (_run_post_call)                    │   │
+│   │              1. Complete conversation record (DB)                     │   │
+│   │              2. Call analysis — Gemini Flash (summary, concerns)     │   │
+│   │              3. Memory extraction — OpenAI (facts, preferences)      │   │
+│   │              4. Daily context — cross-call same-day memory            │   │
+│   │              5. Reminder cleanup + cache clearing                     │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
 │   │                        Shared Services                                │  │
 │   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │  │
-│   │  │ Memory System│  │   Scheduler  │  │  News Service│               │  │
-│   │  │ (pgvector)   │  │  (reminders) │  │ (OpenAI web) │               │  │
-│   │  │ + decay      │  │  + prefetch  │  │  + 1hr cache │               │  │
+│   │  │ Memory System │  │   Scheduler  │  │  News Service│               │  │
+│   │  │ (pgvector)    │  │  (reminders) │  │ (OpenAI web) │               │  │
+│   │  │ + decay/dedup │  │  + prefetch  │  │  + 1hr cache │               │  │
 │   │  └──────────────┘  └──────────────┘  └──────────────┘               │  │
-│   │  ┌──────────────┐                                                    │  │
-│   │  │ Daily Context│                                                    │  │
-│   │  │ (cross-call) │                                                    │  │
-│   │  │ + same-day   │                                                    │  │
-│   │  └──────────────┘                                                    │  │
+│   │  ┌──────────────┐  ┌──────────────┐                                  │  │
+│   │  │ Daily Context │  │ Context Cache│                                  │  │
+│   │  │ (cross-call)  │  │ (5 AM local) │                                  │  │
+│   │  └──────────────┘  └──────────────┘                                  │  │
 │   └────────────────────────────────────┬─────────────────────────────────┘  │
 │                                        ▼                                     │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
 │   │                     PostgreSQL (Neon + pgvector)                      │  │
-│   │  seniors | conversations | memories | reminders | reminderDeliveries  │  │
-│   │  caregivers | callAnalyses | dailyCallContext                        │  │
+│   │  seniors | conversations | memories | reminders | reminder_deliveries │  │
+│   │  caregivers | call_analyses | daily_call_context | admin_users        │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -98,39 +92,37 @@ This document describes the Donna v3.3 system architecture with the **Conversati
 
 ---
 
-## Real-Time Observer Architecture (2-Layer)
+## 2-Layer Observer Architecture
 
-| Layer | File | Model | Latency | Purpose | Affects |
-|-------|------|-------|---------|---------|---------|
-| **1** | `pipelines/quick-observer.js` | Regex | 0ms | Instant pattern detection (health, emotion, engagement) | Current response tokens |
-| **2** | `pipelines/fast-observer.js` | Gemini 3 Flash | ~100-150ms | Conversation Director (call phase, topic, reminders) | Current response guidance |
+| Layer | File | Model | Latency | Purpose |
+|-------|------|-------|---------|---------|
+| **1** | `processors/quick_observer.py` | Regex | 0ms | 252 patterns: health, goodbye, emotion, safety + programmatic call end |
+| **2** | `processors/conversation_director.py` + `services/director_llm.py` | Gemini 2.0 Flash | ~150ms | Non-blocking call guidance (phase, topic, reminders, fallback actions) |
 
-### Post-Call Analysis (Async Batch)
+### Post-Call Analysis (Async)
 
 | Process | File | Model | Trigger | Output |
 |---------|------|-------|---------|--------|
-| Call Analysis | `services/call-analysis.js` | Gemini Flash | Call ends | Summary, concerns, engagement score, follow-ups |
-| Memory Extraction | `pipelines/v1-advanced.js` | GPT-4o-mini | Call ends | Facts, preferences, events stored with embeddings |
+| Call Analysis | `services/call_analysis.py` | Gemini 2.0 Flash | Call ends | Summary, concerns, engagement score, follow-ups |
+| Memory Extraction | `services/memory.py` | OpenAI GPT-4o-mini | Call ends | Facts, preferences, events stored with embeddings |
 
 ---
 
 ## Conversation Director (Layer 2)
 
-The **Conversation Director** proactively guides each call using Gemini 3 Flash (~150ms):
+The Director runs **non-blocking** via `asyncio.create_task()`:
 
-1. **Tracks State** - Topics covered, call phase (opening→rapport→main→closing), engagement level
-2. **Steers Flow** - When to transition topics, what to discuss next, transition phrases
-3. **Manages Reminders** - Finding natural moments to deliver (never during grief/sadness)
-4. **Monitors Pacing** - Detecting if conversation is dragging or rushed
-5. **Recommends Tokens** - 100-400 tokens based on emotional needs
-6. **Provides Guidance** - Specific tone and instruction for Claude's response
+1. **Per-turn analysis** — Calls Gemini Flash with full conversation context
+2. **Cached injection** — Injects PREVIOUS turn's guidance as `[Director guidance]` message
+3. **Fallback actions** — Force winding-down at 9min, force call end at 12min
+4. **Goodbye suppression** — Skips guidance injection when Quick Observer detects goodbye
 
 ### Director Output Schema
 
-```javascript
+```json
 {
   "analysis": {
-    "call_phase": "opening|rapport|main|closing",
+    "call_phase": "opening|rapport|main|winding_down|closing",
     "engagement_level": "high|medium|low",
     "current_topic": "string",
     "emotional_tone": "positive|neutral|concerned|sad"
@@ -141,17 +133,18 @@ The **Conversation Director** proactively guides each call using Gemini 3 Flash 
     "pacing_note": "good|too_fast|dragging|time_to_close"
   },
   "reminder": {
-    "should_deliver": boolean,
+    "should_deliver": false,
     "which_reminder": "string or null",
     "delivery_approach": "how to weave in naturally"
   },
   "guidance": {
     "tone": "warm|empathetic|cheerful|gentle|serious",
-    "response_length": "brief|moderate|extended",
-    "priority_action": "main thing to do"
+    "priority_action": "main thing to do",
+    "specific_instruction": "actionable guidance"
   },
   "model_recommendation": {
-    "max_tokens": 100-400,
+    "use_sonnet": false,
+    "max_tokens": 150,
     "reason": "why this token count"
   }
 }
@@ -159,65 +152,28 @@ The **Conversation Director** proactively guides each call using Gemini 3 Flash 
 
 ### Quick Observer (Layer 1)
 
-Instant regex-based analysis (0ms) with comprehensive patterns:
+252 regex patterns across 19 categories:
 
-| Category | Patterns | Token Impact |
-|----------|----------|--------------|
-| **Health** | 30+ patterns (pain, falls, medication, symptoms) | +50-100 tokens |
-| **Emotion** | 25+ patterns with valence/intensity | +80-150 tokens |
-| **Family** | 25+ relationship patterns including pets | Context only |
-| **Safety** | Scams, strangers, emergencies | +100 tokens |
-| **Engagement** | Response length analysis | +50 if low |
-| **Questions** | Yes/no, WH-questions, opinions | Response type hint |
-| **Factual/Curiosity** | 18 patterns ("what year", "how tall", "I wonder") | Web search trigger |
-| **News** | Weather, sports, current events | Web search trigger |
-
----
-
-## Dynamic Token Routing
-
-The `selectModelConfig()` function in `v1-advanced.js` merges recommendations from both layers:
-
-| Situation | Tokens | Source |
-|-----------|--------|--------|
-| Normal conversation | 100 | Default |
-| Health mention | 150-180 | Quick Observer (severity-based) |
-| Safety concern (high) | 200 | Quick Observer |
-| Emotional support | 200-250 | Director (emotional_tone: sad/concerned) |
-| Low engagement | 200 | Director (engagement_level: low) |
-| Reminder delivery | 150 | Director (should_deliver: true) |
-| Call closing | 150 | Director (stay_or_shift: wrap_up) |
-| Simple question | 80 | Quick Observer |
-| Deep emotional moment | 300-400 | Director + Quick Observer combined |
-
-**Selection Logic:**
-1. Director's `model_recommendation.max_tokens` is the base
-2. Quick Observer can **escalate** tokens for urgent signals (health, safety)
-3. Final = `Math.max(director_tokens, quick_observer_tokens)`
+| Category | Patterns | Effect |
+|----------|----------|--------|
+| **Health** | 30+ patterns (pain, falls, medication, symptoms) | Health signals in context |
+| **Emotion** | 25+ patterns with valence/intensity | Emotional tone detection |
+| **Family** | 25+ relationship patterns including pets | Context enrichment |
+| **Safety** | Scams, strangers, emergencies | Safety concern flags |
+| **Goodbye** | Strong goodbye detection (bye, gotta go, take care) | **Programmatic call end (3.5s EndFrame)** |
+| **Factual/Curiosity** | 18 patterns ("what year", "how tall") | Web search trigger |
+| **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 
 ---
 
-## Post-Call Analysis
+## Pipecat Flows — Call Phases
 
-When a call ends, async batch analysis runs:
-
-```javascript
-{
-  "summary": "2-3 sentence call summary",
-  "topics_discussed": ["greeting", "health", "family"],
-  "engagement_score": 8,  // 1-10
-  "concerns": [
-    {
-      "type": "health|cognitive|emotional|safety",
-      "severity": "low|medium|high",
-      "description": "what was observed",
-      "recommended_action": "what caregiver should do"
-    }
-  ],
-  "positive_observations": ["good engagement", "positive mood"],
-  "follow_up_suggestions": ["ask about doctor appointment"]
-}
-```
+| Phase | Tools | Context Strategy |
+|-------|-------|-----------------|
+| **Opening** | search_memories, save_important_detail, transition_to_main | respond_immediately |
+| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | RESET_WITH_SUMMARY |
+| **Winding Down** | mark_reminder_acknowledged, transition_to_closing | — |
+| **Closing** | *(none — post_action ends call)* | — |
 
 ---
 
@@ -225,14 +181,18 @@ When a call ends, async batch analysis runs:
 
 | Component | Technology | Details |
 |-----------|------------|---------|
-| **Hosting** | Railway | Auto-deploy via `railway up` |
+| **Runtime** | Python 3.12 | asyncio, FastAPI |
+| **Framework** | Pipecat v0.0.101+ | FrameProcessor pipeline |
+| **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
+| **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
-| **Voice AI** | Claude Sonnet 4.5 | Streaming responses, extended thinking disabled |
-| **Director** | Gemini 3 Flash | ~150ms, cost-efficient guidance |
-| **Post-Call Analysis** | Gemini Flash | ~$0.0005/call |
-| **STT** | Deepgram Nova 2 | Real-time, 300ms endpointing |
-| **TTS** | ElevenLabs WebSocket | `eleven_turbo_v2_5`, Rachel voice |
-| **Database** | Neon PostgreSQL + pgvector | Drizzle ORM |
+| **Voice LLM** | Claude Sonnet 4.5 | AnthropicLLMService |
+| **Director** | Gemini 2.0 Flash | ~150ms non-blocking analysis |
+| **Post-Call** | Gemini 2.0 Flash | Summary, concerns, engagement |
+| **STT** | Deepgram Nova 3 | Real-time, interim results |
+| **TTS** | ElevenLabs | `eleven_turbo_v2_5` |
+| **VAD** | Silero | confidence=0.6, stop_secs=1.2, min_volume=0.5 |
+| **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
 | **News** | OpenAI GPT-4o-mini | Web search tool, 1hr cache |
 
@@ -241,53 +201,36 @@ When a call ends, async batch analysis runs:
 ## Key Files
 
 ```
-/
-├── index.js                    ← Express server, routes, WebSocket handlers (1,234 LOC)
-├── pipelines/
-│   ├── v1-advanced.js          ← Main pipeline: STT→Observers→Claude→TTS (1,198 LOC)
-│   ├── quick-observer.js       ← Layer 1: 730+ lines of regex patterns (1,127 LOC)
-│   └── fast-observer.js        ← Layer 2: Conversation Director (Gemini) (615 LOC)
-├── adapters/
-│   ├── llm/
-│   │   ├── index.js            ← Multi-provider factory (Claude, Gemini)
-│   │   ├── claude.js           ← Claude adapter with streaming
-│   │   ├── gemini.js           ← Gemini adapter for Director/Analysis
-│   │   └── base.js             ← Base LLM interface
-│   ├── elevenlabs.js           ← REST TTS (fallback/greetings)
-│   └── elevenlabs-streaming.js ← WebSocket TTS (~150ms first audio)
+pipecat/
+├── main.py                          ← FastAPI entry point, /health, /ws, middleware
+├── bot.py                           ← Pipeline assembly + run_bot() + _run_post_call()
+├── flows/
+│   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts
+│   └── tools.py                     ← 4 LLM tool schemas + async handlers
+├── processors/
+│   ├── quick_observer.py            ← Layer 1: 252 regex patterns + goodbye EndFrame
+│   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking guidance
+│   ├── conversation_tracker.py      ← In-call topic/question/advice tracking
+│   └── guidance_stripper.py         ← Strip <guidance> tags before TTS
 ├── services/
-│   ├── call-analysis.js        ← Post-call: summary, concerns, score
-│   ├── caregivers.js           ← Caregiver-senior relationship management
-│   ├── context-cache.js        ← Pre-caches senior context (5 AM local)
-│   ├── daily-context.js        ← Same-day cross-call memory service
-│   ├── memory.js               ← Semantic search, decay, deduplication
-│   ├── seniors.js              ← Senior CRUD, phone normalization
-│   ├── conversations.js        ← Call records, transcripts
-│   ├── scheduler.js            ← Reminder scheduling + prefetch
-│   └── news.js                 ← OpenAI web search, 1hr cache
-├── middleware/
-│   ├── auth.js                 ← Clerk authentication (requireAuth, requireAdmin)
-│   ├── clerk.js                ← Clerk middleware initialization
-│   ├── rate-limit.js           ← express-rate-limit (100/min API, 5/min calls)
-│   ├── twilio.js               ← Twilio webhook signature verification
-│   └── validate.js             ← Zod schema validation middleware
-├── validators/
-│   └── schemas.js              ← Zod schemas for all API inputs
-├── db/
-│   ├── client.js               ← Database connection (Neon + Drizzle)
-│   ├── schema.js               ← Database schema (8 tables)
-│   └── setup-pgvector.js       ← pgvector initialization
-├── packages/
-│   ├── logger/                 ← TypeScript logging package
-│   └── event-bus/              ← TypeScript event bus package
-├── apps/
-│   ├── admin/                  ← React admin dashboard (primary, Railway)
-│   ├── consumer/               ← Caregiver onboarding + dashboard (Vercel)
-│   ├── observability/          ← React observability dashboard
-│   └── web/                    ← Future placeholder
-├── public/
-│   └── admin.html              ← Legacy admin UI (fallback)
-└── audio-utils.js              ← Audio conversion
+│   ├── director_llm.py              ← Gemini Flash analysis for Director
+│   ├── call_analysis.py             ← Post-call analysis (Gemini Flash)
+│   ├── memory.py                    ← Semantic memory (pgvector, decay, dedup)
+│   ├── scheduler.py                 ← Reminder scheduling + outbound calls
+│   ├── context_cache.py             ← Pre-cache at 5 AM local
+│   ├── conversations.py             ← Conversation CRUD + transcripts
+│   ├── daily_context.py             ← Cross-call same-day memory
+│   ├── greetings.py                 ← Greeting templates + rotation
+│   ├── seniors.py                   ← Senior profile CRUD
+│   ├── caregivers.py                ← Caregiver relationships
+│   └── news.py                      ← News via OpenAI web search
+├── api/
+│   ├── routes/                      ← voice.py, calls.py
+│   └── middleware/                   ← auth, api_auth, rate_limit, security, twilio
+├── db/client.py                     ← asyncpg pool + query helpers
+├── tests/                           ← 13 test files, 163+ tests
+├── pyproject.toml                   ← Python 3.12, dependencies
+└── Dockerfile                       ← python:3.12-slim + uv
 ```
 
 ---
@@ -298,76 +241,40 @@ When a call ends, async batch analysis runs:
 
 | Table | Purpose | Key Fields |
 |-------|---------|------------|
-| **seniors** | User profiles | name, phone, interests, familyInfo, medicalNotes, city, state, zipCode |
-| **conversations** | Call records | callSid, transcript, duration, status, summary, sentiment |
+| **seniors** | User profiles | name, phone, interests, familyInfo, medicalNotes, timezone |
+| **conversations** | Call records | callSid, transcript, duration, status, summary |
 | **memories** | Long-term memory | content, type, importance, embedding (1536d) |
-| **reminders** | Scheduled reminders | title, scheduledTime, isRecurring, type, cronExpression |
-| **reminderDeliveries** | Delivery tracking | status, attemptCount, userResponse, callSid |
-| **caregivers** | User-senior links | clerkUserId, seniorId, role (caregiver/family/admin) |
-| **callAnalyses** | Post-call results | summary, engagementScore, concerns, followUps |
-| **dailyCallContext** | Same-day cross-call memory | seniorId, callDate, topicsDiscussed, remindersDelivered, adviceGiven, keyMoments, summary |
+| **reminders** | Scheduled reminders | title, scheduledTime, isRecurring, type |
+| **reminder_deliveries** | Delivery tracking | status, attemptCount, userResponse, callSid |
+| **caregivers** | User-senior links | clerkUserId, seniorId, role |
+| **call_analyses** | Post-call results | summary, engagementScore, concerns, followUps |
+| **daily_call_context** | Same-day cross-call memory | seniorId, callDate, topicsDiscussed, remindersDelivered |
+| **admin_users** | Admin dashboard accounts | email, passwordHash (bcrypt) |
 
 ### Memory System
 
-Uses pgvector for semantic search with intelligent features:
 - **Embedding**: OpenAI `text-embedding-3-small` (1536 dimensions)
 - **Similarity**: Cosine similarity, 0.7 minimum threshold
 - **Deduplication**: Skip if cosine > 0.9 with existing memory
 - **Decay**: Effective importance = `base * 0.5^(days/30)` (30-day half-life)
 - **Access Boost**: +10 importance if accessed in last week
-- **Types**: fact, preference, event, concern, relationship
-
----
-
-## Latency Budget (Streaming Pipeline)
-
-| Component | Target |
-|-----------|--------|
-| Deepgram utterance detection | ~300ms |
-| Quick Observer (L1) | 0ms |
-| Conversation Director (L2) | ~150ms (parallel) |
-| Claude first token | ~200ms |
-| TTS first audio | ~100ms |
-| **Total time-to-first-audio** | **~600ms** |
-
----
-
-## Cost Summary (15-minute call estimate)
-
-| Component | Model | Per Call | Per Turn |
-|-----------|-------|----------|----------|
-| L1 Quick Observer | Regex | $0 | $0 |
-| L2 Conversation Director | Gemini 3 Flash | ~$0.01 | ~$0.0005 |
-| Voice | Claude Sonnet 4.5 | ~$0.08 | ~$0.004 |
-| Post-Call Analysis | Gemini Flash | ~$0.005 | N/A |
-| Memory Extraction | GPT-4o-mini | ~$0.001 | N/A |
-| Embeddings | OpenAI | ~$0.01 | ~$0.0005 |
-| **Total AI** | | **~$0.11** | |
-| Twilio Voice | | ~$0.30 | |
-| Deepgram STT | | ~$0.065 | |
-| ElevenLabs TTS | | ~$0.18 | |
-| **Total per call** | | **~$0.65** | |
+- **Tiered Retrieval**: Critical → Contextual → Background
 
 ---
 
 ## Deployment
 
-**Railway Configuration:**
-
+**Pipecat voice pipeline (Railway):**
 ```bash
-# Deploy manually (recommended - webhook unreliable)
-git push && git push origin main:master && railway up
-
-# Or use alias after committing
-git pushall && railway up
+cd pipecat && railway up
 ```
 
 **Required Environment Variables:**
 
 | Variable | Purpose |
 |----------|---------|
-| `PORT` | Server port (3001) |
-| `DATABASE_URL` | Neon PostgreSQL connection string |
+| `PORT` | Server port (7860) |
+| `DATABASE_URL` | Neon PostgreSQL |
 | `TWILIO_ACCOUNT_SID` | Twilio account |
 | `TWILIO_AUTH_TOKEN` | Twilio auth |
 | `TWILIO_PHONE_NUMBER` | Donna's phone number |
@@ -375,35 +282,10 @@ git pushall && railway up
 | `GOOGLE_API_KEY` | Gemini Flash (Director + Analysis) |
 | `ELEVENLABS_API_KEY` | TTS |
 | `DEEPGRAM_API_KEY` | STT |
-| `OPENAI_API_KEY` | Embeddings + news search |
-
-**Optional:**
-- `V1_STREAMING_ENABLED` - Enable/disable streaming (default: true)
-- `VOICE_MODEL` - Main voice model (default: claude-sonnet)
-- `FAST_OBSERVER_MODEL` - Director model (default: gemini-3-flash)
+| `OPENAI_API_KEY` | Embeddings + news |
+| `JWT_SECRET` | Admin JWT signing |
+| `SCHEDULER_ENABLED` | Must be `false` (Node.js runs scheduler) |
 
 ---
 
-## API Endpoints
-
-### Voice Control
-- `POST /voice/answer` - Twilio webhook (call answered)
-- `POST /voice/status` - Twilio status callback
-- `POST /api/call` - Initiate outbound call
-
-### Data Management
-- `GET/POST /api/seniors` - Senior CRUD
-- `GET/POST /api/seniors/:id/memories` - Memory management
-- `GET /api/seniors/:id/memories/search` - Semantic search
-- `GET /api/conversations` - Call history
-- `GET/POST/PATCH/DELETE /api/reminders` - Reminder management
-
-### Observability
-- `GET /api/observability/calls` - Recent calls
-- `GET /api/observability/calls/:id/timeline` - Call events
-- `GET /api/observability/calls/:id/turns` - Conversation turns
-- `GET /api/observability/calls/:id/observer` - Observer signals
-
----
-
-*Last updated: February 2026 - v3.3 (In-Call Memory + Cross-Call Memory + Enhanced Web Search)*
+*Last updated: February 2026 — Pipecat v4.0 with Conversation Director*

@@ -38,6 +38,10 @@ async def voice_answer(request: Request):
         dir="outbound" if is_outbound else "inbound",
         phone=target_phone[-4:] if target_phone else "?",
     )
+    logger.debug(
+        "[{cs}] Phone debug: From={frm} To={to} Direction={d} TWILIO_PHONE_NUMBER={tw} is_outbound={ob} target_phone={tp}",
+        cs=call_sid, frm=from_number, to=to_number, d=direction, tw=twilio_number, ob=is_outbound, tp=target_phone,
+    )
 
     senior = None
     memory_context = None
@@ -64,7 +68,11 @@ async def voice_answer(request: Request):
     else:
         # Inbound — look up senior by phone
         from services.seniors import find_by_phone
+        logger.info("[{cs}] Looking up senior by phone: target={tp}, normalized={norm}",
+                     cs=call_sid, tp=target_phone, norm=target_phone[-10:] if target_phone else "?")
         senior = await find_by_phone(target_phone)
+        logger.info("[{cs}] Senior lookup result: {found}", cs=call_sid,
+                     found=senior.get("name") if senior else "NOT FOUND")
         if senior:
             logger.info("[{cs}] Inbound from {name}", cs=call_sid, name=senior.get("name", "?"))
             from services.memory import build_context

@@ -161,18 +161,21 @@ def make_tool_handlers(session_state: dict) -> dict:
         user_response = args.get("user_response", "")
         logger.info("Tool: mark_reminder id={rid} status={s}", rid=reminder_id, s=status)
 
+        # Build a descriptive label for tracking (not just the UUID)
+        reminder_label = user_response or reminder_id
+
         try:
             from services.scheduler import mark_reminder_acknowledged
             delivery = session_state.get("reminder_delivery")
             delivery_id = delivery.get("id") if delivery else None
             if delivery_id:
                 await mark_reminder_acknowledged(delivery_id, status, user_response)
-            session_state.setdefault("reminders_delivered", set()).add(reminder_id)
+            session_state.setdefault("reminders_delivered", set()).add(reminder_label)
             return {"status": "success", "result": f"Reminder marked as {status}."}
         except Exception as e:
             logger.error("mark_reminder error: {err}", err=str(e))
             # Still track locally even if DB write failed
-            session_state.setdefault("reminders_delivered", set()).add(reminder_id)
+            session_state.setdefault("reminders_delivered", set()).add(reminder_label)
             return {"status": "success", "result": f"Reminder noted. Continue the conversation naturally."}
 
     async def handle_save_detail(args: dict) -> dict:

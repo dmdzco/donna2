@@ -86,6 +86,22 @@ async def voice_answer(request: Request):
             )
             pre_generated_greeting = greeting_result.get("greeting", "")
 
+    # 1b. Fetch call summaries and daily context for any identified senior
+    previous_calls_summary = None
+    todays_context = None
+    if senior:
+        try:
+            from services.conversations import get_recent_summaries
+            from services.daily_context import get_todays_context, format_todays_context
+            previous_calls_summary = await get_recent_summaries(senior["id"], 3)
+            raw_ctx = await get_todays_context(senior["id"], senior.get("timezone", "America/New_York"))
+            todays_context = format_todays_context(raw_ctx)
+            logger.info("[{cs}] Summaries={s}ch, daily_ctx={d}ch", cs=call_sid,
+                        s=len(previous_calls_summary) if previous_calls_summary else 0,
+                        d=len(todays_context) if todays_context else 0)
+        except Exception as e:
+            logger.error("[{cs}] Error fetching summaries/daily context: {err}", cs=call_sid, err=str(e))
+
     # 2. Create conversation record
     conversation_id = None
     if senior:
@@ -114,6 +130,8 @@ async def voice_answer(request: Request):
         "reminder_prompt": reminder_prompt,
         "reminder_context": reminder_context,
         "pre_generated_greeting": pre_generated_greeting,
+        "previous_calls_summary": previous_calls_summary,
+        "todays_context": todays_context,
         "call_type": call_type,
         "target_phone": target_phone,
     }

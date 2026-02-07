@@ -118,6 +118,19 @@ def _build_tracking_context(session_state: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _update_tracking_context(session_state: dict) -> None:
+    """Pull current tracking summary from ConversationTracker into session_state."""
+    tracker = session_state.get("_conversation_tracker")
+    if tracker and hasattr(tracker, "get_summary"):
+        summary = tracker.get_summary()
+        if summary:
+            session_state["conversation_tracking"] = summary
+
+
+# ---------------------------------------------------------------------------
 # Transition functions
 # ---------------------------------------------------------------------------
 
@@ -126,6 +139,7 @@ def _make_transition_to_main(session_state: dict, flows_tools: dict):
 
     async def transition_to_main(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
         logger.info("Transitioning: opening → main")
+        _update_tracking_context(session_state)
         return (
             {"status": "success"},
             build_main_node(session_state, flows_tools),
@@ -139,6 +153,7 @@ def _make_transition_to_winding_down(session_state: dict, flows_tools: dict):
 
     async def transition_to_winding_down(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
         logger.info("Transitioning: main → winding_down")
+        _update_tracking_context(session_state)
         return (
             {"status": "success"},
             build_winding_down_node(session_state, flows_tools),
@@ -338,9 +353,12 @@ def build_closing_node(session_state: dict) -> NodeConfig:
         "Do NOT ask any more questions — just say goodbye."
     )
 
+    senior_ctx = _build_senior_context(session_state)
+    system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
+
     return NodeConfig(
         name="closing",
-        role_messages=[{"role": "system", "content": BASE_SYSTEM_PROMPT}],
+        role_messages=[{"role": "system", "content": system_content}],
         task_messages=[{"role": "user", "content": closing_task}],
         functions=[],
         post_actions=[{"type": "end_conversation"}],

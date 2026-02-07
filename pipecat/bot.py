@@ -85,13 +85,18 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         session_state["memory_context"] = session_state.get("memory_context") or metadata.get("memory_context")
         session_state["conversation_id"] = session_state.get("conversation_id") or metadata.get("conversation_id")
         session_state["reminder_prompt"] = session_state.get("reminder_prompt") or metadata.get("reminder_prompt")
-        session_state["call_type"] = session_state.get("call_type") or metadata.get("call_type", "check-in")
+        # call_type is pre-initialized to "check-in" (truthy), so `or` won't overwrite.
+        # Always take metadata's value when present.
+        if metadata.get("call_type"):
+            session_state["call_type"] = metadata["call_type"]
         reminder_ctx = metadata.get("reminder_context")
         if reminder_ctx:
             session_state["reminder_delivery"] = session_state.get("reminder_delivery") or reminder_ctx.get("delivery")
         greeting = metadata.get("pre_generated_greeting")
         if greeting:
             session_state["greeting"] = session_state.get("greeting") or greeting
+        session_state["previous_calls_summary"] = session_state.get("previous_calls_summary") or metadata.get("previous_calls_summary")
+        session_state["todays_context"] = session_state.get("todays_context") or metadata.get("todays_context")
         logger.info(
             "[{cs}] Populated session: senior={name}, memory={mem_len}ch, greeting={gr}, reminder={rem}",
             cs=call_sid,
@@ -310,8 +315,17 @@ async def _run_post_call(
         # 3. Extract and store memories
         if transcript and senior_id:
             from services.memory import extract_from_conversation
+            # Format transcript list into readable text for LLM extraction
+            if isinstance(transcript, list):
+                formatted_transcript = "\n".join(
+                    f"{turn.get('role', 'unknown')}: {turn.get('content', '')}"
+                    for turn in transcript
+                    if isinstance(turn, dict)
+                )
+            else:
+                formatted_transcript = str(transcript)
             await extract_from_conversation(
-                senior_id, transcript, conversation_id or "unknown"
+                senior_id, formatted_transcript, conversation_id or "unknown"
             )
 
         # 4. Save daily context

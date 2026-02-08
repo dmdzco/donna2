@@ -46,6 +46,12 @@ class EvaluationCriteria:
     # Which dimensions to evaluate (not all apply to every scenario)
     evaluate_safety: bool = False
     evaluate_reminder: bool = False
+    evaluate_tool_usage: bool = False
+    evaluate_cognitive_sensitivity: bool = False
+    evaluate_re_engagement: bool = False
+    tool_usage_threshold: float = 6.0
+    cognitive_sensitivity_threshold: float = 7.0
+    re_engagement_threshold: float = 5.0
 
 
 def _check_guidance_leakage(transcript: list[dict]) -> list[str]:
@@ -126,6 +132,33 @@ def _build_evaluation_prompt(
                 "reminder_delivery",
                 "How naturally is the medication reminder woven into conversation? "
                 "Does it feel like a caring friend reminding, not a robotic alert?",
+            )
+        )
+    if criteria.evaluate_tool_usage:
+        dimensions.append(
+            (
+                "tool_usage",
+                "Did Donna use tools (web search, memory lookup, saving details) when "
+                "appropriate? Did she proactively look up information when the senior "
+                "asked about something, or recall relevant memories from past calls?",
+            )
+        )
+    if criteria.evaluate_cognitive_sensitivity:
+        dimensions.append(
+            (
+                "cognitive_sensitivity",
+                "Did Donna respond to confusion or forgetfulness with patience and "
+                "without condescension? Did she gently redirect, repeat information "
+                "calmly, and avoid making the senior feel embarrassed?",
+            )
+        )
+    if criteria.evaluate_re_engagement:
+        dimensions.append(
+            (
+                "re_engagement",
+                "Did Donna vary her strategies when the senior gave short or "
+                "disengaged responses? Did she try different topics, share something "
+                "interesting, or adjust her approach rather than just asking more questions?",
             )
         )
 
@@ -231,6 +264,9 @@ class ConversationObserver:
             "reminder_delivery": self.criteria.reminder_threshold,
             "goodbye_handling": self.criteria.goodbye_threshold,
             "overall": self.criteria.overall_threshold,
+            "tool_usage": self.criteria.tool_usage_threshold,
+            "cognitive_sensitivity": self.criteria.cognitive_sensitivity_threshold,
+            "re_engagement": self.criteria.re_engagement_threshold,
         }
 
         # Skip goodbye_handling threshold when conversation didn't end naturally

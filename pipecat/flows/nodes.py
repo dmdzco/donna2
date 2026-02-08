@@ -24,6 +24,7 @@ from prompts import (
     MAIN_TASK,
     WINDING_DOWN_TASK,
     CLOSING_TASK_TEMPLATE,
+    CONTEXT_SUMMARY_PROMPT,
 )
 
 
@@ -46,10 +47,6 @@ def _build_senior_context(session_state: dict) -> str:
     summaries = session_state.get("previous_calls_summary")
     if summaries:
         parts.append(f"\nRecent calls:\n{summaries}")
-
-    recent_turns = session_state.get("recent_turns")
-    if recent_turns:
-        parts.append(f"\n{recent_turns}")
 
     todays_ctx = session_state.get("todays_context")
     if todays_ctx:
@@ -176,6 +173,8 @@ def build_opening_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         functions.append(flows_tools["search_memories"])
     if "save_important_detail" in flows_tools:
         functions.append(flows_tools["save_important_detail"])
+    if "web_search" in flows_tools:
+        functions.append(flows_tools["web_search"])
 
     # Transition tool
     functions.append(FlowsFunctionSchema(
@@ -186,16 +185,15 @@ def build_opening_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         handler=_make_transition_to_main(session_state, flows_tools),
     ))
 
-    # Combine system prompt + senior context + task into a single user message.
-    # Using role="system" causes Anthropic API errors ("Unexpected role system")
-    # when FlowManager updates context on transitions. Putting everything in a
-    # user message avoids this while keeping Claude's behavior correct.
-    full_prompt = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx + "\n\n" + opening_task
+    # Anthropic only extracts the FIRST system message from the messages array.
+    # Combine base prompt + senior context into one system message, and put
+    # task instructions in a user message.
+    system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
 
     return NodeConfig(
         name="opening",
-        role_messages=[],
-        task_messages=[{"role": "user", "content": full_prompt}],
+        role_messages=[{"role": "system", "content": system_content}],
+        task_messages=[{"role": "user", "content": opening_task}],
         functions=functions,
         context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
         respond_immediately=True,  # Bot always speaks first on phone calls
@@ -206,7 +204,7 @@ def build_main_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     """Build the main conversation node — free-form conversation + reminders.
 
     Tools: all 4 tools + transition_to_winding_down.
-    Context strategy: APPEND (keep full conversation — 12-min calls ≈ 4k tokens max).
+    Context strategy: RESET_WITH_SUMMARY (manage context window size).
     """
     senior_ctx = _build_senior_context(session_state)
     reminder_ctx = _build_reminder_context(session_state)
@@ -232,15 +230,18 @@ def build_main_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         handler=_make_transition_to_winding_down(session_state, flows_tools),
     ))
 
-    full_prompt = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx + "\n\n" + main_task
+    system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
 
     return NodeConfig(
         name="main",
-        role_messages=[],
-        task_messages=[{"role": "user", "content": full_prompt}],
+        role_messages=[{"role": "system", "content": system_content}],
+        task_messages=[{"role": "user", "content": main_task}],
         functions=functions,
-        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
-        respond_immediately=False,
+        context_strategy=ContextStrategyConfig(
+            strategy=ContextStrategy.RESET_WITH_SUMMARY,
+            summary_prompt=CONTEXT_SUMMARY_PROMPT,
+        ),
+        respond_immediately=True,
     )
 
 
@@ -263,6 +264,8 @@ def build_winding_down_node(session_state: dict, flows_tools: dict) -> NodeConfi
         functions.append(flows_tools["mark_reminder_acknowledged"])
     if "save_important_detail" in flows_tools:
         functions.append(flows_tools["save_important_detail"])
+    if "web_search" in flows_tools:
+        functions.append(flows_tools["web_search"])
 
     functions.append(FlowsFunctionSchema(
         name="transition_to_closing",
@@ -272,12 +275,12 @@ def build_winding_down_node(session_state: dict, flows_tools: dict) -> NodeConfi
         handler=_make_transition_to_closing(session_state),
     ))
 
-    full_prompt = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx + "\n\n" + winding_task
+    system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
 
     return NodeConfig(
         name="winding_down",
-        role_messages=[],
-        task_messages=[{"role": "user", "content": full_prompt}],
+        role_messages=[{"role": "system", "content": system_content}],
+        task_messages=[{"role": "user", "content": winding_task}],
         functions=functions,
         context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
         respond_immediately=False,
@@ -296,12 +299,12 @@ def build_closing_node(session_state: dict) -> NodeConfig:
     closing_task = CLOSING_TASK_TEMPLATE.format(first_name=first_name)
 
     senior_ctx = _build_senior_context(session_state)
-    full_prompt = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx + "\n\n" + closing_task
+    system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
 
     return NodeConfig(
         name="closing",
-        role_messages=[],
-        task_messages=[{"role": "user", "content": full_prompt}],
+        role_messages=[{"role": "system", "content": system_content}],
+        task_messages=[{"role": "user", "content": closing_task}],
         functions=[],
         post_actions=[{"type": "end_conversation"}],
         context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),

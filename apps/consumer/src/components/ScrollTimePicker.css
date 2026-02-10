@@ -1,0 +1,94 @@
+.scroll-time-picker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 1rem 1.5rem;
+  margin-top: 1rem;
+  user-select: none;
+}
+
+.scroll-col {
+  position: relative;
+  height: 160px;
+  width: 70px;
+  overflow: hidden;
+}
+
+.scroll-col-inner {
+  height: 100%;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scroll-col-inner::-webkit-scrollbar {
+  display: none;
+}
+
+.scroll-item {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  scroll-snap-align: center;
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.2);
+  transition: color 0.15s, transform 0.15s, opacity 0.15s;
+  cursor: pointer;
+}
+
+.scroll-item.selected {
+  color: #1a1a1a;
+  font-size: 1.8rem;
+  font-weight: 800;
+}
+
+.scroll-item.near {
+  color: rgba(0, 0, 0, 0.4);
+  font-size: 1.2rem;
+}
+
+/* Sage-green highlight band behind the selected row */
+.scroll-col::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 42px;
+  transform: translateY(-50%);
+  background: rgba(74, 93, 79, 0.1);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Fade-out masks at top and bottom */
+.scroll-col::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.95) 0%,
+    transparent 30%,
+    transparent 70%,
+    rgba(255, 255, 255, 0.95) 100%
+  );
+}
+
+.scroll-time-separator {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #ccc;
+  padding: 0 2px;
+  align-self: center;
+}

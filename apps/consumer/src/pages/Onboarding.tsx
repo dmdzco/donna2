@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@clerk/clerk-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowRight, ArrowLeft, Check, Plus, Star, X, ChevronUp, ChevronDown,
+  ArrowRight, ArrowLeft, Check, Plus, Star, X,
   Trophy, History, Music, Film, Globe, Feather, Map, Cat, BookOpen, Flower, Plane, Utensils
 } from 'lucide-react';
+import CityAutocomplete from '../components/CityAutocomplete';
+import ScrollTimePicker from '../components/ScrollTimePicker';
 import './Onboarding.css';
 
 interface Interest {
@@ -126,38 +128,6 @@ export default function Onboarding() {
     h = h % 12;
     h = h ? h : 12;
     return `${h}:${minutes} ${ampm}`;
-  };
-
-  const parseTime = () => {
-    const [hours, minutes] = formData.callTime.split(':').map(Number);
-    return {
-      h: hours % 12 || 12,
-      m: minutes,
-      ampm: hours >= 12 ? 'PM' : 'AM'
-    };
-  };
-
-  const updateTime = (unit: 'hour' | 'minute' | 'ampm', direction: 'up' | 'down' | 'toggle') => {
-    let [hours, minutes] = formData.callTime.split(':').map(Number);
-
-    if (unit === 'hour') {
-      let h12 = hours % 12 || 12;
-      if (direction === 'up') h12 = h12 === 12 ? 1 : h12 + 1;
-      else h12 = h12 === 1 ? 12 : h12 - 1;
-      if (hours >= 12) {
-        hours = h12 === 12 ? 12 : h12 + 12;
-      } else {
-        hours = h12 === 12 ? 0 : h12;
-      }
-    } else if (unit === 'minute') {
-      if (direction === 'up') minutes = (minutes + 5) % 60;
-      else minutes = (minutes - 5 + 60) % 60;
-    } else if (unit === 'ampm') {
-      hours = (hours + 12) % 24;
-    }
-
-    const newTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-    updateFormData('callTime', newTime);
   };
 
   const toggleTopicExpansion = (topicId: string) => {
@@ -329,11 +299,14 @@ export default function Onboarding() {
               </div>
               <div className="form-group">
                 <label>Location</label>
-                <div className="location-grid">
-                  <input type="text" placeholder="City" value={formData.seniorCity} onChange={(e) => updateFormData('seniorCity', e.target.value)} />
-                  <input type="text" placeholder="State" value={formData.seniorState} onChange={(e) => updateFormData('seniorState', e.target.value)} />
-                  <input type="text" placeholder="Zip" value={formData.seniorZip} onChange={(e) => updateFormData('seniorZip', e.target.value)} />
-                </div>
+                <CityAutocomplete
+                  city={formData.seniorCity}
+                  state={formData.seniorState}
+                  zip={formData.seniorZip}
+                  onCityChange={(v) => updateFormData('seniorCity', v)}
+                  onStateChange={(v) => updateFormData('seniorState', v)}
+                  onZipChange={(v) => updateFormData('seniorZip', v)}
+                />
               </div>
             </div>
           )}
@@ -415,24 +388,10 @@ export default function Onboarding() {
 
               <div className="rhythm-section">
                 <h3>Start Time</h3>
-                <div className="time-picker">
-                  <div className="time-col">
-                    <button className="time-btn" onClick={() => updateTime('hour', 'up')}><ChevronUp size={24} /></button>
-                    <div className="time-val">{parseTime().h}</div>
-                    <button className="time-btn" onClick={() => updateTime('hour', 'down')}><ChevronDown size={24} /></button>
-                  </div>
-                  <div className="time-sep">:</div>
-                  <div className="time-col">
-                    <button className="time-btn" onClick={() => updateTime('minute', 'up')}><ChevronUp size={24} /></button>
-                    <div className="time-val">{parseTime().m.toString().padStart(2, '0')}</div>
-                    <button className="time-btn" onClick={() => updateTime('minute', 'down')}><ChevronDown size={24} /></button>
-                  </div>
-                  <div className="time-col">
-                    <button className="time-btn" onClick={() => updateTime('ampm', 'toggle')}><ChevronUp size={24} /></button>
-                    <div className="time-val ampm">{parseTime().ampm}</div>
-                    <button className="time-btn" onClick={() => updateTime('ampm', 'toggle')}><ChevronDown size={24} /></button>
-                  </div>
-                </div>
+                <ScrollTimePicker
+                  value={formData.callTime}
+                  onChange={(v) => updateFormData('callTime', v)}
+                />
               </div>
 
               <div className="schedule-summary">

@@ -19,9 +19,9 @@ export default function ScrollTimePicker({ value, onChange }: Props) {
   const period = h24 >= 12 ? 'PM' : 'AM';
   const minIdx = Math.round(min / 5) % 12;
 
-  const hourRef = useRef<HTMLDivElement>(null);
-  const minRef = useRef<HTMLDivElement>(null);
-  const periodRef = useRef<HTMLDivElement>(null);
+  const hourRef = useRef<HTMLDivElement>(null!);
+  const minRef = useRef<HTMLDivElement>(null!);
+  const periodRef = useRef<HTMLDivElement>(null!);
 
   // Scroll a column so the selected index is centered
   const scrollToIdx = useCallback((el: HTMLDivElement | null, idx: number, smooth = false) => {
@@ -67,7 +67,7 @@ export default function ScrollTimePicker({ value, onChange }: Props) {
   const renderColumn = (
     items: (string | number)[],
     selectedIdx: number,
-    ref: React.RefObject<HTMLDivElement | null>,
+    ref: React.RefObject<HTMLDivElement>,
     col: 'hour' | 'minute' | 'period'
   ) => {
     // Add padding items so the first/last real item can be centered

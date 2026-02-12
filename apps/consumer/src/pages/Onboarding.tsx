@@ -7,7 +7,6 @@ import {
   Trophy, History, Music, Film, Globe, Feather, Map, Cat, BookOpen, Flower, Plane, Utensils
 } from 'lucide-react';
 import CityAutocomplete from '../components/CityAutocomplete';
-import ScrollTimePicker from '../components/ScrollTimePicker';
 import './Onboarding.css';
 
 interface Interest {
@@ -55,7 +54,7 @@ export default function Onboarding() {
     additionalInfo: '',
     reminders: [''],
     updates: [],
-    callTime: '10:30',
+    callTime: '10:00',
     callDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
   });
 
@@ -120,15 +119,30 @@ export default function Onboarding() {
     return `every ${otherDays} and ${lastDay}`;
   };
 
-  const formatTime = (timeStr: string) => {
+  const formatTimeWindow = (timeStr: string) => {
     if (!timeStr) return '';
-    const [hours, minutes] = timeStr.split(':');
-    let h = parseInt(hours, 10);
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12;
-    h = h ? h : 12;
-    return `${h}:${minutes} ${ampm}`;
+    const startH = parseInt(timeStr.split(':')[0], 10);
+    const endH = (startH + 1) % 24;
+    const fmt = (h: number) => {
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const h12 = h % 12 || 12;
+      return `${h12}:00 ${ampm}`;
+    };
+    return `${fmt(startH)} – ${fmt(endH)}`;
   };
+
+  const timeWindowOptions = Array.from({ length: 24 }, (_, i) => {
+    const endH = (i + 1) % 24;
+    const fmt = (h: number) => {
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const h12 = h % 12 || 12;
+      return `${h12}:00 ${ampm}`;
+    };
+    return {
+      value: `${i.toString().padStart(2, '0')}:00`,
+      label: `${fmt(i)} – ${fmt(endH)}`,
+    };
+  });
 
   const toggleTopicExpansion = (topicId: string) => {
     if (expandedTopic === topicId) {
@@ -387,18 +401,22 @@ export default function Onboarding() {
               </div>
 
               <div className="rhythm-section">
-                <h3>Start Time</h3>
-                <ScrollTimePicker
+                <h3>Call Window</h3>
+                <select
                   value={formData.callTime}
-                  onChange={(v) => updateFormData('callTime', v)}
-                />
+                  onChange={(e) => updateFormData('callTime', e.target.value)}
+                >
+                  {timeWindowOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="schedule-summary">
                 <Star size={20} fill="#B78628" stroke="none" />
                 <div>
                   <div className="summary-label">SCHEDULE SUMMARY</div>
-                  <div>Donna will call <strong>{getFormattedSummary()}</strong> at <strong>{formatTime(formData.callTime)}</strong></div>
+                  <div>Donna will call <strong>{getFormattedSummary()}</strong> between <strong>{formatTimeWindow(formData.callTime)}</strong></div>
                 </div>
               </div>
             </div>
@@ -428,7 +446,7 @@ export default function Onboarding() {
 
               <div className="review-section">
                 <h4>Schedule</h4>
-                <p>Calls <strong>{getFormattedSummary()}</strong> at <strong>{formatTime(formData.callTime)}</strong></p>
+                <p>Calls <strong>{getFormattedSummary()}</strong> between <strong>{formatTimeWindow(formData.callTime)}</strong></p>
               </div>
             </div>
           )}

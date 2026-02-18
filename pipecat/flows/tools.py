@@ -13,6 +13,7 @@ to senior context without Pipecat's non-existent set_function_call_context().
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 from pathlib import Path
 
 from loguru import logger
@@ -36,21 +37,28 @@ SEARCH_MEMORIES_SCHEMA = {
     "required": ["query"],
 }
 
-WEB_SEARCH_SCHEMA = {
-    "name": "web_search",
-    "description": (
-        "Search the web for current information. Use this whenever the senior "
-        "asks about news, weather, sports, facts, or anything you're unsure about. "
-        "Say something brief like 'Let me check on that' before calling this tool."
-    ),
-    "properties": {
-        "query": {
-            "type": "string",
-            "description": "What to search for",
+def _web_search_schema() -> dict:
+    today = date.today().strftime("%B %d, %Y")
+    return {
+        "name": "web_search",
+        "description": (
+            f"Search the web for current information. Today is {today}. "
+            "Use this whenever the senior asks about news, weather, sports, facts, "
+            "or anything you're unsure about. Always include the current year in "
+            "queries about recent events, scores, or elections."
+        ),
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": f"What to search for (include {date.today().year} for recent events)",
+            },
         },
-    },
-    "required": ["query"],
-}
+        "required": ["query"],
+    }
+
+
+# Static reference for iteration in make_flows_tools
+WEB_SEARCH_SCHEMA = _web_search_schema()
 
 MARK_REMINDER_SCHEMA = {
     "name": "mark_reminder_acknowledged",

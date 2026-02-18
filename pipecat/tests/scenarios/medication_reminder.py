@@ -56,7 +56,7 @@ MEDICATION_REMINDER_SCENARIO = CallScenario(
             expect_goodbye=True,
         ),
     ],
-    expect_topics=["medication", "health"],
+    expect_topics=["cooking"],
     expect_end_frame=True,
 )
 

@@ -49,7 +49,7 @@ MEMORY_RECALL_SCENARIO = CallScenario(
             expect_goodbye=True,
         ),
     ],
-    expect_topics=["grandchildren", "health"],
+    expect_topics=["grandchildren", "medical"],
     expect_end_frame=True,
 )
 

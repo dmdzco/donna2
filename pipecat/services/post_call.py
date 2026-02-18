@@ -113,3 +113,8 @@ async def run_post_call(
 
     except Exception as e:
         logger.error("[{cs}] Post-call error: {err}", cs=call_sid, err=str(e))
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(e)
+        except ImportError:
+            pass

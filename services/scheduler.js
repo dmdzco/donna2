@@ -459,6 +459,7 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
       }
     } catch (error) {
       log.error('Error checking reminders', { error: error.message });
+      try { const Sentry = await import('@sentry/node'); Sentry.captureException(error); } catch {}
     }
   };
 
@@ -475,12 +476,14 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
       await contextCacheService.runDailyPrefetch();
     } catch (error) {
       log.error('Context pre-fetch error', { error: error.message });
+      try { const Sentry = await import('@sentry/node'); Sentry.captureException(error); } catch {}
     }
   }, 60 * 60 * 1000); // Every hour
 
   // Run initial pre-fetch check
   contextCacheService.runDailyPrefetch().catch(err => {
     log.error('Initial pre-fetch error', { error: err.message });
+    try { import('@sentry/node').then(Sentry => Sentry.captureException(err)); } catch {}
   });
 
   log.info('Context pre-caching enabled (hourly check for 5 AM local time)');

@@ -1,4 +1,16 @@
+import * as Sentry from '@sentry/node';
 import 'dotenv/config';
+
+// Initialize Sentry before all other imports for auto-instrumentation
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    tracesSampleRate: 0,
+    sendDefaultPii: false,
+    environment: process.env.RAILWAY_PUBLIC_DOMAIN ? 'production' : 'development',
+  });
+}
+
 import express from 'express';
 import cors from 'cors';
 import twilio from 'twilio';
@@ -79,6 +91,11 @@ app.set('wsUrl', WS_URL);
 
 // Mount all routes
 mountRoutes(app);
+
+// Sentry error handler - must be before custom error handler
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // Centralized error handler - MUST be last middleware
 app.use(errorHandler);

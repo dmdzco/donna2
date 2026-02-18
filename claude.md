@@ -24,12 +24,13 @@ The voice pipeline has been migrated from Node.js to **Python Pipecat** (`pipeca
 
 ### Working Features (Pipecat)
 - **2-Layer Observer Architecture + Post-Call**
-  - Layer 1: Quick Observer (0ms) - 252 regex patterns + programmatic goodbye (3.5s EndFrame)
+  - Layer 1: Quick Observer (0ms) - 252 regex patterns + goodbye detection → GoodbyeGate
   - Layer 2: Conversation Director (~150ms) - Non-blocking Gemini Flash per-turn analysis
+  - GoodbyeGate: False-goodbye protection (4s silence timer, mutual goodbye required)
   - Post-Call: Analysis, memory extraction, daily context (Gemini Flash)
 - **Pipecat Flows** - 4-phase call state machine (opening → main → winding_down → closing)
 - **4 LLM Tools** - search_memories, get_news, save_important_detail, mark_reminder_acknowledged
-- **Programmatic Call Ending** - Quick Observer detects goodbye → EndFrame after 3.5s (bypasses LLM)
+- **Programmatic Call Ending** - Quick Observer detects goodbye → GoodbyeGate (4s silence) → EndFrame (bypasses LLM)
 - **Director Fallback Actions** - Force winding-down at 9min, force end at 12min
 - **In-Call Memory Tracking** - Topics, questions, advice tracked per call (ConversationTracker)
 - **Same-Day Cross-Call Memory** - Daily context persists across calls per senior per day
@@ -66,7 +67,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1 (0ms): 252 regex patterns
-              │                      │  Goodbye → EndFrame in 3.5s
+              │                      │  Goodbye → GoodbyeGate (4s)
               └─────────┬───────────┘
                         ▼
               ┌─────────────────────┐
@@ -97,8 +98,8 @@ Twilio Audio ──► FastAPIWebsocketTransport
 |-------|-------|-----------------|
 | **Opening** | search_memories, save_important_detail, transition_to_main | respond_immediately |
 | **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | RESET_WITH_SUMMARY |
-| **Winding Down** | mark_reminder_acknowledged, transition_to_closing | — |
-| **Closing** | *(none — post_action ends call)* | — |
+| **Winding Down** | mark_reminder_acknowledged, save_important_detail, transition_to_closing | APPEND |
+| **Closing** | *(none — post_action ends call)* | APPEND |
 
 ### Post-Call Processing
 
@@ -118,10 +119,11 @@ pipecat/
 │   └── tools.py                     ← 4 LLM tool schemas + async handlers (208 LOC)
 │
 ├── processors/
-│   ├── quick_observer.py            ← Layer 1: 252 regex patterns + goodbye EndFrame (560+ LOC)
-│   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking (178 LOC)
-│   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (240 LOC)
-│   └── guidance_stripper.py         ← Strip <guidance> tags before TTS (75 LOC)
+│   ├── quick_observer.py            ← Layer 1: 252 regex patterns + goodbye detection (854 LOC)
+│   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking (180 LOC)
+│   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (239 LOC)
+│   ├── goodbye_gate.py              ← Grace period before call ending, 4s timer (135 LOC)
+│   └── guidance_stripper.py         ← Strip <guidance> tags before TTS (74 LOC)
 │
 ├── services/
 │   ├── director_llm.py              ← Gemini Flash analysis for Director (340 LOC)
@@ -132,9 +134,9 @@ pipecat/
 │   ├── conversations.py             ← Conversation CRUD (169 LOC)
 │   ├── daily_context.py             ← Cross-call same-day memory (160 LOC)
 │   ├── greetings.py                 ← Greeting templates + rotation (219 LOC)
-│   ├── seniors.py                   ← Senior profile CRUD (100 LOC)
-│   ├── caregivers.py                ← Caregiver relationships
-│   └── news.py                      ← OpenAI web search (92 LOC)
+│   ├── seniors.py                   ← Senior profile CRUD (99 LOC)
+│   ├── caregivers.py                ← Caregiver-senior relationships (76 LOC)
+│   └── news.py                      ← OpenAI web search (91 LOC)
 │
 ├── api/
 │   ├── routes/
@@ -145,7 +147,7 @@ pipecat/
 │
 ├── db/client.py                     ← asyncpg pool + query helpers
 ├── lib/sanitize.py                  ← PII-safe logging
-├── tests/                           ← 13 test files, 163+ tests
+├── tests/                           ← 14 test files
 ├── pyproject.toml                   ← Python 3.12, Pipecat v0.0.101+
 └── Dockerfile                       ← python:3.12-slim + uv
 ```
@@ -193,7 +195,7 @@ pipecat/
 | Add/modify LLM tools | `pipecat/flows/tools.py` (schemas + handlers) |
 | Modify Quick Observer patterns | `pipecat/processors/quick_observer.py` |
 | Modify Conversation Director | `pipecat/processors/conversation_director.py` + `pipecat/services/director_llm.py` |
-| Modify call ending behavior | `pipecat/processors/quick_observer.py` (goodbye EndFrame) + `pipecat/processors/conversation_director.py` (time-based) |
+| Modify call ending behavior | `pipecat/processors/quick_observer.py` (goodbye detection) + `pipecat/processors/goodbye_gate.py` (grace period) + `pipecat/processors/conversation_director.py` (time-based) |
 | Change pipeline assembly | `pipecat/bot.py` |
 | Modify post-call processing | `pipecat/bot.py` (_run_post_call) |
 | Modify post-call analysis | `pipecat/services/call_analysis.py` |
@@ -273,7 +275,7 @@ DONNA_API_KEY=...
 SCHEDULER_ENABLED=false          # MUST be false (Node.js runs scheduler)
 
 # Optional
-FAST_OBSERVER_MODEL=gemini-2.0-flash  # Director model
+FAST_OBSERVER_MODEL=gemini-3-flash-preview  # Director model
 ```
 
 ---

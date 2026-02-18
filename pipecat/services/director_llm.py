@@ -18,7 +18,7 @@ from loguru import logger
 
 _genai_client = None
 
-DIRECTOR_MODEL = os.environ.get("FAST_OBSERVER_MODEL", "gemini-2.0-flash")
+DIRECTOR_MODEL = os.environ.get("FAST_OBSERVER_MODEL", "gemini-3-flash-preview")
 
 
 def _get_client():

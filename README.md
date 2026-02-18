@@ -6,13 +6,13 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ### Voice Pipeline (Pipecat)
 - **2-Layer Conversation Director Architecture**
-  - Layer 1: Quick Observer (0ms) - 252 regex patterns for health, emotion, safety, goodbye
-  - Layer 2: Conversation Director (~150ms) - Gemini 2.0 Flash for non-blocking call guidance
-  - Post-Call Analysis - Summary, concerns, engagement score (Gemini Flash)
-- **Pipecat Flows** - 4-phase call state machine (opening → main → winding_down → closing)
-- **Programmatic Call Ending** - Goodbye detection → EndFrame after 3.5s (bypasses unreliable LLM tool calls)
-- **Director Fallback Actions** - Force winding-down at 9min, force call end at 12min
-- **Barge-in support** - Interrupt detection via Silero VAD
+  - Layer 1: Quick Observer (0ms) — 252 regex patterns for health, emotion, safety, goodbye
+  - Layer 2: Conversation Director (~150ms) — Gemini 3 Flash non-blocking call guidance
+  - Post-Call Analysis — Summary, concerns, engagement score (Gemini Flash)
+- **Pipecat Flows** — 4-phase call state machine (opening → main → winding_down → closing)
+- **Programmatic Call Ending** — Goodbye detection → GoodbyeGate grace period → EndFrame (bypasses unreliable LLM tool calls)
+- **Director Fallback Actions** — Force winding-down at 9min, force call end at 12min
+- **Barge-in support** — Interrupt detection via Silero VAD
 
 ### Core Capabilities
 - Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
@@ -26,11 +26,14 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Scheduled reminder calls with delivery tracking
 - Context pre-caching at 5 AM local time
 - 4 LLM tools: search_memories, get_news, save_important_detail, mark_reminder_acknowledged
-- Admin dashboard v2 (React + Vite + Tailwind, Vercel)
-- Consumer app (caregiver onboarding + dashboard)
+
+### Frontend Apps
+- **Admin Dashboard v2** — React + Vite + Tailwind ([admin-v2-liart.vercel.app](https://admin-v2-liart.vercel.app))
+- **Consumer App** — Caregiver onboarding + dashboard ([consumer-ruddy.vercel.app](https://consumer-ruddy.vercel.app))
+- **Observability Dashboard** — Live call monitoring ([observability-five.vercel.app](https://observability-five.vercel.app))
 
 ### Security
-- JWT admin authentication
+- JWT admin authentication + Cofounder API keys
 - API key authentication (DONNA_API_KEY)
 - Twilio webhook signature verification
 - Rate limiting (slowapi)
@@ -52,7 +55,7 @@ Test health:
 curl https://donna-pipecat-production.up.railway.app/health
 ```
 
-**Voice features:** Deploy to Railway, test with a real phone call. This is the only test that matters.
+**Voice features:** Deploy to Railway, test with a real phone call.
 
 **Unit tests** (pure logic, no external services):
 ```bash
@@ -60,9 +63,9 @@ cd pipecat && python -m pytest tests/
 ```
 
 **Frontend apps** (run locally against the Railway API):
-- Admin dashboard: `http://localhost:5175` (run `npm run dev` in `apps/admin-v2/`)
-- Consumer app: `http://localhost:5173` (run `npm run dev` in `apps/consumer/`)
-- Observability: `http://localhost:5174` (run `npm run dev` in `apps/observability/`)
+- Admin dashboard: `cd apps/admin-v2 && npm run dev` → http://localhost:5175
+- Consumer app: `cd apps/consumer && npm run dev` → http://localhost:5173
+- Observability: `cd apps/observability && npm run dev` → http://localhost:5174
 
 ## Architecture
 
@@ -74,7 +77,7 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                                        ▼
                              ┌─────────────────────┐
                              │   Quick Observer     │  Layer 1 (0ms)
-                             │   252 regex patterns │  Goodbye → EndFrame
+                             │   252 regex patterns │  Goodbye → GoodbyeGate
                              └─────────┬───────────┘
                                        ▼
                              ┌─────────────────────┐
@@ -96,7 +99,7 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                              Post-Call: Analysis + Memory + Daily Context
 ```
 
-## Conversation Director
+### Conversation Director
 
 The Director runs non-blocking per turn via `asyncio.create_task()`:
 
@@ -120,9 +123,10 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── nodes.py                        # 4 call phase NodeConfigs + system prompts
 │   └── tools.py                        # 4 LLM tool schemas + async handlers
 ├── processors/
-│   ├── quick_observer.py               # Layer 1: 252 regex + goodbye EndFrame
+│   ├── quick_observer.py               # Layer 1: 252 regex + goodbye detection
 │   ├── conversation_director.py        # Layer 2: Gemini Flash non-blocking
 │   ├── conversation_tracker.py         # Topic/question/advice tracking
+│   ├── goodbye_gate.py                 # Grace period before call ending (4s timer)
 │   └── guidance_stripper.py            # Strip <guidance> tags before TTS
 ├── services/
 │   ├── director_llm.py                 # Gemini Flash analysis for Director
@@ -134,19 +138,39 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── daily_context.py                # Cross-call same-day memory
 │   ├── greetings.py                    # Greeting templates + rotation
 │   ├── seniors.py                      # Senior profile CRUD
+│   ├── caregivers.py                   # Caregiver-senior relationships
 │   └── news.py                         # OpenAI web search (1hr cache)
 ├── api/
 │   ├── routes/                         # voice.py, calls.py
-│   └── middleware/                      # auth, rate_limit, security, twilio
+│   ├── middleware/                      # auth, api_auth, rate_limit, security, twilio
+│   └── validators/schemas.py           # Pydantic input validation
 ├── db/client.py                        # asyncpg pool + query helpers
-├── tests/                              # 13 test files, 163+ tests
+├── lib/sanitize.py                     # PII-safe logging
+├── tests/                              # 14 test files
 ├── pyproject.toml                      # Python 3.12, Pipecat v0.0.101+
 └── Dockerfile                          # python:3.12-slim + uv
 
 apps/                                   # Frontend apps (Vercel)
 ├── admin-v2/                           # Admin dashboard (React + Vite + Tailwind)
-├── consumer/                           # Caregiver onboarding + dashboard
-└── observability/                      # React observability dashboard
+├── consumer/                           # Caregiver onboarding + dashboard (React + Clerk)
+└── observability/                      # Live call monitoring dashboard
+```
+
+### Legacy Node.js (repo root — being phased out)
+
+The original Node.js backend still runs on Railway for API routes consumed by frontend apps and the reminder scheduler. Voice pipeline has been migrated to Pipecat.
+
+```
+/
+├── index.js                    # Express server
+├── pipelines/                  # Legacy voice pipeline (v1-advanced.js)
+├── services/                   # Business logic (10 modules)
+├── routes/                     # REST API (16 route modules)
+├── middleware/                  # Auth, validation, rate limiting (7 modules)
+├── adapters/                   # LLM/TTS adapters (Claude, Gemini, ElevenLabs)
+├── db/                         # Drizzle ORM schema + Neon client
+├── websocket/                  # Twilio Media Stream handler
+└── tests/                      # Vitest + Playwright (17 test files)
 ```
 
 ## Environment Variables
@@ -165,8 +189,8 @@ DATABASE_URL=postgresql://...           # Neon PostgreSQL + pgvector
 
 # AI Services
 ANTHROPIC_API_KEY=...                   # Claude Sonnet 4.5 (voice LLM)
-GOOGLE_API_KEY=...                      # Gemini Flash (Director + Analysis)
-DEEPGRAM_API_KEY=...                    # STT
+GOOGLE_API_KEY=...                      # Gemini 3 Flash (Director + Analysis)
+DEEPGRAM_API_KEY=...                    # STT (Nova 3)
 ELEVENLABS_API_KEY=...                  # TTS
 OPENAI_API_KEY=...                      # Embeddings + news search
 
@@ -178,11 +202,11 @@ DONNA_API_KEY=...                       # API key auth
 SCHEDULER_ENABLED=false                 # Must be false (Node.js runs scheduler)
 
 # Optional
-FAST_OBSERVER_MODEL=gemini-2.0-flash    # Director model
+FAST_OBSERVER_MODEL=gemini-3-flash-preview    # Director model
 ELEVENLABS_VOICE_ID=...                 # Voice ID (has default)
 ```
 
-## API Endpoints
+## API Endpoints (Pipecat)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -202,19 +226,28 @@ cd pipecat && railway up
 
 > **Do NOT test voice/call features locally.** Deploy to Railway and test with real Twilio phone calls.
 
-**Admin Dashboard v2 (Vercel):**
+**Frontend apps (Vercel):**
 ```bash
-cd apps/admin-v2 && npx vercel --prod --yes
+cd apps/admin-v2 && npx vercel --prod --yes     # Admin dashboard
+cd apps/consumer && npx vercel --prod --yes      # Consumer app
 ```
-- Live: https://admin-v2-liart.vercel.app
+
+| Service | Platform | URL |
+|---------|----------|-----|
+| Pipecat API | Railway | https://donna-pipecat-production.up.railway.app |
+| Node.js API | Railway | https://donna-api-production-2450.up.railway.app |
+| Admin Dashboard | Vercel | https://admin-v2-liart.vercel.app |
+| Consumer App | Vercel | https://consumer-ruddy.vercel.app |
+| Observability | Vercel | https://observability-five.vercel.app |
 
 ## Documentation
 
-- [pipecat/docs/ARCHITECTURE.md](./pipecat/docs/ARCHITECTURE.md) - Pipecat pipeline architecture
-- [docs/architecture/OVERVIEW.md](./docs/architecture/OVERVIEW.md) - System architecture overview
-- [docs/PRODUCT_PLAN.md](./docs/PRODUCT_PLAN.md) - Product plan and feature log
-- [docs/CONVERSATION_DIRECTOR_SPEC.md](./docs/CONVERSATION_DIRECTOR_SPEC.md) - Director specification
-- [claude.md](./claude.md) - AI assistant context
+- [pipecat/docs/ARCHITECTURE.md](./pipecat/docs/ARCHITECTURE.md) — Pipecat pipeline architecture (authoritative)
+- [docs/architecture/OVERVIEW.md](./docs/architecture/OVERVIEW.md) — System architecture overview
+- [docs/PRODUCT_PLAN.md](./docs/PRODUCT_PLAN.md) — Product plan and feature log
+- [docs/CONVERSATION_DIRECTOR_SPEC.md](./docs/CONVERSATION_DIRECTOR_SPEC.md) — Director specification
+- [docs/DONNA_ON_PIPECAT.md](./docs/DONNA_ON_PIPECAT.md) — Pipecat migration architecture
+- [claude.md](./claude.md) — AI assistant context
 
 ## License
 

@@ -12,7 +12,7 @@ from loguru import logger
 from db import query_one
 
 
-ANALYSIS_MODEL = os.environ.get("CALL_ANALYSIS_MODEL", "gemini-3-flash")
+ANALYSIS_MODEL = os.environ.get("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview")
 
 ANALYSIS_PROMPT = """You are analyzing a completed phone call between Donna (an AI companion) and an elderly individual.
 
@@ -155,7 +155,7 @@ async def analyze_completed_call(
 
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model=ANALYSIS_MODEL,
             contents=prompt,
             config={"max_output_tokens": 1500, "temperature": 0.2},
         )

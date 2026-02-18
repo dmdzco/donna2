@@ -34,12 +34,12 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 
 ### Working Features (Pipecat)
 - **2-Layer Observer Architecture + Post-Call**
-  - Layer 1: Quick Observer (0ms) - 268 regex patterns + programmatic goodbye (3.5s EndFrame)
+  - Layer 1: Quick Observer (0ms) - 268 regex patterns + programmatic goodbye (2s EndFrame)
   - Layer 2: Conversation Director (~150ms) - Non-blocking Gemini Flash per-turn analysis
   - Post-Call: Analysis, memory extraction, daily context (Gemini Flash)
 - **Pipecat Flows** - 4-phase call state machine (opening → main → winding_down → closing)
 - **4 LLM Tools** - search_memories, get_news, save_important_detail, mark_reminder_acknowledged
-- **Programmatic Call Ending** - Quick Observer detects goodbye → EndFrame after 3.5s (bypasses LLM)
+- **Programmatic Call Ending** - Quick Observer detects goodbye → EndFrame after 2s delay (bypasses LLM)
 - **Director Fallback Actions** - Force winding-down at 9min, force end at 12min
 - **Full In-Call Context Retention** - APPEND strategy keeps complete conversation history (no summary truncation)
 - **Cross-Call Turn History** - Recent turns from previous calls loaded into system prompt via `get_recent_turns()`
@@ -81,7 +81,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1 (0ms): 268 regex patterns
               │                      │  Injects guidance via LLMMessagesAppendFrame
-              │                      │  Strong goodbye → EndFrame in 3.5s
+              │                      │  Strong goodbye → EndFrame in 2s
               └─────────┬───────────┘
                         ▼
               ┌─────────────────────┐
@@ -216,7 +216,7 @@ pipecat/
 | Add/modify LLM tools | `pipecat/flows/tools.py` (schemas + handlers) |
 | Modify Quick Observer patterns | `pipecat/processors/patterns.py` (data) + `pipecat/processors/quick_observer.py` (logic) |
 | Modify Conversation Director | `pipecat/processors/conversation_director.py` + `pipecat/services/director_llm.py` |
-| Modify call ending behavior | `pipecat/processors/quick_observer.py` (goodbye EndFrame) + `pipecat/processors/conversation_director.py` (time-based) |
+| Modify call ending behavior | `pipecat/processors/quick_observer.py` (goodbye detection) + `pipecat/processors/goodbye_gate.py` (grace period) + `pipecat/processors/conversation_director.py` (time-based) |
 | Change pipeline assembly | `pipecat/bot.py` |
 | Modify post-call processing | `pipecat/services/post_call.py` |
 | Modify post-call analysis | `pipecat/services/call_analysis.py` |

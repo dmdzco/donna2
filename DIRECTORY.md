@@ -72,38 +72,40 @@ The primary codebase. All voice/call features live here. **Clean architecture: n
 
 ```
 pipecat/
-├── main.py              FastAPI entry: /health, /ws, middleware setup (156 LOC)
-├── bot.py               Pipeline assembly — imports run_post_call from services (280 LOC)
-├── config.py            All environment variables, centralized (95 LOC)
-├── prompts.py           System prompts + phase task instructions (92 LOC)
+├── main.py              FastAPI entry: /health, /ws, middleware setup (207 LOC)
+├── bot.py               Pipeline assembly — imports run_post_call from services (297 LOC)
+├── config.py            All environment variables, centralized (110 LOC)
+├── prompts.py           System prompts + phase task instructions (105 LOC)
 │
 ├── flows/               Call state machine (Pipecat Flows)
-│   ├── nodes.py         4 phases: opening → main → winding_down → closing (315 LOC)
+│   ├── nodes.py         4 phases: opening → main → winding_down → closing (317 LOC)
 │   │                    Imports prompts from prompts.py
-│   └── tools.py         4 LLM tool schemas + closure-based handlers (230 LOC)
+│   └── tools.py         4 LLM tool schemas + closure-based handlers (236 LOC)
 │
 ├── processors/          Frame processors in the audio pipeline
 │   ├── patterns.py             Pattern data: 268 regex patterns, 19 categories (503 LOC)
-│   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (374 LOC)
-│   ├── conversation_director.py Layer 2: Gemini Flash guidance injection (180 LOC)
-│   ├── conversation_tracker.py  Tracks topics/questions/advice per call (239 LOC)
+│   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (386 LOC)
+│   ├── conversation_director.py Layer 2: Gemini Flash guidance injection (183 LOC)
+│   ├── conversation_tracker.py  Tracks topics/questions/advice per call (246 LOC)
+│   ├── metrics_logger.py        Call metrics logging processor (97 LOC)
 │   ├── goodbye_gate.py          False-goodbye grace period — NOT in active pipeline (135 LOC)
-│   └── guidance_stripper.py     Strips <guidance> tags before TTS (74 LOC)
+│   └── guidance_stripper.py     Strips <guidance> tags before TTS (115 LOC)
 │
 ├── services/            Business logic — mostly independent, DB-only deps
-│   ├── scheduler.py         Reminder polling + outbound calls (403 LOC)
-│   ├── reminder_delivery.py Delivery CRUD + prompt formatting (93 LOC)
-│   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup (105 LOC)
-│   ├── memory.py            Semantic memory: pgvector, decay, dedup (356 LOC)
-│   ├── director_llm.py      Gemini Flash analysis prompts (339 LOC)
-│   ├── context_cache.py     Pre-cache senior context at 5 AM (260 LOC)
-│   ├── call_analysis.py     Post-call analysis via Gemini (221 LOC)
-│   ├── greetings.py         Greeting templates + rotation (218 LOC)
-│   ├── conversations.py     Conversation CRUD (168 LOC)
-│   ├── daily_context.py     Same-day cross-call memory (159 LOC)
-│   ├── seniors.py           Senior profile CRUD (99 LOC)
-│   ├── news.py              OpenAI web search, 1hr cache (91 LOC)
-│   └── caregivers.py        Caregiver relationships (76 LOC)
+│   ├── scheduler.py         Reminder polling + outbound calls (427 LOC)
+│   ├── reminder_delivery.py Delivery CRUD + prompt formatting (95 LOC)
+│   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup (169 LOC)
+│   ├── memory.py            Semantic memory: pgvector, decay, dedup (355 LOC)
+│   ├── director_llm.py      Gemini Flash analysis prompts (340 LOC)
+│   ├── context_cache.py     Pre-cache senior context at 5 AM (290 LOC)
+│   ├── call_analysis.py     Post-call analysis via Gemini (226 LOC)
+│   ├── interest_discovery.py Interest extraction from conversations (183 LOC)
+│   ├── greetings.py         Greeting templates + rotation (300 LOC)
+│   ├── conversations.py     Conversation CRUD (250 LOC)
+│   ├── daily_context.py     Same-day cross-call memory (161 LOC)
+│   ├── seniors.py           Senior profile CRUD (105 LOC)
+│   ├── news.py              OpenAI web search, 1hr cache (202 LOC)
+│   └── caregivers.py        Caregiver relationships (78 LOC)
 │
 ├── api/                 HTTP layer (291 LOC total)
 │   ├── routes/voice.py      /voice/answer (TwiML), /voice/status
@@ -111,9 +113,9 @@ pipecat/
 │   ├── middleware/           auth, api_auth, rate_limit, security, twilio, error_handler
 │   └── validators/schemas.py  Pydantic request validation (142 LOC)
 │
-├── db/client.py         asyncpg pool + query helpers (56 LOC)
+├── db/client.py         asyncpg pool + query helpers (58 LOC)
 ├── lib/sanitize.py      PII masking for logs (38 LOC)
-├── tests/               14 test files, 163+ tests
+├── tests/               36 test files + helpers/mocks/scenarios
 ├── docs/ARCHITECTURE.md Full architecture docs
 ├── pyproject.toml       Python 3.12, dependencies
 └── Dockerfile           python:3.12-slim + uv
@@ -240,12 +242,15 @@ Only load these when your task specifically requires them.
 
 | File | LOC | Why it's big |
 |---|---|---|
-| `pipecat/processors/patterns.py` | 570 | 268 regex patterns, 19 categories (pure data) |
-| `pipecat/services/scheduler.py` | 403 | Polling + call triggering + prefetch + state |
-| `pipecat/processors/quick_observer.py` | 375 | Analysis logic + goodbye detection |
-| `pipecat/services/memory.py` | 356 | pgvector search + decay + dedup + tiered retrieval |
-| `pipecat/services/director_llm.py` | 339 | Gemini Flash analysis prompts + response parsing |
-| `pipecat/flows/nodes.py` | 315 | 4-phase flow config + context builders |
+| `pipecat/processors/patterns.py` | 503 | 268 regex patterns, 19 categories (pure data) |
+| `pipecat/services/scheduler.py` | 427 | Polling + call triggering + prefetch + state |
+| `pipecat/processors/quick_observer.py` | 386 | Analysis logic + goodbye detection |
+| `pipecat/services/memory.py` | 355 | pgvector search + decay + dedup + tiered retrieval |
+| `pipecat/services/director_llm.py` | 340 | Gemini Flash analysis prompts + response parsing |
+| `pipecat/flows/nodes.py` | 317 | 4-phase flow config + context builders |
+| `pipecat/services/greetings.py` | 300 | Greeting templates + rotation |
+| `pipecat/bot.py` | 297 | Pipeline assembly + run_bot() |
+| `pipecat/services/context_cache.py` | 290 | Pre-cache senior context at 5 AM |
 | `services/scheduler.js` | 489 | Node.js reminder polling (mirrors pipecat scheduler) |
 | `services/context-cache.js` | 364 | Node.js context pre-caching |
 | `routes/observability.js` | 368 | Call monitoring + metrics aggregation |
@@ -255,7 +260,7 @@ Only load these when your task specifically requires them.
 ## Testing
 
 ```bash
-# Pipecat (primary — 14 files, 163+ tests)
+# Pipecat (primary — 36 test files)
 cd pipecat && python -m pytest tests/
 
 # Node.js (4 test files + e2e)

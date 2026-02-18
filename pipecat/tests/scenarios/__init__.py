@@ -1,0 +1,44 @@
+"""Call scenario definitions for Level 3 tests."""
+
+from tests.scenarios.happy_path import HAPPY_PATH_SCENARIO, HAPPY_PATH_LLM_RESPONSES
+from tests.scenarios.goodbye_detection import (
+    FALSE_GOODBYE_SCENARIO,
+    STRONG_GOODBYE_SCENARIO,
+)
+from tests.scenarios.medication_reminder import (
+    MEDICATION_REMINDER_SCENARIO,
+    MEDICATION_REMINDER_LLM_RESPONSES,
+)
+from tests.scenarios.news_discussion import (
+    NEWS_DISCUSSION_SCENARIO,
+    NEWS_DISCUSSION_LLM_RESPONSES,
+)
+from tests.scenarios.emotional_support import (
+    EMOTIONAL_SUPPORT_SCENARIO,
+    EMOTIONAL_SUPPORT_LLM_RESPONSES,
+)
+from tests.scenarios.memory_recall import (
+    MEMORY_RECALL_SCENARIO,
+    MEMORY_RECALL_LLM_RESPONSES,
+)
+from tests.scenarios.long_call_timeout import (
+    LONG_CALL_TIMEOUT_SCENARIO,
+    LONG_CALL_TIMEOUT_LLM_RESPONSES,
+)
+
+__all__ = [
+    "HAPPY_PATH_SCENARIO",
+    "HAPPY_PATH_LLM_RESPONSES",
+    "FALSE_GOODBYE_SCENARIO",
+    "STRONG_GOODBYE_SCENARIO",
+    "MEDICATION_REMINDER_SCENARIO",
+    "MEDICATION_REMINDER_LLM_RESPONSES",
+    "NEWS_DISCUSSION_SCENARIO",
+    "NEWS_DISCUSSION_LLM_RESPONSES",
+    "EMOTIONAL_SUPPORT_SCENARIO",
+    "EMOTIONAL_SUPPORT_LLM_RESPONSES",
+    "MEMORY_RECALL_SCENARIO",
+    "MEMORY_RECALL_LLM_RESPONSES",
+    "LONG_CALL_TIMEOUT_SCENARIO",
+    "LONG_CALL_TIMEOUT_LLM_RESPONSES",
+]

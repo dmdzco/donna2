@@ -36,3 +36,61 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  regression-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pipecat
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run regression scenarios
+        run: uv run python -m pytest tests/ -m regression --tb=short -q
+
+  deploy-staging:
+    needs: [python-tests, node-tests, regression-tests]
+    runs-on: ubuntu-latest
+    environment: staging
+    defaults:
+      run:
+        working-directory: pipecat
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy Pipecat to staging
+        run: railway up --service donna-pipecat --environment staging
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+  smoke-test:
+    needs: [deploy-staging]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health check — Pipecat staging
+        run: |
+          for i in $(seq 1 10); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' "${{ vars.STAGING_PIPECAT_URL }}/health" || true)
+            if [ "$status" = "200" ]; then echo "Pipecat healthy"; break; fi
+            echo "Attempt $i: status=$status, retrying in 15s..."
+            sleep 15
+          done
+          [ "$status" = "200" ] || (echo "Pipecat health check failed" && exit 1)
+
+      - name: Health check — Node.js staging
+        run: |
+          for i in $(seq 1 10); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' "${{ vars.STAGING_NODEJS_URL }}/health" || true)
+            if [ "$status" = "200" ]; then echo "Node.js healthy"; break; fi
+            echo "Attempt $i: status=$status, retrying in 15s..."
+            sleep 15
+          done
+          [ "$status" = "200" ] || (echo "Node.js health check failed" && exit 1)

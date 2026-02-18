@@ -4,6 +4,8 @@ Provides a connection pool and helper functions for executing queries
 against the shared Neon PostgreSQL database.
 """
 
+from __future__ import annotations
+
 import os
 import asyncpg
 from loguru import logger

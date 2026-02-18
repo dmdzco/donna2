@@ -4,6 +4,8 @@ Port of services/memory.js — stores, searches, and builds context from memorie
 Uses OpenAI text-embedding-3-small for embeddings, pgvector for similarity search.
 """
 
+from __future__ import annotations
+
 import json
 import math
 import os

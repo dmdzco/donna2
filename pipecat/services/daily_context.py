@@ -4,6 +4,8 @@ Port of services/daily-context.js — tracks what happened in each call
 so subsequent calls on the same day don't repeat topics/reminders/advice.
 """
 
+from __future__ import annotations
+
 import json
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo

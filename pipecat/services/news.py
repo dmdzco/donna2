@@ -3,6 +3,8 @@
 Port of services/news.js — fetches senior-friendly news via OpenAI web search.
 """
 
+from __future__ import annotations
+
 import os
 import time
 from loguru import logger

@@ -3,11 +3,14 @@
 Port of services/context-cache.js (365 lines). Caches:
 - Recent call summaries
 - Critical memories (Tier 1)
+
 - Important memories (with decay)
 - Pre-generated greeting (templated with rotation)
 
 In-memory cache with 24-hour TTL. Called by scheduler hourly + at call connect.
 """
+
+from __future__ import annotations
 
 import asyncio
 import random

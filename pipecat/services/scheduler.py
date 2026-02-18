@@ -6,6 +6,8 @@ and runs the polling loop. Uses asyncio for polling instead of setInterval.
 Delivery record CRUD lives in services/reminder_delivery.py.
 """
 
+from __future__ import annotations
+
 import asyncio
 import os
 import re

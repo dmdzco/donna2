@@ -175,10 +175,13 @@ def make_tool_handlers(session_state: dict) -> dict:
 
         try:
             from services.news import web_search_query
-            result = await web_search_query(query)
+            result = await asyncio.wait_for(web_search_query(query), timeout=15.0)
             if not result:
                 return {"status": "success", "result": f"I couldn't find information about {query}."}
             return {"status": "success", "result": result}
+        except asyncio.TimeoutError:
+            logger.warning("web_search timed out after 15s for query={q}", q=query)
+            return {"status": "success", "result": "Search took too long. Continue naturally."}
         except Exception as e:
             logger.error("web_search error: {err}", err=str(e))
             return {"status": "success", "result": "Search unavailable. Continue naturally."}
@@ -201,6 +204,8 @@ def make_tool_handlers(session_state: dict) -> dict:
             delivery_id = delivery.get("id") if delivery else None
             if delivery_id:
                 await mark_reminder_acknowledged(delivery_id, status, user_response)
+            else:
+                logger.warning("mark_reminder called but no delivery_id in session (not a reminder call)")
             session_state.setdefault("reminders_delivered", set()).add(reminder_label)
             return {"status": "success", "result": f"Reminder marked as {status}."}
         except Exception as e:

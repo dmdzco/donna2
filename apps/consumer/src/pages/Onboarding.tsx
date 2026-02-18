@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@clerk/clerk-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowRight, ArrowLeft, Check, Plus, Star, X, ChevronUp, ChevronDown,
+  ArrowRight, ArrowLeft, Check, Plus, Star, X,
   Trophy, History, Music, Film, Globe, Feather, Map, Cat, BookOpen, Flower, Plane, Utensils
 } from 'lucide-react';
+import CityAutocomplete from '../components/CityAutocomplete';
 import './Onboarding.css';
 
 interface Interest {
@@ -53,7 +54,7 @@ export default function Onboarding() {
     additionalInfo: '',
     reminders: [''],
     updates: [],
-    callTime: '10:30',
+    callTime: '10:00',
     callDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
   });
 
@@ -118,47 +119,30 @@ export default function Onboarding() {
     return `every ${otherDays} and ${lastDay}`;
   };
 
-  const formatTime = (timeStr: string) => {
+  const formatTimeWindow = (timeStr: string) => {
     if (!timeStr) return '';
-    const [hours, minutes] = timeStr.split(':');
-    let h = parseInt(hours, 10);
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12;
-    h = h ? h : 12;
-    return `${h}:${minutes} ${ampm}`;
-  };
-
-  const parseTime = () => {
-    const [hours, minutes] = formData.callTime.split(':').map(Number);
-    return {
-      h: hours % 12 || 12,
-      m: minutes,
-      ampm: hours >= 12 ? 'PM' : 'AM'
+    const startH = parseInt(timeStr.split(':')[0], 10);
+    const endH = (startH + 1) % 24;
+    const fmt = (h: number) => {
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const h12 = h % 12 || 12;
+      return `${h12}:00 ${ampm}`;
     };
+    return `${fmt(startH)} – ${fmt(endH)}`;
   };
 
-  const updateTime = (unit: 'hour' | 'minute' | 'ampm', direction: 'up' | 'down' | 'toggle') => {
-    let [hours, minutes] = formData.callTime.split(':').map(Number);
-
-    if (unit === 'hour') {
-      let h12 = hours % 12 || 12;
-      if (direction === 'up') h12 = h12 === 12 ? 1 : h12 + 1;
-      else h12 = h12 === 1 ? 12 : h12 - 1;
-      if (hours >= 12) {
-        hours = h12 === 12 ? 12 : h12 + 12;
-      } else {
-        hours = h12 === 12 ? 0 : h12;
-      }
-    } else if (unit === 'minute') {
-      if (direction === 'up') minutes = (minutes + 5) % 60;
-      else minutes = (minutes - 5 + 60) % 60;
-    } else if (unit === 'ampm') {
-      hours = (hours + 12) % 24;
-    }
-
-    const newTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-    updateFormData('callTime', newTime);
-  };
+  const timeWindowOptions = Array.from({ length: 24 }, (_, i) => {
+    const endH = (i + 1) % 24;
+    const fmt = (h: number) => {
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const h12 = h % 12 || 12;
+      return `${h12}:00 ${ampm}`;
+    };
+    return {
+      value: `${i.toString().padStart(2, '0')}:00`,
+      label: `${fmt(i)} – ${fmt(endH)}`,
+    };
+  });
 
   const toggleTopicExpansion = (topicId: string) => {
     if (expandedTopic === topicId) {
@@ -329,11 +313,14 @@ export default function Onboarding() {
               </div>
               <div className="form-group">
                 <label>Location</label>
-                <div className="location-grid">
-                  <input type="text" placeholder="City" value={formData.seniorCity} onChange={(e) => updateFormData('seniorCity', e.target.value)} />
-                  <input type="text" placeholder="State" value={formData.seniorState} onChange={(e) => updateFormData('seniorState', e.target.value)} />
-                  <input type="text" placeholder="Zip" value={formData.seniorZip} onChange={(e) => updateFormData('seniorZip', e.target.value)} />
-                </div>
+                <CityAutocomplete
+                  city={formData.seniorCity}
+                  state={formData.seniorState}
+                  zip={formData.seniorZip}
+                  onCityChange={(v) => updateFormData('seniorCity', v)}
+                  onStateChange={(v) => updateFormData('seniorState', v)}
+                  onZipChange={(v) => updateFormData('seniorZip', v)}
+                />
               </div>
             </div>
           )}
@@ -414,32 +401,22 @@ export default function Onboarding() {
               </div>
 
               <div className="rhythm-section">
-                <h3>Start Time</h3>
-                <div className="time-picker">
-                  <div className="time-col">
-                    <button className="time-btn" onClick={() => updateTime('hour', 'up')}><ChevronUp size={24} /></button>
-                    <div className="time-val">{parseTime().h}</div>
-                    <button className="time-btn" onClick={() => updateTime('hour', 'down')}><ChevronDown size={24} /></button>
-                  </div>
-                  <div className="time-sep">:</div>
-                  <div className="time-col">
-                    <button className="time-btn" onClick={() => updateTime('minute', 'up')}><ChevronUp size={24} /></button>
-                    <div className="time-val">{parseTime().m.toString().padStart(2, '0')}</div>
-                    <button className="time-btn" onClick={() => updateTime('minute', 'down')}><ChevronDown size={24} /></button>
-                  </div>
-                  <div className="time-col">
-                    <button className="time-btn" onClick={() => updateTime('ampm', 'toggle')}><ChevronUp size={24} /></button>
-                    <div className="time-val ampm">{parseTime().ampm}</div>
-                    <button className="time-btn" onClick={() => updateTime('ampm', 'toggle')}><ChevronDown size={24} /></button>
-                  </div>
-                </div>
+                <h3>Call Window</h3>
+                <select
+                  value={formData.callTime}
+                  onChange={(e) => updateFormData('callTime', e.target.value)}
+                >
+                  {timeWindowOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="schedule-summary">
                 <Star size={20} fill="#B78628" stroke="none" />
                 <div>
                   <div className="summary-label">SCHEDULE SUMMARY</div>
-                  <div>Donna will call <strong>{getFormattedSummary()}</strong> at <strong>{formatTime(formData.callTime)}</strong></div>
+                  <div>Donna will call <strong>{getFormattedSummary()}</strong> between <strong>{formatTimeWindow(formData.callTime)}</strong></div>
                 </div>
               </div>
             </div>
@@ -469,7 +446,7 @@ export default function Onboarding() {
 
               <div className="review-section">
                 <h4>Schedule</h4>
-                <p>Calls <strong>{getFormattedSummary()}</strong> at <strong>{formatTime(formData.callTime)}</strong></p>
+                <p>Calls <strong>{getFormattedSummary()}</strong> between <strong>{formatTimeWindow(formData.callTime)}</strong></p>
               </div>
             </div>
           )}

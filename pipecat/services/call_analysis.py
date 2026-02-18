@@ -147,7 +147,7 @@ async def analyze_completed_call(
     )
 
     try:
-        # Use google-genai for Gemini
+        # Use google-genai for Gemini (async to avoid blocking event loop)
         from google import genai
 
         api_key = os.environ.get("GOOGLE_API_KEY")
@@ -156,10 +156,13 @@ async def analyze_completed_call(
             return _get_default_analysis()
 
         client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
+        response = await client.aio.models.generate_content(
             model=ANALYSIS_MODEL,
             contents=prompt,
-            config={"max_output_tokens": 1500, "temperature": 0.2},
+            config=genai.types.GenerateContentConfig(
+                max_output_tokens=1500,
+                temperature=0.2,
+            ),
         )
 
         json_text = response.text.strip()

@@ -8,6 +8,7 @@ Port of routes/voice.js. Handles:
 from __future__ import annotations
 
 import os
+from xml.sax.saxutils import escape as xml_escape
 
 from fastapi import APIRouter, Request, Response
 from loguru import logger
@@ -48,6 +49,7 @@ async def voice_answer(request: Request):
     reminder_prompt = None
     pre_generated_greeting = None
     news_context = None
+    recent_turns = None
     call_type = "check-in"
 
     # 1. Check for reminder call (pre-fetched context)
@@ -98,13 +100,14 @@ async def voice_answer(request: Request):
     # 1b. Fetch call summaries, recent turns, and daily context for any identified senior
     previous_calls_summary = None
     todays_context = None
-    recent_turns = None
+    # Only fetch recent_turns from DB if not already provided by prefetch
     if senior:
         try:
             from services.conversations import get_recent_summaries, get_recent_turns
             from services.daily_context import get_todays_context, format_todays_context
             previous_calls_summary = await get_recent_summaries(senior["id"], 3)
-            recent_turns = await get_recent_turns(senior["id"])
+            if not recent_turns:
+                recent_turns = await get_recent_turns(senior["id"])
             raw_ctx = await get_todays_context(senior["id"], senior.get("timezone", "America/New_York"))
             todays_context = format_todays_context(raw_ctx)
             logger.info("[{cs}] Summaries={s}ch, recent_turns={rt}ch, daily_ctx={d}ch", cs=call_sid,
@@ -160,10 +163,10 @@ async def voice_answer(request: Request):
 <Response>
     <Connect>
         <Stream url="{ws_url}/ws">
-            <Parameter name="senior_id" value="{senior_id}" />
-            <Parameter name="call_sid" value="{call_sid}" />
-            <Parameter name="conversation_id" value="{conversation_id or ''}" />
-            <Parameter name="call_type" value="{call_type}" />
+            <Parameter name="senior_id" value="{xml_escape(str(senior_id), {'"': '&quot;'})}" />
+            <Parameter name="call_sid" value="{xml_escape(str(call_sid), {'"': '&quot;'})}" />
+            <Parameter name="conversation_id" value="{xml_escape(str(conversation_id or ''), {'"': '&quot;'})}" />
+            <Parameter name="call_type" value="{xml_escape(str(call_type), {'"': '&quot;'})}" />
         </Stream>
     </Connect>
 </Response>"""

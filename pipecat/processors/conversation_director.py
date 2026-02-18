@@ -51,6 +51,7 @@ class ConversationDirectorProcessor(FrameProcessor):
         self._pipeline_task = None
         self._last_result: dict | None = None
         self._pending_analysis: asyncio.Task | None = None
+        self._delayed_end_task: asyncio.Task | None = None
         self._turn_count = 0
         self._end_scheduled = False
 
@@ -138,7 +139,7 @@ class ConversationDirectorProcessor(FrameProcessor):
                     m=minutes_elapsed,
                 )
                 self._end_scheduled = True
-                asyncio.create_task(self._delayed_end(5.0))
+                self._delayed_end_task = asyncio.create_task(self._delayed_end(5.0))
 
         # Inject time-pressure guidance if call exceeds limit
         if (
@@ -167,7 +168,7 @@ class ConversationDirectorProcessor(FrameProcessor):
                     m=minutes_elapsed,
                 )
                 self._end_scheduled = True
-                asyncio.create_task(self._delayed_end(3.0))
+                self._delayed_end_task = asyncio.create_task(self._delayed_end(3.0))
 
     async def _delayed_end(self, delay: float):
         """End the call after a delay (lets current audio play)."""

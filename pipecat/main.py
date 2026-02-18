@@ -59,6 +59,7 @@ from api.middleware.rate_limit import limiter
 from api.middleware.security import SecurityHeadersMiddleware
 from api.routes.calls import router as calls_router
 from api.routes.voice import router as voice_router, call_metadata
+from bot import run_bot
 
 app = FastAPI(title="Donna Pipecat", version="0.1.0")
 
@@ -117,8 +118,6 @@ async def websocket_endpoint(websocket: WebSocket):
     """Twilio connects here via TwiML <Stream>. Runs the Pipecat pipeline."""
     await websocket.accept()
 
-    from bot import run_bot
-
     session_state = {
         "senior_id": None,
         "senior": None,
@@ -133,7 +132,6 @@ async def websocket_endpoint(websocket: WebSocket):
         "call_type": "check-in",
         "is_outbound": True,
         "previous_calls_summary": None,
-        "recent_turns": None,
         "todays_context": None,
         "_transcript": [],
         "_call_metadata": call_metadata,
@@ -156,6 +154,10 @@ async def websocket_endpoint(websocket: WebSocket):
         except ImportError:
             pass
     finally:
+        # Clean up call_metadata to prevent memory leaks on crashes
+        cs = session_state.get("call_sid")
+        if cs:
+            call_metadata.pop(cs, None)
         if websocket.client_state.name != "DISCONNECTED":
             try:
                 await websocket.close()

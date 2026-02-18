@@ -73,6 +73,8 @@ class SimulationConfig:
     memory_context: str | None = None
     reminder_prompt: str | None = None
     reminder_delivery: dict | None = None
+    is_outbound: bool = True
+    memory_results: list[dict] | None = None
 
 
 @dataclass
@@ -86,6 +88,7 @@ class ConversationResult:
     duration_seconds: float
     donna_model: str
     error: str | None = None
+    tool_call_counts: dict[str, int] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -205,13 +208,15 @@ class ConversationRunner:
         transcript: list[dict] = []
         ended_naturally = False
         error_msg: str | None = None
+        tool_call_counts: dict[str, int] = {}
 
         try:
             result = await asyncio.wait_for(
                 self._run_conversation(transcript),
                 timeout=self._config.overall_timeout,
             )
-            ended_naturally = result
+            ended_naturally = result[0]
+            tool_call_counts = result[1]
         except asyncio.TimeoutError:
             error_msg = f"Conversation exceeded overall timeout ({self._config.overall_timeout}s)"
             logger.warning(error_msg)
@@ -246,10 +251,11 @@ class ConversationRunner:
             duration_seconds=duration,
             donna_model=self._config.donna_model,
             error=error_msg,
+            tool_call_counts=tool_call_counts,
         )
 
-    async def _run_conversation(self, transcript: list[dict]) -> bool:
-        """Run the reactive conversation loop. Returns True if ended naturally."""
+    async def _run_conversation(self, transcript: list[dict]) -> tuple[bool, dict[str, int]]:
+        """Run the reactive conversation loop. Returns (ended_naturally, tool_call_counts)."""
         cfg = self._config
 
         # -- Build session state -----------------------------------------------
@@ -270,6 +276,7 @@ class ConversationRunner:
             "conversation_id": "conv-sim-001",
             "call_sid": "CA-sim-001",
             "call_type": cfg.call_type,
+            "is_outbound": cfg.is_outbound,
             "previous_calls_summary": None,
             "todays_context": None,
             "_call_start_time": time.time(),
@@ -377,7 +384,10 @@ class ConversationRunner:
                 # Wait for pipeline to settle after opening (tool calls like
                 # search_memories and transition_to_main + RESET_WITH_SUMMARY
                 # may still be in flight)
-                await _wait_for_pipeline_idle(response_collector)
+                idle_response = await _wait_for_pipeline_idle(response_collector)
+                if idle_response and idle_response != donna_greeting:
+                    transcript.append({"role": "donna", "content": idle_response})
+                    logger.info("[SIM] Donna (post-tool): {}", idle_response[:100])
 
                 # 2. Get senior's response to the greeting
                 senior_reply = await simulator.respond(donna_greeting)
@@ -385,7 +395,7 @@ class ConversationRunner:
                     ended_naturally = True
                     await task.queue_frame(EndFrame())
                     await _safe_wait(pipeline_task)
-                    return ended_naturally
+                    return ended_naturally, mock_patches.get_tool_counts()
 
                 transcript.append({"role": "senior", "content": senior_reply})
                 logger.info("[SIM] Senior: {}", senior_reply[:100])
@@ -428,11 +438,16 @@ class ConversationRunner:
                             break
                         except asyncio.TimeoutError:
                             resets_since = context_reset_detector.reset_count - pre_inject_resets
-                            if resets_since > 0 and attempt < 2:
-                                # RESET wiped our speech — re-inject after settle
+                            if attempt < 2:
+                                # Re-inject speech. Two common causes:
+                                # 1. RESET_WITH_SUMMARY wiped our speech
+                                # 2. Opening→main APPEND transition didn't
+                                #    trigger a new LLM call (run_llm=False)
+                                # In both cases, fresh user speech gives the
+                                # pipeline new input to generate a response.
                                 logger.info(
-                                    "[SIM] RESET detected after injection (attempt {}), "
-                                    "re-injecting speech", attempt + 1,
+                                    "[SIM] Response timeout (attempt {}, resets={}), "
+                                    "re-injecting speech", attempt + 1, resets_since,
                                 )
                                 await _wait_for_pipeline_idle(response_collector)
                                 response_collector.drain()
@@ -452,8 +467,14 @@ class ConversationRunner:
                     logger.info("[SIM] Donna: {}", donna_response[:100])
 
                     # Wait for pipeline to settle — tool calls and context
-                    # resets (RESET_WITH_SUMMARY) may still be in flight
-                    await _wait_for_pipeline_idle(response_collector)
+                    # resets (RESET_WITH_SUMMARY) may still be in flight.
+                    # Capture any additional text response from tool-call
+                    # sequences (e.g. web_search: "Let me look..." → tool → "The weather is...")
+                    idle_response = await _wait_for_pipeline_idle(response_collector)
+                    if idle_response and idle_response != donna_response:
+                        transcript.append({"role": "donna", "content": idle_response})
+                        logger.info("[SIM] Donna (post-tool): {}", idle_response[:100])
+                        donna_response = idle_response
 
                     # Check if pipeline ended (goodbye detection)
                     if output_transport.ended:
@@ -497,24 +518,53 @@ class ConversationRunner:
                 await task.queue_frame(EndFrame())
             await _safe_wait(pipeline_task)
 
-            return ended_naturally
+            return ended_naturally, mock_patches.get_tool_counts()
 
-    @staticmethod
-    def _build_service_mocks():
+    def _build_service_mocks(self):
         """Build a combined context manager that mocks all external service calls."""
         default_direction = get_default_direction()
+        cfg = self._config
+
+        # Default memory search results — overridable via config
+        memory_results = cfg.memory_results if cfg.memory_results is not None else [
+            {"content": "Margaret planted new roses last spring", "similarity": 0.85},
+        ]
 
         class _CombinedMocks:
-            """Context manager that patches all service modules."""
+            """Context manager that patches all service modules.
+
+            Exposes named references to key tool mocks so callers can inspect
+            call counts after the conversation completes.
+            """
 
             def __init__(self):
                 self._patches = []
                 self._mocks = []
+                # Named references to tool-related mocks
+                self.memory_search_mock: AsyncMock | None = None
+                self.memory_store_mock: AsyncMock | None = None
+                self.web_search_mock: AsyncMock | None = None
+                self.mark_reminder_mock: AsyncMock | None = None
+
+            def get_tool_counts(self) -> dict[str, int]:
+                """Return call counts for key tool mocks."""
+                return {
+                    "memory_search": self.memory_search_mock.call_count if self.memory_search_mock else 0,
+                    "memory_store": self.memory_store_mock.call_count if self.memory_store_mock else 0,
+                    "web_search_query": self.web_search_mock.call_count if self.web_search_mock else 0,
+                    "mark_reminder": self.mark_reminder_mock.call_count if self.mark_reminder_mock else 0,
+                }
 
             def __enter__(self):
-                # (target, mock_obj, create) — create=True for attrs that
-                # don't exist at module level (e.g. get_news_for_topic is
-                # referenced by flows/tools.py but not defined in services/news.py).
+                # Create named mocks for tool backends
+                self.memory_search_mock = AsyncMock(return_value=memory_results)
+                self.memory_store_mock = AsyncMock(return_value=None)
+                self.web_search_mock = AsyncMock(
+                    return_value="The weather this weekend will be sunny with highs near 72 degrees."
+                )
+                self.mark_reminder_mock = AsyncMock(return_value=None)
+
+                # (target, mock_obj, create)
                 patch_specs = [
                     # Patch Director imports at the point of USE (processors.conversation_director)
                     # not just at the source module — Python's `from X import Y` binds Y locally.
@@ -524,13 +574,12 @@ class ConversationRunner:
                     # Also patch at source module for any other callers
                     ("services.director_llm.analyze_turn", AsyncMock(return_value=default_direction), False),
                     ("services.director_llm.format_director_guidance", MagicMock(return_value="main/medium/warm | Continue naturally"), False),
-                    ("services.memory.search", AsyncMock(return_value=[
-                        {"content": "Margaret planted new roses last spring", "similarity": 0.85},
-                    ]), False),
-                    ("services.memory.store", AsyncMock(return_value=None), False),
+                    ("services.memory.search", self.memory_search_mock, False),
+                    ("services.memory.store", self.memory_store_mock, False),
                     ("services.memory.extract_from_conversation", AsyncMock(return_value=None), False),
                     ("services.news.get_news_for_senior", AsyncMock(return_value="The local garden show is this weekend."), False),
-                    ("services.reminder_delivery.mark_reminder_acknowledged", AsyncMock(return_value=None), False),
+                    ("services.news.web_search_query", self.web_search_mock, False),
+                    ("services.reminder_delivery.mark_reminder_acknowledged", self.mark_reminder_mock, False),
                     ("services.reminder_delivery.mark_call_ended_without_acknowledgment", AsyncMock(return_value=None), False),
                     ("services.scheduler.clear_reminder_context", AsyncMock(return_value=None), False),
                     ("services.conversations.complete", AsyncMock(return_value=None), False),
@@ -557,7 +606,7 @@ async def _wait_for_pipeline_idle(
     idle_timeout: float = 3.0,
     post_activity_timeout: float = 2.0,
     max_wait: float = 20.0,
-) -> None:
+) -> str | None:
     """Wait until the pipeline stops producing activity.
 
     After Donna's text response, tool calls (transition_to_main, search_memories)
@@ -572,6 +621,10 @@ async def _wait_for_pipeline_idle(
     - Once activity is detected, switch to a shorter ``post_activity_timeout``
       (2s) — once the reset arrives, the pipeline settles quickly
     - Return when no activity is detected within the current timeout
+
+    Returns:
+        The latest LLM response text generated during the idle wait (from
+        tool-call sequences like web_search), or None if no new response.
     """
     start = time.time()
     current_timeout = idle_timeout
@@ -586,10 +639,14 @@ async def _wait_for_pipeline_idle(
             # No activity within timeout — pipeline is idle
             elapsed = time.time() - start
             logger.debug("[SIM] Pipeline idle after {:.1f}s", elapsed)
+            # Capture any response generated during idle wait before draining
+            additional = collector.latest_response or None
             collector.drain()
-            return
+            return additional
     logger.warning("[SIM] Pipeline idle wait hit max_wait ({:.0f}s)", max_wait)
+    additional = collector.latest_response or None
     collector.drain()
+    return additional
 
 
 async def _safe_wait(task: asyncio.Task, timeout: float = 10.0) -> None:

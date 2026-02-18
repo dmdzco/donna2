@@ -103,7 +103,7 @@ class TestGenerateEmbedding:
         mock_embedding = MagicMock()
         mock_embedding.data = [MagicMock(embedding=[0.1, 0.2, 0.3])]
         mock_client = MagicMock()
-        mock_client.embeddings.create.return_value = mock_embedding
+        mock_client.embeddings.create = AsyncMock(return_value=mock_embedding)
         with patch("services.memory._get_openai", return_value=mock_client):
             from services.memory import generate_embedding
             result = await generate_embedding("test text")
@@ -249,7 +249,7 @@ class TestExtractFromConversation:
         mock_response = MagicMock()
         mock_response.choices = [MagicMock(message=MagicMock(content=json.dumps(memories)))]
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         with patch("services.memory._get_openai", return_value=mock_client), \
              patch("services.memory.store", new_callable=AsyncMock) as mock_store:
             from services.memory import extract_from_conversation
@@ -262,7 +262,7 @@ class TestExtractFromConversation:
         mock_response = MagicMock()
         mock_response.choices = [MagicMock(message=MagicMock(content=json.dumps(memories_dict)))]
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         with patch("services.memory._get_openai", return_value=mock_client), \
              patch("services.memory.store", new_callable=AsyncMock) as mock_store:
             from services.memory import extract_from_conversation
@@ -272,7 +272,7 @@ class TestExtractFromConversation:
     @pytest.mark.asyncio
     async def test_handles_api_error(self):
         mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = Exception("API error")
+        mock_client.chat.completions.create = AsyncMock(side_effect=Exception("API error"))
         with patch("services.memory._get_openai", return_value=mock_client):
             from services.memory import extract_from_conversation
             await extract_from_conversation("s1", "transcript", "conv-1")

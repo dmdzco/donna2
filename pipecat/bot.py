@@ -46,6 +46,14 @@ from processors.quick_observer import QuickObserverProcessor
 from services.post_call import run_post_call
 
 
+async def _safe_post_call(session_state: dict, conversation_tracker, elapsed: int, call_sid: str):
+    """Run post-call in background with its own error boundary."""
+    try:
+        await run_post_call(session_state, conversation_tracker, elapsed)
+    except Exception as e:
+        logger.error("[{cs}] Background post-call failed: {err}", cs=call_sid, err=str(e))
+
+
 async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     """Run the Donna voice pipeline for a single call.
 
@@ -273,8 +281,11 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     async def on_disconnected(transport_ref, websocket_ref):
         elapsed = round(time.time() - start_time)
         logger.info("[{cs}] Client disconnected after {s}s", cs=call_sid, s=elapsed)
-        await run_post_call(session_state, conversation_tracker, elapsed)
+        # End pipeline first so runner.run() unblocks, then run post-call in background.
+        # Previously run_post_call was awaited before EndFrame, so if Gemini/OpenAI
+        # hung during analysis the pipeline would never terminate.
         await task.queue_frame(EndFrame())
+        asyncio.create_task(_safe_post_call(session_state, conversation_tracker, elapsed, call_sid))
 
     # -------------------------------------------------------------------------
     # Run pipeline

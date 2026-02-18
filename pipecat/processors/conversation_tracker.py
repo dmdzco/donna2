@@ -13,7 +13,7 @@ Sits in the pipeline after the LLM and reads both:
 import re
 from dataclasses import dataclass, field
 
-from pipecat.frames.frames import TextFrame, TranscriptionFrame
+from pipecat.frames.frames import EndFrame, TextFrame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameProcessor
 
 
@@ -200,6 +200,13 @@ class ConversationTrackerProcessor(FrameProcessor):
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
+
+        # Flush remaining assistant buffer on call end so the last
+        # bot utterance is included in the transcript for post-call analysis.
+        if isinstance(frame, EndFrame):
+            self._flush_assistant_buffer()
+            await self.push_frame(frame, direction)
+            return
 
         if isinstance(frame, TranscriptionFrame):
             # Flush any buffered assistant text from previous turn

@@ -222,11 +222,9 @@ class TestWebSearchToolHandler:
 
     @pytest.mark.asyncio
     async def test_api_error_returns_graceful_fallback(self):
-        mock_client = MagicMock()
-        mock_client.responses.create.side_effect = Exception("timeout")
-
+        """Handler's own except branch fires when web_search_query raises."""
         handlers, _ = self._make_handlers()
-        with patch("services.news._get_openai", return_value=mock_client):
+        with patch("services.news.web_search_query", new_callable=AsyncMock, side_effect=Exception("timeout")):
             result = await handlers["web_search"]({"query": "test query"})
 
         assert result["status"] == "success"

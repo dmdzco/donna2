@@ -95,8 +95,9 @@ async def get_due_reminders() -> list[dict]:
              AND s.is_active = true""",
     )
 
-    # Filter recurring to those whose time-of-day matches now (within 5 min)
-    now_minutes = now.hour * 60 + now.minute
+    # Filter recurring to those whose time-of-day matches now (within 5 min).
+    # scheduled_time is stored in the senior's local timezone, so convert
+    # UTC `now` to the senior's timezone before comparing.
     recurring_due = []
     for row in recurring_all:
         st = row.get("scheduled_time")
@@ -105,7 +106,22 @@ async def get_due_reminders() -> list[dict]:
         if isinstance(st, str):
             st = datetime.fromisoformat(st)
         sched_minutes = st.hour * 60 + st.minute
-        if abs(sched_minutes - now_minutes) <= 5:
+
+        # Convert UTC now to the senior's local timezone for comparison
+        senior_tz_name = row.get("timezone")
+        if senior_tz_name:
+            try:
+                from zoneinfo import ZoneInfo
+                local_now = now.astimezone(ZoneInfo(senior_tz_name))
+            except Exception:
+                local_now = now
+        else:
+            local_now = now
+        now_minutes = local_now.hour * 60 + local_now.minute
+
+        # Handle midnight wrap-around (e.g. 23:58 vs 00:02 = 4 min, not 1436)
+        diff = abs(sched_minutes - now_minutes)
+        if min(diff, 1440 - diff) <= 5:
             recurring_due.append(row)
 
     all_candidates = non_recurring + recurring_due
@@ -258,6 +274,7 @@ async def prefetch_for_phone(phone_number: str, senior: dict | None) -> dict:
 
     memory_context = None
     pre_generated_greeting = None
+    cached = None
 
     if senior:
         try:

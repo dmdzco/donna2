@@ -6,6 +6,8 @@ Port of services/news.js — fetches senior-friendly news via OpenAI web search.
 from __future__ import annotations
 
 import os
+import random
+import re
 import time
 from loguru import logger
 
@@ -55,14 +57,14 @@ async def get_news_for_senior(interests: list[str], limit: int = 3) -> str | Non
         return cached["news"]
 
     try:
-        interest_list = ", ".join(interests[:3])
+        interest_list = ", ".join(interests[:5])
         logger.info("Fetching news for interests: {il}", il=interest_list)
 
         response = client.responses.create(
             model="gpt-4o-mini",
             tools=[{"type": "web_search_preview"}],
             input=(
-                f"Find 2-3 brief, positive news stories from today about: {interest_list}.\n"
+                f"Find 7-8 brief, positive news stories from today about: {interest_list}.\n"
                 "These are for an elderly person, so:\n"
                 "- Choose uplifting or interesting stories (avoid distressing news)\n"
                 "- Keep each summary to 1-2 sentences\n"
@@ -148,6 +150,50 @@ async def web_search_query(query: str) -> str | None:
     except Exception as e:
         logger.error("Web search error: {err}", err=str(e))
         return None
+
+
+def select_stories_for_call(
+    full_news: str | None,
+    interests: list[str] | None = None,
+    interest_scores: dict[str, float] | None = None,
+    count: int = 3,
+) -> str | None:
+    """Pick the best stories from the full cached news for a single call.
+
+    Scores each bullet point by matching interest weight, adds random jitter
+    so consecutive calls aren't identical, and returns the top *count* stories
+    re-wrapped with the standard news context header.
+    """
+    if not full_news:
+        return None
+
+    # Parse bullet points (lines starting with - or *)
+    bullets = [
+        line.strip()
+        for line in re.split(r"\n", full_news)
+        if line.strip() and re.match(r"^[-*•]", line.strip())
+    ]
+    if not bullets:
+        return full_news  # Can't parse, return as-is
+
+    scores = interest_scores or {}
+    interest_list = [i.lower() for i in (interests or [])]
+
+    scored: list[tuple[float, str]] = []
+    for bullet in bullets:
+        bullet_lower = bullet.lower()
+        weight = 0.0
+        for interest in interest_list:
+            if interest in bullet_lower:
+                weight += scores.get(interest, 1.0)
+        # Add random jitter (0–1) so ties are broken randomly
+        weight += random.random()
+        scored.append((weight, bullet))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    selected = [b for _, b in scored[:count]]
+    raw = "\n".join(selected)
+    return format_news_context(raw)
 
 
 def clear_cache():

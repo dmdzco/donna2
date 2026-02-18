@@ -52,6 +52,20 @@ class TestSelectInterest:
         result = _select_interest(interests, recent)
         assert result in interests
 
+    def test_with_interest_scores(self):
+        interests = ["low_one", "high_one"]
+        scores = {"low_one": 0.1, "high_one": 10.0}
+        counts = {"low_one": 0, "high_one": 0}
+        for _ in range(100):
+            result = _select_interest(interests, None, interest_scores=scores)
+            counts[result] += 1
+        assert counts["high_one"] > counts["low_one"]
+
+    def test_interest_scores_param_is_optional(self):
+        """Calling without interest_scores should work (backward compat)."""
+        result = _select_interest(["gardening"], None)
+        assert result == "gardening"
+
 
 class TestGenerateTemplatedGreeting:
     def test_contains_first_name(self):
@@ -143,7 +157,7 @@ class TestPrefetchAndCache:
 
     @pytest.mark.asyncio
     async def test_populates_cache(self):
-        senior = {"id": "s1", "name": "Margaret", "interests": ["gardening"], "timezone": "America/New_York"}
+        senior = {"id": "s1", "name": "Margaret", "interests": ["gardening"], "timezone": "America/New_York", "interest_scores": {"gardening": 5.0}}
         with patch("services.seniors.get_by_id", new_callable=AsyncMock, return_value=senior), \
              patch("services.conversations.get_recent_summaries", new_callable=AsyncMock, return_value="Recent call summary"), \
              patch("services.conversations.get_recent_turns", new_callable=AsyncMock, return_value="Turn history"), \
@@ -151,12 +165,15 @@ class TestPrefetchAndCache:
              patch("services.memory.get_important", new_callable=AsyncMock, return_value=[]), \
              patch("services.memory.get_recent", new_callable=AsyncMock, return_value=[]), \
              patch("services.news.get_news_for_senior", new_callable=AsyncMock, return_value=None), \
+             patch("services.news.select_stories_for_call", return_value=None), \
              patch("services.greetings.get_greeting", return_value={"greeting": "Hi Margaret!", "period": "morning", "template_index": 0, "selected_interest": "gardening"}):
             from services.context_cache import prefetch_and_cache
             result = await prefetch_and_cache("s1")
             assert result is not None
             assert "s1" in _cache
             assert _cache["s1"]["greeting"] == "Hi Margaret!"
+            assert _cache["s1"]["interest_scores"] == {"gardening": 5.0}
+            assert "news_context_full" in _cache["s1"]
 
 
 class TestRunDailyPrefetch:

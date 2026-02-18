@@ -5,6 +5,7 @@ Port of services/seniors.js — CRUD operations for senior profiles.
 
 from __future__ import annotations
 
+import json
 import re
 from loguru import logger
 from db import query_one, query_many, execute
@@ -57,6 +58,7 @@ async def update(senior_id: str, data: dict) -> dict | None:
         ("phone", "phone"),
         ("timezone", "timezone"),
         ("interests", "interests"),
+        ("interest_scores", "interest_scores"),
         ("familyInfo", "family_info"),
         ("medicalNotes", "medical_notes"),
         ("preferredCallTimes", "preferred_call_times"),
@@ -69,6 +71,8 @@ async def update(senior_id: str, data: dict) -> dict | None:
             val = data[key]
             if key == "phone":
                 val = _normalize_phone(val)
+            elif key == "interest_scores" and isinstance(val, dict):
+                val = json.dumps(val)
             fields.append(f"{col} = ${idx}")
             values.append(val)
             idx += 1

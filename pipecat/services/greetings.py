@@ -115,7 +115,9 @@ def _pick_index(array_length: int, exclude_index: int) -> int:
 
 
 def select_interest(
-    interests: list[str] | None, recent_memories: list[dict] | None = None
+    interests: list[str] | None,
+    recent_memories: list[dict] | None = None,
+    interest_scores: dict[str, float] | None = None,
 ) -> str | None:
     """Select an interest using weighted random (boosted by recent memory mentions)."""
     if not interests:
@@ -126,7 +128,8 @@ def select_interest(
     seven_days = 7 * 24 * 60 * 60 * 1000
     fourteen_days = 14 * 24 * 60 * 60 * 1000
 
-    weights: dict[str, float] = {i.lower(): 1.0 for i in interests}
+    scores = interest_scores or {}
+    weights: dict[str, float] = {i.lower(): scores.get(i.lower(), 1.0) for i in interests}
 
     for memory in (recent_memories or []):
         content = (memory.get("content") or "").lower()
@@ -201,6 +204,7 @@ def get_greeting(
     recent_memories: list[dict] | None = None,
     senior_id: str | None = None,
     news_context: str | None = None,
+    interest_scores: dict[str, float] | None = None,
 ) -> dict:
     """Generate a greeting for a senior.
 
@@ -253,7 +257,7 @@ def get_greeting(
                 }
 
     if add_followup and interests:
-        selected = select_interest(interests, recent_memories)
+        selected = select_interest(interests, recent_memories, interest_scores)
         if selected:
             followup = random.choice(INTEREST_FOLLOWUPS).replace("{interest}", selected)
             greeting += " " + followup

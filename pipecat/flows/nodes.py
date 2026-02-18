@@ -229,22 +229,12 @@ def build_main_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         handler=_make_transition_to_winding_down(session_state, flows_tools),
     ))
 
-    system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
-
     return NodeConfig(
         name="main",
-        role_messages=[{"role": "system", "content": system_content}],
+        role_messages=[],
         task_messages=[{"role": "user", "content": main_task}],
         functions=functions,
-        context_strategy=ContextStrategyConfig(
-            strategy=ContextStrategy.RESET_WITH_SUMMARY,
-            summary_prompt=(
-                "Summarize the conversation so far in 2-3 sentences, noting: "
-                "key topics discussed, the senior's mood/engagement, any reminders "
-                "delivered, and any concerns raised. Keep it concise — this summary "
-                "will replace the full conversation history."
-            ),
-        ),
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
     )
 
 

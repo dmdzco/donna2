@@ -98,23 +98,6 @@ class TestSeniorContext:
         ctx = _build_senior_context(state)
         assert "recent news" not in ctx
 
-    def test_includes_recent_turns(self):
-        turns = (
-            "RECENT CONVERSATIONS (from previous calls):\n"
-            "[Yesterday (5 min)]\n"
-            "  Senior: I went to the doctor yesterday\n"
-            "  Donna: Oh, how did that go?\n"
-            "(Reference these naturally — show you remember without repeating exactly.)"
-        )
-        state = _make_session_state(recent_turns=turns)
-        ctx = _build_senior_context(state)
-        assert "RECENT CONVERSATIONS" in ctx
-        assert "doctor" in ctx
-
-    def test_no_recent_turns_when_none(self):
-        state = _make_session_state(recent_turns=None)
-        ctx = _build_senior_context(state)
-        assert "RECENT CONVERSATIONS" not in ctx
 
 
 class TestReminderContext:

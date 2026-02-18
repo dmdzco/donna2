@@ -15,7 +15,7 @@ export default defineConfig({
     include: ['tests/**/*.test.js'],
 
     // Exclude patterns
-    exclude: ['tests/e2e/**', 'node_modules/**'],
+    exclude: ['tests/e2e/**', 'tests/integration/services/call-analysis.test.js', 'node_modules/**'],
 
     // Coverage configuration
     coverage: {

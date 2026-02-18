@@ -336,6 +336,7 @@ class QuickObserverProcessor(FrameProcessor):
 
         if isinstance(frame, TranscriptionFrame):
             text = frame.text
+            logger.debug("[QuickObserver] Transcription: {txt!r}", txt=text[:120])
             analysis = quick_analyze(text, self._recent_history)
             self.last_analysis = analysis
 
@@ -362,7 +363,9 @@ class QuickObserverProcessor(FrameProcessor):
                 has_strong = any(g["strength"] == "strong" for g in analysis.goodbye_signals)
                 if has_strong:
                     logger.info(
-                        "[QuickObserver] Strong goodbye detected — scheduling forced end in {d}s",
+                        "[QuickObserver] Strong goodbye detected on text={txt!r} signals={sig} — scheduling forced end in {d}s",
+                        txt=text[:80],
+                        sig=analysis.goodbye_signals,
                         d=self.GOODBYE_DELAY_SECONDS,
                     )
                     self._goodbye_task = asyncio.create_task(self._force_end_call())

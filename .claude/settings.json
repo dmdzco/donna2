@@ -11,13 +11,13 @@
         ]
       }
     ],
-    "PreCommit": [
+    "PreToolUse": [
       {
-        "matcher": "",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "cd pipecat && uv run python -m pytest tests/ -m 'not integration and not llm and not llm_simulation' --tb=short -q"
+            "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -q 'git commit'; then cd pipecat && uv run python -m pytest tests/ -m 'not integration and not llm and not llm_simulation' --tb=short -q; fi"
           }
         ]
       }

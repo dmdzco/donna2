@@ -303,7 +303,7 @@ class QuickObserverProcessor(FrameProcessor):
 
     # Seconds to wait after goodbye detection before forcing call end.
     # Gives the LLM time to generate and TTS to speak the goodbye audio.
-    GOODBYE_DELAY_SECONDS = 3.5
+    GOODBYE_DELAY_SECONDS = 2.0
 
     def __init__(self, session_state: dict | None = None, **kwargs):
         super().__init__(**kwargs)
@@ -369,6 +369,15 @@ class QuickObserverProcessor(FrameProcessor):
                     # Signal to Director to suppress stale guidance
                     if self._session_state is not None:
                         self._session_state["_goodbye_in_progress"] = True
+
+            # Cancel goodbye timer if senior keeps speaking (false goodbye)
+            elif self._goodbye_task is not None and not self._goodbye_task.done():
+                if not analysis.goodbye_signals:
+                    logger.info("[QuickObserver] Senior still speaking — cancelling goodbye timer")
+                    self._goodbye_task.cancel()
+                    self._goodbye_task = None
+                    if self._session_state is not None:
+                        self._session_state["_goodbye_in_progress"] = False
 
         # Always pass frames through
         await self.push_frame(frame, direction)

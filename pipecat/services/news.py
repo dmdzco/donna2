@@ -10,6 +10,7 @@ from loguru import logger
 _openai_client = None
 _news_cache: dict[str, dict] = {}
 CACHE_TTL = 3600  # 1 hour in seconds
+_MAX_CACHE_ENTRIES = 50
 
 
 def _get_openai():
@@ -21,6 +22,14 @@ def _get_openai():
         from openai import OpenAI
         _openai_client = OpenAI(api_key=api_key)
     return _openai_client
+
+
+def _evict_expired():
+    """Remove expired entries from the cache."""
+    now = time.time()
+    expired = [k for k, v in _news_cache.items() if now - v["timestamp"] >= CACHE_TTL]
+    for k in expired:
+        del _news_cache[k]
 
 
 def _cache_key(interests: list[str]) -> str:
@@ -67,6 +76,9 @@ async def get_news_for_senior(interests: list[str], limit: int = 3) -> str | Non
             return None
 
         formatted = format_news_context(news_content)
+        # Evict expired entries if cache is getting large
+        if len(_news_cache) >= _MAX_CACHE_ENTRIES:
+            _evict_expired()
         _news_cache[key] = {"news": formatted, "timestamp": time.time()}
         logger.info("Fetched and cached news successfully")
         return formatted
@@ -125,6 +137,8 @@ async def web_search_query(query: str) -> str | None:
             logger.info("No web search content returned")
             return None
 
+        if len(_news_cache) >= _MAX_CACHE_ENTRIES:
+            _evict_expired()
         _news_cache[key] = {"news": content, "timestamp": time.time()}
         logger.info("Web search completed successfully")
         return content

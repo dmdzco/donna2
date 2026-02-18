@@ -35,8 +35,11 @@ async def run_post_call(
 
     analysis = None
 
+    # Each step has its own try/except so a failure in one step
+    # (e.g. Gemini outage) doesn't prevent the others from running.
+
+    # 1. Complete conversation record
     try:
-        # 1. Complete conversation record
         if conversation_id:
             from services.conversations import complete
             await complete(call_sid, {
@@ -44,8 +47,11 @@ async def run_post_call(
                 "status": "completed",
                 "transcript": transcript,
             })
+    except Exception as e:
+        logger.error("[{cs}] Post-call step 1 (complete conversation) failed: {err}", cs=call_sid, err=str(e))
 
-        # 2. Run call analysis (Gemini Flash)
+    # 2. Run call analysis (Gemini Flash)
+    try:
         if transcript and senior:
             from services.call_analysis import analyze_completed_call, save_call_analysis
             analysis = await analyze_completed_call(transcript, senior)
@@ -58,8 +64,11 @@ async def run_post_call(
                 from services.conversations import update_summary
                 await update_summary(call_sid, summary)
                 logger.info("[{cs}] Persisted call summary ({n} chars)", cs=call_sid, n=len(summary))
+    except Exception as e:
+        logger.error("[{cs}] Post-call step 2 (call analysis) failed: {err}", cs=call_sid, err=str(e))
 
-        # 3. Extract and store memories
+    # 3. Extract and store memories
+    try:
         if transcript and senior_id:
             from services.memory import extract_from_conversation
             # Format transcript list into readable text for LLM extraction
@@ -74,8 +83,11 @@ async def run_post_call(
             await extract_from_conversation(
                 senior_id, formatted_transcript, conversation_id or "unknown"
             )
+    except Exception as e:
+        logger.error("[{cs}] Post-call step 3 (memory extraction) failed: {err}", cs=call_sid, err=str(e))
 
-        # 4. Save daily context
+    # 4. Save daily context
+    try:
         if senior_id and conversation_tracker:
             from services.daily_context import save_call_context
             senior = session_state.get("senior") or {}
@@ -92,24 +104,29 @@ async def run_post_call(
                     "summary": analysis.get("summary") if analysis else None,
                 },
             )
+    except Exception as e:
+        logger.error("[{cs}] Post-call step 4 (daily context) failed: {err}", cs=call_sid, err=str(e))
 
-        # 5. Handle reminder cleanup
+    # 5. Handle reminder cleanup
+    try:
         reminder_delivery = session_state.get("reminder_delivery")
         if reminder_delivery:
             delivered_set = session_state.get("reminders_delivered", set())
             if not delivered_set:
                 from services.reminder_delivery import mark_call_ended_without_acknowledgment
                 await mark_call_ended_without_acknowledgment(reminder_delivery["id"])
+    except Exception as e:
+        logger.error("[{cs}] Post-call step 5 (reminder cleanup) failed: {err}", cs=call_sid, err=str(e))
 
-        # 6. Clear caches
+    # 6. Clear caches (always runs even if earlier steps failed)
+    try:
         if senior_id:
             from services.context_cache import clear_cache
             clear_cache(senior_id)
         if call_sid:
             from services.scheduler import clear_reminder_context
             clear_reminder_context(call_sid)
-
-        logger.info("[{cs}] Post-call processing complete", cs=call_sid)
-
     except Exception as e:
-        logger.error("[{cs}] Post-call error: {err}", cs=call_sid, err=str(e))
+        logger.error("[{cs}] Post-call step 6 (cache clearing) failed: {err}", cs=call_sid, err=str(e))
+
+    logger.info("[{cs}] Post-call processing complete", cs=call_sid)

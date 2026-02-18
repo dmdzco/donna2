@@ -24,8 +24,8 @@ def _get_openai():
         if not api_key:
             logger.warning("OPENAI_API_KEY not set — memory features disabled")
             return None
-        from openai import OpenAI
-        _openai_client = OpenAI(api_key=api_key)
+        from openai import AsyncOpenAI
+        _openai_client = AsyncOpenAI(api_key=api_key)
     return _openai_client
 
 
@@ -62,7 +62,7 @@ async def generate_embedding(text: str) -> list[float] | None:
     client = _get_openai()
     if client is None:
         return None
-    response = client.embeddings.create(model="text-embedding-3-small", input=text)
+    response = await client.embeddings.create(model="text-embedding-3-small", input=text)
     return response.data[0].embedding
 
 
@@ -323,7 +323,7 @@ async def extract_from_conversation(
     )
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
@@ -332,14 +332,22 @@ async def extract_from_conversation(
         memories_array = result.get("memories", result) if isinstance(result, dict) else result
 
         if isinstance(memories_array, list):
+            stored = 0
             for mem in memories_array:
-                await store(
-                    senior_id,
-                    mem.get("type", "fact"),
-                    mem["content"],
-                    conversation_id,
-                    mem.get("importance", 50),
-                )
-            logger.info("Extracted {n} memories from conversation", n=len(memories_array))
+                content = mem.get("content")
+                if not content:
+                    continue
+                try:
+                    await store(
+                        senior_id,
+                        mem.get("type", "fact"),
+                        content,
+                        conversation_id,
+                        mem.get("importance", 50),
+                    )
+                    stored += 1
+                except Exception as e:
+                    logger.warning("Failed to store memory: {err}", err=str(e))
+            logger.info("Extracted {n} memories from conversation", n=stored)
     except Exception as e:
         logger.error("Failed to extract memories: {err}", err=str(e))

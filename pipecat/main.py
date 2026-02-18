@@ -127,6 +127,10 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error("Pipeline error: {err}", err=str(e))
     finally:
+        # Clean up call_metadata to prevent memory leaks on crashes
+        cs = session_state.get("call_sid")
+        if cs:
+            call_metadata.pop(cs, None)
         if websocket.client_state.name != "DISCONNECTED":
             try:
                 await websocket.close()

@@ -94,7 +94,7 @@ def get_local_hour(tz_name: str | None) -> int:
         tz = ZoneInfo(tz_name or "America/New_York")
         return datetime.now(tz).hour
     except Exception:
-        return datetime.utcnow().hour - 5
+        return (datetime.now().hour - 5) % 24
 
 
 def get_time_period(hour: int) -> str:

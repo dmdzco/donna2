@@ -236,7 +236,7 @@ def build_main_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         role_messages=[{"role": "system", "content": system_content}],
         task_messages=[{"role": "user", "content": main_task}],
         functions=functions,
-        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
         respond_immediately=True,
     )
 

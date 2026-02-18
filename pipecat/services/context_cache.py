@@ -55,7 +55,9 @@ def _get_local_hour(tz_name: str | None) -> int:
 
 
 def _select_interest(
-    interests: list[str] | None, recent_memories: list[dict] | None
+    interests: list[str] | None,
+    recent_memories: list[dict] | None,
+    interest_scores: dict[str, float] | None = None,
 ) -> str | None:
     """Select an interest using weighted random (boosted by recent memory mentions)."""
     if not interests:
@@ -65,7 +67,8 @@ def _select_interest(
     seven_days = 7 * 24 * 60 * 60 * 1000
     fourteen_days = 14 * 24 * 60 * 60 * 1000
 
-    weights: dict[str, float] = {i.lower(): 1.0 for i in interests}
+    scores = interest_scores or {}
+    weights: dict[str, float] = {i.lower(): scores.get(i.lower(), 1.0) for i in interests}
 
     for memory in (recent_memories or []):
         content = (memory.get("content") or "").lower()
@@ -147,12 +150,20 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
             get_recent(senior_id, 10),
         )
 
-        # Fetch news for seniors with interests
+        # Fetch news for seniors with interests (fetch full set, pick subset for prompt)
+        news_context_full = None
         news_context = None
+        interest_scores = senior.get("interest_scores") or {}
         if senior.get("interests"):
             try:
-                from services.news import get_news_for_senior
-                news_context = await get_news_for_senior(senior["interests"], limit=3)
+                from services.news import get_news_for_senior, select_stories_for_call
+                news_context_full = await get_news_for_senior(senior["interests"], limit=8)
+                news_context = select_stories_for_call(
+                    news_context_full,
+                    interests=senior.get("interests"),
+                    interest_scores=interest_scores,
+                    count=3,
+                )
             except Exception as e:
                 logger.error("Error fetching news for cache: {err}", err=str(e))
 
@@ -165,6 +176,7 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
             recent_memories=recent_mems,
             senior_id=senior_id,
             news_context=news_context,
+            interest_scores=interest_scores,
         )
 
         logger.info(
@@ -200,6 +212,8 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
             "important_memories": important,
             "memory_context": "\n".join(memory_parts),
             "news_context": news_context,
+            "news_context_full": news_context_full,
+            "interest_scores": interest_scores,
             "greeting": greeting_result["greeting"],
             "last_greeting_index": greeting_result["template_index"],
             "cached_at": now,

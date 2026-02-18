@@ -5,6 +5,7 @@ from services.greetings import (
     get_inbound_greeting,
     get_time_period,
     get_local_hour,
+    select_interest,
     _extract_news_topic,
     MORNING_TEMPLATES,
     AFTERNOON_TEMPLATES,
@@ -83,6 +84,37 @@ class TestGetGreeting:
         )
         assert isinstance(result, dict)
         assert "Margaret" in result["greeting"]
+
+    def test_accepts_interest_scores(self):
+        result = get_greeting(
+            senior_name="Margaret",
+            interests=["gardening", "cooking"],
+            interest_scores={"gardening": 8.5, "cooking": 2.0},
+        )
+        assert isinstance(result, dict)
+        assert "Margaret" in result["greeting"]
+
+
+class TestSelectInterestWithScores:
+    def test_interest_scores_influence_selection(self):
+        """With a very high score, the scored interest should be selected more often."""
+        interests = ["low_one", "high_one"]
+        scores = {"low_one": 0.1, "high_one": 10.0}
+        counts = {"low_one": 0, "high_one": 0}
+        for _ in range(100):
+            result = select_interest(interests, None, interest_scores=scores)
+            counts[result] += 1
+        # high_one should dominate
+        assert counts["high_one"] > counts["low_one"]
+
+    def test_without_scores_all_equal(self):
+        interests = ["a", "b", "c"]
+        result = select_interest(interests, None)
+        assert result in interests
+
+    def test_scores_param_is_optional(self):
+        result = select_interest(["gardening"], None)
+        assert result == "gardening"
 
 
 class TestInboundGreeting:

@@ -86,6 +86,43 @@ async def run_post_call(
     except Exception as e:
         logger.error("[{cs}] Post-call step 3 (memory extraction) failed: {err}", cs=call_sid, err=str(e))
 
+    # 3.5 Discover new interests from the call
+    try:
+        if senior_id and senior and analysis:
+            from services.interest_discovery import discover_new_interests, add_interests_to_senior
+            tracker_topics = (
+                conversation_tracker.state.topics_discussed
+                if conversation_tracker else []
+            )
+            existing_interests = senior.get("interests") or []
+            new_interests = discover_new_interests(
+                existing_interests, analysis, tracker_topics
+            )
+            if new_interests:
+                updated = await add_interests_to_senior(
+                    senior_id, new_interests, existing_interests
+                )
+                # Update senior dict in session so step 3.6 uses fresh interests
+                senior["interests"] = updated
+                logger.info(
+                    "[{cs}] Discovered {n} new interests: {new}",
+                    cs=call_sid, n=len(new_interests), new=new_interests,
+                )
+    except Exception as e:
+        logger.error("[{cs}] Post-call step 3.5 (interest discovery) failed: {err}", cs=call_sid, err=str(e))
+
+    # 3.6 Compute and persist interest engagement scores
+    try:
+        if senior_id and senior:
+            from services.interest_discovery import compute_interest_scores, update_interest_scores
+            interests = senior.get("interests") or []
+            if interests:
+                scores = await compute_interest_scores(senior_id, interests)
+                await update_interest_scores(senior_id, scores)
+                logger.info("[{cs}] Updated interest scores", cs=call_sid)
+    except Exception as e:
+        logger.error("[{cs}] Post-call step 3.6 (interest scores) failed: {err}", cs=call_sid, err=str(e))
+
     # 4. Save daily context
     try:
         if senior_id and conversation_tracker:

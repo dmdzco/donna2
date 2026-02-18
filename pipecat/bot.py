@@ -244,9 +244,6 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         ),
     )
 
-    # Store pipeline task in session_state for tool handlers (e.g. typing sound)
-    session_state["_pipeline_task"] = task
-
     # Give processors references to the task so they can force-end calls
     # Quick Observer: instant goodbye detection (regex, 3.5s delay)
     # Director: time-based call ending + phase-based fallbacks

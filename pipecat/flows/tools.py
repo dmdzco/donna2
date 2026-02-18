@@ -2,7 +2,7 @@
 
 Defines four tools available during calls:
 - search_memories: Semantic search over senior's memory bank
-- web_search: General web search with typing sound UX
+- web_search: General web search with spoken filler UX
 - mark_reminder_acknowledged: Track reminder delivery status
 - save_important_detail: Store new memories from conversation
 
@@ -14,10 +14,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date
-from pathlib import Path
 
 from loguru import logger
-from pipecat.frames.frames import OutputAudioRawFrame
 from pipecat_flows import FlowsFunctionSchema
 
 
@@ -45,7 +43,11 @@ def _web_search_schema() -> dict:
             f"Search the web for current information. Today is {today}. "
             "Use this whenever the senior asks about news, weather, sports, facts, "
             "or anything you're unsure about. Always include the current year in "
-            "queries about recent events, scores, or elections."
+            "queries about recent events, scores, or elections. "
+            "IMPORTANT: Before calling this tool, always say a brief natural filler "
+            "like 'Let me look that up for you', 'One moment while I check on that', "
+            "or 'Hmm, let me find out'. This gives the senior something to hear while "
+            "the search runs. Vary the phrasing each time."
         ),
         "properties": {
             "query": {
@@ -100,37 +102,6 @@ SAVE_DETAIL_SCHEMA = {
 
 
 # ---------------------------------------------------------------------------
-# Typing sound UX (plays while web_search runs)
-# ---------------------------------------------------------------------------
-
-_TYPING_SOUND: bytes | None = None
-
-
-def _load_typing_sound() -> bytes | None:
-    global _TYPING_SOUND
-    if _TYPING_SOUND is None:
-        path = Path(__file__).parent.parent / "assets" / "typing.raw"
-        if path.exists():
-            _TYPING_SOUND = path.read_bytes()
-    return _TYPING_SOUND
-
-
-async def _play_typing_loop(pipeline_task, interval: float = 1.0) -> None:
-    """Play typing sound on loop until cancelled."""
-    sound = _load_typing_sound()
-    if not sound:
-        return
-    try:
-        while True:
-            await pipeline_task.queue_frame(
-                OutputAudioRawFrame(audio=sound, sample_rate=8000, num_channels=1)
-            )
-            await asyncio.sleep(interval)
-    except asyncio.CancelledError:
-        pass
-
-
-# ---------------------------------------------------------------------------
 # Tool handler factory (closure over session_state)
 # ---------------------------------------------------------------------------
 
@@ -175,12 +146,6 @@ def make_tool_handlers(session_state: dict) -> dict:
         if not query:
             return {"status": "success", "result": "No query provided."}
 
-        # Start typing sound in background while search runs
-        task = session_state.get("_pipeline_task")
-        typing_task = None
-        if task:
-            typing_task = asyncio.create_task(_play_typing_loop(task))
-
         try:
             from services.news import web_search_query
             result = await asyncio.wait_for(web_search_query(query), timeout=15.0)
@@ -193,9 +158,6 @@ def make_tool_handlers(session_state: dict) -> dict:
         except Exception as e:
             logger.error("web_search error: {err}", err=str(e))
             return {"status": "success", "result": "Search unavailable. Continue naturally."}
-        finally:
-            if typing_task:
-                typing_task.cancel()
 
     async def handle_mark_reminder(args: dict) -> dict:
         reminder_id = args.get("reminder_id", "")

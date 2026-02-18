@@ -178,7 +178,6 @@ class TestWebSearchToolHandler:
         state = {
             "senior_id": "test-senior-1",
             "senior": {"name": "Margaret", "interests": ["gardening"]},
-            "_pipeline_task": None,  # No typing sound in tests
         }
         state.update(state_overrides)
         return make_tool_handlers(state), state

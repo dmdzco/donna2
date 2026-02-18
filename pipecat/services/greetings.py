@@ -4,6 +4,8 @@ Port of services/greetings.js — generates varied, time-aware greetings
 for seniors with per-senior rotation tracking.
 """
 
+from __future__ import annotations
+
 import random
 from datetime import datetime
 from zoneinfo import ZoneInfo

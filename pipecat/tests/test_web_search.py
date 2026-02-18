@@ -245,3 +245,66 @@ class TestWebSearchToolHandler:
         # If the handler correctly imports web_search_query, the mock should be called
         # Note: due to late import in closure, we patch at the module level
         assert result["status"] == "success"
+
+
+# ---------------------------------------------------------------------------
+# format_news_context (pure function)
+# ---------------------------------------------------------------------------
+
+
+class TestFormatNewsContext:
+    """Test the format_news_context wrapper."""
+
+    def test_wraps_news_with_context(self):
+        from services.news import format_news_context
+        result = format_news_context("- Story 1\n- Story 2")
+        assert "Story 1" in result
+        assert "Story 2" in result
+        assert "naturally" in result.lower()
+
+    def test_includes_disclaimer(self):
+        from services.news import format_news_context
+        result = format_news_context("Some news")
+        assert "don't force it" in result.lower() or "relevant to the conversation" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# clear_cache
+# ---------------------------------------------------------------------------
+
+
+class TestClearNewsCache:
+    """Test the cache clearing function."""
+
+    def test_empties_cache(self):
+        from services.news import clear_cache, _news_cache
+        _news_cache["test_key"] = {"news": "test", "timestamp": 0}
+        clear_cache()
+        assert len(_news_cache) == 0
+
+
+# ---------------------------------------------------------------------------
+# get_news_for_senior edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestGetNewsEdgeCases:
+    """Additional edge case tests for get_news_for_senior."""
+
+    @pytest.fixture(autouse=True)
+    def clear_cache(self):
+        _news_cache.clear()
+        yield
+        _news_cache.clear()
+
+    @pytest.mark.asyncio
+    async def test_empty_interests_returns_none(self):
+        result = await get_news_for_senior([])
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_no_openai_returns_none(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch("services.news._openai_client", None):
+                result = await get_news_for_senior(["gardening"])
+                assert result is None

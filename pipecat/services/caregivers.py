@@ -3,6 +3,8 @@
 Port of services/caregivers.js — manages caregiver-senior relationships via Clerk user IDs.
 """
 
+from __future__ import annotations
+
 from loguru import logger
 from db import query_one, query_many, execute
 

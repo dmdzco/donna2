@@ -3,6 +3,8 @@
 Port of services/seniors.js — CRUD operations for senior profiles.
 """
 
+from __future__ import annotations
+
 import re
 from loguru import logger
 from db import query_one, query_many, execute

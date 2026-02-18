@@ -8,6 +8,8 @@ Split from scheduler.py to separate delivery tracking (used by bot.py,
 tools.py) from the polling loop and call triggering (used by main.py).
 """
 
+from __future__ import annotations
+
 from loguru import logger
 from db import query_one, execute
 

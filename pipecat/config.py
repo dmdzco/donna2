@@ -52,6 +52,9 @@ class Settings:
     cofounder_api_key_2: str = ""
     clerk_secret_key: str = ""
 
+    # ---- Monitoring ----
+    sentry_dsn: str = ""
+
     # ---- Feature Flags ----
     scheduler_enabled: bool = False
 
@@ -96,6 +99,8 @@ def _load_settings() -> Settings:
         cofounder_api_key_1=_env("COFOUNDER_API_KEY_1"),
         cofounder_api_key_2=_env("COFOUNDER_API_KEY_2"),
         clerk_secret_key=_env("CLERK_SECRET_KEY"),
+        # Monitoring
+        sentry_dsn=_env("SENTRY_DSN"),
         # Feature Flags
         scheduler_enabled=_env("SCHEDULER_ENABLED", "false").lower() == "true",
     )

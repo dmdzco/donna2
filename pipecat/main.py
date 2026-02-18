@@ -34,6 +34,21 @@ def _warning_handler(message, category, filename, lineno, file=None, line=None):
 
 warnings.showwarning = _warning_handler
 
+# Sentry error monitoring (before FastAPI import for auto-instrumentation)
+try:
+    import sentry_sdk
+    _sentry_dsn = os.getenv("SENTRY_DSN", "")
+    if _sentry_dsn:
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            traces_sample_rate=0,
+            send_default_pii=False,
+            environment="production" if os.getenv("RAILWAY_PUBLIC_DOMAIN") else "development",
+        )
+        logger.info("Sentry initialized")
+except ImportError:
+    pass
+
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -123,9 +138,21 @@ async def websocket_endpoint(websocket: WebSocket):
     }
 
     try:
+        import sentry_sdk as _sentry
+        _sentry.set_tag("senior_id", session_state.get("senior_id", "unknown"))
+        _sentry.set_tag("call_type", session_state.get("call_type", "unknown"))
+    except ImportError:
+        pass
+
+    try:
         await run_bot(websocket, session_state)
     except Exception as e:
         logger.error("Pipeline error: {err}", err=str(e))
+        try:
+            import sentry_sdk as _sentry
+            _sentry.capture_exception(e)
+        except ImportError:
+            pass
     finally:
         # Clean up call_metadata to prevent memory leaks on crashes
         cs = session_state.get("call_sid")

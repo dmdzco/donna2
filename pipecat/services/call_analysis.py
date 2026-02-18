@@ -5,6 +5,8 @@ summary, caregiver alerts, engagement metrics, and follow-up suggestions.
 Uses Gemini Flash for cost efficiency.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re

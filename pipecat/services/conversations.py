@@ -3,6 +3,8 @@
 Port of services/conversations.js — CRUD for call records + summary/transcript retrieval.
 """
 
+from __future__ import annotations
+
 import json
 import math
 from datetime import datetime, timezone, timedelta

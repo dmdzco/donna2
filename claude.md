@@ -295,6 +295,9 @@ DONNA_API_KEY=...
 # Scheduler
 SCHEDULER_ENABLED=false          # MUST be false (Node.js runs scheduler)
 
+# Monitoring
+SENTRY_DSN=...                               # Error monitoring (optional, both backends)
+
 # Optional
 FAST_OBSERVER_MODEL=gemini-3-flash-preview   # Director model
 CALL_ANALYSIS_MODEL=gemini-3-flash-preview   # Post-call analysis model

@@ -1,0 +1,61 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy-pipecat:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: pipecat
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy Pipecat to production
+        run: railway up --service donna-pipecat
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+  deploy-nodejs:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy Node.js to production
+        run: railway up --service donna-nodejs
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+  health-check:
+    needs: [deploy-pipecat, deploy-nodejs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health check — Pipecat production
+        run: |
+          for i in $(seq 1 10); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' "https://donna-pipecat-production.up.railway.app/health" || true)
+            if [ "$status" = "200" ]; then echo "Pipecat healthy"; break; fi
+            echo "Attempt $i: status=$status, retrying in 15s..."
+            sleep 15
+          done
+          [ "$status" = "200" ] || (echo "Pipecat health check failed" && exit 1)
+
+      - name: Health check — Node.js production
+        run: |
+          for i in $(seq 1 10); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' "${{ vars.PRODUCTION_NODEJS_URL }}/health" || true)
+            if [ "$status" = "200" ]; then echo "Node.js healthy"; break; fi
+            echo "Attempt $i: status=$status, retrying in 15s..."
+            sleep 15
+          done
+          [ "$status" = "200" ] || (echo "Node.js health check failed" && exit 1)

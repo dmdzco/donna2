@@ -34,12 +34,12 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 
 ### Working Features (Pipecat)
 - **2-Layer Observer Architecture + Post-Call**
-  - Layer 1: Quick Observer (0ms) - 268 regex patterns + programmatic goodbye (3.5s EndFrame)
+  - Layer 1: Quick Observer (0ms) - 268 regex patterns + programmatic goodbye (2s EndFrame)
   - Layer 2: Conversation Director (~150ms) - Non-blocking Gemini Flash per-turn analysis
   - Post-Call: Analysis, memory extraction, daily context (Gemini Flash)
 - **Pipecat Flows** - 4-phase call state machine (opening → main → winding_down → closing)
 - **4 LLM Tools** - search_memories, get_news, save_important_detail, mark_reminder_acknowledged
-- **Programmatic Call Ending** - Quick Observer detects goodbye → EndFrame after 3.5s (bypasses LLM)
+- **Programmatic Call Ending** - Quick Observer detects goodbye → EndFrame after 2s delay (bypasses LLM)
 - **Director Fallback Actions** - Force winding-down at 9min, force end at 12min
 - **Full In-Call Context Retention** - APPEND strategy keeps complete conversation history (no summary truncation)
 - **Cross-Call Turn History** - Recent turns from previous calls loaded into system prompt via `get_recent_turns()`
@@ -81,7 +81,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1 (0ms): 268 regex patterns
               │                      │  Injects guidance via LLMMessagesAppendFrame
-              │                      │  Strong goodbye → EndFrame in 3.5s
+              │                      │  Strong goodbye → EndFrame in 2s
               └─────────┬───────────┘
                         ▼
               ┌─────────────────────┐
@@ -129,36 +129,38 @@ On disconnect: complete conversation → call analysis (Gemini) → summary pers
 ```
 pipecat/
 ├── main.py                          ← FastAPI entry point, /health, /ws, middleware
-├── bot.py                           ← Pipeline assembly + run_bot() (277 LOC)
-├── config.py                        ← All env vars centralized (105 LOC)
-├── prompts.py                       ← System prompts + phase task instructions (91 LOC)
+├── bot.py                           ← Pipeline assembly + run_bot() (297 LOC)
+├── config.py                        ← All env vars centralized (110 LOC)
+├── prompts.py                       ← System prompts + phase task instructions (105 LOC)
 │
 ├── flows/
-│   ├── nodes.py                     ← 4 call phase NodeConfigs (imports prompts.py) (314 LOC)
-│   └── tools.py                     ← 4 LLM tool schemas + closure-based handlers (230 LOC)
+│   ├── nodes.py                     ← 4 call phase NodeConfigs (imports prompts.py) (317 LOC)
+│   └── tools.py                     ← 4 LLM tool schemas + closure-based handlers (236 LOC)
 │
 ├── processors/
 │   ├── patterns.py                  ← Pattern data: 268 regex patterns, 19 categories (503 LOC)
-│   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame (374 LOC)
-│   ├── conversation_director.py     ← Layer 2: Gemini 3 Flash Preview non-blocking (180 LOC)
-│   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (239 LOC)
+│   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame (386 LOC)
+│   ├── conversation_director.py     ← Layer 2: Gemini 3 Flash Preview non-blocking (183 LOC)
+│   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (246 LOC)
+│   ├── metrics_logger.py            ← Call metrics logging processor (97 LOC)
 │   ├── goodbye_gate.py              ← False-goodbye grace period — NOT in active pipeline (135 LOC)
-│   └── guidance_stripper.py         ← Strip <guidance> tags + [BRACKETED] directives (74 LOC)
+│   └── guidance_stripper.py         ← Strip <guidance> tags + [BRACKETED] directives (115 LOC)
 │
 ├── services/
-│   ├── scheduler.py                 ← Reminder polling + outbound calls (403 LOC)
-│   ├── reminder_delivery.py         ← Delivery CRUD + prompt formatting (93 LOC)
-│   ├── post_call.py                 ← Post-call: analysis, memory, cleanup (105 LOC)
-│   ├── director_llm.py              ← Gemini Flash analysis for Director (339 LOC)
-│   ├── call_analysis.py             ← Post-call analysis (Gemini Flash) (221 LOC)
-│   ├── memory.py                    ← Semantic memory (pgvector, decay) (356 LOC)
-│   ├── context_cache.py             ← Pre-cache at 5 AM local (260 LOC)
-│   ├── conversations.py             ← Conversation CRUD (168 LOC)
-│   ├── daily_context.py             ← Cross-call same-day memory (159 LOC)
-│   ├── greetings.py                 ← Greeting templates + rotation (218 LOC)
-│   ├── seniors.py                   ← Senior profile CRUD (99 LOC)
-│   ├── caregivers.py                ← Caregiver relationships (76 LOC)
-│   └── news.py                      ← OpenAI web search (91 LOC)
+│   ├── scheduler.py                 ← Reminder polling + outbound calls (427 LOC)
+│   ├── reminder_delivery.py         ← Delivery CRUD + prompt formatting (95 LOC)
+│   ├── post_call.py                 ← Post-call: analysis, memory, cleanup (169 LOC)
+│   ├── director_llm.py              ← Gemini Flash analysis for Director (340 LOC)
+│   ├── call_analysis.py             ← Post-call analysis (Gemini Flash) (226 LOC)
+│   ├── memory.py                    ← Semantic memory (pgvector, decay) (355 LOC)
+│   ├── interest_discovery.py        ← Interest extraction from conversations (183 LOC)
+│   ├── context_cache.py             ← Pre-cache at 5 AM local (290 LOC)
+│   ├── conversations.py             ← Conversation CRUD (250 LOC)
+│   ├── daily_context.py             ← Cross-call same-day memory (161 LOC)
+│   ├── greetings.py                 ← Greeting templates + rotation (300 LOC)
+│   ├── seniors.py                   ← Senior profile CRUD (105 LOC)
+│   ├── caregivers.py                ← Caregiver relationships (78 LOC)
+│   └── news.py                      ← OpenAI web search (202 LOC)
 │
 ├── api/
 │   ├── routes/
@@ -169,7 +171,7 @@ pipecat/
 │
 ├── db/client.py                     ← asyncpg pool + query helpers
 ├── lib/sanitize.py                  ← PII-safe logging
-├── tests/                           ← 13 test files
+├── tests/                           ← 36 test files + helpers/mocks/scenarios
 ├── pyproject.toml                   ← Python 3.12, Pipecat v0.0.101+
 └── Dockerfile                       ← python:3.12-slim + uv
 ```
@@ -214,7 +216,7 @@ pipecat/
 | Add/modify LLM tools | `pipecat/flows/tools.py` (schemas + handlers) |
 | Modify Quick Observer patterns | `pipecat/processors/patterns.py` (data) + `pipecat/processors/quick_observer.py` (logic) |
 | Modify Conversation Director | `pipecat/processors/conversation_director.py` + `pipecat/services/director_llm.py` |
-| Modify call ending behavior | `pipecat/processors/quick_observer.py` (goodbye EndFrame) + `pipecat/processors/conversation_director.py` (time-based) |
+| Modify call ending behavior | `pipecat/processors/quick_observer.py` (goodbye detection) + `pipecat/processors/goodbye_gate.py` (grace period) + `pipecat/processors/conversation_director.py` (time-based) |
 | Change pipeline assembly | `pipecat/bot.py` |
 | Modify post-call processing | `pipecat/services/post_call.py` |
 | Modify post-call analysis | `pipecat/services/call_analysis.py` |

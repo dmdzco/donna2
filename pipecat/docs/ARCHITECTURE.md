@@ -43,9 +43,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
               │   Quick Observer     │  Layer 1: Instant regex (0ms)
               │   (268 patterns)     │  → health, goodbye, emotion,
               │                      │    cognitive, activity signals
-              │   Programmatic hang- │  → Strong goodbye detected:
-              │   up: EndFrame after │    schedules EndFrame in 3.5s
-              │   3.5s delay         │
+              │   Goodbye detected → │  → notifies GoodbyeGate
               └─────────┬───────────┘
                         │
                         ▼
@@ -127,7 +125,7 @@ Instant regex-based analysis with 268 patterns across 19 categories:
 | **Family** | 25+ relationship patterns including pets | Context enrichment |
 | **Safety** | Scams, strangers, emergencies | Safety concern flags |
 | **Engagement** | Response length analysis | Engagement level tracking |
-| **Goodbye** | Strong/weak goodbye detection | **Programmatic call end (3.5s)** |
+| **Goodbye** | Strong/weak goodbye detection | **Notifies GoodbyeGate** |
 | **Factual/Curiosity** | 18 patterns ("what year", "how tall") | Web search trigger |
 | **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 
@@ -135,7 +133,7 @@ Instant regex-based analysis with 268 patterns across 19 categories:
 
 **Model recommendations**: Quick Observer also generates token budget recommendations based on signal priority (16 ordered rules). Crisis situations get 350 tokens; simple questions get 100. This data is available on the `AnalysisResult` but is not currently consumed by the pipeline — it's designed for future dynamic token routing.
 
-**Programmatic Goodbye**: When a strong goodbye signal is detected (e.g., "goodbye", "talk to you later"), Quick Observer schedules an `EndFrame` after 3.5 seconds via the pipeline task reference. This bypasses unreliable LLM tool-calling for call termination. It also sets `session_state["_goodbye_in_progress"] = True` to suppress Director guidance injection during the goodbye.
+**Programmatic Goodbye**: When a strong goodbye signal is detected (e.g., "goodbye", "talk to you later"), Quick Observer schedules an `EndFrame` after 2 seconds via the pipeline task reference. This bypasses unreliable LLM tool-calling for call termination. It also sets `session_state["_goodbye_in_progress"] = True` to suppress Director guidance injection during the goodbye.
 
 ### Layer 2: Conversation Director (~150ms, non-blocking)
 
@@ -220,6 +218,7 @@ closing/medium/warm | CLOSING: Say a warm goodbye. Keep it brief.
                                             │               │
                                             │ • Last remind │
                                             │ • Summary     │
+                                            │ • Save details│
                                             └───────┬───────┘
                                                      │
                                         transition_to_closing
@@ -243,6 +242,15 @@ closing/medium/warm | CLOSING: Say a warm goodbye. Keep it brief.
 | **Main** | `search_memories`, `get_news`, `save_important_detail`, `mark_reminder_acknowledged`, `transition_to_winding_down` |
 | **Winding Down** | `mark_reminder_acknowledged`, `save_important_detail`, `transition_to_closing` |
 | **Closing** | *(none — post_action ends call)* |
+
+### Context Strategies Per Phase
+
+| Phase | Strategy | Effect |
+|-------|----------|--------|
+| **Opening** | APPEND / respond_immediately | Keeps greeting in context, responds right away |
+| **Main** | RESET_WITH_SUMMARY | Manages context window for long conversations |
+| **Winding Down** | APPEND | Preserves recent context for summary |
+| **Closing** | APPEND | Preserves goodbye context |
 
 ### Tool Descriptions
 
@@ -279,7 +287,7 @@ pipecat/
 │   │   ├── voice.py                 ← /voice/answer (TwiML), /voice/status
 │   │   └── calls.py                 ← /api/call, /api/calls, /api/calls/:sid/end
 │   ├── middleware/
-│   │   ├── auth.py                  ← JWT admin auth
+│   │   ├── auth.py                  ← 3-tier auth (cofounder key, JWT, Clerk)
 │   │   ├── api_auth.py              ← API key auth (DONNA_API_KEY)
 │   │   ├── rate_limit.py            ← Rate limiting (slowapi)
 │   │   ├── security.py              ← Security headers (HSTS, X-Frame-Options)
@@ -297,6 +305,7 @@ pipecat/
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame
 │   ├── conversation_director.py     ← Layer 2: Gemini Flash guidance (non-blocking)
 │   ├── conversation_tracker.py      ← In-call topic/question/advice tracking + transcript
+│   ├── metrics_logger.py            ← Call metrics logging processor
 │   ├── goodbye_gate.py              ← False-goodbye grace period (NOT in active pipeline — available but unused)
 │   └── guidance_stripper.py         ← Strips <guidance> tags and [BRACKETED] directives
 │
@@ -309,10 +318,16 @@ pipecat/
 │   ├── greetings.py                 ← Time-based greeting templates + rotation
 │   ├── daily_context.py             ← Cross-call same-day memory
 │   ├── conversations.py             ← Conversation CRUD + transcript history
+│   ├── interest_discovery.py        ← Interest extraction from conversations
 │   ├── seniors.py                   ← Senior profile CRUD
 │   ├── caregivers.py                ← Caregiver-senior relationships
 │   ├── scheduler.py                 ← Reminder scheduling + outbound calls
 │   ├── context_cache.py             ← Pre-cache senior context (5 AM local)
+│   ├── conversations.py             ← Conversation CRUD + transcript history
+│   ├── daily_context.py             ← Cross-call same-day memory
+│   ├── greetings.py                 ← Time-based greeting templates + rotation
+│   ├── seniors.py                   ← Senior profile CRUD
+│   ├── caregivers.py                ← Caregiver-senior relationships
 │   └── news.py                      ← News via OpenAI web search (1hr cache)
 │
 ├── db/
@@ -324,22 +339,17 @@ pipecat/
 ├── docs/
 │   └── ARCHITECTURE.md              ← This file
 │
-├── tests/                           ← 13 test files
-│   ├── test_quick_observer.py
-│   ├── test_conversation_tracker.py
-│   ├── test_goodbye_gate.py
-│   ├── test_guidance_stripper.py
-│   ├── test_nodes.py
-│   ├── test_tools.py
-│   ├── test_api_routes.py
-│   ├── test_call_analysis.py
-│   ├── test_daily_context.py
-│   ├── test_greetings.py
-│   ├── test_validators.py
-│   ├── test_sanitize.py
-│   └── test_db.py
+├── tests/                           ← 36 test files + support dirs
+│   ├── test_*.py                    (36 test modules — unit, frame, pipeline, simulation)
+│   ├── helpers/                     pipeline_builder, assertions
+│   ├── mocks/                       mock_llm, mock_services, mock_stt, mock_transport, mock_tts
+│   ├── scenarios/                   happy_path, emotional_support, goodbye_detection, etc.
+│   ├── llm_simulation/              conversation_runner, senior_simulator, observer
+│   ├── conftest.py                  shared fixtures
+│   └── TESTING_DESIGN.md            test architecture docs
 │
 ├── pyproject.toml                   ← Dependencies + project config
+├── railway.toml                     ← Railway deployment config
 └── Dockerfile                       ← python:3.12-slim + uv
 ```
 
@@ -377,6 +387,20 @@ pipecat/
 
 Running separate backends is an explicit decision. Pipecat handles real-time voice, Node.js handles REST APIs and scheduling.
 
+### Key Differences from Node.js Stack
+
+| Aspect | Node.js | Pipecat |
+|--------|---------|---------|
+| **Pipeline** | Custom streaming (v1-advanced.js) | Pipecat FrameProcessor pipeline |
+| **Call phases** | Custom state machine in pipeline | Pipecat Flows (4 NodeConfigs) |
+| **Director** | Inline in v1-advanced.js | Separate non-blocking FrameProcessor |
+| **Transport** | Raw Twilio WebSocket | FastAPIWebsocketTransport + TwilioFrameSerializer |
+| **LLM** | Claude (streaming, sentence-by-sentence) | AnthropicLLMService (Pipecat managed) |
+| **TTS** | ElevenLabs WebSocket (custom) | ElevenLabs via Pipecat |
+| **STT** | Deepgram (custom integration) | DeepgramSTTService (Pipecat managed) |
+| **Goodbye** | Custom timer in v1-advanced.js | Quick Observer → EndFrame (2s delay) |
+| **Scheduler** | Active (SCHEDULER_ENABLED=true) | Disabled (prevents dual-scheduler) |
+
 ## Tech Stack
 
 | Component | Technology | Details |
@@ -384,17 +408,17 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Runtime** | Python 3.12 | asyncio, FastAPI |
 | **Framework** | Pipecat v0.0.101+ | FrameProcessor pipeline |
 | **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
-| **Hosting** | Railway | Docker, port 7860 |
+| **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
 | **Voice LLM** | Claude Sonnet 4.5 | AnthropicLLMService |
 | **Director** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | ~150ms non-blocking analysis |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
 | **STT** | Deepgram Nova 3 | Real-time, interim results |
 | **TTS** | ElevenLabs | `eleven_turbo_v2_5` |
+| **VAD** | Silero | confidence=0.6, stop_secs=1.2, min_volume=0.5 |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
 | **News** | OpenAI GPT-4o-mini | Web search tool, 1hr cache |
-| **VAD** | Silero | confidence=0.6, stop_secs=1.2, min_volume=0.5 |
 
 ## Database Schema (shared)
 
@@ -411,6 +435,15 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | `call_analyses` | Post-call AI analysis |
 | `daily_call_context` | Cross-call same-day memory |
 | `admin_users` | Admin dashboard accounts (bcrypt) |
+
+### Memory System
+
+- **Embedding**: OpenAI `text-embedding-3-small` (1536 dimensions)
+- **Similarity**: Cosine similarity, 0.7 minimum threshold
+- **Deduplication**: Skip if cosine > 0.9 with existing memory
+- **Decay**: Effective importance = `base * 0.5^(days/30)` (30-day half-life)
+- **Access Boost**: +10 importance if accessed in last week
+- **Tiered Retrieval**: Critical → Contextual → Background
 
 ## Environment Variables
 
@@ -437,6 +470,8 @@ OPENAI_API_KEY=...               # Embeddings + news search
 # Auth (shared with Node.js)
 JWT_SECRET=...
 DONNA_API_KEY=...
+COFOUNDER_API_KEY_1=...          # Cofounder auth
+COFOUNDER_API_KEY_2=...          # Cofounder auth
 
 # Scheduler (MUST be false to prevent conflicts)
 SCHEDULER_ENABLED=false
@@ -450,4 +485,4 @@ RUN_DB_TESTS=1                   # Set to run DB integration tests
 
 ---
 
-*Last updated: February 2026 — Pipecat migration with Conversation Director*
+*Last updated: February 2026 — Pipecat v4.0 with Conversation Director + GoodbyeGate*

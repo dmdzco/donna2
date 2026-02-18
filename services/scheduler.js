@@ -1,5 +1,5 @@
 import { db } from '../db/client.js';
-import { reminders, seniors, reminderDeliveries } from '../db/schema.js';
+import { reminders, seniors, reminderDeliveries, conversations } from '../db/schema.js';
 import { eq, and, lte, isNull, or, sql, ne, lt } from 'drizzle-orm';
 import twilio from 'twilio';
 import { memoryService } from './memory.js';
@@ -25,6 +25,29 @@ export const prefetchedContextByPhone = new Map();
 
 // Normalize phone to last 10 digits (matches seniors.js)
 const normalizePhone = (phone) => phone.replace(/\D/g, '').slice(-10);
+
+// Welfare check tracking — prevents calling the same senior twice per day
+const welfareCalledToday = new Set();
+let lastWelfareClearDate = new Date().toISOString().slice(0, 10);
+
+/**
+ * Check if a senior's local time is within the acceptable call window.
+ * Default window: 9 AM – 7 PM.
+ * If a caregiver explicitly scheduled a reminder in the 5–9 AM range,
+ * the early-morning window opens to allow it (earlyAllowed = true).
+ */
+function isInCallWindow(timezone, { earlyAllowed = false } = {}) {
+  try {
+    const now = new Date();
+    const localHour = parseInt(
+      now.toLocaleString('en-US', { timeZone: timezone || 'America/New_York', hour: 'numeric', hour12: false })
+    );
+    const earliest = earlyAllowed ? 5 : 9;
+    return localHour >= earliest && localHour < 19;
+  } catch {
+    return true; // Default to allowing if timezone is invalid
+  }
+}
 
 export const schedulerService = {
   /**
@@ -174,11 +197,57 @@ export const schedulerService = {
   },
 
   /**
-   * Trigger an outbound call for a reminder
-   * Pre-fetches memory context BEFORE calling Twilio to reduce lag
-   * Now also creates/updates delivery records for acknowledgment tracking
+   * Merge due reminders and welfare-eligible seniors into a deduplicated call plan.
+   * Reminder calls take priority — if a senior has both a reminder and needs welfare,
+   * only the reminder fires (it counts as contact).
+   * Returns an array of CallSpec objects: { type, senior, reminder?, scheduledFor?, existingDelivery? }
    */
-  async triggerReminderCall(reminder, senior, baseUrl, scheduledFor = null, existingDelivery = null) {
+  buildCallPlan(dueReminders, welfareSeniors) {
+    const specs = [];
+    const seniorIdsWithReminders = new Set();
+
+    // Reminder specs first (higher priority)
+    for (const { reminder, senior, scheduledFor, existingDelivery } of dueReminders) {
+      specs.push({
+        type: 'reminder',
+        senior,
+        reminder,
+        scheduledFor,
+        existingDelivery
+      });
+      seniorIdsWithReminders.add(senior.id);
+    }
+
+    // Welfare specs — skip seniors already getting a reminder call or already called today
+    for (const senior of welfareSeniors) {
+      if (seniorIdsWithReminders.has(senior.id)) continue;
+      if (welfareCalledToday.has(senior.id)) continue;
+
+      specs.push({
+        type: 'welfare',
+        senior
+      });
+    }
+
+    return specs;
+  },
+
+  /**
+   * Unified outbound call trigger for both reminder and welfare calls.
+   * Gates ALL calls through isInCallWindow(). Handles context prefetch,
+   * Twilio call creation, and type-specific bookkeeping.
+   */
+  async triggerOutboundCall(spec, baseUrl) {
+    const { type, senior } = spec;
+
+    // Gate ALL outbound calls through the timezone call window.
+    // Reminder calls with an explicit caregiver-set time are allowed as early as 5 AM.
+    const earlyAllowed = type === 'reminder' && !!spec.reminder?.scheduledTime;
+    if (!isInCallWindow(senior.timezone, { earlyAllowed })) {
+      log.info('Outside call window, skipping', { type, name: senior.name, timezone: senior.timezone || 'America/New_York', earlyAllowed });
+      return null;
+    }
+
     const client = getTwilioClient();
     if (!client) {
       log.error('Twilio not configured');
@@ -186,70 +255,106 @@ export const schedulerService = {
     }
 
     try {
-      log.info('Pre-fetching context', { name: senior.name });
-
-      // PRE-FETCH: Build memory context (includes news) BEFORE the call
-      const memoryContext = await memoryService.buildContext(senior.id, null, senior);
-      const reminderPrompt = this.formatReminderPrompt(reminder);
-
-      log.info('Context ready, triggering call', { contextLen: memoryContext?.length || 0 });
-
-      const call = await client.calls.create({
-        to: senior.phone,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        url: `${baseUrl}/voice/answer`,
-        statusCallback: `${baseUrl}/voice/status`,
-        statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-      });
-
-      // Calculate scheduledFor if not provided
-      const targetScheduledFor = scheduledFor || this.getScheduledForTime(reminder) || new Date();
-
-      // Create or update delivery record
-      let delivery;
-      if (existingDelivery) {
-        // Retry - update existing delivery
-        [delivery] = await db.update(reminderDeliveries)
-          .set({
-            deliveredAt: new Date(),
-            callSid: call.sid,
-            attemptCount: existingDelivery.attemptCount + 1,
-            status: 'delivered'
-          })
-          .where(eq(reminderDeliveries.id, existingDelivery.id))
-          .returning();
-        log.info('Updated delivery record', { deliveryId: delivery.id, attempt: delivery.attemptCount });
+      if (type === 'reminder') {
+        return await this._triggerReminderPath(spec, baseUrl, client);
       } else {
-        // First attempt - create new delivery record
-        [delivery] = await db.insert(reminderDeliveries).values({
-          reminderId: reminder.id,
-          scheduledFor: targetScheduledFor,
-          deliveredAt: new Date(),
-          callSid: call.sid,
-          status: 'delivered',
-          attemptCount: 1
-        }).returning();
-        log.info('Created delivery record', { deliveryId: delivery.id });
+        return await this._triggerWelfarePath(spec, baseUrl, client);
       }
-
-      // Store pre-fetched context for this call (ready when /voice/answer is hit)
-      pendingReminderCalls.set(call.sid, {
-        reminder,
-        senior,
-        memoryContext,  // PRE-FETCHED
-        reminderPrompt, // PRE-FORMATTED
-        triggeredAt: new Date(),
-        delivery,       // Include delivery record for acknowledgment tracking
-        scheduledFor: targetScheduledFor
-      });
-
-      log.info('Call initiated', { callSid: call.sid });
-      return call;
-
     } catch (error) {
-      log.error('Failed to initiate call', { error: error.message });
+      log.error('Failed to initiate call', { type, name: senior.name, error: error.message });
       return null;
     }
+  },
+
+  /**
+   * Reminder call path: build memory context, create Twilio call, create delivery record,
+   * store in pendingReminderCalls for /voice/answer pickup.
+   */
+  async _triggerReminderPath(spec, baseUrl, client) {
+    const { senior, reminder, scheduledFor, existingDelivery } = spec;
+
+    log.info('Pre-fetching reminder context', { name: senior.name });
+
+    // PRE-FETCH: Build memory context (includes news) BEFORE the call
+    const memoryContext = await memoryService.buildContext(senior.id, null, senior);
+    const reminderPrompt = this.formatReminderPrompt(reminder);
+
+    log.info('Context ready, triggering reminder call', { contextLen: memoryContext?.length || 0 });
+
+    const call = await client.calls.create({
+      to: senior.phone,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      url: `${baseUrl}/voice/answer`,
+      statusCallback: `${baseUrl}/voice/status`,
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+    });
+
+    // Calculate scheduledFor if not provided
+    const targetScheduledFor = scheduledFor || this.getScheduledForTime(reminder) || new Date();
+
+    // Create or update delivery record
+    let delivery;
+    if (existingDelivery) {
+      // Retry - update existing delivery
+      [delivery] = await db.update(reminderDeliveries)
+        .set({
+          deliveredAt: new Date(),
+          callSid: call.sid,
+          attemptCount: existingDelivery.attemptCount + 1,
+          status: 'delivered'
+        })
+        .where(eq(reminderDeliveries.id, existingDelivery.id))
+        .returning();
+      log.info('Updated delivery record', { deliveryId: delivery.id, attempt: delivery.attemptCount });
+    } else {
+      // First attempt - create new delivery record
+      [delivery] = await db.insert(reminderDeliveries).values({
+        reminderId: reminder.id,
+        scheduledFor: targetScheduledFor,
+        deliveredAt: new Date(),
+        callSid: call.sid,
+        status: 'delivered',
+        attemptCount: 1
+      }).returning();
+      log.info('Created delivery record', { deliveryId: delivery.id });
+    }
+
+    // Store pre-fetched context for this call (ready when /voice/answer is hit)
+    pendingReminderCalls.set(call.sid, {
+      reminder,
+      senior,
+      memoryContext,  // PRE-FETCHED
+      reminderPrompt, // PRE-FORMATTED
+      triggeredAt: new Date(),
+      delivery,       // Include delivery record for acknowledgment tracking
+      scheduledFor: targetScheduledFor
+    });
+
+    log.info('Reminder call initiated', { callSid: call.sid, name: senior.name });
+    return call;
+  },
+
+  /**
+   * Welfare call path: prefetch context (cache-aware), create Twilio call,
+   * store in prefetchedContextByPhone for /voice/answer pickup.
+   */
+  async _triggerWelfarePath(spec, baseUrl, client) {
+    const { senior } = spec;
+
+    log.info('Welfare check: pre-fetching context', { name: senior.name, seniorId: senior.id });
+
+    await this.prefetchForPhone(senior.phone, senior);
+
+    const call = await client.calls.create({
+      to: senior.phone,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      url: `${baseUrl}/voice/answer`,
+      statusCallback: `${baseUrl}/voice/status`,
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+    });
+
+    log.info('Welfare check call initiated', { callSid: call.sid, name: senior.name });
+    return call;
   },
 
   /**
@@ -427,50 +532,98 @@ export const schedulerService = {
     prompt += `\n\nDeliver this reminder naturally in the conversation - don't sound robotic or alarming.`;
     prompt += `\nStart with a warm greeting, then mention the reminder.`;
     return prompt;
+  },
+
+  /**
+   * Find active seniors who haven't had a completed conversation in 2+ days.
+   * These seniors need a welfare check call.
+   */
+  async getSeniorsNeedingWelfareCheck() {
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+
+    const results = await db.execute(sql`
+      SELECT s.* FROM seniors s
+      WHERE s.is_active = true
+      AND NOT EXISTS (
+        SELECT 1 FROM conversations c
+        WHERE c.senior_id = s.id
+        AND c.status = 'completed'
+        AND c.started_at > ${twoDaysAgo}
+      )
+    `);
+    return results.rows;
   }
 };
 
 /**
- * Start the scheduler polling loop
+ * Start the unified scheduler polling loop.
+ * Single 60-second loop handles both reminders and welfare checks.
+ * Welfare SQL is cheap (NOT EXISTS), so running every minute means
+ * newly-eligible seniors get called within ~1 minute instead of ~59.
  */
 export function startScheduler(baseUrl, intervalMs = 60000) {
-  log.info('Starting scheduler', { intervalSeconds: intervalMs / 1000 });
+  log.info('Starting unified scheduler', { intervalSeconds: intervalMs / 1000 });
 
-  const checkReminders = async () => {
+  const runUnifiedCheck = async () => {
     try {
-      const dueReminders = await schedulerService.getDueReminders();
-
-      if (dueReminders.length > 0) {
-        log.info('Found due reminders', { count: dueReminders.length });
+      // Date-rollover clear of welfare tracking
+      const today = new Date().toISOString().slice(0, 10);
+      if (today !== lastWelfareClearDate) {
+        welfareCalledToday.clear();
+        lastWelfareClearDate = today;
+        log.info('Welfare tracking cleared for new day', { date: today });
       }
 
-      for (const { reminder, senior, scheduledFor, existingDelivery } of dueReminders) {
-        const call = await schedulerService.triggerReminderCall(
-          reminder,
-          senior,
-          baseUrl,
-          scheduledFor,
-          existingDelivery
-        );
+      // Fetch both sources in parallel
+      const [dueReminders, welfareSeniors] = await Promise.all([
+        schedulerService.getDueReminders(),
+        schedulerService.getSeniorsNeedingWelfareCheck()
+      ]);
+
+      // Merge and deduplicate into a single call plan
+      const callPlan = schedulerService.buildCallPlan(dueReminders, welfareSeniors);
+
+      if (callPlan.length > 0) {
+        const reminderCount = callPlan.filter(s => s.type === 'reminder').length;
+        const welfareCount = callPlan.filter(s => s.type === 'welfare').length;
+        log.info('Unified call plan', { total: callPlan.length, reminders: reminderCount, welfare: welfareCount });
+      }
+
+      // Execute calls sequentially with 5s stagger
+      let executed = 0;
+      for (const spec of callPlan) {
+        const call = await schedulerService.triggerOutboundCall(spec, baseUrl);
         if (call) {
-          // Mark as delivered on the reminders table (legacy field)
-          await schedulerService.markDelivered(reminder.id);
+          // Post-call bookkeeping
+          if (spec.type === 'reminder') {
+            await schedulerService.markDelivered(spec.reminder.id);
+          } else {
+            welfareCalledToday.add(spec.senior.id);
+          }
+          executed++;
+          // 5s stagger between calls to avoid overwhelming Twilio
+          if (executed < callPlan.length) {
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          }
         }
       }
+
+      if (executed > 0) {
+        log.info('Unified check complete', { executed, planned: callPlan.length });
+      }
     } catch (error) {
-      log.error('Error checking reminders', { error: error.message });
+      log.error('Unified check error', { error: error.message });
       try { const Sentry = await import('@sentry/node'); Sentry.captureException(error); } catch {}
     }
   };
 
-  // Initial check
-  checkReminders();
+  // Initial check after 5s delay (let server warm up)
+  setTimeout(runUnifiedCheck, 5000);
 
-  // Set up interval for reminders (every minute)
-  const reminderIntervalId = setInterval(checkReminders, intervalMs);
+  // Single 60-second polling loop for both reminders and welfare
+  const schedulerIntervalId = setInterval(runUnifiedCheck, intervalMs);
 
-  // Set up hourly interval for context pre-caching
-  // This runs daily pre-fetch for seniors whose local time is 5 AM
+  // Hourly context pre-caching (unchanged)
   const prefetchIntervalId = setInterval(async () => {
     try {
       await contextCacheService.runDailyPrefetch();
@@ -478,7 +631,7 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
       log.error('Context pre-fetch error', { error: error.message });
       try { const Sentry = await import('@sentry/node'); Sentry.captureException(error); } catch {}
     }
-  }, 60 * 60 * 1000); // Every hour
+  }, 60 * 60 * 1000);
 
   // Run initial pre-fetch check
   contextCacheService.runDailyPrefetch().catch(err => {
@@ -487,6 +640,7 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
   });
 
   log.info('Context pre-caching enabled (hourly check for 5 AM local time)');
+  log.info('Unified scheduler ready (reminders + welfare every 60s)');
 
-  return { reminderIntervalId, prefetchIntervalId };
+  return { schedulerIntervalId, prefetchIntervalId };
 }

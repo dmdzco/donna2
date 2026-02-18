@@ -2,6 +2,8 @@
 
 This document describes the Donna v4.0 system architecture with the **Pipecat voice pipeline**, **2-Layer Conversation Director**, and **Pipecat Flows** call state machine.
 
+> For detailed Pipecat implementation specifics, see [pipecat/docs/ARCHITECTURE.md](../../pipecat/docs/ARCHITECTURE.md).
+
 ---
 
 ## High-Level Architecture
@@ -15,17 +17,24 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 │   │  Admin Dashboard │  │  Consumer App   │  │  Observability  │            │
 │   │  apps/admin-v2/  │  │ apps/consumer/  │  │   Dashboard     │            │
 │   └────────┬─────────┘  └────────┬────────┘  └────────┬────────┘            │
-│            │                     │                                           │
-│            ▼                     ▼                                           │
-│   ┌──────────────────┐        ┌──────────────────┐                          │
-│   │  Senior's Phone  │        │    /api/call      │                          │
-│   └────────┬─────────┘        └────────┬──────────┘                          │
-│            │                           │                                     │
-│            ▼                           ▼                                     │
-│   ┌──────────────────────────────────────────────────┐                      │
-│   │              Twilio Media Streams                 │                      │
-│   │         /voice/answer → <Stream url="/ws">        │                      │
-│   └────────────────────┬─────────────────────────────┘                      │
+│            │                     │                     │                     │
+│            ▼                     ▼                     ▼                     │
+│   ┌──────────────────────────────────────────────────────────────┐          │
+│   │                  Node.js API (Railway)                        │          │
+│   │    routes/ (16 modules) — consumed by all frontend apps      │          │
+│   │    services/scheduler.js — reminder polling (still active)   │          │
+│   └──────────────────────────────────────────────────────────────┘          │
+│                                                                              │
+│   ┌──────────────┐                                                          │
+│   │ Senior's     │                                                          │
+│   │ Phone        │                                                          │
+│   └──────┬───────┘                                                          │
+│          │                                                                   │
+│          ▼                                                                   │
+│   ┌──────────────────────────────────────────────────────────┐              │
+│   │              Twilio Media Streams                         │              │
+│   │         /voice/answer → <Stream url="/ws">                │              │
+│   └────────────────────┬─────────────────────────────────────┘              │
 │                        │ WebSocket                                           │
 │                        ▼                                                     │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
@@ -39,7 +48,7 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 │   │         │  Layer 1: Quick       │  0ms — 268 regex patterns          │   │
 │   │         │  Observer             │  Injects guidance via              │   │
 │   │         │                       │  LLMMessagesAppendFrame            │   │
-│   │         │                       │  Goodbye → EndFrame (3.5s)         │   │
+│   │         │                       │  Goodbye → EndFrame (2s)           │   │
 │   │         └───────────┬───────────┘                                    │   │
 │   │                     ▼                                                │   │
 │   │         ┌───────────────────────┐                                    │   │
@@ -63,6 +72,8 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (assistant) ← tracks responses            │   │
 │   │                                                                      │   │
+│   │         GoodbyeGate (observes goodbye signals, 4s grace period)     │   │
+│   │                                                                      │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                        │                                                     │
 │                        ▼ (on disconnect)                                     │
@@ -82,10 +93,10 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 │   │  │ (pgvector)    │  │  (reminders) │  │ (OpenAI web) │               │  │
 │   │  │ + decay/dedup │  │  + prefetch  │  │  + 1hr cache │               │  │
 │   │  └──────────────┘  └──────────────┘  └──────────────┘               │  │
-│   │  ┌──────────────┐  ┌──────────────┐                                  │  │
-│   │  │ Daily Context │  │ Context Cache│                                  │  │
-│   │  │ (cross-call)  │  │ (5 AM local) │                                  │  │
-│   │  └──────────────┘  └──────────────┘                                  │  │
+│   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │  │
+│   │  │ Daily Context │  │ Context Cache│  │  Caregivers  │               │  │
+│   │  │ (cross-call)  │  │ (5 AM local) │  │ (access ctrl)│               │  │
+│   │  └──────────────┘  └──────────────┘  └──────────────┘               │  │
 │   └────────────────────────────────────┬─────────────────────────────────┘  │
 │                                        ▼                                     │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
@@ -103,7 +114,7 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 
 | Layer | File | Model | Latency | Purpose |
 |-------|------|-------|---------|---------|
-| **1** | `processors/quick_observer.py` | Regex | 0ms | 268 patterns: health, goodbye, emotion, safety + programmatic call end |
+| **1** | `processors/quick_observer.py` + `processors/patterns.py` | Regex | 0ms | 268 patterns: health, goodbye, emotion, safety + programmatic call end (2s EndFrame) |
 | **2** | `processors/conversation_director.py` + `services/director_llm.py` | Gemini 3 Flash Preview | ~150ms | Non-blocking call guidance (phase, topic, reminders, fallback actions) |
 
 ### Post-Call Analysis (Async)
@@ -167,7 +178,7 @@ The Director runs **non-blocking** via `asyncio.create_task()`:
 | **Emotion** | 25+ patterns with valence/intensity | Emotional tone detection |
 | **Family** | 25+ relationship patterns including pets | Context enrichment |
 | **Safety** | Scams, strangers, emergencies | Safety concern flags |
-| **Goodbye** | Strong goodbye detection (bye, gotta go, take care) | **Programmatic call end (3.5s EndFrame)** |
+| **Goodbye** | Strong goodbye detection (bye, gotta go, take care) | **Notifies GoodbyeGate** |
 | **Factual/Curiosity** | 18 patterns ("what year", "how tall") | Web search trigger |
 | **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 
@@ -178,7 +189,7 @@ The Director runs **non-blocking** via `asyncio.create_task()`:
 | Phase | Tools | Context Strategy |
 |-------|-------|-----------------|
 | **Opening** | search_memories, save_important_detail, transition_to_main | APPEND, respond_immediately |
-| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | RESET_WITH_SUMMARY |
+| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | APPEND |
 | **Winding Down** | mark_reminder_acknowledged, save_important_detail, transition_to_closing | APPEND |
 | **Closing** | *(none — post_action: end_conversation)* | APPEND |
 
@@ -203,6 +214,16 @@ The Director runs **non-blocking** via `asyncio.create_task()`:
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
 | **News** | OpenAI GPT-4o-mini | Web search tool, 1hr cache |
 
+### Frontend Apps
+
+### Frontend Apps
+
+| App | Tech | URL |
+|-----|------|-----|
+| **Admin Dashboard v2** | React 18 + Vite + Tailwind + Radix UI | [admin-v2-liart.vercel.app](https://admin-v2-liart.vercel.app) |
+| **Consumer App** | React 18 + Vite + Clerk + Framer Motion | [consumer-ruddy.vercel.app](https://consumer-ruddy.vercel.app) |
+| **Observability** | React 18 + Vite (vanilla CSS) | [observability-five.vercel.app](https://observability-five.vercel.app) |
+
 ---
 
 ## Key Files
@@ -215,9 +236,12 @@ pipecat/
 │   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts
 │   └── tools.py                     ← 4 LLM tool schemas + async handlers
 ├── processors/
-│   ├── quick_observer.py            ← Layer 1: 268 regex patterns + goodbye EndFrame
+│   ├── patterns.py                  ← 268 regex patterns, 19 categories (data only)
+│   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame
 │   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking guidance
 │   ├── conversation_tracker.py      ← In-call topic/question/advice tracking
+│   ├── metrics_logger.py            ← Call metrics logging processor
+│   ├── goodbye_gate.py              ← False-goodbye grace period (NOT in active pipeline)
 │   └── guidance_stripper.py         ← Strip <guidance> tags before TTS
 ├── services/
 │   ├── director_llm.py              ← Gemini Flash analysis for Director
@@ -228,6 +252,7 @@ pipecat/
 │   ├── conversations.py             ← Conversation CRUD + transcripts
 │   ├── daily_context.py             ← Cross-call same-day memory
 │   ├── greetings.py                 ← Greeting templates + rotation
+│   ├── interest_discovery.py        ← Interest extraction from conversations
 │   ├── seniors.py                   ← Senior profile CRUD
 │   ├── caregivers.py                ← Caregiver relationships
 │   └── news.py                      ← News via OpenAI web search
@@ -235,7 +260,7 @@ pipecat/
 │   ├── routes/                      ← voice.py, calls.py
 │   └── middleware/                   ← auth, api_auth, rate_limit, security, twilio
 ├── db/client.py                     ← asyncpg pool + query helpers
-├── tests/                           ← 13 test files, 163+ tests
+├── tests/                           ← 36 test files + helpers/mocks/scenarios
 ├── pyproject.toml                   ← Python 3.12, dependencies
 └── Dockerfile                       ← python:3.12-slim + uv
 ```
@@ -271,28 +296,15 @@ pipecat/
 
 ## Deployment
 
-**Pipecat voice pipeline (Railway):**
-```bash
-cd pipecat && railway up
-```
-
-**Required Environment Variables:**
-
-| Variable | Purpose |
-|----------|---------|
-| `PORT` | Server port (7860) |
-| `DATABASE_URL` | Neon PostgreSQL |
-| `TWILIO_ACCOUNT_SID` | Twilio account |
-| `TWILIO_AUTH_TOKEN` | Twilio auth |
-| `TWILIO_PHONE_NUMBER` | Donna's phone number |
-| `ANTHROPIC_API_KEY` | Claude Sonnet 4.5 (voice) |
-| `GOOGLE_API_KEY` | Gemini Flash (Director + Analysis) |
-| `ELEVENLABS_API_KEY` | TTS |
-| `DEEPGRAM_API_KEY` | STT |
-| `OPENAI_API_KEY` | Embeddings + news |
-| `JWT_SECRET` | Admin JWT signing |
-| `SCHEDULER_ENABLED` | Must be `false` (Node.js runs scheduler) |
+| Service | Platform | Port | URL |
+|---------|----------|------|-----|
+| Pipecat voice pipeline | Railway | 7860 | donna-pipecat-production.up.railway.app |
+| Node.js API (legacy) | Railway | 3001 | donna-api-production-2450.up.railway.app |
+| Admin Dashboard | Vercel | — | admin-v2-liart.vercel.app |
+| Consumer App | Vercel | — | consumer-ruddy.vercel.app |
+| Observability | Vercel | — | observability-five.vercel.app |
+| Database | Neon | — | Managed PostgreSQL + pgvector |
 
 ---
 
-*Last updated: February 2026 — Pipecat v4.0 with Conversation Director*
+*Last updated: February 2026 — Pipecat v4.0 with Conversation Director + GoodbyeGate*

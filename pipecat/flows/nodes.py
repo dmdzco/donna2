@@ -24,7 +24,6 @@ from prompts import (
     MAIN_TASK,
     WINDING_DOWN_TASK,
     CLOSING_TASK_TEMPLATE,
-    CONTEXT_SUMMARY_PROMPT,
 )
 
 
@@ -237,10 +236,7 @@ def build_main_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         role_messages=[{"role": "system", "content": system_content}],
         task_messages=[{"role": "user", "content": main_task}],
         functions=functions,
-        context_strategy=ContextStrategyConfig(
-            strategy=ContextStrategy.RESET_WITH_SUMMARY,
-            summary_prompt=CONTEXT_SUMMARY_PROMPT,
-        ),
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
         respond_immediately=True,
     )
 

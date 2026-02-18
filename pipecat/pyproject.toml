@@ -42,4 +42,5 @@ markers = [
     "integration: tests requiring real external services (DATABASE_URL, API keys)",
     "llm: tests requiring real LLM API calls (ANTHROPIC_API_KEY)",
     "llm_simulation: LLM-vs-LLM simulation tests (slow, requires ANTHROPIC_API_KEY)",
+    "regression: conversation scenario regression tests (full pipeline simulation)",
 ]

@@ -10,6 +10,17 @@
           }
         ]
       }
+    ],
+    "PreCommit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd pipecat && uv run python -m pytest tests/ -m 'not integration and not llm and not llm_simulation' --tb=short -q"
+          }
+        ]
+      }
     ]
   },
   "projectName": "Donna",

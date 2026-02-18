@@ -173,6 +173,7 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── quick_observer.py               # Layer 1: analysis + goodbye EndFrame
 │   ├── conversation_director.py        # Layer 2: Gemini Flash non-blocking
 │   ├── conversation_tracker.py         # Topic/question/advice tracking
+│   ├── metrics_logger.py              # Call metrics logging
 │   ├── goodbye_gate.py                 # False-goodbye grace period (not in active pipeline)
 │   └── guidance_stripper.py            # Strip <guidance> tags before TTS
 ├── services/
@@ -186,13 +187,14 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── conversations.py                # Conversation CRUD
 │   ├── daily_context.py                # Cross-call same-day memory
 │   ├── greetings.py                    # Greeting templates + rotation
+│   ├── interest_discovery.py           # Interest extraction from conversations
 │   ├── seniors.py, caregivers.py       # Profile CRUD
 │   └── news.py                         # OpenAI web search (1hr cache)
 ├── api/
 │   ├── routes/                         # voice.py, calls.py
 │   └── middleware/                      # auth, rate_limit, security, twilio
 ├── db/client.py                        # asyncpg pool + query helpers
-├── tests/                              # 13 test files
+├── tests/                              # 36 test files + helpers/mocks/scenarios
 ├── pyproject.toml                      # Python 3.12, Pipecat v0.0.101+
 └── Dockerfile                          # python:3.12-slim + uv
 

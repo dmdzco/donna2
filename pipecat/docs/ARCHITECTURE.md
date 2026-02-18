@@ -297,6 +297,7 @@ pipecat/
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame
 │   ├── conversation_director.py     ← Layer 2: Gemini Flash guidance (non-blocking)
 │   ├── conversation_tracker.py      ← In-call topic/question/advice tracking + transcript
+│   ├── metrics_logger.py            ← Call metrics logging processor
 │   ├── goodbye_gate.py              ← False-goodbye grace period (NOT in active pipeline — available but unused)
 │   └── guidance_stripper.py         ← Strips <guidance> tags and [BRACKETED] directives
 │
@@ -309,6 +310,7 @@ pipecat/
 │   ├── greetings.py                 ← Time-based greeting templates + rotation
 │   ├── daily_context.py             ← Cross-call same-day memory
 │   ├── conversations.py             ← Conversation CRUD + transcript history
+│   ├── interest_discovery.py         ← Interest extraction from conversations
 │   ├── seniors.py                   ← Senior profile CRUD
 │   ├── caregivers.py                ← Caregiver-senior relationships
 │   ├── scheduler.py                 ← Reminder scheduling + outbound calls
@@ -324,20 +326,14 @@ pipecat/
 ├── docs/
 │   └── ARCHITECTURE.md              ← This file
 │
-├── tests/                           ← 13 test files
-│   ├── test_quick_observer.py
-│   ├── test_conversation_tracker.py
-│   ├── test_goodbye_gate.py
-│   ├── test_guidance_stripper.py
-│   ├── test_nodes.py
-│   ├── test_tools.py
-│   ├── test_api_routes.py
-│   ├── test_call_analysis.py
-│   ├── test_daily_context.py
-│   ├── test_greetings.py
-│   ├── test_validators.py
-│   ├── test_sanitize.py
-│   └── test_db.py
+├── tests/                           ← 36 test files + support dirs
+│   ├── test_*.py                    (36 test modules — unit, frame, pipeline, simulation)
+│   ├── helpers/                     pipeline_builder, assertions
+│   ├── mocks/                       mock_llm, mock_services, mock_stt, mock_transport, mock_tts
+│   ├── scenarios/                   happy_path, emotional_support, goodbye_detection, etc.
+│   ├── llm_simulation/              conversation_runner, senior_simulator, observer
+│   ├── conftest.py                  shared fixtures
+│   └── TESTING_DESIGN.md            test architecture docs
 │
 ├── pyproject.toml                   ← Dependencies + project config
 └── Dockerfile                       ← python:3.12-slim + uv

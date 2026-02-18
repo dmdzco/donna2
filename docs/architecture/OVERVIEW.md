@@ -178,7 +178,7 @@ The Director runs **non-blocking** via `asyncio.create_task()`:
 | Phase | Tools | Context Strategy |
 |-------|-------|-----------------|
 | **Opening** | search_memories, save_important_detail, transition_to_main | APPEND, respond_immediately |
-| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | RESET_WITH_SUMMARY |
+| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | APPEND |
 | **Winding Down** | mark_reminder_acknowledged, save_important_detail, transition_to_closing | APPEND |
 | **Closing** | *(none — post_action: end_conversation)* | APPEND |
 
@@ -218,6 +218,7 @@ pipecat/
 │   ├── quick_observer.py            ← Layer 1: 268 regex patterns + goodbye EndFrame
 │   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking guidance
 │   ├── conversation_tracker.py      ← In-call topic/question/advice tracking
+│   ├── metrics_logger.py            ← Call metrics logging processor
 │   └── guidance_stripper.py         ← Strip <guidance> tags before TTS
 ├── services/
 │   ├── director_llm.py              ← Gemini Flash analysis for Director
@@ -228,6 +229,7 @@ pipecat/
 │   ├── conversations.py             ← Conversation CRUD + transcripts
 │   ├── daily_context.py             ← Cross-call same-day memory
 │   ├── greetings.py                 ← Greeting templates + rotation
+│   ├── interest_discovery.py        ← Interest extraction from conversations
 │   ├── seniors.py                   ← Senior profile CRUD
 │   ├── caregivers.py                ← Caregiver relationships
 │   └── news.py                      ← News via OpenAI web search
@@ -235,7 +237,7 @@ pipecat/
 │   ├── routes/                      ← voice.py, calls.py
 │   └── middleware/                   ← auth, api_auth, rate_limit, security, twilio
 ├── db/client.py                     ← asyncpg pool + query helpers
-├── tests/                           ← 13 test files, 163+ tests
+├── tests/                           ← 36 test files + helpers/mocks/scenarios
 ├── pyproject.toml                   ← Python 3.12, dependencies
 └── Dockerfile                       ← python:3.12-slim + uv
 ```

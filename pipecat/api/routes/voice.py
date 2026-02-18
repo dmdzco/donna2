@@ -49,6 +49,7 @@ async def voice_answer(request: Request):
     reminder_prompt = None
     pre_generated_greeting = None
     news_context = None
+    recent_turns = None
     call_type = "check-in"
 
     # 1. Check for reminder call (pre-fetched context)

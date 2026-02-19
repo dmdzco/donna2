@@ -77,7 +77,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Anthropic LLM      │  Claude Sonnet 4.5 (streaming)
-              │   + Flow Manager     │  5 tools, 4-phase state machine
+              │   + Flow Manager     │  5 tools, 3-phase state machine
               └─────────┬───────────┘
                         │ TextFrame
                         ▼
@@ -276,16 +276,20 @@ This nudges Claude to call `search_memories` — knowing the call will be instan
 
 ## Pipecat Flows — Call Phase Management
 
+The opening phase is merged into main — the bot starts directly in main (or reminder if pending) with the greeting prepended. This eliminates the `transition_to_main` double-LLM-call penalty (~3-5s saved on every call).
+
 ```
-┌──────────────┐     transition_to_main     ┌──────────────┐
-│   Opening     │ ─────────────────────────► │    Main       │
-│               │                            │               │
-│ • Greeting    │                            │ • Conversation│
-│ • Warm start  │                            │ • Reminders   │
+┌──────────────┐                            ┌──────────────┐
+│   Reminder    │    transition_to_main      │    Main       │
+│  (conditional)│ ─────────────────────────► │               │
+│               │                            │ • Greeting +  │
+│ • Greeting +  │                            │   Conversation│
+│   reminders   │                            │ • Reminders   │
 │ • respond_    │                            │ • Memory tools│
 │   immediately │                            │ • News search │
-│               │                            │ • APPEND      │
-│               │                            │   context      │
+│ (when initial)│                            │ • respond_    │
+│               │                            │   immediately │
+│               │                            │ (when initial)│
 └──────────────┘                            └───────┬───────┘
                                                      │
                                     transition_to_winding_down
@@ -316,17 +320,18 @@ This nudges Claude to call `search_memories` — knowing the call will be instan
 
 | Phase | Tools |
 |-------|-------|
-| **Opening** | `search_memories`, `save_important_detail`, `check_caregiver_notes`, `transition_to_main` |
-| **Main** | `search_memories`, `get_news`, `save_important_detail`, `mark_reminder_acknowledged`, `check_caregiver_notes`, `transition_to_winding_down` |
-| **Winding Down** | `mark_reminder_acknowledged`, `save_important_detail`, `transition_to_closing` |
+| **Reminder** *(conditional)* | `mark_reminder_acknowledged`, `save_important_detail`, `transition_to_main` |
+| **Main** | `search_memories`, `web_search`, `save_important_detail`, `mark_reminder_acknowledged`, `check_caregiver_notes`, `transition_to_winding_down` |
+| **Winding Down** | `mark_reminder_acknowledged`, `save_important_detail`, `web_search`, `check_caregiver_notes`, `transition_to_closing` |
 | **Closing** | *(none — post_action ends call)* |
 
 ### Context Strategies Per Phase
 
 | Phase | Strategy | Effect |
 |-------|----------|--------|
-| **Opening** | APPEND / respond_immediately | Keeps greeting in context, responds right away |
-| **Main** | APPEND | Full in-call context retention (no summary truncation) |
+| **Reminder** *(when initial)* | APPEND / respond_immediately | Greeting + reminders, responds right away |
+| **Main** *(when initial)* | APPEND / respond_immediately | Greeting + full conversation, responds right away |
+| **Main** *(after reminder)* | APPEND | Full in-call context retention (no summary truncation) |
 | **Winding Down** | APPEND | Preserves recent context for summary |
 | **Closing** | APPEND | Preserves goodbye context |
 

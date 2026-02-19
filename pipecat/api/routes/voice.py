@@ -152,7 +152,7 @@ async def voice_answer(request: Request):
         try:
             from services.conversations import create
             conv = await create(senior["id"], call_sid)
-            conversation_id = conv.get("id") if conv else None
+            conversation_id = str(conv["id"]) if conv else None
         except Exception as e:
             logger.error("[{cs}] Error creating conversation: {err}", cs=call_sid, err=str(e))
 

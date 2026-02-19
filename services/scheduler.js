@@ -1,6 +1,6 @@
 import { db } from '../db/client.js';
-import { reminders, seniors, reminderDeliveries, conversations } from '../db/schema.js';
-import { eq, and, lte, isNull, or, sql, ne, lt } from 'drizzle-orm';
+import { reminders, seniors, reminderDeliveries, conversations, notificationPreferences, notifications, caregivers } from '../db/schema.js';
+import { eq, and, lte, isNull, or, sql, ne, lt, gte, desc } from 'drizzle-orm';
 import twilio from 'twilio';
 import { memoryService } from './memory.js';
 import { contextCacheService } from './context-cache.js';
@@ -496,6 +496,26 @@ export const schedulerService = {
         .where(eq(reminderDeliveries.id, deliveryId));
 
       log.info('Delivery status updated', { deliveryId, status: newStatus, attempt: delivery.attemptCount });
+
+      // Trigger reminder_missed notification when max attempts reached
+      if (newStatus === 'max_attempts') {
+        try {
+          const [reminder] = await db.select()
+            .from(reminders)
+            .where(eq(reminders.id, delivery.reminderId))
+            .limit(1);
+          if (reminder) {
+            const { notificationService } = await import('./notifications.js');
+            await notificationService.onReminderMissed(reminder.seniorId, {
+              reminderTitle: reminder.title,
+              reminderType: reminder.type,
+              attemptCount: delivery.attemptCount,
+            });
+          }
+        } catch (notifErr) {
+          log.error('Failed to send reminder_missed notification', { error: notifErr.message });
+        }
+      }
     } catch (error) {
       log.error('Failed to update delivery status', { error: error.message });
     }
@@ -642,5 +662,76 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
   log.info('Context pre-caching enabled (hourly check for 5 AM local time)');
   log.info('Unified scheduler ready (reminders + welfare every 60s)');
 
-  return { schedulerIntervalId, prefetchIntervalId };
+  // Weekly report polling (hourly check)
+  const checkWeeklyReports = async () => {
+    try {
+      // Get all preferences where weekly summary is enabled
+      const prefs = await db.select()
+        .from(notificationPreferences)
+        .where(eq(notificationPreferences.weeklySummary, true));
+
+      for (const pref of prefs) {
+        const tz = pref.timezone || 'America/New_York';
+        const now = new Date();
+
+        // Get current day/time in caregiver's timezone
+        const dayFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' });
+        const hourFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+
+        const dayStr = dayFormatter.format(now);
+        const dayMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+        const currentDay = dayMap[dayStr] ?? -1;
+
+        if (currentDay !== pref.weeklyReportDay) continue;
+
+        // Check if current time is within 30min of report time
+        const timeParts = hourFormatter.formatToParts(now);
+        const currentHour = parseInt(timeParts.find(p => p.type === 'hour').value);
+        const currentMinute = parseInt(timeParts.find(p => p.type === 'minute').value);
+        const currentMinutes = currentHour * 60 + currentMinute;
+
+        const [reportH, reportM] = (pref.weeklyReportTime || '09:00').split(':').map(Number);
+        const reportMinutes = reportH * 60 + reportM;
+
+        if (Math.abs(currentMinutes - reportMinutes) > 30) continue;
+
+        // Check if we already sent a weekly report in the last 6 days for this caregiver
+        const sixDaysAgo = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+        const [recentReport] = await db.select({ id: notifications.id })
+          .from(notifications)
+          .where(and(
+            eq(notifications.caregiverId, pref.caregiverId),
+            eq(notifications.eventType, 'weekly_summary'),
+            gte(notifications.sentAt, sixDaysAgo),
+          ))
+          .limit(1);
+
+        if (recentReport) continue; // Already sent this week
+
+        // Get the senior for this caregiver
+        const [cg] = await db.select({ seniorId: caregivers.seniorId })
+          .from(caregivers)
+          .where(eq(caregivers.id, pref.caregiverId))
+          .limit(1);
+
+        if (!cg) continue;
+
+        log.info('Sending weekly report', { caregiverId: pref.caregiverId, seniorId: cg.seniorId });
+
+        const { notificationService } = await import('./notifications.js');
+        await notificationService.sendWeeklyReport(pref.caregiverId, cg.seniorId);
+      }
+    } catch (error) {
+      log.error('Weekly report check error', { error: error.message });
+    }
+  };
+
+  const weeklyReportIntervalId = setInterval(checkWeeklyReports, 60 * 60 * 1000); // hourly
+
+  // Initial weekly report check (delayed 30s to let server warm up)
+  setTimeout(checkWeeklyReports, 30000);
+
+  log.info('Weekly report scheduling enabled (hourly check)');
+
+  return { schedulerIntervalId, prefetchIntervalId, weeklyReportIntervalId };
 }

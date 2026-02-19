@@ -275,6 +275,30 @@ export const onboardingSchema = z.object({
 });
 
 // =============================================================================
+// Notification Schemas
+// =============================================================================
+
+export const notificationPreferencesSchema = z.object({
+  callCompleted: z.boolean().optional(),
+  concernDetected: z.boolean().optional(),
+  reminderMissed: z.boolean().optional(),
+  weeklySummary: z.boolean().optional(),
+  smsEnabled: z.boolean().optional(),
+  emailEnabled: z.boolean().optional(),
+  quietHoursStart: z.string().regex(/^\d{2}:\d{2}$/, 'Must be HH:MM format').optional().nullable(),
+  quietHoursEnd: z.string().regex(/^\d{2}:\d{2}$/, 'Must be HH:MM format').optional().nullable(),
+  timezone: timezoneSchema.optional(),
+  weeklyReportDay: z.number().int().min(0).max(6).optional(),
+  weeklyReportTime: z.string().regex(/^\d{2}:\d{2}$/, 'Must be HH:MM format').optional(),
+});
+
+export const notificationTriggerSchema = z.object({
+  event_type: z.enum(['call_completed', 'concern_detected', 'reminder_missed']),
+  senior_id: uuidSchema,
+  data: z.object({}).passthrough(), // flexible payload
+});
+
+// =============================================================================
 // URL Parameter Schemas
 // =============================================================================
 
@@ -323,6 +347,10 @@ export const schemas = {
   // Twilio webhooks
   voiceAnswer: voiceAnswerSchema,
   voiceStatus: voiceStatusSchema,
+
+  // Notifications
+  notificationPreferences: notificationPreferencesSchema,
+  notificationTrigger: notificationTriggerSchema,
 
   // URL params
   seniorIdParam: seniorIdParamSchema,

@@ -190,17 +190,120 @@ pipecat/
 
 ---
 
-## Development Philosophy
+## Development Workflow
 
-### Railway-First Development
+### Three Environments
 
-**All development targets Railway (production) from the start.** Do NOT build features locally with ngrok or local server testing for voice/call features.
+Donna runs three fully isolated environments. Each has its own Railway services, Neon database branch, and Twilio phone number.
 
-- **Voice/call features:** Deploy to Railway, test with real phone calls
-- **Unit tests (pure logic):** Run locally — `cd pipecat && python -m pytest tests/`
-- **Frontend apps:** Run locally against Railway API, or deploy to Vercel
+| Environment | Purpose | Database | Twilio # | Pipecat URL | API URL |
+|---|---|---|---|---|---|
+| **production** | Live customers | Neon `main` branch | +18064508649 | donna-pipecat-production.up.railway.app | donna-api-production-2450.up.railway.app |
+| **staging** | Pre-merge CI validation | Neon `staging` branch | +19789235477 | (created on deploy) | (created on deploy) |
+| **dev** | Your experiments | Neon `dev` branch | +19789235477 | donna-pipecat-dev.up.railway.app | donna-api-dev.up.railway.app |
 
-**Workflow:** write code → commit → push → `cd pipecat && railway up` → test with real call
+**Isolation guarantees:**
+- Each environment has its own database (Neon copy-on-write branches) — bad writes in dev never touch production data
+- Each environment uses its own Twilio phone number — dev calls never reach real seniors
+- API keys (Anthropic, Deepgram, ElevenLabs, etc.) are shared across environments (safe — they're stateless services)
+
+### Daily Development Workflow
+
+```
+# 1. Work on a feature branch
+git checkout -b feat/better-greetings
+
+# 2. Edit code locally
+#    (e.g., change pipecat/services/greetings.py)
+
+# 3. Deploy to dev (deploys whatever code is in your working directory)
+make deploy-dev-pipecat          # ~30s — just Pipecat (fastest)
+make deploy-dev                  # ~60s — both Pipecat + Node.js API
+
+# 4. Test with a real call
+#    Call +19789235477 (dev number) from your phone
+
+# 5. Check logs if something's wrong
+make logs-dev
+
+# 6. Iterate: edit → deploy → call → repeat
+
+# 7. When happy, push and open PR
+git push -u origin feat/better-greetings
+gh pr create
+#    → CI runs tests → deploys to staging → smoke tests
+
+# 8. Merge to main
+#    → CI auto-deploys to production
+```
+
+### Git Branches vs Railway Environments
+
+**Railway environments are NOT tied to git branches.** `make deploy-dev` uploads your current working directory to the dev environment, regardless of which git branch you're on. This is intentional — you can test any branch in dev without ceremony.
+
+**The only automated git→deploy connections are:**
+- **PR to `main`** → CI deploys to staging (after tests pass)
+- **Push to `main`** → CI deploys to production
+
+### Neon Database Branches
+
+Neon branches are copy-on-write snapshots of the production database. The `dev` and `staging` branches contain all production data (seniors, memories, reminders) but changes stay isolated.
+
+```bash
+# Reset dev database to a fresh copy of production (if data gets messy)
+neonctl branches delete dev --project-id ancient-hill-13451362 --org-id org-sparkling-voice-59093323
+neonctl branches create --name dev --project-id ancient-hill-13451362 --org-id org-sparkling-voice-59093323
+# Then update DATABASE_URL in Railway dev environment if the connection string changes
+```
+
+### Makefile Commands
+
+```bash
+# Deploy
+make deploy-dev              # Both services to dev
+make deploy-dev-pipecat      # Just Pipecat to dev (fastest for voice changes)
+make deploy-staging          # Both services to staging
+make deploy-prod             # Both services to production
+
+# Health checks
+make health-dev              # Check dev services are up
+make health-staging          # Check staging
+make health-prod             # Check production
+
+# Logs
+make logs-dev                # Tail dev Pipecat logs
+make logs-staging            # Tail staging logs
+make logs-prod               # Tail production logs
+
+# Tests (run locally)
+make test                    # All tests (Python + Node.js)
+make test-python             # Pipecat tests only
+make test-node               # Node.js tests only
+make test-regression         # Regression scenario tests
+
+# First-time setup
+make setup                   # Create Neon branches + Railway environments
+```
+
+### Railway Services
+
+The Railway project has two services per environment:
+
+| Service | Railway Name | Port | Responsibility |
+|---|---|---|---|
+| Pipecat (Python) | `donna-pipecat` | 7860 | Voice pipeline: STT → Observer → Director → Claude → TTS |
+| Node.js API | `donna-api` | 3001 | Admin/consumer APIs, reminder scheduler, call initiation |
+
+**Railway CLI is linked to production by default.** Use `--environment dev` or `--environment staging` flags for other environments. If you switch with `railway environment dev`, remember to switch back with `railway environment production`.
+
+### Testing Strategy
+
+- **Unit tests (local):** `make test` — runs Python + Node.js tests, no external deps needed
+- **Voice/call features:** Deploy to dev, test with real phone calls to dev number
+- **Frontend apps:** Run locally against dev API, or deploy to Vercel
+- **Regression:** `make test-regression` — scenario-based tests run in CI on every PR
+
+**Do NOT** test voice features locally with ngrok — always deploy to Railway dev environment
 
 ---
 
@@ -262,29 +365,7 @@ make health-prod
 make logs-dev
 ```
 
-**Manual Railway commands (if needed):**
-```bash
-cd pipecat && railway up --service donna-pipecat --environment dev
-railway up --service donna-nodejs --environment dev
-```
-
-**Environment isolation:**
-| Environment | Database | Twilio # | Deploys from |
-|---|---|---|---|
-| production | Neon main branch | Production number | `main` (auto via CI) |
-| staging | Neon `staging` branch | Dev number | PR branches (auto via CI) |
-| dev | Neon `dev` branch | Dev number | Any branch (manual) |
-
-**First-time setup:** `make setup` (creates Neon branches + Railway env vars)
-
-**Iteration workflow:**
-```
-edit code → make deploy-dev-pipecat → call dev number → repeat
-```
-
-**Production URLs:**
-- Pipecat: `https://donna-pipecat-production.up.railway.app`
-- Node.js: `https://donna-api-production-2450.up.railway.app`
+See the **Development Workflow** section above for full environment details, Makefile commands, and iteration workflow.
 
 **Admin v2 (Vercel):**
 ```bash
@@ -349,10 +430,11 @@ Both share the same Neon PostgreSQL database. Dual service implementations (e.g.
 - ~~Admin Dashboard v2~~ ✓ Completed (Vercel)
 - ~~Security Hardening~~ ✓ Completed
 - ~~Pipecat Migration~~ ✓ Completed (voice pipeline ported, Director ported)
+- ~~Multi-Environment Workflow~~ ✓ Completed (dev/staging/prod with Neon branching + Railway environments)
 - Pipecat context migration: `OpenAILLMContext` → `LLMContext` + `LLMContextAggregatorPair` (blocked — `AnthropicLLMService.create_context_aggregator()` requires `set_llm_adapter()` which only exists on `OpenAILLMContext` in v0.0.101. Revisit when pipecat updates the Anthropic adapter. Deprecation warnings are suppressed in `main.py`.)
 - Prompt Caching (Anthropic)
 - Telnyx Migration (65% cost savings)
 
 ---
 
-*Last updated: February 2026 — Pipecat migration v4.0 with Conversation Director*
+*Last updated: February 2026 — Multi-environment dev/staging/prod workflow*

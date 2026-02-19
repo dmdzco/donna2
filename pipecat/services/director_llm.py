@@ -56,99 +56,31 @@ def _repair_json(text: str) -> str:
 # System prompt (ported from DIRECTOR_SYSTEM_PROMPT in fast-observer.js)
 # ---------------------------------------------------------------------------
 
-DIRECTOR_SYSTEM_PROMPT = """\
-You are a Conversation Director for Donna, an AI companion that calls elderly individuals.
+# Static instructions — passed as system_instruction (separated from per-turn content)
+DIRECTOR_SYSTEM_INSTRUCTION = """\
+You direct Donna, an AI companion calling elderly individuals. Analyze the conversation and return JSON guidance.
 
-Your job is to GUIDE the conversation proactively — not just react to what was said, but steer where it should go next.
+## RULES
+Phases: opening (0-30s) → main (30s-8min) → winding_down (8-9min) → closing (9-10min). If past 30s and still opening, set to "main".
+Reminders: deliver at natural pauses with high engagement. NEVER during emotional moments or low engagement. Never repeat delivered.
+Low engagement: suggest personal questions, memories, open-ended prompts.
+News: only when engagement medium+ and topic winding down, never during emotional moments.
+Caregiver notes: suggest during natural pauses if available.
 
-## CALL CONTEXT
+## OUTPUT (JSON only)
+{"analysis":{"call_phase":"opening|main|winding_down|closing","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"warm|empathetic|cheerful|gentle|serious","priority_action":"str","specific_instruction":"str"}}"""
 
-Senior: {senior_name}
-Call duration: {minutes_elapsed} minutes (max {max_duration} minutes)
-Call type: {call_type}
-Pending reminders (NOT yet delivered): {pending_reminders}
-Already delivered this call (do NOT repeat): {delivered_reminders}
-Senior's interests: {interests}
-Important memories: {memories}
-Previous calls today: {todays_context}
-News available for this senior: {news_context}
-Has caregiver notes to deliver: {has_caregiver_notes}
-
-## CONVERSATION SO FAR
+# Dynamic per-turn context — passed as contents
+DIRECTOR_TURN_TEMPLATE = """\
+Senior: {senior_name} | {minutes_elapsed}min / {max_duration}min max | {call_type}
+Reminders pending: {pending_reminders}
+Delivered (don't repeat): {delivered_reminders}
+Interests: {interests}
+Has memories: {has_memories} | Has news: {has_news} | Caregiver notes: {has_caregiver_notes} | Calls today: {num_calls_today}
 
 {conversation_history}
 
-## DIRECTION PRINCIPLES
-
-### Call Phases (must match these exactly)
-1. **Opening (0-30 sec)**: Brief greeting only. Donna should transition to main IMMEDIATELY after the senior's first response. Do NOT linger here.
-2. **Main (30 sec - 8 min)**: The real conversation. Explore topics, deliver reminders, use tools (web_search, search_memories). This is where 90% of the call happens.
-3. **Winding Down (8-9 min)**: Deliver any remaining reminders, summarize, begin sign-off.
-4. **Closing (9-10 min, or after goodbye)**: Warm goodbye. Keep brief.
-
-IMPORTANT: There is NO "rapport" phase. If the call is past 30 seconds and still in opening, set call_phase to "main" and add guidance to transition immediately.
-
-### Reminder Delivery
-- Connect to what they care about ("stay healthy for the grandkids")
-- Find natural pauses in positive conversation
-- NEVER during emotional moments or when engagement is low
-- NEVER repeat already-delivered reminders
-
-### Re-engagement
-If low engagement: ask about something personal, reference a memory, ask open-ended questions.
-
-### Emotional Moments
-STAY on the topic. Validate feelings. NEVER deliver reminders during grief/sadness.
-
-### News Integration
-If news context is available:
-- Recommend mentioning news when engagement is medium/high and topic is winding down
-- NEVER during emotional moments or low engagement
-- Pick stories that match the senior's interests
-- Include "should_mention_news" in your direction when appropriate
-- Suggest a natural lead-in: "I saw something about {{topic}} that made me think of you"
-
-### Caregiver Notes
-If has_caregiver_notes is true, suggest checking notes during a natural pause in conversation.
-Do NOT interrupt emotional moments to deliver caregiver notes.
-
-## OUTPUT FORMAT
-
-Respond with ONLY valid JSON:
-
-{{
-  "analysis": {{
-    "call_phase": "opening|main|winding_down|closing",
-    "engagement_level": "high|medium|low",
-    "current_topic": "string",
-    "emotional_tone": "positive|neutral|concerned|sad",
-    "turns_on_current_topic": 0
-  }},
-  "direction": {{
-    "stay_or_shift": "stay|transition|wrap_up",
-    "next_topic": null,
-    "should_mention_news": false,
-    "news_topic": null,
-    "pacing_note": "good|too_fast|dragging|time_to_close"
-  }},
-  "reminder": {{
-    "should_deliver": false,
-    "which_reminder": null,
-    "delivery_approach": null
-  }},
-  "guidance": {{
-    "tone": "warm|empathetic|cheerful|gentle|serious",
-    "priority_action": "string",
-    "specific_instruction": "string"
-  }},
-  "model_recommendation": {{
-    "use_sonnet": false,
-    "max_tokens": 150,
-    "reason": "string"
-  }}
-}}
-
-Now analyze the current conversation and provide direction:"""
+Current message from senior: "{user_message}\""""
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +93,7 @@ def _format_history(history: list[dict]) -> str:
         return "Call just started"
     return "\n".join(
         f"{'DONNA' if m.get('role') == 'assistant' else 'SENIOR'}: {m.get('content', '')}"
-        for m in history[-10:]
+        for m in history[-4:]
     )
 
 
@@ -203,11 +135,6 @@ def get_default_direction() -> dict:
             "tone": "warm",
             "priority_action": "Continue conversation naturally",
             "specific_instruction": "Be warm and attentive",
-        },
-        "model_recommendation": {
-            "use_sonnet": False,
-            "max_tokens": 150,
-            "reason": "default",
         },
     }
 
@@ -309,7 +236,7 @@ async def analyze_turn(
     # Resolve max call duration from call_settings if available
     max_duration = (session_state.get("call_settings") or {}).get("max_call_minutes", 10)
 
-    prompt = DIRECTOR_SYSTEM_PROMPT.format(
+    turn_content = DIRECTOR_TURN_TEMPLATE.format(
         senior_name=(senior.get("name") or "").split(" ")[0] or "Friend",
         minutes_elapsed=f"{minutes_elapsed:.1f}",
         max_duration=max_duration,
@@ -317,13 +244,12 @@ async def analyze_turn(
         pending_reminders=_format_reminders(pending, delivered),
         delivered_reminders=", ".join(delivered) if delivered else "None",
         interests=", ".join(senior.get("interests") or []) or "unknown",
-        memories=(session_state.get("memory_context") or "None available"),
-        todays_context=(
-            session_state.get("todays_context") or "None (first call today)"
-        ),
-        news_context=(session_state.get("news_context") or "None available"),
+        has_memories=str(bool(session_state.get("memory_context"))).lower(),
+        has_news=str(bool(session_state.get("news_context"))).lower(),
         has_caregiver_notes=str(session_state.get("_has_caregiver_notes", False)).lower(),
+        num_calls_today=len((session_state.get("todays_context") or "").split("Call ")) - 1 if session_state.get("todays_context") else 0,
         conversation_history=_format_history(conversation_history or []),
+        user_message=user_message,
     )
 
     try:
@@ -332,10 +258,14 @@ async def analyze_turn(
         async def _gemini_call():
             return await client.aio.models.generate_content(
                 model=DIRECTOR_MODEL,
-                contents=f'{prompt}\n\nCurrent message from senior: "{user_message}"',
+                contents=turn_content,
                 config=genai.types.GenerateContentConfig(
+                    system_instruction=DIRECTOR_SYSTEM_INSTRUCTION,
                     temperature=0.2,
-                    max_output_tokens=1500,
+                    max_output_tokens=500,
+                    thinking_config=genai.types.ThinkingConfig(
+                        thinking_budget=0,
+                    ),
                 ),
             )
 

@@ -80,18 +80,18 @@ pipecat/
 ├── main.py              FastAPI entry: /health, /ws, graceful shutdown (258 LOC)
 ├── bot.py               Pipeline assembly + sentiment-aware greetings (335 LOC)
 ├── config.py            All environment variables, centralized (110 LOC)
-├── prompts.py           System prompts + phase task instructions (129 LOC)
+├── prompts.py           System prompts + phase task instructions (78 LOC)
 │
 ├── flows/               Call state machine (Pipecat Flows)
-│   ├── nodes.py         4 phases: opening → main → winding_down → closing (319 LOC)
+│   ├── nodes.py         3 phases: [reminder] → main → winding_down → closing (370 LOC)
 │   │                    Imports prompts from prompts.py
 │   └── tools.py         5 LLM tool schemas + closure-based handlers (269 LOC)
 │
 ├── processors/          Frame processors in the audio pipeline
 │   ├── patterns.py             Pattern data: 268 regex patterns, 19 categories (503 LOC)
-│   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (392 LOC)
+│   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (386 LOC)
 │   ├── conversation_director.py Layer 2: Gemini Flash guidance + prefetch orchestration + mid-call memory refresh (275 LOC)
-│   ├── conversation_tracker.py  Tracks topics/questions/advice per call (254 LOC)
+│   ├── conversation_tracker.py  Tracks topics/questions/advice per call (246 LOC)
 │   ├── metrics_logger.py        Call metrics + prefetch stats logging (110 LOC)
 │   ├── goodbye_gate.py          False-goodbye grace period — NOT in active pipeline (135 LOC)
 │   └── guidance_stripper.py     Strips <guidance> tags before TTS (115 LOC)
@@ -102,7 +102,7 @@ pipecat/
 │   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup (169 LOC)
 │   ├── memory.py            Semantic memory: pgvector, HNSW, decay, dedup, circuit breaker (392 LOC)
 │   ├── prefetch.py          Predictive Context Engine: cache, extraction, runner (250 LOC)
-│   ├── director_llm.py      Gemini Flash analysis prompts + prefetch hints (374 LOC)
+│   ├── director_llm.py      Gemini Flash analysis prompts + prefetch hints (350 LOC)
 │   ├── context_cache.py     Pre-cache senior context at 5 AM (290 LOC)
 │   ├── call_analysis.py     Post-call analysis via Gemini + call quality (246 LOC)
 │   ├── interest_discovery.py Interest extraction from conversations (183 LOC)
@@ -277,7 +277,7 @@ Only load these when your task specifically requires them.
 | `pipecat/services/director_llm.py` | 374 | Gemini Flash analysis prompts + response parsing |
 | `pipecat/bot.py` | 335 | Pipeline assembly + sentiment greetings + call settings |
 | `pipecat/services/greetings.py` | 326 | Sentiment-aware greeting templates + rotation |
-| `pipecat/flows/nodes.py` | 319 | 4-phase flow config + context builders |
+| `pipecat/flows/nodes.py` | 370 | 3-phase flow config + greeting merge + context builders |
 | `pipecat/services/context_cache.py` | 290 | Pre-cache senior context at 5 AM |
 | `pipecat/flows/tools.py` | 269 | 5 LLM tool schemas + closure-based handlers |
 | `pipecat/main.py` | 258 | FastAPI + graceful shutdown + enhanced /health |

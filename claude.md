@@ -169,9 +169,9 @@ pipecat/
 │
 ├── processors/
 │   ├── patterns.py                  ← Pattern data: 268 regex patterns, 19 categories (503 LOC)
-│   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame (392 LOC)
+│   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame (386 LOC)
 │   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking + prefetch orchestration + mid-call memory refresh (275 LOC)
-│   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (254 LOC)
+│   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (246 LOC)
 │   ├── metrics_logger.py            ← Call metrics + prefetch stats logging (110 LOC)
 │   ├── goodbye_gate.py              ← False-goodbye grace period — NOT in active pipeline (135 LOC)
 │   └── guidance_stripper.py         ← Strip <guidance> tags + [BRACKETED] directives (115 LOC)
@@ -181,7 +181,7 @@ pipecat/
 │   ├── reminder_delivery.py         ← Delivery CRUD + prompt formatting (95 LOC)
 │   ├── post_call.py                 ← Post-call: analysis, memory, cleanup (169 LOC)
 │   ├── prefetch.py                  ← Predictive Context Engine: cache + query extraction + runner (250 LOC)
-│   ├── director_llm.py              ← Gemini Flash analysis for Director + prefetch hints (374 LOC)
+│   ├── director_llm.py              ← Gemini Flash analysis for Director + prefetch hints (350 LOC)
 │   ├── call_analysis.py             ← Post-call analysis + call quality scoring (246 LOC)
 │   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (392 LOC)
 │   ├── interest_discovery.py        ← Interest extraction from conversations (183 LOC)

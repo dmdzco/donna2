@@ -41,12 +41,12 @@ class TestFormatHistory:
         assert "DONNA: Hello!" in result
         assert "SENIOR: Hi there" in result
 
-    def test_limits_to_10_messages(self):
+    def test_limits_to_4_messages(self):
         from services.director_llm import _format_history
         history = [{"role": "user", "content": f"msg {i}"} for i in range(15)]
         result = _format_history(history)
         lines = result.strip().split("\n")
-        assert len(lines) == 10
+        assert len(lines) == 4
 
 
 class TestFormatReminders:
@@ -83,7 +83,6 @@ class TestGetDefaultDirection:
         assert "direction" in d
         assert "reminder" in d
         assert "guidance" in d
-        assert "model_recommendation" in d
 
     def test_analysis_has_required_fields(self):
         from services.director_llm import get_default_direction
@@ -196,7 +195,6 @@ class TestAnalyzeTurn:
             "direction": {"stay_or_shift": "stay", "next_topic": None, "pacing_note": "good"},
             "reminder": {"should_deliver": False, "which_reminder": None, "delivery_approach": None},
             "guidance": {"tone": "warm", "priority_action": "Continue", "specific_instruction": "Ask about roses"},
-            "model_recommendation": {"use_sonnet": False, "max_tokens": 150, "reason": "normal"},
         }
         mock_response = MagicMock()
         mock_response.text = json.dumps(direction)

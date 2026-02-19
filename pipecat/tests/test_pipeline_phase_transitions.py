@@ -8,11 +8,11 @@ import pytest
 
 from flows.nodes import (
     build_initial_node,
-    build_opening_node,
     build_main_node,
+    build_reminder_node,
     build_winding_down_node,
     build_closing_node,
-    _make_transition_to_main,
+    _make_transition_reminder_to_main,
     _make_transition_to_winding_down,
     _make_transition_to_closing,
 )
@@ -20,14 +20,27 @@ from flows.tools import make_flows_tools
 
 
 class TestPhaseNodeConfigs:
-    def test_opening_node_has_correct_tools(self, session_state):
+    def test_initial_node_is_main_without_reminders(self, session_state):
+        session_state["reminder_prompt"] = None
         flows_tools = make_flows_tools(session_state)
-        node = build_opening_node(session_state, flows_tools)
+        node = build_initial_node(session_state, flows_tools)
 
-        assert node["name"] == "opening"
+        assert node["name"] == "main"
         func_names = [f.name for f in node["functions"]]
         assert "search_memories" in func_names
         assert "save_important_detail" in func_names
+        assert "transition_to_winding_down" in func_names
+        assert node.get("respond_immediately") is True
+
+    def test_initial_node_is_reminder_with_pending(self, session_state):
+        session_state["reminder_prompt"] = "Take medication at 2pm"
+        session_state["reminders_delivered"] = set()
+        flows_tools = make_flows_tools(session_state)
+        node = build_initial_node(session_state, flows_tools)
+
+        assert node["name"] == "reminder"
+        func_names = [f.name for f in node["functions"]]
+        assert "mark_reminder_acknowledged" in func_names
         assert "transition_to_main" in func_names
         assert node.get("respond_immediately") is True
 
@@ -63,9 +76,9 @@ class TestPhaseNodeConfigs:
 
 class TestPhaseTransitions:
     @pytest.mark.asyncio
-    async def test_transition_opening_to_main(self, session_state):
+    async def test_transition_reminder_to_main(self, session_state):
         flows_tools = make_flows_tools(session_state)
-        transition = _make_transition_to_main(session_state, flows_tools)
+        transition = _make_transition_reminder_to_main(session_state, flows_tools)
 
         result, node = await transition({}, None)
         assert result["status"] == "success"
@@ -88,7 +101,8 @@ class TestPhaseTransitions:
         assert result["status"] == "success"
         assert node["name"] == "closing"
 
-    def test_initial_node_is_opening(self, session_state):
+    def test_initial_node_routes_correctly(self, session_state):
+        session_state["reminder_prompt"] = None
         flows_tools = make_flows_tools(session_state)
         node = build_initial_node(session_state, flows_tools)
-        assert node["name"] == "opening"
+        assert node["name"] == "main"

@@ -19,71 +19,20 @@ _breaker = CircuitBreaker("gemini_analysis", failure_threshold=3, recovery_timeo
 
 ANALYSIS_MODEL = os.environ.get("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview")
 
-ANALYSIS_PROMPT = """You are analyzing a completed phone call between Donna (an AI companion) and an elderly individual.
+# Static instructions — passed as system_instruction
+ANALYSIS_SYSTEM_INSTRUCTION = """You analyze completed phone calls between Donna (an AI companion) and elderly individuals.
 
-## SENIOR CONTEXT
-Name: {{SENIOR_NAME}}
-Known conditions: {{HEALTH_CONDITIONS}}
+Analyze the call and return JSON with: summary (2-3 sentences), topics_discussed, reminders_delivered, engagement_score (1-10), concerns (health/cognitive/emotional/safety with severity low/medium/high, description, evidence, recommended_action), positive_observations, follow_up_suggestions, call_quality (rapport: strong/moderate/weak, goals_achieved: bool, duration_appropriate: bool).
+
+Output ONLY valid JSON: {"summary":"str","topics_discussed":["str"],"reminders_delivered":["str"],"engagement_score":0,"concerns":[{"type":"health|cognitive|emotional|safety","severity":"low|medium|high","description":"str","evidence":"str","recommended_action":"str"}],"positive_observations":["str"],"follow_up_suggestions":["str"],"call_quality":{"rapport":"strong|moderate|weak","goals_achieved":true,"duration_appropriate":true}}"""
+
+# Dynamic per-call content — passed as contents
+ANALYSIS_TURN_TEMPLATE = """Senior: {{SENIOR_NAME}}
+Conditions: {{HEALTH_CONDITIONS}}
 Family: {{FAMILY_MEMBERS}}
 
-## FULL CALL TRANSCRIPT
-{{TRANSCRIPT}}
-
-## ANALYSIS REQUIRED
-
-Analyze the complete call and provide:
-
-1. **Summary** (2-3 sentences): What happened in this call?
-
-2. **Topics Discussed**: List main topics covered
-
-3. **Reminders**: Were any reminders delivered? Which ones?
-
-4. **Engagement Score** (1-10): How engaged was the senior?
-
-5. **Concerns for Caregiver**: Flag any issues the family should know about
-   - Health concerns (pain, symptoms, medication issues, falls)
-   - Cognitive concerns (confusion, memory issues, disorientation)
-   - Emotional concerns (persistent sadness, loneliness, anxiety)
-   - Safety concerns (mentions of strangers, scams, being alone)
-
-   For each concern, provide:
-   - Type: health|cognitive|emotional|safety
-   - Severity: low|medium|high
-   - Description: What was observed
-   - Evidence: Quote or specific observation
-   - Action: What caregiver should do
-
-6. **Positive Observations**: Good things noticed (high engagement, positive mood, etc.)
-
-7. **Follow-up Suggestions**: Things to bring up in the next call
-
-## OUTPUT FORMAT
-
-Respond with ONLY valid JSON:
-
-{
-  "summary": "string",
-  "topics_discussed": ["string"],
-  "reminders_delivered": ["string"],
-  "engagement_score": number,
-  "concerns": [
-    {
-      "type": "health|cognitive|emotional|safety",
-      "severity": "low|medium|high",
-      "description": "string",
-      "evidence": "string",
-      "recommended_action": "string"
-    }
-  ],
-  "positive_observations": ["string"],
-  "follow_up_suggestions": ["string"],
-  "call_quality": {
-    "rapport": "strong|moderate|weak",
-    "goals_achieved": boolean,
-    "duration_appropriate": boolean
-  }
-}"""
+## TRANSCRIPT
+{{TRANSCRIPT}}"""
 
 
 def _repair_json(json_text: str) -> str:
@@ -138,8 +87,8 @@ async def analyze_completed_call(
     transcript: list[dict], senior_context: dict | None
 ) -> dict:
     """Analyze a completed call using Gemini Flash."""
-    prompt = (
-        ANALYSIS_PROMPT
+    turn_content = (
+        ANALYSIS_TURN_TEMPLATE
         .replace("{{SENIOR_NAME}}", (senior_context or {}).get("name", "Unknown"))
         .replace("{{HEALTH_CONDITIONS}}", (senior_context or {}).get("medical_notes", "None known"))
         .replace(
@@ -163,8 +112,9 @@ async def analyze_completed_call(
         async def _gemini_call():
             return await client.aio.models.generate_content(
                 model=ANALYSIS_MODEL,
-                contents=prompt,
+                contents=turn_content,
                 config=genai.types.GenerateContentConfig(
+                    system_instruction=ANALYSIS_SYSTEM_INSTRUCTION,
                     max_output_tokens=1500,
                     temperature=0.2,
                 ),

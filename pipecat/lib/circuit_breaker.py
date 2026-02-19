@@ -48,6 +48,9 @@ class CircuitBreaker:
                 logger.info("[CB:{name}] Half-open, testing recovery", name=self.name)
             else:
                 logger.warning("[CB:{name}] Circuit open, using fallback", name=self.name)
+                # Close the unawaited coroutine to avoid RuntimeWarning
+                if hasattr(coro, "close"):
+                    coro.close()
                 return fallback() if callable(fallback) else fallback
 
         try:

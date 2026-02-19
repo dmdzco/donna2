@@ -3,18 +3,17 @@
 import pytest
 
 from flows.nodes import (
-    build_opening_node,
     build_reminder_node,
     build_main_node,
     build_winding_down_node,
     build_closing_node,
     build_initial_node,
-    _make_transition_to_main,
-    BASE_SYSTEM_PROMPT,
     _build_senior_context,
     _build_reminder_context,
     _build_tracking_context,
+    _make_transition_reminder_to_main,
 )
+from prompts import BASE_SYSTEM_PROMPT
 from flows.tools import make_flows_tools
 
 
@@ -58,8 +57,8 @@ class TestBaseSystemPrompt:
         assert "Donna" in BASE_SYSTEM_PROMPT
         assert "warm" in BASE_SYSTEM_PROMPT
 
-    def test_prompt_contains_speech_awareness(self):
-        assert "speech-to-text" in BASE_SYSTEM_PROMPT.lower()
+    def test_prompt_contains_speech_handling(self):
+        assert "stt" in BASE_SYSTEM_PROMPT.lower()
 
     def test_prompt_limits_response_length(self):
         assert "1-2 sentences" in BASE_SYSTEM_PROMPT
@@ -122,50 +121,6 @@ class TestReminderContext:
         assert ctx == ""
 
 
-class TestOpeningNode:
-    def test_node_has_correct_name(self):
-        state = _make_session_state()
-        tools = make_flows_tools(state)
-        node = build_opening_node(state, tools)
-        assert node["name"] == "opening"
-
-    def test_node_has_transition_tool(self):
-        state = _make_session_state()
-        tools = make_flows_tools(state)
-        node = build_opening_node(state, tools)
-        func_names = _get_func_names(node)
-        assert "transition_to_main" in func_names
-
-    def test_respond_immediately_with_greeting(self):
-        state = _make_session_state(greeting="Hello Margaret!")
-        tools = make_flows_tools(state)
-        node = build_opening_node(state, tools)
-        assert node.get("respond_immediately") is True
-
-    def test_always_respond_immediately(self):
-        """Bot always speaks first on phone calls, even without pre-generated greeting."""
-        state = _make_session_state(greeting="")
-        tools = make_flows_tools(state)
-        node = build_opening_node(state, tools)
-        assert node.get("respond_immediately") is True
-
-    def test_outbound_uses_opening_task(self):
-        state = _make_session_state(is_outbound=True)
-        tools = make_flows_tools(state)
-        node = build_opening_node(state, tools)
-        task_content = node["task_messages"][0]["content"]
-        assert "PHASE: OPENING" in task_content
-        assert "INBOUND" not in task_content
-
-    def test_inbound_uses_inbound_opening_task(self):
-        state = _make_session_state(is_outbound=False)
-        tools = make_flows_tools(state)
-        node = build_opening_node(state, tools)
-        task_content = node["task_messages"][0]["content"]
-        assert "INBOUND" in task_content
-        assert "transition_to_main" in task_content
-
-
 class TestMainNode:
     def test_node_has_all_tools(self):
         state = _make_session_state()
@@ -193,6 +148,52 @@ class TestMainNode:
         assert ctx_strategy is not None
         from pipecat_flows import ContextStrategy
         assert ctx_strategy.strategy == ContextStrategy.APPEND
+
+    def test_with_greeting_has_system_prompt(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_main_node(state, tools, with_greeting=True)
+        assert len(node["role_messages"]) == 1
+        assert "Donna" in node["role_messages"][0]["content"]
+
+    def test_with_greeting_has_respond_immediately(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_main_node(state, tools, with_greeting=True)
+        assert node.get("respond_immediately") is True
+
+    def test_with_greeting_includes_greeting_text(self):
+        state = _make_session_state(greeting="Hello Margaret!")
+        tools = make_flows_tools(state)
+        node = build_main_node(state, tools, with_greeting=True)
+        task_content = node["task_messages"][0]["content"]
+        assert "Hello Margaret!" in task_content
+
+    def test_without_greeting_no_system_prompt(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_main_node(state, tools, with_greeting=False)
+        assert node["role_messages"] == []
+
+    def test_without_greeting_no_respond_immediately(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_main_node(state, tools, with_greeting=False)
+        assert node.get("respond_immediately") is False
+
+    def test_outbound_uses_outbound_greeting(self):
+        state = _make_session_state(is_outbound=True)
+        tools = make_flows_tools(state)
+        node = build_main_node(state, tools, with_greeting=True)
+        task_content = node["task_messages"][0]["content"]
+        assert "START THE CALL" in task_content
+
+    def test_inbound_uses_inbound_greeting(self):
+        state = _make_session_state(is_outbound=False)
+        tools = make_flows_tools(state)
+        node = build_main_node(state, tools, with_greeting=True)
+        task_content = node["task_messages"][0]["content"]
+        assert "INBOUND" in task_content
 
 
 class TestWindingDownNode:
@@ -262,57 +263,109 @@ class TestReminderNode:
         from pipecat_flows import ContextStrategy
         assert node["context_strategy"].strategy == ContextStrategy.APPEND
 
-    def test_no_system_prompt_override(self):
+    def test_no_system_prompt_without_greeting(self):
         state = _make_session_state()
         tools = make_flows_tools(state)
         node = build_reminder_node(state, tools)
         assert node["role_messages"] == []
 
-    def test_does_not_respond_immediately(self):
+    def test_does_not_respond_immediately_without_greeting(self):
         state = _make_session_state()
         tools = make_flows_tools(state)
         node = build_reminder_node(state, tools)
         assert node.get("respond_immediately") is False
 
+    def test_with_greeting_has_system_prompt(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_reminder_node(state, tools, with_greeting=True)
+        assert len(node["role_messages"]) == 1
+        assert "Donna" in node["role_messages"][0]["content"]
+
+    def test_with_greeting_responds_immediately(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_reminder_node(state, tools, with_greeting=True)
+        assert node.get("respond_immediately") is True
+
+    def test_with_greeting_includes_greeting_text(self):
+        state = _make_session_state(greeting="Hi Margaret!")
+        tools = make_flows_tools(state)
+        node = build_reminder_node(state, tools, with_greeting=True)
+        task_content = node["task_messages"][0]["content"]
+        assert "Hi Margaret!" in task_content
+
 
 class TestConditionalRouting:
-    @pytest.mark.asyncio
-    async def test_routes_to_reminder_when_reminders_pending(self):
+    def test_routes_to_reminder_when_reminders_pending(self):
         state = _make_session_state(
             reminder_prompt="Take blood pressure medication at 2pm.",
             reminders_delivered=set(),
         )
         tools = make_flows_tools(state)
-        transition_fn = _make_transition_to_main(state, tools)
-        result, node = await transition_fn({}, None)
+        node = build_initial_node(state, tools)
         assert node["name"] == "reminder"
 
-    @pytest.mark.asyncio
-    async def test_routes_to_main_when_no_reminders(self):
+    def test_routes_to_main_when_no_reminders(self):
         state = _make_session_state(
             reminder_prompt=None,
             reminders_delivered=set(),
         )
         tools = make_flows_tools(state)
-        transition_fn = _make_transition_to_main(state, tools)
-        result, node = await transition_fn({}, None)
+        node = build_initial_node(state, tools)
         assert node["name"] == "main"
 
-    @pytest.mark.asyncio
-    async def test_routes_to_main_when_reminders_already_delivered(self):
+    def test_routes_to_main_when_reminders_already_delivered(self):
         state = _make_session_state(
             reminder_prompt="Take blood pressure medication at 2pm.",
             reminders_delivered={"Take blood pressure medication"},
         )
         tools = make_flows_tools(state)
-        transition_fn = _make_transition_to_main(state, tools)
+        node = build_initial_node(state, tools)
+        assert node["name"] == "main"
+
+    @pytest.mark.asyncio
+    async def test_reminder_to_main_transition(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        transition_fn = _make_transition_reminder_to_main(state, tools)
         result, node = await transition_fn({}, None)
+        assert result["status"] == "success"
         assert node["name"] == "main"
 
 
 class TestInitialNode:
-    def test_returns_opening_node(self):
-        state = _make_session_state()
+    def test_returns_main_without_reminders(self):
+        state = _make_session_state(reminder_prompt=None)
         tools = make_flows_tools(state)
         node = build_initial_node(state, tools)
-        assert node["name"] == "opening"
+        assert node["name"] == "main"
+
+    def test_returns_reminder_with_pending_reminders(self):
+        state = _make_session_state(
+            reminder_prompt="Take medication",
+            reminders_delivered=set(),
+        )
+        tools = make_flows_tools(state)
+        node = build_initial_node(state, tools)
+        assert node["name"] == "reminder"
+
+    def test_initial_node_always_responds_immediately(self):
+        state = _make_session_state(reminder_prompt=None)
+        tools = make_flows_tools(state)
+        node = build_initial_node(state, tools)
+        assert node.get("respond_immediately") is True
+
+    def test_initial_node_has_system_prompt(self):
+        state = _make_session_state(reminder_prompt=None)
+        tools = make_flows_tools(state)
+        node = build_initial_node(state, tools)
+        assert len(node["role_messages"]) == 1
+        assert "Donna" in node["role_messages"][0]["content"]
+
+    def test_initial_node_includes_greeting(self):
+        state = _make_session_state(reminder_prompt=None, greeting="Hello Margaret!")
+        tools = make_flows_tools(state)
+        node = build_initial_node(state, tools)
+        task_content = node["task_messages"][0]["content"]
+        assert "Hello Margaret!" in task_content

@@ -1,6 +1,6 @@
 # Donna Architecture Overview
 
-This document describes the Donna v4.0 system architecture with the **Pipecat voice pipeline**, **2-Layer Conversation Director**, and **Pipecat Flows** call state machine.
+This document describes the Donna v5.0 system architecture with the **Pipecat voice pipeline**, **2-Layer Conversation Director**, **Pipecat Flows** call state machine, and **infrastructure reliability** features (circuit breakers, feature flags, graceful shutdown).
 
 > For detailed Pipecat implementation specifics, see [pipecat/docs/ARCHITECTURE.md](../../pipecat/docs/ARCHITECTURE.md).
 
@@ -10,7 +10,7 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│              DONNA v4.0 — PIPECAT VOICE PIPELINE                            │
+│              DONNA v5.0 — PIPECAT VOICE PIPELINE                            │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐            │
@@ -45,23 +45,26 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 │   │                     │ TranscriptionFrame                             │   │
 │   │                     ▼                                                │   │
 │   │         ┌───────────────────────┐                                    │   │
-│   │         │  Layer 1: Quick       │  0ms — 268 regex patterns          │   │
-│   │         │  Observer             │  Injects guidance via              │   │
-│   │         │                       │  LLMMessagesAppendFrame            │   │
+│   │         │  Layer 1: Quick       │  0ms — BLOCKING                    │   │
+│   │         │  Observer             │  268 regex patterns                │   │
+│   │         │                       │  Injects guidance for THIS turn    │   │
 │   │         │                       │  Goodbye → EndFrame (2s)           │   │
 │   │         └───────────┬───────────┘                                    │   │
 │   │                     ▼                                                │   │
-│   │         ┌───────────────────────┐                                    │   │
-│   │         │  Layer 2: Conversation│  ~150ms — Gemini 3 Flash Preview  │   │
-│   │         │  Director             │  NON-BLOCKING (asyncio.create_task)│   │
-│   │         │                       │  Injects PREVIOUS turn's guidance  │   │
-│   │         │                       │  Predictive prefetch (2 waves)     │   │
-│   │         │                       │  Interim transcription prefetch    │   │
-│   │         └───────────┬───────────┘  Fallback: force end at 12min     │   │
+│   │         ┌───────────────────────┐  ┌─────────────────────────┐      │   │
+│   │         │  Layer 2: Conversation│─►│ Background: Gemini Flash│      │   │
+│   │         │  Director             │  │ ~150ms, asyncio.task    │      │   │
+│   │         │  (PASS-THROUGH)       │  │ Result cached → used on │      │   │
+│   │         │                       │  │ NEXT turn's injection   │      │   │
+│   │         │  Injects PREVIOUS     │  │ + mid-call mem refresh  │      │   │
+│   │         │  turn's cached result │  │ + predictive prefetch   │      │   │
+│   │         │                       │  │ + force end at 9/12min  │      │   │
+│   │         └───────────┬───────────┘  └─────────────────────────┘      │   │
+│   │                     │ (no delay)                                     │   │
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (user) ← builds LLM context              │   │
 │   │                     ▼                                                │   │
-│   │         Claude Sonnet 4.5 + FlowManager                             │   │
+│   │         Claude Sonnet 4.5 + FlowManager (5 tools)                   │   │
 │   │         (4 phases: opening → main → winding_down → closing)         │   │
 │   │                     │ TextFrame                                      │   │
 │   │                     ▼                                                │   │
@@ -72,8 +75,6 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 │   │         ElevenLabs TTS → Audio Out → Twilio (mulaw 8kHz)            │   │
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (assistant) ← tracks responses            │   │
-│   │                                                                      │   │
-│   │         GoodbyeGate (observes goodbye signals, 4s grace period)     │   │
 │   │                                                                      │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                        │                                                     │
@@ -92,18 +93,24 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 │   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │  │
 │   │  │ Memory System │  │   Scheduler  │  │  News Service│               │  │
 │   │  │ (pgvector)    │  │  (reminders) │  │ (OpenAI web) │               │  │
-│   │  │ + decay/dedup │  │  + prefetch  │  │  + 1hr cache │               │  │
+│   │  │ + HNSW index  │  │  + prefetch  │  │  + 1hr cache │               │  │
+│   │  │ + decay/dedup │  │              │  │              │               │  │
 │   │  └──────────────┘  └──────────────┘  └──────────────┘               │  │
 │   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │  │
 │   │  │ Daily Context │  │ Context Cache│  │  Caregivers  │               │  │
-│   │  │ (cross-call)  │  │ (5 AM local) │  │ (access ctrl)│               │  │
+│   │  │ (cross-call)  │  │ (5 AM local) │  │ + notes      │               │  │
 │   │  └──────────────┘  └──────────────┘  └──────────────┘               │  │
+│   │  ┌──────────────┐  ┌──────────────┐                                 │  │
+│   │  │Circuit Breaker│  │Feature Flags │                                 │  │
+│   │  │(Gemini, OAI)  │  │ (DB-backed)  │                                 │  │
+│   │  └──────────────┘  └──────────────┘                                 │  │
 │   └────────────────────────────────────┬─────────────────────────────────┘  │
 │                                        ▼                                     │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
 │   │                     PostgreSQL (Neon + pgvector)                      │  │
 │   │  seniors | conversations | memories | reminders | reminder_deliveries │  │
-│   │  caregivers | call_analyses | daily_call_context | admin_users        │  │
+│   │  caregivers | caregiver_notes | call_analyses | daily_call_context    │  │
+│   │  feature_flags | admin_users                                          │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -189,8 +196,8 @@ The Director runs **non-blocking** via `asyncio.create_task()`:
 
 | Phase | Tools | Context Strategy |
 |-------|-------|-----------------|
-| **Opening** | search_memories, save_important_detail, transition_to_main | APPEND, respond_immediately |
-| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | APPEND |
+| **Opening** | search_memories, save_important_detail, check_caregiver_notes, transition_to_main | APPEND, respond_immediately |
+| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes, transition_to_winding_down | APPEND |
 | **Winding Down** | mark_reminder_acknowledged, save_important_detail, transition_to_closing | APPEND |
 | **Closing** | *(none — post_action: end_conversation)* | APPEND |
 
@@ -274,38 +281,59 @@ pipecat/
 
 | Table | Purpose | Key Fields |
 |-------|---------|------------|
-| **seniors** | User profiles | name, phone, interests, familyInfo, medicalNotes, timezone |
+| **seniors** | User profiles | name, phone, interests, familyInfo, medicalNotes, timezone, call_settings (JSONB) |
 | **conversations** | Call records | callSid, transcript, duration, status, summary |
-| **memories** | Long-term memory | content, type, importance, embedding (1536d) |
+| **memories** | Long-term memory | content, type, importance, embedding (1536d, HNSW index) |
 | **reminders** | Scheduled reminders | title, scheduledTime, isRecurring, type |
 | **reminder_deliveries** | Delivery tracking | status, attemptCount, userResponse, callSid |
 | **caregivers** | User-senior links | clerkUserId, seniorId, role |
+| **caregiver_notes** | Notes from caregivers | content, is_delivered, delivered_at, call_sid |
 | **call_analyses** | Post-call results | summary, engagementScore, concerns, followUps |
 | **daily_call_context** | Same-day cross-call memory | seniorId, callDate, topicsDiscussed, remindersDelivered |
+| **feature_flags** | Feature flag toggles | key (PK), enabled, description |
 | **admin_users** | Admin dashboard accounts | email, passwordHash (bcrypt) |
 
 ### Memory System
 
 - **Embedding**: OpenAI `text-embedding-3-small` (1536 dimensions)
+- **Index**: HNSW (cosine_ops, m=16, ef_construction=64) — approximate nearest-neighbor
 - **Similarity**: Cosine similarity, 0.7 minimum threshold
 - **Deduplication**: Skip if cosine > 0.9 with existing memory
 - **Decay**: Effective importance = `base * 0.5^(days/30)` (30-day half-life)
 - **Access Boost**: +10 importance if accessed in last week
 - **Tiered Retrieval**: Critical → Contextual → Background
+- **Mid-Call Refresh**: After 5+ minutes, refresh context with current conversation topics
+- **Circuit Breaker**: OpenAI embedding calls wrapped with 10s timeout + 3-failure threshold
+
+---
+
+## Infrastructure & Reliability (v5.0)
+
+| Feature | Implementation | Details |
+|---------|---------------|---------|
+| **Circuit Breakers** | `lib/circuit_breaker.py` | Gemini (5s), OpenAI embedding (10s), news (10s) |
+| **Feature Flags** | `lib/feature_flags.py` | DB-backed with 5-minute in-memory cache |
+| **Graceful Shutdown** | `main.py` | Tracks active calls, 7s drain on SIGTERM |
+| **Enhanced /health** | `main.py` | Database connectivity + circuit breaker states |
+| **Per-Senior Settings** | `seniors.call_settings` | JSONB column for time limits, greeting style, etc. |
 
 ---
 
 ## Deployment
 
+Three environments: **dev** (experiments), **staging** (CI), **production** (customers).
+
 | Service | Platform | Port | URL |
 |---------|----------|------|-----|
 | Pipecat voice pipeline | Railway | 7860 | donna-pipecat-production.up.railway.app |
-| Node.js API (legacy) | Railway | 3001 | donna-api-production-2450.up.railway.app |
+| Node.js API | Railway | 3001 | donna-api-production-2450.up.railway.app |
 | Admin Dashboard | Vercel | — | admin-v2-liart.vercel.app |
 | Consumer App | Vercel | — | consumer-ruddy.vercel.app |
 | Observability | Vercel | — | observability-five.vercel.app |
-| Database | Neon | — | Managed PostgreSQL + pgvector |
+| Database | Neon | — | Managed PostgreSQL + pgvector (3 branches) |
+
+**CI/CD:** PRs → tests → staging deploy → smoke tests. Push to main → production auto-deploy.
 
 ---
 
-*Last updated: February 2026 — Pipecat v4.0 with Conversation Director + GoodbyeGate*
+*Last updated: February 2026 — v5.0 with circuit breakers, feature flags, caregiver notes, sentiment-aware greetings*

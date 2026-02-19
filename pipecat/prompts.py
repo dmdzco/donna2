@@ -92,6 +92,16 @@ INBOUND_OPENING_TASK = (
     "The main phase has all your tools and is where real conversation happens."
 )
 
+REMINDER_TASK = (
+    "PHASE: REMINDER DELIVERY (keep this brief — deliver reminders, then move on)\n"
+    "You have pending reminders to deliver. Weave them into conversation naturally — "
+    "don't just read them off a list. After delivering each reminder, call "
+    "mark_reminder_acknowledged so the system knows it was delivered.\n\n"
+    "Once ALL reminders have been delivered and acknowledged, call transition_to_main "
+    "to move into the main conversation. Do NOT linger in this phase — deliver the "
+    "reminders warmly but efficiently, then transition."
+)
+
 MAIN_TASK = (
     "PHASE: MAIN CONVERSATION\n"
     "Have a natural, warm conversation. Listen actively, respond empathetically, "

@@ -10,6 +10,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
   - Layer 2: Conversation Director (~150ms) — Gemini 3 Flash non-blocking call guidance
   - Post-Call Analysis — Summary, concerns, engagement score (Gemini Flash)
 - **Pipecat Flows** — 4-phase call state machine (opening → main → winding_down → closing)
+- **5 LLM Tools** — search_memories, get_news, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
 - **Programmatic Call Ending** — Goodbye detection → EndFrame after 2s delay (bypasses unreliable LLM tool calls)
 - **Director Fallback Actions** — Force winding-down at 9min, force call end at 12min
 - **Predictive Context Engine** — Speculative memory prefetch with 2-wave pipeline:
@@ -24,15 +25,26 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Speech transcription (Deepgram Nova 3)
 - LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService)
 - Text-to-speech (ElevenLabs via Pipecat)
-- Semantic memory with decay + deduplication (pgvector)
+- Semantic memory with decay + deduplication (pgvector + HNSW index)
 - Full in-call context retention (APPEND strategy, no summary truncation)
 - Cross-call turn history (recent turns from previous calls in system prompt)
 - In-call memory tracking (topics, questions, advice per call)
+- Mid-call memory refresh (after 5+ minutes, refreshes context with current topics)
 - Same-day cross-call memory (timezone-aware daily context + call summaries)
+- Sentiment-aware greetings (uses last call's engagement/rapport for tone)
 - News via OpenAI web search (1hr cache)
 - Scheduled reminder calls with delivery tracking
 - Context pre-caching at 5 AM local time
-- 4 LLM tools: search_memories, get_news, save_important_detail, mark_reminder_acknowledged
+- Caregiver notes delivery (family can leave notes read during calls)
+- Per-senior call settings (configurable time limits, greeting style, memory decay)
+- 5 LLM tools: search_memories, get_news, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
+
+### Infrastructure & Reliability
+- Circuit breakers for external services (Gemini, OpenAI embeddings, news)
+- DB-backed feature flags with 5-minute cache
+- Graceful shutdown with active call tracking (7s drain on SIGTERM)
+- Enhanced /health endpoint (database + circuit breaker states)
+- Multi-environment workflow (dev/staging/production with Neon branching)
 
 ### Frontend Apps
 - **Admin Dashboard v2** — React + Vite + Tailwind ([admin-v2-liart.vercel.app](https://admin-v2-liart.vercel.app))
@@ -51,22 +63,29 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ### Railway-First Development
 
-Voice and API features are developed directly against Railway — not localhost. Local servers can't meaningfully test Twilio calls, WebSocket audio streams, or real STT/TTS latency.
+Voice and API features are developed directly against Railway — not localhost. Three isolated environments: dev, staging, production.
 
 ```bash
-cd pipecat && railway up    # Deploy to Railway
+# Deploy to dev environment (fast iteration)
+make deploy-dev-pipecat      # Just Pipecat (~30s)
+make deploy-dev              # Both services (~60s)
+
+# Test with a real call to dev number (+19789235477)
+# Check logs
+make logs-dev
 ```
 
 Test health:
 ```bash
-curl https://donna-pipecat-production.up.railway.app/health
+make health-dev
+# or: curl https://donna-pipecat-dev.up.railway.app/health
 ```
-
-**Voice features:** Deploy to Railway, test with a real phone call.
 
 **Unit tests** (pure logic, no external services):
 ```bash
-cd pipecat && python -m pytest tests/
+make test                    # All tests (Python + Node.js)
+make test-python             # Pipecat only
+make test-regression         # Scenario-based regression tests
 ```
 
 **Frontend apps** (run locally against the Railway API):
@@ -78,7 +97,7 @@ cd pipecat && python -m pytest tests/
 
 ### Pipecat Voice Pipeline (bot.py)
 
-Each box is a Pipecat `FrameProcessor` in a linear `Pipeline`. Frames flow top-to-bottom.
+Linear pipeline of `FrameProcessor`s. The Conversation Director is **non-blocking** — it passes frames through instantly while running Gemini analysis in a background task.
 
 ```
 Phone Call → Twilio → WebSocket → Pipecat Pipeline
@@ -87,20 +106,26 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                                        │ TranscriptionFrame
                                        ▼
                              ┌─────────────────────┐
-                             │   Quick Observer     │  Layer 1 (0ms)
-                             │   268 regex patterns │  Goodbye → EndFrame (2s)
+                             │   Quick Observer     │  Layer 1 (0ms, BLOCKING)
+                             │   268 regex patterns │  Injects guidance for THIS turn
+                             │                      │  Goodbye → EndFrame (2s)
                              └─────────┬───────────┘
+                                       │
                                        ▼
-                             ┌─────────────────────┐
-                             │   Conversation       │  Layer 2 (~150ms)
-                             │   Director           │  NON-BLOCKING
-                             │   (Gemini Flash)     │  Prev-turn guidance
-                             │                      │  Predictive prefetch
+                             ┌─────────────────────┐   ┌───────────────────┐
+                             │   Conversation       │──►│ Background Task   │
+                             │   Director           │   │ Gemini Flash      │
+                             │   (PASS-THROUGH)     │   │ ~150ms/turn       │
+                             │                      │   │ Result cached for │
+                             │ Injects PREVIOUS     │   │ NEXT turn         │
+                             │ turn's cached result  │   │ Predictive prefetch│
+                             │                      │   └───────────────────┘
                              └─────────┬───────────┘
+                                       │ (no delay)
                                        ▼
                              Context Aggregator (user)
                                        ▼
-                             Claude Sonnet 4.5 + Pipecat Flows
+                             Claude Sonnet 4.5 + Pipecat Flows (5 tools)
                                        │ TextFrame
                                        ▼
                              Conversation Tracker → Guidance Stripper
@@ -145,7 +170,7 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 ├── prompts.py                          # System prompts + phase instructions
 ├── flows/
 │   ├── nodes.py                        # 4 call phase NodeConfigs
-│   └── tools.py                        # 4 LLM tool schemas + async handlers
+│   └── tools.py                        # 5 LLM tool schemas + async handlers
 ├── processors/
 │   ├── patterns.py                     # 268 regex patterns, 19 categories
 │   ├── quick_observer.py               # Layer 1: analysis + goodbye EndFrame
@@ -174,9 +199,14 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── routes/                         # voice.py, calls.py
 │   ├── middleware/                      # auth, api_auth, rate_limit, security, twilio
 │   └── validators/schemas.py           # Pydantic input validation
-├── db/client.py                        # asyncpg pool + query helpers
-├── lib/sanitize.py                     # PII-safe logging
-├── tests/                              # 36 test files + helpers/mocks/scenarios
+├── db/
+│   ├── client.py                       # asyncpg pool + query helpers + health check
+│   └── migrations/                     # SQL migrations (HNSW index, feature_flags)
+├── lib/
+│   ├── circuit_breaker.py              # Async circuit breaker for external services
+│   ├── feature_flags.py                # DB-backed feature flags (5-min cache)
+│   └── sanitize.py                     # PII-safe logging
+├── tests/                              # 61 test files + helpers/mocks/scenarios
 ├── pyproject.toml                      # Python 3.12, Pipecat v0.0.101+
 └── Dockerfile                          # python:3.12-slim + uv
 
@@ -239,12 +269,18 @@ ELEVENLABS_VOICE_ID=...                 # Voice ID (has default)
 
 ## Deployment
 
-**Pipecat voice pipeline (Railway):**
+Three environments: **dev** (experiments), **staging** (CI), **production** (customers).
+
 ```bash
-cd pipecat && railway up
+make deploy-dev              # Both services to dev
+make deploy-dev-pipecat      # Just Pipecat to dev (faster)
+make deploy-staging          # Both services to staging
+make deploy-prod             # Both services to production
 ```
 
-> **Do NOT test voice/call features locally.** Deploy to Railway and test with real Twilio phone calls.
+> **Do NOT test voice/call features locally.** Deploy to Railway dev and test with real Twilio calls.
+
+**CI/CD:** PRs to main → tests → staging deploy → smoke tests. Push to main → production deploy.
 
 **Frontend apps (Vercel):**
 ```bash

@@ -21,6 +21,10 @@
 | Change greeting templates | `pipecat/services/greetings.py` |
 | Change context pre-caching | `pipecat/services/context_cache.py` |
 | Change reminder scheduling | `pipecat/services/scheduler.py` (polling/calls) + `pipecat/services/reminder_delivery.py` (delivery CRUD) |
+| Change per-senior call settings | `pipecat/services/seniors.py` (`get_call_settings()`) |
+| Change caregiver notes delivery | `pipecat/services/caregivers.py` + `pipecat/flows/tools.py` |
+| Change circuit breaker behavior | `pipecat/lib/circuit_breaker.py` |
+| Change feature flags | `pipecat/lib/feature_flags.py` + `feature_flags` DB table |
 | Check all environment variables | `pipecat/config.py` |
 | Add Pipecat API routes | `pipecat/api/routes/` |
 | Change Pipecat auth/middleware | `pipecat/api/middleware/` |
@@ -67,26 +71,26 @@ Donna runs two backend services. Change the wrong one and nothing happens.
 
 ## Directory Map
 
-### `pipecat/` — Voice Pipeline (Python, 7.2k LOC)
+### `pipecat/` — Voice Pipeline (Python, 7.7k LOC)
 
 The primary codebase. All voice/call features live here. **Clean architecture: no circular imports, flat service dependencies.**
 
 ```
 pipecat/
-├── main.py              FastAPI entry: /health, /ws, middleware setup (207 LOC)
-├── bot.py               Pipeline assembly — imports run_post_call from services (297 LOC)
+├── main.py              FastAPI entry: /health, /ws, graceful shutdown (258 LOC)
+├── bot.py               Pipeline assembly + sentiment-aware greetings (335 LOC)
 ├── config.py            All environment variables, centralized (110 LOC)
-├── prompts.py           System prompts + phase task instructions (105 LOC)
+├── prompts.py           System prompts + phase task instructions (129 LOC)
 │
 ├── flows/               Call state machine (Pipecat Flows)
-│   ├── nodes.py         4 phases: opening → main → winding_down → closing (317 LOC)
+│   ├── nodes.py         4 phases: opening → main → winding_down → closing (319 LOC)
 │   │                    Imports prompts from prompts.py
-│   └── tools.py         4 LLM tool schemas + closure-based handlers (236 LOC)
+│   └── tools.py         5 LLM tool schemas + closure-based handlers (269 LOC)
 │
 ├── processors/          Frame processors in the audio pipeline
 │   ├── patterns.py             Pattern data: 268 regex patterns, 19 categories (503 LOC)
 │   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (386 LOC)
-│   ├── conversation_director.py Layer 2: Gemini Flash guidance + prefetch orchestration (275 LOC)
+│   ├── conversation_director.py Layer 2: Gemini Flash guidance + prefetch orchestration + mid-call memory refresh (275 LOC)
 │   ├── conversation_tracker.py  Tracks topics/questions/advice per call (246 LOC)
 │   ├── metrics_logger.py        Call metrics + prefetch stats logging (110 LOC)
 │   ├── goodbye_gate.py          False-goodbye grace period — NOT in active pipeline (135 LOC)
@@ -96,28 +100,34 @@ pipecat/
 │   ├── scheduler.py         Reminder polling + outbound calls (427 LOC)
 │   ├── reminder_delivery.py Delivery CRUD + prompt formatting (95 LOC)
 │   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup (169 LOC)
-│   ├── memory.py            Semantic memory: pgvector, decay, dedup (355 LOC)
+│   ├── memory.py            Semantic memory: pgvector, HNSW, decay, dedup, circuit breaker (392 LOC)
 │   ├── prefetch.py          Predictive Context Engine: cache, extraction, runner (250 LOC)
 │   ├── director_llm.py      Gemini Flash analysis prompts + prefetch hints (350 LOC)
 │   ├── context_cache.py     Pre-cache senior context at 5 AM (290 LOC)
-│   ├── call_analysis.py     Post-call analysis via Gemini (226 LOC)
+│   ├── call_analysis.py     Post-call analysis via Gemini + call quality (246 LOC)
 │   ├── interest_discovery.py Interest extraction from conversations (183 LOC)
-│   ├── greetings.py         Greeting templates + rotation (300 LOC)
+│   ├── greetings.py         Sentiment-aware greeting templates + rotation (326 LOC)
 │   ├── conversations.py     Conversation CRUD (250 LOC)
 │   ├── daily_context.py     Same-day cross-call memory (161 LOC)
-│   ├── seniors.py           Senior profile CRUD (105 LOC)
-│   ├── news.py              OpenAI web search, 1hr cache (202 LOC)
-│   └── caregivers.py        Caregiver relationships (78 LOC)
+│   ├── seniors.py           Senior profile + per-senior call_settings (131 LOC)
+│   ├── news.py              OpenAI web search, 1hr cache + circuit breaker (213 LOC)
+│   └── caregivers.py        Caregiver relationships + notes delivery (101 LOC)
 │
-├── api/                 HTTP layer (291 LOC total)
-│   ├── routes/voice.py      /voice/answer (TwiML), /voice/status
+├── lib/                 Shared utilities
+│   ├── circuit_breaker.py   Async circuit breaker for external services (84 LOC)
+│   ├── feature_flags.py     DB-backed feature flags with 5-min cache (41 LOC)
+│   └── sanitize.py          PII masking for logs (38 LOC)
+│
+├── api/                 HTTP layer
+│   ├── routes/voice.py      /voice/answer (TwiML), /voice/status (230 LOC)
 │   ├── routes/calls.py      /api/call, /api/calls
 │   ├── middleware/           auth, api_auth, rate_limit, security, twilio, error_handler
 │   └── validators/schemas.py  Pydantic request validation (142 LOC)
 │
-├── db/client.py         asyncpg pool + query helpers (58 LOC)
-├── lib/sanitize.py      PII masking for logs (38 LOC)
-├── tests/               36 test files + helpers/mocks/scenarios
+├── db/
+│   ├── client.py            asyncpg pool + query helpers + health check (69 LOC)
+│   └── migrations/          SQL migrations (HNSW index, feature_flags table)
+├── tests/               61 test files + helpers/mocks/scenarios
 ├── docs/ARCHITECTURE.md Full architecture docs
 ├── pyproject.toml       Python 3.12, dependencies
 └── Dockerfile           python:3.12-slim + uv
@@ -127,6 +137,7 @@ pipecat/
 ```
 context_cache → seniors, conversations, memory, greetings  (orchestrator)
 scheduler → memory, context_cache                           (needs context for calls)
+memory, news → lib/circuit_breaker                          (external service resilience)
 All other services → db only                                (independent)
 ```
 
@@ -206,7 +217,7 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   └── error-handler.js Error formatting (33 LOC)
 │
 ├── db/
-│   ├── schema.js        9 Drizzle tables: seniors, conversations, memories, reminders, etc.
+│   ├── schema.js        11 Drizzle tables: seniors, conversations, memories, reminders, etc.
 │   ├── client.js        Neon PostgreSQL + Drizzle ORM init
 │   └── setup-pgvector.js
 │
@@ -222,15 +233,17 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 ```
 docs/
 ├── PRODUCT_PLAN.md               Product roadmap (40KB)
-├── architecture/OVERVIEW.md      v4.0 high-level architecture (current)
+├── architecture/OVERVIEW.md      v5.0 high-level architecture (current)
 ├── plans/
-│   └── 2026-02-05-multi-senior-management.md   Feature plan (may be active)
+│   ├── 2026-02-18-v5-execution-plan.md         v5.0 execution plan (7 workstreams)
+│   ├── 2026-02-07-roadmap-and-feature-flags.md Feature flag roadmap
+│   └── 2026-02-05-multi-senior-management.md   Multi-senior management plan
 ├── guides/
 │   └── DEPLOYMENT_PLAN.md        Railway deployment guide
-└── decisions/                    Historical decisions + completed plans (reference only):
+└── decisions/                    Historical decisions (reference only):
     ├── DONNA_ON_PIPECAT.md, DONNA_ON_LIVEKIT.md, VOICE_AI_FRAMEWORK_ANALYSIS.md
-    ├── ARCHITECTURE.md, ARCHITECTURE_ASSESSMENT.md
-    └── 2026-02-05-pipecat-migration*.md, 2026-02-05-security-hardening.md
+    ├── ARCHITECTURE_ASSESSMENT.md
+    └── 2026-02-05-pipecat-migration-REVIEWED.md, 2026-02-05-security-hardening.md
 ```
 
 ---
@@ -259,13 +272,15 @@ Only load these when your task specifically requires them.
 |---|---|---|
 | `pipecat/processors/patterns.py` | 503 | 268 regex patterns, 19 categories (pure data) |
 | `pipecat/services/scheduler.py` | 427 | Polling + call triggering + prefetch + state |
-| `pipecat/processors/quick_observer.py` | 386 | Analysis logic + goodbye detection |
-| `pipecat/services/memory.py` | 355 | pgvector search + decay + dedup + tiered retrieval |
-| `pipecat/services/director_llm.py` | 340 | Gemini Flash analysis prompts + response parsing |
-| `pipecat/flows/nodes.py` | 317 | 4-phase flow config + context builders |
-| `pipecat/services/greetings.py` | 300 | Greeting templates + rotation |
-| `pipecat/bot.py` | 297 | Pipeline assembly + run_bot() |
+| `pipecat/services/memory.py` | 392 | pgvector + HNSW + circuit breaker + mid-call refresh |
+| `pipecat/processors/quick_observer.py` | 392 | Analysis logic + goodbye detection + model recs |
+| `pipecat/services/director_llm.py` | 374 | Gemini Flash analysis prompts + response parsing |
+| `pipecat/bot.py` | 335 | Pipeline assembly + sentiment greetings + call settings |
+| `pipecat/services/greetings.py` | 326 | Sentiment-aware greeting templates + rotation |
+| `pipecat/flows/nodes.py` | 319 | 4-phase flow config + context builders |
 | `pipecat/services/context_cache.py` | 290 | Pre-cache senior context at 5 AM |
+| `pipecat/flows/tools.py` | 269 | 5 LLM tool schemas + closure-based handlers |
+| `pipecat/main.py` | 258 | FastAPI + graceful shutdown + enhanced /health |
 | `services/scheduler.js` | 489 | Node.js reminder polling (mirrors pipecat scheduler) |
 | `services/context-cache.js` | 364 | Node.js context pre-caching |
 | `routes/observability.js` | 368 | Call monitoring + metrics aggregation |
@@ -275,8 +290,14 @@ Only load these when your task specifically requires them.
 ## Testing
 
 ```bash
-# Pipecat (primary — 36 test files)
-cd pipecat && python -m pytest tests/
+# All tests (Python + Node.js)
+make test
+
+# Pipecat only (61 test files)
+make test-python
+
+# Regression scenario tests
+make test-regression
 
 # Node.js (4 test files + e2e)
 npm test
@@ -285,7 +306,7 @@ npm test
 npx playwright test
 ```
 
-Test files follow `pipecat/tests/test_<module>.py` naming.
+Test files follow `pipecat/tests/test_<module>.py` naming. Regression scenarios in `pipecat/tests/scenarios/`.
 
 ---
 
@@ -316,4 +337,4 @@ Workflow: `edit → make deploy-dev-pipecat → call dev number → repeat`
 
 ---
 
-*Source of truth for codebase navigation. Update when directories or responsibilities change.*
+*Source of truth for codebase navigation. Update when directories or responsibilities change. Last updated: February 2026 — v5.0*

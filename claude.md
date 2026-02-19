@@ -245,20 +245,46 @@ After each commit that adds features or changes architecture, update:
 
 ### Deployment
 
-**Pipecat (Railway):**
+Three environments: **dev** (your experiments), **staging** (pre-merge CI), **production** (customers).
+
 ```bash
-cd pipecat && railway up
+# Quick deploy (use Makefile)
+make deploy-dev              # Deploy both services to dev
+make deploy-dev-pipecat      # Deploy only Pipecat to dev (faster iteration)
+make deploy-staging          # Deploy both to staging
+make deploy-prod             # Deploy both to production
+
+# Health checks
+make health-dev
+make health-prod
+
+# Logs
+make logs-dev
 ```
 
-Railway project: `36e40dcb-ada1-4df5-9465-627d3cfdff71`
-Service: `donna-pipecat` (port 7860)
-URL: `https://donna-pipecat-production.up.railway.app`
-
-**Node.js admin API (Railway):**
+**Manual Railway commands (if needed):**
 ```bash
-# From repo root
-railway up
+cd pipecat && railway up --service donna-pipecat --environment dev
+railway up --service donna-nodejs --environment dev
 ```
+
+**Environment isolation:**
+| Environment | Database | Twilio # | Deploys from |
+|---|---|---|---|
+| production | Neon main branch | Production number | `main` (auto via CI) |
+| staging | Neon `staging` branch | Dev number | PR branches (auto via CI) |
+| dev | Neon `dev` branch | Dev number | Any branch (manual) |
+
+**First-time setup:** `make setup` (creates Neon branches + Railway env vars)
+
+**Iteration workflow:**
+```
+edit code → make deploy-dev-pipecat → call dev number → repeat
+```
+
+**Production URLs:**
+- Pipecat: `https://donna-pipecat-production.up.railway.app`
+- Node.js: `https://donna-api-production-2450.up.railway.app`
 
 **Admin v2 (Vercel):**
 ```bash

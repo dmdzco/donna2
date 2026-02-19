@@ -67,6 +67,8 @@ Already delivered this call (do NOT repeat): {delivered_reminders}
 Senior's interests: {interests}
 Important memories: {memories}
 Previous calls today: {todays_context}
+News available for this senior: {news_context}
+Has caregiver notes to deliver: {has_caregiver_notes}
 
 ## CONVERSATION SO FAR
 
@@ -94,6 +96,18 @@ If low engagement: ask about something personal, reference a memory, ask open-en
 ### Emotional Moments
 STAY on the topic. Validate feelings. NEVER deliver reminders during grief/sadness.
 
+### News Integration
+If news context is available:
+- Recommend mentioning news when engagement is medium/high and topic is winding down
+- NEVER during emotional moments or low engagement
+- Pick stories that match the senior's interests
+- Include "should_mention_news" in your direction when appropriate
+- Suggest a natural lead-in: "I saw something about {{topic}} that made me think of you"
+
+### Caregiver Notes
+If has_caregiver_notes is true, suggest checking notes during a natural pause in conversation.
+Do NOT interrupt emotional moments to deliver caregiver notes.
+
 ## OUTPUT FORMAT
 
 Respond with ONLY valid JSON:
@@ -109,6 +123,8 @@ Respond with ONLY valid JSON:
   "direction": {{
     "stay_or_shift": "stay|transition|wrap_up",
     "next_topic": null,
+    "should_mention_news": false,
+    "news_topic": null,
     "pacing_note": "good|too_fast|dragging|time_to_close"
   }},
   "reminder": {{
@@ -244,6 +260,10 @@ def format_director_guidance(direction: dict) -> str | None:
         ):
             parts.append(instr[:60])
 
+    dir_section = direction.get("direction", {})
+    if dir_section.get("should_mention_news") and dir_section.get("news_topic"):
+        parts.append(f"NEWS: Naturally mention {dir_section['news_topic']}")
+
     emotional_tone = analysis.get("emotional_tone")
     if emotional_tone in ("sad", "concerned"):
         parts.append(f"({emotional_tone})")
@@ -277,10 +297,13 @@ async def analyze_turn(
     call_start = session_state.get("_call_start_time") or time.time()
     minutes_elapsed = (time.time() - call_start) / 60
 
+    # Resolve max call duration from call_settings if available
+    max_duration = (session_state.get("call_settings") or {}).get("max_call_minutes", 10)
+
     prompt = DIRECTOR_SYSTEM_PROMPT.format(
         senior_name=(senior.get("name") or "").split(" ")[0] or "Friend",
         minutes_elapsed=f"{minutes_elapsed:.1f}",
-        max_duration=10,
+        max_duration=max_duration,
         call_type=session_state.get("call_type", "check-in"),
         pending_reminders=_format_reminders(pending, delivered),
         delivered_reminders=", ".join(delivered) if delivered else "None",
@@ -289,6 +312,8 @@ async def analyze_turn(
         todays_context=(
             session_state.get("todays_context") or "None (first call today)"
         ),
+        news_context=(session_state.get("news_context") or "None available"),
+        has_caregiver_notes=str(session_state.get("_has_caregiver_notes", False)).lower(),
         conversation_history=_format_history(conversation_history or []),
     )
 

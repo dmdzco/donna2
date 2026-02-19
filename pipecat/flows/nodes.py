@@ -217,7 +217,7 @@ def build_main_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     if tracking_ctx:
         main_task += f"\n\n{tracking_ctx}"
 
-    # All tools for main phase
+    # All tools for main phase (includes check_caregiver_notes)
     functions: list = list(flows_tools.values())
 
     # Transition tool
@@ -259,6 +259,8 @@ def build_winding_down_node(session_state: dict, flows_tools: dict) -> NodeConfi
         functions.append(flows_tools["save_important_detail"])
     if "web_search" in flows_tools:
         functions.append(flows_tools["web_search"])
+    if "check_caregiver_notes" in flows_tools:
+        functions.append(flows_tools["check_caregiver_notes"])
 
     functions.append(FlowsFunctionSchema(
         name="transition_to_closing",

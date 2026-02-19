@@ -103,3 +103,29 @@ async def delete(senior_id: str) -> dict | None:
         "UPDATE seniors SET is_active = false, updated_at = NOW() WHERE id = $1 RETURNING *",
         senior_id,
     )
+
+
+DEFAULT_CALL_SETTINGS = {
+    "max_call_minutes": 12,
+    "winding_down_minutes": 9,
+    "goodbye_delay_seconds": 2.0,
+    "greeting_followup_chance": 0.6,
+    "memory_decay_half_life_days": 30,
+    "max_consecutive_questions": 2,
+    "memory_refresh_after_minutes": 5,
+}
+
+
+async def get_call_settings(senior_id: str) -> dict:
+    """Get per-senior call settings, with defaults."""
+    row = await query_one(
+        "SELECT call_settings FROM seniors WHERE id = $1", senior_id
+    )
+    overrides = (row or {}).get("call_settings") or {}
+    if isinstance(overrides, str):
+        import json as _json
+        try:
+            overrides = _json.loads(overrides)
+        except Exception:
+            overrides = {}
+    return {**DEFAULT_CALL_SETTINGS, **overrides}

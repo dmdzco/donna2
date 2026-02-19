@@ -97,6 +97,35 @@ async def voice_answer(request: Request):
             )
             pre_generated_greeting = greeting_result.get("greeting", "")
 
+    # 1a. Fetch last call analysis for greeting personalization
+    last_call_analysis = None
+    if senior:
+        try:
+            from services.call_analysis import get_latest_analysis
+            last_call_analysis = await get_latest_analysis(senior["id"])
+        except Exception as e:
+            logger.error("[{cs}] Error fetching last analysis: {err}", cs=call_sid, err=str(e))
+
+    # 1a2. Fetch per-senior call settings
+    call_settings = None
+    if senior:
+        try:
+            from services.seniors import get_call_settings
+            call_settings = await get_call_settings(senior["id"])
+        except Exception as e:
+            logger.error("[{cs}] Error fetching call settings: {err}", cs=call_sid, err=str(e))
+
+    # 1a3. Pre-fetch caregiver notes
+    has_caregiver_notes = False
+    if senior:
+        try:
+            from services.caregivers import get_pending_notes
+            caregiver_notes = await get_pending_notes(senior["id"])
+            if caregiver_notes:
+                has_caregiver_notes = True
+        except Exception as e:
+            logger.error("[{cs}] Error fetching caregiver notes: {err}", cs=call_sid, err=str(e))
+
     # 1b. Fetch call summaries, recent turns, and daily context for any identified senior
     previous_calls_summary = None
     todays_context = None
@@ -152,6 +181,9 @@ async def voice_answer(request: Request):
         "is_outbound": is_outbound,
         "call_type": call_type,
         "target_phone": target_phone,
+        "last_call_analysis": last_call_analysis,
+        "has_caregiver_notes": has_caregiver_notes,
+        "call_settings": call_settings,
     }
 
     # 4. Return TwiML

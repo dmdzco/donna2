@@ -79,6 +79,13 @@ NEWS_FOLLOWUPS = [
     "I read something about {topic} that made me think of you.",
 ]
 
+# ── Gentle followups (for concerned/sad last-call sentiment) ──────
+GENTLE_FOLLOWUPS = [
+    "I've been thinking about you — how are you feeling today?",
+    "I just wanted to check in and see how you're doing.",
+    "I hope today is treating you well. How are things?",
+]
+
 # ── Inbound call templates (short, receptive) ────────────────────
 INBOUND_TEMPLATES = [
     "Hello, {name}! So nice to hear from you. What's on your mind?",
@@ -205,6 +212,10 @@ def get_greeting(
     senior_id: str | None = None,
     news_context: str | None = None,
     interest_scores: dict[str, float] | None = None,
+    last_call_sentiment: str | None = None,
+    last_call_engagement: int | None = None,
+    last_call_rapport: str | None = None,
+    followup_chance: float = 0.6,
 ) -> dict:
     """Generate a greeting for a senior.
 
@@ -227,8 +238,23 @@ def get_greeting(
 
     greeting = templates[template_index].replace("{name}", first_name)
 
-    # 60% chance of a followup
-    add_followup = random.random() < 0.6
+    # Adjust followup behavior based on last call sentiment
+    add_followup = random.random() < followup_chance
+
+    if last_call_sentiment in ("concerned", "sad"):
+        # Use gentler followup — replace any followup with a checking-in template
+        followup = random.choice(GENTLE_FOLLOWUPS)
+        greeting += " " + followup
+        return {
+            "greeting": greeting,
+            "period": period,
+            "template_index": template_index,
+            "selected_interest": None,
+        }
+
+    if last_call_engagement is not None and last_call_engagement <= 3:
+        # Low engagement last call — skip followup entirely, don't overwhelm
+        add_followup = False
 
     if add_followup and last_call_summary:
         ctx_phrase = _extract_context_phrase(last_call_summary)

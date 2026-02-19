@@ -330,7 +330,8 @@ async def analyze_turn(
                 contents=f'{prompt}\n\nCurrent message from senior: "{user_message}"',
                 config=genai.types.GenerateContentConfig(
                     temperature=0.2,
-                    max_output_tokens=1500,
+                    max_output_tokens=500,
+                    thinking_config=genai.types.ThinkingConfig(thinking_budget=0),
                 ),
             )
 

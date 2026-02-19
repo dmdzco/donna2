@@ -1,9 +1,9 @@
 """Pipecat Flows call phase node definitions.
 
-Defines call phases: opening → [reminder] → main → winding_down → closing.
+Defines call phases: [reminder] → main → winding_down → closing.
+The opening phase is merged into main — the bot greets and continues
+in one phase, eliminating the transition_to_main double-LLM-call penalty.
 The reminder phase is conditional — only activates when pending reminders exist.
-Each node specifies system prompt, available tools, context strategy,
-and transition functions.
 
 Prompt text lives in prompts.py — edit prompts there, edit flow logic here.
 """
@@ -20,8 +20,8 @@ from pipecat_flows import (
 
 from prompts import (
     BASE_SYSTEM_PROMPT,
-    OPENING_TASK,
-    INBOUND_OPENING_TASK,
+    GREETING_TASK_OUTBOUND,
+    GREETING_TASK_INBOUND,
     REMINDER_TASK,
     MAIN_TASK,
     WINDING_DOWN_TASK,
@@ -104,34 +104,21 @@ def _update_tracking_context(session_state: dict) -> None:
             session_state["conversation_tracking"] = summary
 
 
+def _build_greeting_task(session_state: dict) -> str:
+    """Build the greeting instruction for the initial call phase."""
+    is_outbound = session_state.get("is_outbound", True)
+    greeting_task = GREETING_TASK_OUTBOUND if is_outbound else GREETING_TASK_INBOUND
+
+    greeting = session_state.get("greeting", "")
+    if greeting:
+        greeting_task += f'\n\nUse this greeting to start: "{greeting}"'
+
+    return greeting_task
+
+
 # ---------------------------------------------------------------------------
 # Transition functions
 # ---------------------------------------------------------------------------
-
-def _make_transition_to_main(session_state: dict, flows_tools: dict):
-    """Create transition function: opening → main (or opening → reminder if pending)."""
-
-    async def transition_to_main(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
-        _update_tracking_context(session_state)
-
-        reminder_prompt = session_state.get("reminder_prompt")
-        reminders_delivered = session_state.get("reminders_delivered") or set()
-
-        if reminder_prompt and not reminders_delivered:
-            logger.info("Transitioning: opening → reminder (pending reminders)")
-            return (
-                {"status": "success"},
-                build_reminder_node(session_state, flows_tools),
-            )
-
-        logger.info("Transitioning: opening → main")
-        return (
-            {"status": "success"},
-            build_main_node(session_state, flows_tools),
-        )
-
-    return transition_to_main
-
 
 def _make_transition_reminder_to_main(session_state: dict, flows_tools: dict):
     """Create transition function: reminder → main."""
@@ -178,66 +165,27 @@ def _make_transition_to_closing(session_state: dict):
 # Node builders
 # ---------------------------------------------------------------------------
 
-def build_opening_node(session_state: dict, flows_tools: dict) -> NodeConfig:
-    """Build the opening node — warm greeting and initial engagement.
-
-    Tools: search_memories, save_important_detail, transition_to_main.
-    Context strategy: APPEND (keep greeting in context).
-    """
-    senior_ctx = _build_senior_context(session_state)
-    greeting = session_state.get("greeting", "")
-    is_outbound = session_state.get("is_outbound", True)
-
-    opening_task = OPENING_TASK if is_outbound else INBOUND_OPENING_TASK
-
-    if greeting:
-        opening_task += f'\n\nUse this greeting to start: "{greeting}"'
-
-    # Available tools for opening
-    functions: list = []
-    if "search_memories" in flows_tools:
-        functions.append(flows_tools["search_memories"])
-    if "save_important_detail" in flows_tools:
-        functions.append(flows_tools["save_important_detail"])
-    if "web_search" in flows_tools:
-        functions.append(flows_tools["web_search"])
-
-    # Transition tool
-    functions.append(FlowsFunctionSchema(
-        name="transition_to_main",
-        description="Call this after the opening pleasantries are done and you are ready to move into the main conversation.",
-        properties={},
-        required=[],
-        handler=_make_transition_to_main(session_state, flows_tools),
-    ))
-
-    # Anthropic only extracts the FIRST system message from the messages array.
-    # Combine base prompt + senior context into one system message, and put
-    # task instructions in a user message.
-    system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
-
-    return NodeConfig(
-        name="opening",
-        role_messages=[{"role": "system", "content": system_content}],
-        task_messages=[{"role": "user", "content": opening_task}],
-        functions=functions,
-        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
-        respond_immediately=True,  # Bot always speaks first on phone calls
-    )
-
-
-def build_reminder_node(session_state: dict, flows_tools: dict) -> NodeConfig:
-    """Build the reminder node — deliver pending reminders early in the call.
+def build_reminder_node(
+    session_state: dict, flows_tools: dict, *, with_greeting: bool = False
+) -> NodeConfig:
+    """Build the reminder node — deliver pending reminders.
 
     Only activated when session_state has pending reminders.
     Tools: mark_reminder_acknowledged, save_important_detail, transition_to_main.
-    Context strategy: APPEND (carries forward opening context).
+    Context strategy: APPEND.
+
+    When with_greeting=True (initial node), includes system prompt and greeting.
     """
     reminder_ctx = _build_reminder_context(session_state)
 
     reminder_task = REMINDER_TASK
     if reminder_ctx:
         reminder_task += f"\n\n{reminder_ctx}"
+
+    # When this is the initial node, prepend the greeting
+    if with_greeting:
+        greeting_task = _build_greeting_task(session_state)
+        reminder_task = greeting_task + "\n\n" + reminder_task
 
     functions: list = []
     if "mark_reminder_acknowledged" in flows_tools:
@@ -253,27 +201,42 @@ def build_reminder_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         handler=_make_transition_reminder_to_main(session_state, flows_tools),
     ))
 
+    # When this is the initial node, include system prompt
+    role_messages = []
+    if with_greeting:
+        senior_ctx = _build_senior_context(session_state)
+        system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
+        role_messages = [{"role": "system", "content": system_content}]
+
     return NodeConfig(
         name="reminder",
-        role_messages=[],
+        role_messages=role_messages,
         task_messages=[{"role": "user", "content": reminder_task}],
         functions=functions,
         context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
-        respond_immediately=False,
+        respond_immediately=with_greeting,  # Bot speaks first only on initial node
     )
 
 
-def build_main_node(session_state: dict, flows_tools: dict) -> NodeConfig:
+def build_main_node(
+    session_state: dict, flows_tools: dict, *, with_greeting: bool = False
+) -> NodeConfig:
     """Build the main conversation node — free-form conversation + reminders.
 
-    Tools: all 4 tools + transition_to_winding_down.
-    Context strategy: RESET_WITH_SUMMARY (manage context window size).
+    Tools: all tools + transition_to_winding_down.
+    Context strategy: APPEND.
+
+    When with_greeting=True (initial node), includes system prompt and greeting.
     """
-    senior_ctx = _build_senior_context(session_state)
     reminder_ctx = _build_reminder_context(session_state)
     tracking_ctx = _build_tracking_context(session_state)
 
     main_task = MAIN_TASK
+
+    # When this is the initial node, prepend the greeting
+    if with_greeting:
+        greeting_task = _build_greeting_task(session_state)
+        main_task = greeting_task + "\n\n" + main_task
 
     if reminder_ctx:
         main_task += f"\n\n{reminder_ctx}"
@@ -293,12 +256,20 @@ def build_main_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         handler=_make_transition_to_winding_down(session_state, flows_tools),
     ))
 
+    # When this is the initial node, include system prompt
+    role_messages = []
+    if with_greeting:
+        senior_ctx = _build_senior_context(session_state)
+        system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
+        role_messages = [{"role": "system", "content": system_content}]
+
     return NodeConfig(
         name="main",
-        role_messages=[],
+        role_messages=role_messages,
         task_messages=[{"role": "user", "content": main_task}],
         functions=functions,
         context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
+        respond_immediately=with_greeting,  # Bot speaks first only on initial node
     )
 
 
@@ -376,8 +347,18 @@ def build_closing_node(session_state: dict) -> NodeConfig:
 # ---------------------------------------------------------------------------
 
 def build_initial_node(session_state: dict, flows_tools: dict) -> NodeConfig:
-    """Build the initial (opening) node for a new call.
+    """Build the initial node for a new call.
 
-    This is the entry point — pass the returned NodeConfig to FlowManager.
+    Skips the legacy opening phase — starts directly in main (or reminder
+    if pending). The greeting is prepended to the task message.
+    This eliminates the transition_to_main double-LLM-call penalty (~3-5s).
     """
-    return build_opening_node(session_state, flows_tools)
+    reminder_prompt = session_state.get("reminder_prompt")
+    reminders_delivered = session_state.get("reminders_delivered") or set()
+
+    if reminder_prompt and not reminders_delivered:
+        logger.info("Initial node: reminder (pending reminders)")
+        return build_reminder_node(session_state, flows_tools, with_greeting=True)
+
+    logger.info("Initial node: main (no pending reminders)")
+    return build_main_node(session_state, flows_tools, with_greeting=True)

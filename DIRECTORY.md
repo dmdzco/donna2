@@ -89,9 +89,9 @@ pipecat/
 │
 ├── processors/          Frame processors in the audio pipeline
 │   ├── patterns.py             Pattern data: 268 regex patterns, 19 categories (503 LOC)
-│   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (386 LOC)
+│   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (392 LOC)
 │   ├── conversation_director.py Layer 2: Gemini Flash guidance + prefetch orchestration + mid-call memory refresh (275 LOC)
-│   ├── conversation_tracker.py  Tracks topics/questions/advice per call (246 LOC)
+│   ├── conversation_tracker.py  Tracks topics/questions/advice per call (254 LOC)
 │   ├── metrics_logger.py        Call metrics + prefetch stats logging (110 LOC)
 │   ├── goodbye_gate.py          False-goodbye grace period — NOT in active pipeline (135 LOC)
 │   └── guidance_stripper.py     Strips <guidance> tags before TTS (115 LOC)
@@ -102,7 +102,7 @@ pipecat/
 │   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup (169 LOC)
 │   ├── memory.py            Semantic memory: pgvector, HNSW, decay, dedup, circuit breaker (392 LOC)
 │   ├── prefetch.py          Predictive Context Engine: cache, extraction, runner (250 LOC)
-│   ├── director_llm.py      Gemini Flash analysis prompts + prefetch hints (350 LOC)
+│   ├── director_llm.py      Gemini Flash analysis prompts + prefetch hints (374 LOC)
 │   ├── context_cache.py     Pre-cache senior context at 5 AM (290 LOC)
 │   ├── call_analysis.py     Post-call analysis via Gemini + call quality (246 LOC)
 │   ├── interest_discovery.py Interest extraction from conversations (183 LOC)

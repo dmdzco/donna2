@@ -76,6 +76,7 @@ This document describes the Donna v5.0 system architecture with the **Pipecat vo
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (assistant) ← tracks responses            │   │
 │   │                                                                      │   │
+│   │                                                                      │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                        │                                                     │
 │                        ▼ (on disconnect)                                     │

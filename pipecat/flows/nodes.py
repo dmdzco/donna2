@@ -1,6 +1,7 @@
 """Pipecat Flows call phase node definitions.
 
-Defines 4 call phases: opening → main → winding_down → closing.
+Defines call phases: opening → [reminder] → main → winding_down → closing.
+The reminder phase is conditional — only activates when pending reminders exist.
 Each node specifies system prompt, available tools, context strategy,
 and transition functions.
 
@@ -21,6 +22,7 @@ from prompts import (
     BASE_SYSTEM_PROMPT,
     OPENING_TASK,
     INBOUND_OPENING_TASK,
+    REMINDER_TASK,
     MAIN_TASK,
     WINDING_DOWN_TASK,
     CLOSING_TASK_TEMPLATE,
@@ -107,10 +109,35 @@ def _update_tracking_context(session_state: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def _make_transition_to_main(session_state: dict, flows_tools: dict):
-    """Create transition function: opening → main."""
+    """Create transition function: opening → main (or opening → reminder if pending)."""
 
     async def transition_to_main(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
+        _update_tracking_context(session_state)
+
+        reminder_prompt = session_state.get("reminder_prompt")
+        reminders_delivered = session_state.get("reminders_delivered") or set()
+
+        if reminder_prompt and not reminders_delivered:
+            logger.info("Transitioning: opening → reminder (pending reminders)")
+            return (
+                {"status": "success"},
+                build_reminder_node(session_state, flows_tools),
+            )
+
         logger.info("Transitioning: opening → main")
+        return (
+            {"status": "success"},
+            build_main_node(session_state, flows_tools),
+        )
+
+    return transition_to_main
+
+
+def _make_transition_reminder_to_main(session_state: dict, flows_tools: dict):
+    """Create transition function: reminder → main."""
+
+    async def transition_to_main(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
+        logger.info("Transitioning: reminder → main")
         _update_tracking_context(session_state)
         return (
             {"status": "success"},
@@ -196,6 +223,43 @@ def build_opening_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         functions=functions,
         context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
         respond_immediately=True,  # Bot always speaks first on phone calls
+    )
+
+
+def build_reminder_node(session_state: dict, flows_tools: dict) -> NodeConfig:
+    """Build the reminder node — deliver pending reminders early in the call.
+
+    Only activated when session_state has pending reminders.
+    Tools: mark_reminder_acknowledged, save_important_detail, transition_to_main.
+    Context strategy: APPEND (carries forward opening context).
+    """
+    reminder_ctx = _build_reminder_context(session_state)
+
+    reminder_task = REMINDER_TASK
+    if reminder_ctx:
+        reminder_task += f"\n\n{reminder_ctx}"
+
+    functions: list = []
+    if "mark_reminder_acknowledged" in flows_tools:
+        functions.append(flows_tools["mark_reminder_acknowledged"])
+    if "save_important_detail" in flows_tools:
+        functions.append(flows_tools["save_important_detail"])
+
+    functions.append(FlowsFunctionSchema(
+        name="transition_to_main",
+        description="Call this after all reminders have been delivered and acknowledged, to move into the main conversation.",
+        properties={},
+        required=[],
+        handler=_make_transition_reminder_to_main(session_state, flows_tools),
+    ))
+
+    return NodeConfig(
+        name="reminder",
+        role_messages=[],
+        task_messages=[{"role": "user", "content": reminder_task}],
+        functions=functions,
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
+        respond_immediately=False,
     )
 
 

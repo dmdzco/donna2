@@ -1,11 +1,15 @@
 """Tests for Pipecat Flows call phase node definitions."""
 
+import pytest
+
 from flows.nodes import (
     build_opening_node,
+    build_reminder_node,
     build_main_node,
     build_winding_down_node,
     build_closing_node,
     build_initial_node,
+    _make_transition_to_main,
     BASE_SYSTEM_PROMPT,
     _build_senior_context,
     _build_reminder_context,
@@ -218,6 +222,92 @@ class TestClosingNode:
         node = build_closing_node(state)
         task_content = node["task_messages"][0]["content"]
         assert "Margaret" in task_content
+
+
+class TestReminderNode:
+    def test_node_has_correct_name(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_reminder_node(state, tools)
+        assert node["name"] == "reminder"
+
+    def test_has_reminder_tools(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_reminder_node(state, tools)
+        func_names = _get_func_names(node)
+        assert "mark_reminder_acknowledged" in func_names
+        assert "save_important_detail" in func_names
+        assert "transition_to_main" in func_names
+
+    def test_does_not_have_conversation_tools(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_reminder_node(state, tools)
+        func_names = _get_func_names(node)
+        assert "web_search" not in func_names
+        assert "search_memories" not in func_names
+
+    def test_includes_reminder_context(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_reminder_node(state, tools)
+        task_content = node["task_messages"][0]["content"]
+        assert "blood pressure" in task_content
+
+    def test_uses_append_strategy(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_reminder_node(state, tools)
+        from pipecat_flows import ContextStrategy
+        assert node["context_strategy"].strategy == ContextStrategy.APPEND
+
+    def test_no_system_prompt_override(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_reminder_node(state, tools)
+        assert node["role_messages"] == []
+
+    def test_does_not_respond_immediately(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_reminder_node(state, tools)
+        assert node.get("respond_immediately") is False
+
+
+class TestConditionalRouting:
+    @pytest.mark.asyncio
+    async def test_routes_to_reminder_when_reminders_pending(self):
+        state = _make_session_state(
+            reminder_prompt="Take blood pressure medication at 2pm.",
+            reminders_delivered=set(),
+        )
+        tools = make_flows_tools(state)
+        transition_fn = _make_transition_to_main(state, tools)
+        result, node = await transition_fn({}, None)
+        assert node["name"] == "reminder"
+
+    @pytest.mark.asyncio
+    async def test_routes_to_main_when_no_reminders(self):
+        state = _make_session_state(
+            reminder_prompt=None,
+            reminders_delivered=set(),
+        )
+        tools = make_flows_tools(state)
+        transition_fn = _make_transition_to_main(state, tools)
+        result, node = await transition_fn({}, None)
+        assert node["name"] == "main"
+
+    @pytest.mark.asyncio
+    async def test_routes_to_main_when_reminders_already_delivered(self):
+        state = _make_session_state(
+            reminder_prompt="Take blood pressure medication at 2pm.",
+            reminders_delivered={"Take blood pressure medication"},
+        )
+        tools = make_flows_tools(state)
+        transition_fn = _make_transition_to_main(state, tools)
+        result, node = await transition_fn({}, None)
+        assert node["name"] == "main"
 
 
 class TestInitialNode:

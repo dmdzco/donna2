@@ -60,13 +60,14 @@ class CircuitBreaker:
         except (asyncio.TimeoutError, Exception) as e:
             self.failure_count += 1
             self.last_failure_time = time.time()
+            err_msg = f"timeout ({self.call_timeout}s)" if isinstance(e, asyncio.TimeoutError) else str(e)
             if self.failure_count >= self.failure_threshold:
                 self.state = "open"
                 logger.error(
                     "[CB:{name}] Circuit opened after {n} failures: {err}",
                     name=self.name,
                     n=self.failure_count,
-                    err=str(e),
+                    err=err_msg,
                 )
             else:
                 logger.warning(
@@ -74,7 +75,7 @@ class CircuitBreaker:
                     name=self.name,
                     n=self.failure_count,
                     t=self.failure_threshold,
-                    err=str(e),
+                    err=err_msg,
                 )
             return fallback() if callable(fallback) else fallback
 

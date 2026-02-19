@@ -18,7 +18,7 @@ from loguru import logger
 
 from lib.circuit_breaker import CircuitBreaker
 
-_breaker = CircuitBreaker("gemini_director", failure_threshold=3, recovery_timeout=60.0, call_timeout=5.0)
+_breaker = CircuitBreaker("gemini_director", failure_threshold=3, recovery_timeout=60.0, call_timeout=10.0)
 
 _genai_client = None
 
@@ -330,7 +330,8 @@ async def analyze_turn(
                 contents=f'{prompt}\n\nCurrent message from senior: "{user_message}"',
                 config=genai.types.GenerateContentConfig(
                     temperature=0.2,
-                    max_output_tokens=1500,
+                    max_output_tokens=500,
+                    thinking_config=genai.types.ThinkingConfig(thinking_budget=0),
                 ),
             )
 

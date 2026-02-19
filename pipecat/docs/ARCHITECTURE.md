@@ -30,6 +30,8 @@
 
 ## Pipecat Pipeline (bot.py)
 
+Linear pipeline of `FrameProcessor`s. The Conversation Director sits in the pipeline but is **non-blocking** — it passes frames through instantly while running Gemini analysis in a background `asyncio.create_task()`.
+
 ```
 Twilio Audio ──► FastAPIWebsocketTransport
                         │
@@ -41,22 +43,31 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1: Instant regex (0ms)
-              │   (268 patterns)     │  → health, goodbye, emotion,
-              │                      │    cognitive, activity signals
-              │   Goodbye detected → │  → notifies GoodbyeGate
+              │   (BLOCKING)         │  → 268 patterns: health, goodbye,
+              │   (268 patterns)     │    emotion, cognitive, activity
+              │                      │  → Injects guidance for THIS turn
+              │   Goodbye detected → │  → EndFrame after 2s delay
               └─────────┬───────────┘
                         │
                         ▼
-              ┌─────────────────────┐
-              │ Conversation         │  Layer 2: Gemini Flash (~150ms)
-              │ Director             │  NON-BLOCKING: async analysis
-              │                      │  → Injects PREVIOUS turn guidance
-              │                      │  → Background: analyzes THIS turn
-              │                      │  → Predictive prefetch (2 waves)
-              │                      │  → Interim transcription prefetch
-              │                      │  → Fallback: force call end at 12min
-              └─────────┬───────────┘
-                        │
+              ┌─────────────────────┐     ┌──────────────────────────┐
+              │ Conversation         │     │  Background Analysis      │
+              │ Director             │────►│  (asyncio.create_task)    │
+              │ (PASS-THROUGH)       │     │                           │
+              │                      │     │  Gemini 3 Flash Preview   │
+              │ 1. Injects PREVIOUS  │     │  ~150ms per turn          │
+              │    turn's cached     │     │  Result cached → injected │
+              │    guidance          │     │  on NEXT turn             │
+              │ 2. Passes frame      │     │                           │
+              │    immediately       │     │  Also handles:            │
+              │ 3. Fires background  │     │  • Predictive prefetch    │
+              │    analysis ────────►│     │    (2 waves + interim)    │
+              │                      │     │  • Mid-call memory refresh│
+              │                      │     │    (after 5+ min)         │
+              │                      │     │  • Force winding-down 9min│
+              │                      │     │  • Force call end 12min   │
+              └─────────┬───────────┘     └──────────────────────────┘
+                        │ (no delay)
                         ▼
               ┌─────────────────────┐
               │  Context Aggregator  │  Builds LLM context from
@@ -66,7 +77,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Anthropic LLM      │  Claude Sonnet 4.5 (streaming)
-              │   + Flow Manager     │  Guided by Pipecat Flows
+              │   + Flow Manager     │  5 tools, 4-phase state machine
               └─────────┬───────────┘
                         │ TextFrame
                         ▼
@@ -129,7 +140,7 @@ Instant regex-based analysis with 268 patterns across 19 categories:
 | **Family** | 25+ relationship patterns including pets | Context enrichment |
 | **Safety** | Scams, strangers, emergencies | Safety concern flags |
 | **Engagement** | Response length analysis | Engagement level tracking |
-| **Goodbye** | Strong/weak goodbye detection | **Notifies GoodbyeGate** |
+| **Goodbye** | Strong/weak goodbye detection | **EndFrame after 2s delay** |
 | **Factual/Curiosity** | 18 patterns ("what year", "how tall") | Web search trigger |
 | **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 

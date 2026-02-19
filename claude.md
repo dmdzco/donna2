@@ -86,7 +86,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 
 ### Pipecat Pipeline (bot.py)
 
-Linear pipeline — each processor is a Pipecat `FrameProcessor`. Frames flow top to bottom.
+Linear pipeline of `FrameProcessor`s. Frames flow top to bottom. The Conversation Director is in the pipeline but **non-blocking** — it passes frames through instantly while running Gemini analysis in the background.
 
 ```
 Twilio Audio ──► FastAPIWebsocketTransport
@@ -96,18 +96,28 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1 (0ms): 268 regex patterns
-              │                      │  Injects guidance via LLMMessagesAppendFrame
+              │   (BLOCKING)         │  Injects guidance for THIS turn
               │                      │  Strong goodbye → EndFrame in 2s
               └─────────┬───────────┘
+                        │
                         ▼
-              ┌─────────────────────┐
-              │ Conversation         │  Layer 2 (~150ms): Gemini 3 Flash Preview
-              │ Director             │  NON-BLOCKING (asyncio.create_task)
-              │                      │  Injects PREVIOUS turn's cached guidance
-              │                      │  Force winding-down at 9min, end at 12min
-              │                      │  Predictive prefetch (1st + 2nd wave)
-              │                      │  Interim transcription prefetch (debounced)
-              └─────────┬───────────┘
+              ┌─────────────────────┐     ┌──────────────────────────┐
+              │ Conversation         │────►│  Background Analysis      │
+              │ Director             │     │  (asyncio.create_task)    │
+              │ (PASS-THROUGH)       │     │                           │
+              │                      │     │  Gemini 3 Flash Preview   │
+              │ 1. Injects PREVIOUS  │     │  ~150ms per turn          │
+              │    turn's cached     │     │  Result cached for NEXT   │
+              │    guidance          │     │  turn's injection         │
+              │ 2. Passes frame      │     │                           │
+              │    immediately       │     │  Also: mid-call memory    │
+              │ 3. Fires background  │     │  refresh after 5+ min     │
+              │    analysis ────────►│     │  Predictive prefetch      │
+              │                      │     │  (1st + 2nd wave)         │
+              │                      │     │  Fallback: force end      │
+              │                      │     │  at 9min / 12min          │
+              └─────────┬───────────┘     └──────────────────────────┘
+                        │ (no delay)
                         ▼
               Context Aggregator (user) ← builds LLM context from transcriptions
                         ▼
@@ -125,7 +135,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
               Context Aggregator (assistant) ← tracks assistant responses
 ```
 
-**Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. The guidance appears as user-role messages in Claude's context before the next LLM call is triggered by the Context Aggregator.
+**Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. Quick Observer's guidance is for the **current** turn (instant regex). Director's guidance is from the **previous** turn (cached Gemini result). Both appear as user-role messages in Claude's context before the next LLM call.
 
 **Predictive Context Engine**: The Director also runs speculative memory prefetch in the background. On each transcription, regex extracts topics/entities and pre-fetches memories. After Gemini analysis completes (~150ms), a second wave prefetches based on `next_topic`, upcoming reminders, and news topics. Results are cached in `session_state["_prefetch_cache"]` (TTL=30s, Jaccard fuzzy match). When Claude calls `search_memories`, the tool handler checks the cache first — cache hit returns instantly (~0ms vs 200-300ms). Interim transcriptions also trigger debounced prefetch while the user is still speaking.
 

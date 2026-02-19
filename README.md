@@ -97,7 +97,7 @@ make test-regression         # Scenario-based regression tests
 
 ### Pipecat Voice Pipeline (bot.py)
 
-Each box is a Pipecat `FrameProcessor` in a linear `Pipeline`. Frames flow top-to-bottom.
+Linear pipeline of `FrameProcessor`s. The Conversation Director is **non-blocking** — it passes frames through instantly while running Gemini analysis in a background task.
 
 ```
 Phone Call → Twilio → WebSocket → Pipecat Pipeline
@@ -106,20 +106,26 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                                        │ TranscriptionFrame
                                        ▼
                              ┌─────────────────────┐
-                             │   Quick Observer     │  Layer 1 (0ms)
-                             │   268 regex patterns │  Goodbye → EndFrame (2s)
+                             │   Quick Observer     │  Layer 1 (0ms, BLOCKING)
+                             │   268 regex patterns │  Injects guidance for THIS turn
+                             │                      │  Goodbye → EndFrame (2s)
                              └─────────┬───────────┘
+                                       │
                                        ▼
-                             ┌─────────────────────┐
-                             │   Conversation       │  Layer 2 (~150ms)
-                             │   Director           │  NON-BLOCKING
-                             │   (Gemini Flash)     │  Prev-turn guidance
-                             │                      │  Predictive prefetch
+                             ┌─────────────────────┐   ┌───────────────────┐
+                             │   Conversation       │──►│ Background Task   │
+                             │   Director           │   │ Gemini Flash      │
+                             │   (PASS-THROUGH)     │   │ ~150ms/turn       │
+                             │                      │   │ Result cached for │
+                             │ Injects PREVIOUS     │   │ NEXT turn         │
+                             │ turn's cached result  │   │ Predictive prefetch│
+                             │                      │   └───────────────────┘
                              └─────────┬───────────┘
+                                       │ (no delay)
                                        ▼
                              Context Aggregator (user)
                                        ▼
-                             Claude Sonnet 4.5 + Pipecat Flows
+                             Claude Sonnet 4.5 + Pipecat Flows (5 tools)
                                        │ TextFrame
                                        ▼
                              Conversation Tracker → Guidance Stripper

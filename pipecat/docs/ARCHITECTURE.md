@@ -305,8 +305,8 @@ This nudges Claude to call `search_memories` — knowing the call will be instan
 
 | Phase | Tools |
 |-------|-------|
-| **Opening** | `search_memories`, `save_important_detail`, `transition_to_main` |
-| **Main** | `search_memories`, `get_news`, `save_important_detail`, `mark_reminder_acknowledged`, `transition_to_winding_down` |
+| **Opening** | `search_memories`, `save_important_detail`, `check_caregiver_notes`, `transition_to_main` |
+| **Main** | `search_memories`, `get_news`, `save_important_detail`, `mark_reminder_acknowledged`, `check_caregiver_notes`, `transition_to_winding_down` |
 | **Winding Down** | `mark_reminder_acknowledged`, `save_important_detail`, `transition_to_closing` |
 | **Closing** | *(none — post_action ends call)* |
 
@@ -315,7 +315,7 @@ This nudges Claude to call `search_memories` — knowing the call will be instan
 | Phase | Strategy | Effect |
 |-------|----------|--------|
 | **Opening** | APPEND / respond_immediately | Keeps greeting in context, responds right away |
-| **Main** | RESET_WITH_SUMMARY | Manages context window for long conversations |
+| **Main** | APPEND | Full in-call context retention (no summary truncation) |
 | **Winding Down** | APPEND | Preserves recent context for summary |
 | **Closing** | APPEND | Preserves goodbye context |
 
@@ -323,10 +323,11 @@ This nudges Claude to call `search_memories` — knowing the call will be instan
 
 | Tool | Purpose |
 |------|---------|
-| `search_memories` | Semantic search of senior's memory bank (pgvector) |
-| `get_news` | Web search for current events via OpenAI |
+| `search_memories` | Semantic search of senior's memory bank (pgvector + HNSW) |
+| `get_news` | Web search for current events via OpenAI (circuit breaker protected) |
 | `save_important_detail` | Store new memories (health, family, preference, life_event, emotional, activity) |
 | `mark_reminder_acknowledged` | Track reminder delivery with acknowledgment status |
+| `check_caregiver_notes` | Retrieve and deliver pending notes from caregivers |
 
 ## Post-Call Processing
 
@@ -365,7 +366,7 @@ pipecat/
 │
 ├── flows/
 │   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts
-│   └── tools.py                     ← LLM tool schemas + async handlers (4 tools)
+│   └── tools.py                     ← LLM tool schemas + async handlers (5 tools)
 │
 ├── processors/
 │   ├── patterns.py                  ← 268 regex patterns, 19 categories (data only)
@@ -378,40 +379,39 @@ pipecat/
 │
 ├── services/
 │   ├── prefetch.py                  ← Predictive Context Engine: cache, extraction, runner
-│   ├── director_llm.py              ← Gemini Flash analysis for Director + prefetch hints
+│   ├── director_llm.py              ← Gemini Flash analysis for Director + prefetch hints (374 LOC)
 │   ├── post_call.py                 ← Post-call orchestration (analysis, memory, cleanup)
 │   ├── reminder_delivery.py         ← Reminder delivery CRUD + prompt formatting
-│   ├── call_analysis.py             ← Post-call analysis (Gemini Flash)
-│   ├── memory.py                    ← Semantic memory (pgvector, decay, dedup)
-│   ├── greetings.py                 ← Time-based greeting templates + rotation
-│   ├── daily_context.py             ← Cross-call same-day memory
+│   ├── call_analysis.py             ← Post-call analysis + call quality scoring (246 LOC)
+│   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (392 LOC)
+│   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation (326 LOC)
 │   ├── conversations.py             ← Conversation CRUD + transcript history
 │   ├── interest_discovery.py        ← Interest extraction from conversations
-│   ├── seniors.py                   ← Senior profile CRUD
-│   ├── caregivers.py                ← Caregiver-senior relationships
+│   ├── seniors.py                   ← Senior profile + per-senior call_settings (131 LOC)
+│   ├── caregivers.py                ← Caregiver relationships + notes delivery (101 LOC)
 │   ├── scheduler.py                 ← Reminder scheduling + outbound calls
 │   ├── context_cache.py             ← Pre-cache senior context (5 AM local)
-│   ├── conversations.py             ← Conversation CRUD + transcript history
 │   ├── daily_context.py             ← Cross-call same-day memory
-│   ├── greetings.py                 ← Time-based greeting templates + rotation
-│   ├── seniors.py                   ← Senior profile CRUD
-│   ├── caregivers.py                ← Caregiver-senior relationships
-│   └── news.py                      ← News via OpenAI web search (1hr cache)
+│   └── news.py                      ← News via OpenAI web search + circuit breaker (213 LOC)
 │
 ├── db/
-│   └── client.py                    ← asyncpg pool + query helpers
+│   ├── client.py                    ← asyncpg pool + query helpers + health check (69 LOC)
+│   └── migrations/                  ← SQL migrations (HNSW index, feature_flags table)
 │
 ├── lib/
+│   ├── circuit_breaker.py           ← Async circuit breaker for external services (84 LOC)
+│   ├── feature_flags.py             ← DB-backed feature flags, 5-min cache (41 LOC)
 │   └── sanitize.py                  ← PII-safe logging (phone, name masking)
 │
 ├── docs/
 │   └── ARCHITECTURE.md              ← This file
 │
-├── tests/                           ← 36 test files + support dirs
-│   ├── test_*.py                    (36 test modules — unit, frame, pipeline, simulation)
+├── tests/                           ← 61 test files + support dirs
+│   ├── test_*.py                    (test modules — unit, frame, pipeline, simulation)
+│   ├── test_regression_scenarios.py ← Scenario-based regression tests
 │   ├── helpers/                     pipeline_builder, assertions
 │   ├── mocks/                       mock_llm, mock_services, mock_stt, mock_transport, mock_tts
-│   ├── scenarios/                   happy_path, emotional_support, goodbye_detection, etc.
+│   ├── scenarios/                   emotional_support, medication_reminder, memory_recall, etc.
 │   ├── llm_simulation/              conversation_runner, senior_simulator, observer
 │   ├── conftest.py                  shared fixtures
 │   └── TESTING_DESIGN.md            test architecture docs
@@ -490,28 +490,33 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 
 ## Database Schema (shared)
 
-9 tables, same schema as Node.js:
+11 tables, same schema as Node.js:
 
 | Table | Purpose |
 |-------|---------|
-| `seniors` | Senior profiles (name, phone, interests, timezone) |
+| `seniors` | Senior profiles (name, phone, interests, timezone, call_settings JSONB) |
 | `conversations` | Call records (duration, metrics, transcript) |
-| `memories` | Semantic memories (pgvector embeddings, decay) |
+| `memories` | Semantic memories (pgvector embeddings, HNSW index, decay) |
 | `reminders` | Scheduled reminders |
 | `reminder_deliveries` | Delivery tracking per call |
 | `caregivers` | Caregiver-senior relationships |
+| `caregiver_notes` | Notes from caregivers delivered during calls |
 | `call_analyses` | Post-call AI analysis |
 | `daily_call_context` | Cross-call same-day memory |
+| `feature_flags` | Feature flag toggles (DB-backed, 5-min cache) |
 | `admin_users` | Admin dashboard accounts (bcrypt) |
 
 ### Memory System
 
 - **Embedding**: OpenAI `text-embedding-3-small` (1536 dimensions)
+- **Index**: HNSW (cosine_ops, m=16, ef_construction=64)
 - **Similarity**: Cosine similarity, 0.7 minimum threshold
 - **Deduplication**: Skip if cosine > 0.9 with existing memory
 - **Decay**: Effective importance = `base * 0.5^(days/30)` (30-day half-life)
 - **Access Boost**: +10 importance if accessed in last week
 - **Tiered Retrieval**: Critical → Contextual → Background
+- **Mid-Call Refresh**: After 5+ minutes, topic-aware context refresh
+- **Circuit Breaker**: Embedding calls protected (10s timeout, 3-failure threshold)
 
 ## Environment Variables
 
@@ -553,4 +558,4 @@ RUN_DB_TESTS=1                   # Set to run DB integration tests
 
 ---
 
-*Last updated: February 2026 — Predictive Context Engine (speculative memory prefetch)*
+*Last updated: February 2026 — v5.0 with Predictive Context Engine, circuit breakers, feature flags, caregiver notes, sentiment-aware greetings, graceful shutdown*

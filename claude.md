@@ -28,14 +28,14 @@ Do NOT confuse the Node.js `services/` with `pipecat/services/` — they are sep
 
 ---
 
-## Current Status: v4.0
+## Current Status: v5.0
 
 The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (repo root) serves admin/consumer APIs and the reminder scheduler. See "Architecture Decision: Two Backends" below.
 
 ### Working Features (Pipecat)
 - **2-Layer Observer Architecture + Post-Call**
   - Layer 1: Quick Observer (0ms) - 268 regex patterns + programmatic goodbye (2s EndFrame)
-  - Layer 2: Conversation Director (~150ms) - Non-blocking Gemini Flash per-turn analysis
+  - Layer 2: Conversation Director (~150ms) - Non-blocking Gemini Flash per-turn analysis + mid-call memory refresh
   - Post-Call: Analysis, memory extraction, daily context (Gemini Flash)
 - **Predictive Context Engine** — Speculative memory prefetch eliminates tool-call latency
   - 1st wave: Regex entity/topic extraction on final transcriptions → background `memory.search()`
@@ -43,15 +43,18 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
   - Interim transcriptions: Debounced prefetch while user is still speaking (1s gap, 15+ chars)
   - Cache-first tool handlers: `search_memories` returns instantly on cache hit (~0ms vs 200-300ms)
 - **Pipecat Flows** - 4-phase call state machine (opening → main → winding_down → closing)
-- **4 LLM Tools** - search_memories, get_news, save_important_detail, mark_reminder_acknowledged
+- **5 LLM Tools** - search_memories, get_news, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
 - **Programmatic Call Ending** - Quick Observer detects goodbye → EndFrame after 2s delay (bypasses LLM)
-- **Director Fallback Actions** - Force winding-down at 9min, force end at 12min
+- **Director Fallback Actions** - Force winding-down at 9min, force end at 12min (configurable per-senior)
 - **Full In-Call Context Retention** - APPEND strategy keeps complete conversation history (no summary truncation)
 - **Cross-Call Turn History** - Recent turns from previous calls loaded into system prompt via `get_recent_turns()`
 - **In-Call Memory Tracking** - Topics, questions, advice tracked per call (ConversationTracker)
+- **Mid-Call Memory Refresh** - After 5+ minutes, refreshes context with current conversation topics
 - **Same-Day Cross-Call Memory** - Daily context + call summaries persist across calls per senior per day
-- **Greeting Rotation** - Time-based templates with interest/context followups
-- **Semantic Memory** - pgvector with decay + deduplication + tiered retrieval
+- **Sentiment-Aware Greetings** - Uses last call's engagement/rapport score for greeting tone
+- **Semantic Memory** - pgvector with HNSW index + decay + deduplication + tiered retrieval
+- **Caregiver Notes** - Family can leave notes that are read during calls (check_caregiver_notes tool)
+- **Per-Senior Call Settings** - Configurable time limits, greeting style, memory decay via `call_settings` JSONB
 - **Scheduled Reminder Calls** - Polling scheduler with prefetch + delivery tracking
 - **Context Pre-caching** - Senior context cached at 5 AM local time
 - Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
@@ -61,6 +64,14 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - VAD (Silero — confidence=0.6, stop_secs=1.2, min_volume=0.5)
 - News via OpenAI web search (1hr cache)
 - Security: JWT admin auth, API key auth, Twilio webhook validation, rate limiting, security headers
+
+### Infrastructure & Reliability (v5.0)
+- **Circuit Breakers** - Gemini (5s), OpenAI embedding (10s), news (10s) — `lib/circuit_breaker.py`
+- **Feature Flags** - DB-backed with 5-min cache — `lib/feature_flags.py`
+- **Graceful Shutdown** - Tracks active calls, 7s drain on SIGTERM
+- **Enhanced /health** - Database connectivity + circuit breaker states
+- **CI/CD Pipelines** - PR → tests → staging → smoke tests; push to main → production
+- **Multi-Environment** - dev/staging/production with Neon branching + Railway environments
 
 ### Frontend Apps (unchanged, on Vercel/separate)
 - **Admin Dashboard (v2)** - React + Vite + Tailwind (`apps/admin-v2/`) on Vercel
@@ -122,8 +133,8 @@ Twilio Audio ──► FastAPIWebsocketTransport
 
 | Phase | Tools | Context Strategy |
 |-------|-------|-----------------|
-| **Opening** | search_memories, save_important_detail, transition_to_main | APPEND, respond_immediately |
-| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, transition_to_winding_down | APPEND |
+| **Opening** | search_memories, save_important_detail, check_caregiver_notes, transition_to_main | APPEND, respond_immediately |
+| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes, transition_to_winding_down | APPEND |
 | **Winding Down** | mark_reminder_acknowledged, save_important_detail, transition_to_closing | APPEND |
 | **Closing** | *(none — post_action: end_conversation)* | APPEND |
 
@@ -137,19 +148,19 @@ On disconnect: complete conversation → call analysis (Gemini) → summary pers
 
 ```
 pipecat/
-├── main.py                          ← FastAPI entry point, /health, /ws, middleware
-├── bot.py                           ← Pipeline assembly + run_bot() (297 LOC)
+├── main.py                          ← FastAPI entry, /health, /ws, graceful shutdown (258 LOC)
+├── bot.py                           ← Pipeline assembly + sentiment greetings (335 LOC)
 ├── config.py                        ← All env vars centralized (110 LOC)
-├── prompts.py                       ← System prompts + phase task instructions (105 LOC)
+├── prompts.py                       ← System prompts + phase task instructions (129 LOC)
 │
 ├── flows/
-│   ├── nodes.py                     ← 4 call phase NodeConfigs (imports prompts.py) (317 LOC)
-│   └── tools.py                     ← 4 LLM tool schemas + closure-based handlers (236 LOC)
+│   ├── nodes.py                     ← 4 call phase NodeConfigs (imports prompts.py) (319 LOC)
+│   └── tools.py                     ← 5 LLM tool schemas + closure-based handlers (269 LOC)
 │
 ├── processors/
 │   ├── patterns.py                  ← Pattern data: 268 regex patterns, 19 categories (503 LOC)
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame (386 LOC)
-│   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking + prefetch orchestration (275 LOC)
+│   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking + prefetch orchestration + mid-call memory refresh (275 LOC)
 │   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (246 LOC)
 │   ├── metrics_logger.py            ← Call metrics + prefetch stats logging (110 LOC)
 │   ├── goodbye_gate.py              ← False-goodbye grace period — NOT in active pipeline (135 LOC)
@@ -161,27 +172,33 @@ pipecat/
 │   ├── post_call.py                 ← Post-call: analysis, memory, cleanup (169 LOC)
 │   ├── prefetch.py                  ← Predictive Context Engine: cache + query extraction + runner (250 LOC)
 │   ├── director_llm.py              ← Gemini Flash analysis for Director + prefetch hints (350 LOC)
-│   ├── call_analysis.py             ← Post-call analysis (Gemini Flash) (226 LOC)
-│   ├── memory.py                    ← Semantic memory (pgvector, decay) (355 LOC)
+│   ├── call_analysis.py             ← Post-call analysis + call quality scoring (246 LOC)
+│   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (392 LOC)
 │   ├── interest_discovery.py        ← Interest extraction from conversations (183 LOC)
 │   ├── context_cache.py             ← Pre-cache at 5 AM local (290 LOC)
 │   ├── conversations.py             ← Conversation CRUD (250 LOC)
 │   ├── daily_context.py             ← Cross-call same-day memory (161 LOC)
-│   ├── greetings.py                 ← Greeting templates + rotation (300 LOC)
-│   ├── seniors.py                   ← Senior profile CRUD (105 LOC)
-│   ├── caregivers.py                ← Caregiver relationships (78 LOC)
-│   └── news.py                      ← OpenAI web search (202 LOC)
+│   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation (326 LOC)
+│   ├── seniors.py                   ← Senior profile + per-senior call_settings (131 LOC)
+│   ├── caregivers.py                ← Caregiver relationships + notes delivery (101 LOC)
+│   └── news.py                      ← OpenAI web search + circuit breaker (213 LOC)
+│
+├── lib/
+│   ├── circuit_breaker.py           ← Async circuit breaker for external services (84 LOC)
+│   ├── feature_flags.py             ← DB-backed feature flags, 5-min cache (41 LOC)
+│   └── sanitize.py                  ← PII-safe logging
 │
 ├── api/
 │   ├── routes/
-│   │   ├── voice.py                 ← /voice/answer (TwiML), /voice/status
+│   │   ├── voice.py                 ← /voice/answer (TwiML), /voice/status (230 LOC)
 │   │   └── calls.py                 ← /api/call, /api/calls
 │   ├── middleware/                   ← auth, api_auth, rate_limit, security, twilio, error_handler
 │   └── validators/schemas.py        ← Pydantic input validation
 │
-├── db/client.py                     ← asyncpg pool + query helpers
-├── lib/sanitize.py                  ← PII-safe logging
-├── tests/                           ← 36 test files + helpers/mocks/scenarios
+├── db/
+│   ├── client.py                    ← asyncpg pool + query helpers + health check (69 LOC)
+│   └── migrations/                  ← SQL migrations (HNSW index, feature_flags table)
+├── tests/                           ← 61 test files + helpers/mocks/scenarios
 ├── pyproject.toml                   ← Python 3.12, Pipecat v0.0.101+
 └── Dockerfile                       ← python:3.12-slim + uv
 ```
@@ -339,13 +356,17 @@ The Railway project has two services per environment:
 | Modify context pre-caching | `pipecat/services/context_cache.py` |
 | Modify cross-call daily context | `pipecat/services/daily_context.py` |
 | Modify reminder scheduling | `pipecat/services/scheduler.py` (polling) + `pipecat/services/reminder_delivery.py` (CRUD) |
+| Modify per-senior call settings | `pipecat/services/seniors.py` (`get_call_settings()`) |
+| Modify caregiver notes delivery | `pipecat/services/caregivers.py` + `pipecat/flows/tools.py` |
+| Modify circuit breaker behavior | `pipecat/lib/circuit_breaker.py` |
+| Modify feature flags | `pipecat/lib/feature_flags.py` + `feature_flags` DB table |
 | Check/add environment variables | `pipecat/config.py` |
 | Modify in-call tracking | `pipecat/processors/conversation_tracker.py` |
 | Modify guidance stripping | `pipecat/processors/guidance_stripper.py` |
 | Add API routes | `pipecat/api/routes/` |
 | Modify auth/middleware | `pipecat/api/middleware/` |
 | Database queries | `pipecat/db/client.py` |
-| Server setup | `pipecat/main.py` |
+| Server setup / graceful shutdown | `pipecat/main.py` |
 | Update admin UI (v2) | `apps/admin-v2/src/pages/` |
 | Update admin API client | `apps/admin-v2/src/lib/api.ts` |
 
@@ -444,10 +465,13 @@ Both share the same Neon PostgreSQL database. Dual service implementations (e.g.
 - ~~Security Hardening~~ ✓ Completed
 - ~~Pipecat Migration~~ ✓ Completed (voice pipeline ported, Director ported)
 - ~~Multi-Environment Workflow~~ ✓ Completed (dev/staging/prod with Neon branching + Railway environments)
+- ~~Infrastructure Reliability (v5.0)~~ ✓ Completed (circuit breakers, feature flags, graceful shutdown, enhanced /health)
+- ~~Conversation Quality (v5.0)~~ ✓ Completed (sentiment greetings, mid-call memory refresh, caregiver notes, per-senior settings, HNSW index)
+- ~~CI/CD Pipelines~~ ✓ Completed (GitHub Actions: tests → staging → production)
 - Pipecat context migration: `OpenAILLMContext` → `LLMContext` + `LLMContextAggregatorPair` (blocked — `AnthropicLLMService.create_context_aggregator()` requires `set_llm_adapter()` which only exists on `OpenAILLMContext` in v0.0.101. Revisit when pipecat updates the Anthropic adapter. Deprecation warnings are suppressed in `main.py`.)
 - Prompt Caching (Anthropic)
 - Telnyx Migration (65% cost savings)
 
 ---
 
-*Last updated: February 2026 — Predictive Context Engine (speculative memory prefetch)*
+*Last updated: February 2026 — v5.0 with Predictive Context Engine, circuit breakers, feature flags, caregiver notes, sentiment-aware greetings, CI/CD*

@@ -37,6 +37,11 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
   - Layer 1: Quick Observer (0ms) - 268 regex patterns + programmatic goodbye (2s EndFrame)
   - Layer 2: Conversation Director (~150ms) - Non-blocking Gemini Flash per-turn analysis + mid-call memory refresh
   - Post-Call: Analysis, memory extraction, daily context (Gemini Flash)
+- **Predictive Context Engine** — Speculative memory prefetch eliminates tool-call latency
+  - 1st wave: Regex entity/topic extraction on final transcriptions → background `memory.search()`
+  - 2nd wave: Director Gemini analysis (next_topic, reminders, news) → anticipatory prefetch
+  - Interim transcriptions: Debounced prefetch while user is still speaking (1s gap, 15+ chars)
+  - Cache-first tool handlers: `search_memories` returns instantly on cache hit (~0ms vs 200-300ms)
 - **Pipecat Flows** - 4-phase call state machine (opening → main → winding_down → closing)
 - **5 LLM Tools** - search_memories, get_news, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
 - **Programmatic Call Ending** - Quick Observer detects goodbye → EndFrame after 2s delay (bypasses LLM)
@@ -81,7 +86,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 
 ### Pipecat Pipeline (bot.py)
 
-Linear pipeline — each processor is a Pipecat `FrameProcessor`. Frames flow top to bottom.
+Linear pipeline of `FrameProcessor`s. Frames flow top to bottom. The Conversation Director is in the pipeline but **non-blocking** — it passes frames through instantly while running Gemini analysis in the background.
 
 ```
 Twilio Audio ──► FastAPIWebsocketTransport
@@ -91,16 +96,28 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1 (0ms): 268 regex patterns
-              │                      │  Injects guidance via LLMMessagesAppendFrame
+              │   (BLOCKING)         │  Injects guidance for THIS turn
               │                      │  Strong goodbye → EndFrame in 2s
               └─────────┬───────────┘
+                        │
                         ▼
-              ┌─────────────────────┐
-              │ Conversation         │  Layer 2 (~150ms): Gemini 3 Flash Preview
-              │ Director             │  NON-BLOCKING (asyncio.create_task)
-              │                      │  Injects PREVIOUS turn's cached guidance
-              │                      │  Force winding-down at 9min, end at 12min
-              └─────────┬───────────┘
+              ┌─────────────────────┐     ┌──────────────────────────┐
+              │ Conversation         │────►│  Background Analysis      │
+              │ Director             │     │  (asyncio.create_task)    │
+              │ (PASS-THROUGH)       │     │                           │
+              │                      │     │  Gemini 3 Flash Preview   │
+              │ 1. Injects PREVIOUS  │     │  ~150ms per turn          │
+              │    turn's cached     │     │  Result cached for NEXT   │
+              │    guidance          │     │  turn's injection         │
+              │ 2. Passes frame      │     │                           │
+              │    immediately       │     │  Also: mid-call memory    │
+              │ 3. Fires background  │     │  refresh after 5+ min     │
+              │    analysis ────────►│     │  Predictive prefetch      │
+              │                      │     │  (1st + 2nd wave)         │
+              │                      │     │  Fallback: force end      │
+              │                      │     │  at 9min / 12min          │
+              └─────────┬───────────┘     └──────────────────────────┘
+                        │ (no delay)
                         ▼
               Context Aggregator (user) ← builds LLM context from transcriptions
                         ▼
@@ -118,7 +135,9 @@ Twilio Audio ──► FastAPIWebsocketTransport
               Context Aggregator (assistant) ← tracks assistant responses
 ```
 
-**Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. The guidance appears as user-role messages in Claude's context before the next LLM call is triggered by the Context Aggregator.
+**Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. Quick Observer's guidance is for the **current** turn (instant regex). Director's guidance is from the **previous** turn (cached Gemini result). Both appear as user-role messages in Claude's context before the next LLM call.
+
+**Predictive Context Engine**: The Director also runs speculative memory prefetch in the background. On each transcription, regex extracts topics/entities and pre-fetches memories. After Gemini analysis completes (~150ms), a second wave prefetches based on `next_topic`, upcoming reminders, and news topics. Results are cached in `session_state["_prefetch_cache"]` (TTL=30s, Jaccard fuzzy match). When Claude calls `search_memories`, the tool handler checks the cache first — cache hit returns instantly (~0ms vs 200-300ms). Interim transcriptions also trigger debounced prefetch while the user is still speaking.
 
 ### Call Phase State Machine (Pipecat Flows)
 
@@ -151,17 +170,18 @@ pipecat/
 ├── processors/
 │   ├── patterns.py                  ← Pattern data: 268 regex patterns, 19 categories (503 LOC)
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame (392 LOC)
-│   ├── conversation_director.py     ← Layer 2: Gemini Flash + mid-call memory refresh (219 LOC)
+│   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking + prefetch orchestration + mid-call memory refresh (275 LOC)
 │   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (254 LOC)
-│   ├── metrics_logger.py            ← Call metrics logging processor (97 LOC)
+│   ├── metrics_logger.py            ← Call metrics + prefetch stats logging (110 LOC)
 │   ├── goodbye_gate.py              ← False-goodbye grace period — NOT in active pipeline (135 LOC)
 │   └── guidance_stripper.py         ← Strip <guidance> tags + [BRACKETED] directives (115 LOC)
 │
 ├── services/
 │   ├── scheduler.py                 ← Reminder polling + outbound calls (427 LOC)
 │   ├── reminder_delivery.py         ← Delivery CRUD + prompt formatting (95 LOC)
-│   ├── post_call.py                 ← Post-call: analysis, memory, cleanup (166 LOC)
-│   ├── director_llm.py              ← Gemini Flash analysis for Director (374 LOC)
+│   ├── post_call.py                 ← Post-call: analysis, memory, cleanup (169 LOC)
+│   ├── prefetch.py                  ← Predictive Context Engine: cache + query extraction + runner (250 LOC)
+│   ├── director_llm.py              ← Gemini Flash analysis for Director + prefetch hints (374 LOC)
 │   ├── call_analysis.py             ← Post-call analysis + call quality scoring (246 LOC)
 │   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (392 LOC)
 │   ├── interest_discovery.py        ← Interest extraction from conversations (183 LOC)
@@ -341,6 +361,7 @@ The Railway project has two services per environment:
 | Modify post-call processing | `pipecat/services/post_call.py` |
 | Modify post-call analysis | `pipecat/services/call_analysis.py` |
 | Modify memory system | `pipecat/services/memory.py` |
+| Modify predictive prefetch | `pipecat/services/prefetch.py` (cache + extraction + runner) + `pipecat/processors/conversation_director.py` (orchestration) |
 | Modify greeting templates | `pipecat/services/greetings.py` |
 | Modify context pre-caching | `pipecat/services/context_cache.py` |
 | Modify cross-call daily context | `pipecat/services/daily_context.py` |
@@ -463,4 +484,4 @@ Both share the same Neon PostgreSQL database. Dual service implementations (e.g.
 
 ---
 
-*Last updated: February 2026 — v5.0 with circuit breakers, feature flags, caregiver notes, sentiment-aware greetings, CI/CD*
+*Last updated: February 2026 — v5.0 with Predictive Context Engine, circuit breakers, feature flags, caregiver notes, sentiment-aware greetings, CI/CD*

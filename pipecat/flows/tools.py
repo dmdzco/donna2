@@ -137,6 +137,17 @@ def make_tool_handlers(session_state: dict) -> dict:
         query = args.get("query", "")
         logger.info("Tool: search_memories query={q} senior={sid}", q=query, sid=senior_id)
 
+        # Check prefetch cache first (instant return on hit)
+        cache = session_state.get("_prefetch_cache")
+        if cache:
+            cached = cache.get(query)
+            if cached:
+                logger.info("Tool: search_memories CACHE HIT query={q}", q=query)
+                formatted = "[MEMORY] " + "\n[MEMORY] ".join(
+                    r['content'] for r in cached
+                )
+                return {"status": "success", "result": formatted}
+
         try:
             from services.memory import search
             results = await search(senior_id, query, limit=3)

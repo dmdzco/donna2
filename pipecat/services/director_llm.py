@@ -272,6 +272,11 @@ def format_director_guidance(direction: dict) -> str | None:
     if emotional_tone in ("sad", "concerned"):
         parts.append(f"({emotional_tone})")
 
+    # Phase 2: Prefetch hints — let Claude know memories are pre-loaded
+    prefetch_hints = direction.get("_prefetch_hints")
+    if prefetch_hints:
+        parts.append(f"CONTEXT AVAILABLE: Memories about {', '.join(prefetch_hints[:2])}")
+
     return " | ".join(parts) if parts else None
 
 
@@ -366,6 +371,14 @@ async def analyze_turn(
             e=direction.get("analysis", {}).get("engagement_level"),
             t=direction.get("analysis", {}).get("emotional_tone"),
         )
+
+        # Attach prefetch hints so guidance can mention available context
+        cache = session_state.get("_prefetch_cache")
+        if cache:
+            recent = cache.get_recent_queries()
+            if recent:
+                direction["_prefetch_hints"] = recent
+
         return direction
 
     except Exception as e:

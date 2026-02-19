@@ -17,6 +17,7 @@
 | Change post-call processing | `pipecat/services/post_call.py` |
 | Change post-call analysis prompts | `pipecat/services/call_analysis.py` |
 | Change memory search/storage | `pipecat/services/memory.py` |
+| Change predictive prefetch | `pipecat/services/prefetch.py` (cache + extraction) + `pipecat/processors/conversation_director.py` (orchestration) |
 | Change greeting templates | `pipecat/services/greetings.py` |
 | Change context pre-caching | `pipecat/services/context_cache.py` |
 | Change reminder scheduling | `pipecat/services/scheduler.py` (polling/calls) + `pipecat/services/reminder_delivery.py` (delivery CRUD) |
@@ -89,18 +90,19 @@ pipecat/
 ├── processors/          Frame processors in the audio pipeline
 │   ├── patterns.py             Pattern data: 268 regex patterns, 19 categories (503 LOC)
 │   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (392 LOC)
-│   ├── conversation_director.py Layer 2: Gemini Flash + mid-call memory refresh (219 LOC)
+│   ├── conversation_director.py Layer 2: Gemini Flash guidance + prefetch orchestration + mid-call memory refresh (275 LOC)
 │   ├── conversation_tracker.py  Tracks topics/questions/advice per call (254 LOC)
-│   ├── metrics_logger.py        Call metrics logging processor (97 LOC)
+│   ├── metrics_logger.py        Call metrics + prefetch stats logging (110 LOC)
 │   ├── goodbye_gate.py          False-goodbye grace period — NOT in active pipeline (135 LOC)
 │   └── guidance_stripper.py     Strips <guidance> tags before TTS (115 LOC)
 │
 ├── services/            Business logic — mostly independent, DB-only deps
 │   ├── scheduler.py         Reminder polling + outbound calls (427 LOC)
 │   ├── reminder_delivery.py Delivery CRUD + prompt formatting (95 LOC)
-│   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup (166 LOC)
-│   ├── memory.py            Semantic memory: pgvector, decay, dedup, HNSW (392 LOC)
-│   ├── director_llm.py      Gemini Flash analysis prompts (374 LOC)
+│   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup (169 LOC)
+│   ├── memory.py            Semantic memory: pgvector, HNSW, decay, dedup, circuit breaker (392 LOC)
+│   ├── prefetch.py          Predictive Context Engine: cache, extraction, runner (250 LOC)
+│   ├── director_llm.py      Gemini Flash analysis prompts + prefetch hints (374 LOC)
 │   ├── context_cache.py     Pre-cache senior context at 5 AM (290 LOC)
 │   ├── call_analysis.py     Post-call analysis via Gemini + call quality (246 LOC)
 │   ├── interest_discovery.py Interest extraction from conversations (183 LOC)

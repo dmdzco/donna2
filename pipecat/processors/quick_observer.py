@@ -342,6 +342,10 @@ class QuickObserverProcessor(FrameProcessor):
             analysis = quick_analyze(text, self._recent_history)
             self.last_analysis = analysis
 
+            # Expose analysis to session_state for prefetch engine
+            if self._session_state is not None:
+                self._session_state["_last_quick_analysis"] = analysis
+
             # Store token recommendation in session_state for Director
             if self._session_state is not None and analysis.model_recommendation:
                 self._session_state["_token_recommendation"] = analysis.model_recommendation

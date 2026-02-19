@@ -45,22 +45,26 @@ This document describes the Donna v5.0 system architecture with the **Pipecat vo
 │   │                     │ TranscriptionFrame                             │   │
 │   │                     ▼                                                │   │
 │   │         ┌───────────────────────┐                                    │   │
-│   │         │  Layer 1: Quick       │  0ms — 268 regex patterns          │   │
-│   │         │  Observer             │  Injects guidance via              │   │
-│   │         │                       │  LLMMessagesAppendFrame            │   │
+│   │         │  Layer 1: Quick       │  0ms — BLOCKING                    │   │
+│   │         │  Observer             │  268 regex patterns                │   │
+│   │         │                       │  Injects guidance for THIS turn    │   │
 │   │         │                       │  Goodbye → EndFrame (2s)           │   │
 │   │         └───────────┬───────────┘                                    │   │
 │   │                     ▼                                                │   │
-│   │         ┌───────────────────────┐                                    │   │
-│   │         │  Layer 2: Conversation│  ~150ms — Gemini 3 Flash Preview  │   │
-│   │         │  Director             │  NON-BLOCKING (asyncio.create_task)│   │
-│   │         │                       │  Injects PREVIOUS turn's guidance  │   │
-│   │         │                       │  via LLMMessagesAppendFrame        │   │
-│   │         └───────────┬───────────┘  Fallback: force end at 12min     │   │
+│   │         ┌───────────────────────┐  ┌─────────────────────────┐      │   │
+│   │         │  Layer 2: Conversation│─►│ Background: Gemini Flash│      │   │
+│   │         │  Director             │  │ ~150ms, asyncio.task    │      │   │
+│   │         │  (PASS-THROUGH)       │  │ Result cached → used on │      │   │
+│   │         │                       │  │ NEXT turn's injection   │      │   │
+│   │         │  Injects PREVIOUS     │  │ + mid-call mem refresh  │      │   │
+│   │         │  turn's cached result │  │ + predictive prefetch   │      │   │
+│   │         │                       │  │ + force end at 9/12min  │      │   │
+│   │         └───────────┬───────────┘  └─────────────────────────┘      │   │
+│   │                     │ (no delay)                                     │   │
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (user) ← builds LLM context              │   │
 │   │                     ▼                                                │   │
-│   │         Claude Sonnet 4.5 + FlowManager                             │   │
+│   │         Claude Sonnet 4.5 + FlowManager (5 tools)                   │   │
 │   │         (4 phases: opening → main → winding_down → closing)         │   │
 │   │                     │ TextFrame                                      │   │
 │   │                     ▼                                                │   │

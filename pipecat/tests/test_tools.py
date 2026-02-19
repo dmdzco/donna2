@@ -82,6 +82,93 @@ class TestToolHandlerFactory:
         assert "rem-1" in session_state.get("reminders_delivered", set())
 
 
+class TestSearchMemoriesCacheLookup:
+    """Tests for prefetch cache integration in search_memories handler."""
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_returns_cached_results(self):
+        from services.prefetch import PrefetchCache
+
+        cache = PrefetchCache()
+        cache.put("gardening", [
+            {"content": "Margaret loves her rose garden"},
+            {"content": "She planted tulips last spring"},
+        ])
+
+        session_state = {
+            "senior_id": "test-123",
+            "_prefetch_cache": cache,
+        }
+        handlers = make_tool_handlers(session_state)
+        result = await handlers["search_memories"]({"query": "gardening"})
+
+        assert result["status"] == "success"
+        assert "rose garden" in result["result"]
+        assert "tulips" in result["result"]
+        assert "[MEMORY]" in result["result"]
+
+    @pytest.mark.asyncio
+    async def test_cache_miss_falls_through_to_live_search(self):
+        from services.prefetch import PrefetchCache
+        from unittest.mock import AsyncMock, patch
+
+        cache = PrefetchCache()
+        # Cache has "gardening" but we'll query "cooking"
+        cache.put("gardening", [{"content": "Roses"}])
+
+        session_state = {
+            "senior_id": "test-123",
+            "_prefetch_cache": cache,
+        }
+        handlers = make_tool_handlers(session_state)
+
+        with patch("services.memory.search", new_callable=AsyncMock) as mock_search:
+            mock_search.return_value = [{"content": "She bakes apple pie"}]
+            result = await handlers["search_memories"]({"query": "cooking"})
+
+        assert result["status"] == "success"
+        assert "apple pie" in result["result"]
+        mock_search.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_cache_falls_through_gracefully(self):
+        """When no prefetch cache exists, falls through to live search."""
+        from unittest.mock import AsyncMock, patch
+
+        session_state = {
+            "senior_id": "test-123",
+            # No _prefetch_cache key
+        }
+        handlers = make_tool_handlers(session_state)
+
+        with patch("services.memory.search", new_callable=AsyncMock) as mock_search:
+            mock_search.return_value = [{"content": "Some memory"}]
+            result = await handlers["search_memories"]({"query": "anything"})
+
+        assert result["status"] == "success"
+        mock_search.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cache_fuzzy_match(self):
+        from services.prefetch import PrefetchCache
+
+        cache = PrefetchCache()
+        cache.put("grandson Jake baseball", [
+            {"content": "Jake plays little league baseball"},
+        ])
+
+        session_state = {
+            "senior_id": "test-123",
+            "_prefetch_cache": cache,
+        }
+        handlers = make_tool_handlers(session_state)
+        # Fuzzy match — partial word overlap
+        result = await handlers["search_memories"]({"query": "Jake grandson"})
+
+        assert result["status"] == "success"
+        assert "little league" in result["result"]
+
+
 class TestFlowsTools:
     def test_make_flows_tools_returns_schemas(self):
         session_state = {"senior_id": "test-123"}

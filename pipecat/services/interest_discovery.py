@@ -129,7 +129,7 @@ async def compute_interest_scores(
         return {}
 
     rows = await query_many(
-        """SELECT topics_discussed, engagement_score, created_at
+        """SELECT topics, engagement_score, created_at
            FROM call_analyses
            WHERE senior_id = $1
              AND created_at > NOW() - INTERVAL '1 day' * $2
@@ -143,7 +143,7 @@ async def compute_interest_scores(
     now = datetime.now(timezone.utc)
 
     for row in rows:
-        topics = row.get("topics_discussed") or []
+        topics = row.get("topics") or []
         eng = row.get("engagement_score") or 5
         created = row.get("created_at")
         if not created:

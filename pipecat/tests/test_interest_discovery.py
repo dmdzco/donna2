@@ -149,7 +149,7 @@ class TestComputeInterestScores:
         now = datetime.now(timezone.utc)
         rows = [
             {
-                "topics_discussed": ["gardening", "cooking"],
+                "topics": ["gardening", "cooking"],
                 "engagement_score": 8,
                 "created_at": now - timedelta(days=1),
             },
@@ -168,12 +168,12 @@ class TestComputeInterestScores:
         now = datetime.now(timezone.utc)
         rows = [
             {
-                "topics_discussed": ["gardening"],
+                "topics": ["gardening"],
                 "engagement_score": 8,
                 "created_at": now - timedelta(days=1),
             },
             {
-                "topics_discussed": ["cooking"],
+                "topics": ["cooking"],
                 "engagement_score": 8,
                 "created_at": now - timedelta(days=28),
             },
@@ -200,7 +200,7 @@ class TestComputeInterestScores:
         now = datetime.now(timezone.utc)
         rows = [
             {
-                "topics_discussed": ["gardening"],
+                "topics": ["gardening"],
                 "engagement_score": 8,
                 "created_at": now - timedelta(days=1),
             },

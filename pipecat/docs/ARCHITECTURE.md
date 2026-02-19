@@ -30,6 +30,8 @@
 
 ## Pipecat Pipeline (bot.py)
 
+Linear pipeline of `FrameProcessor`s. The Conversation Director sits in the pipeline but is **non-blocking** — it passes frames through instantly while running Gemini analysis in a background `asyncio.create_task()`.
+
 ```
 Twilio Audio ──► FastAPIWebsocketTransport
                         │
@@ -41,20 +43,31 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1: Instant regex (0ms)
-              │   (268 patterns)     │  → health, goodbye, emotion,
-              │                      │    cognitive, activity signals
-              │   Goodbye detected → │  → notifies GoodbyeGate
+              │   (BLOCKING)         │  → 268 patterns: health, goodbye,
+              │   (268 patterns)     │    emotion, cognitive, activity
+              │                      │  → Injects guidance for THIS turn
+              │   Goodbye detected → │  → EndFrame after 2s delay
               └─────────┬───────────┘
                         │
                         ▼
-              ┌─────────────────────┐
-              │ Conversation         │  Layer 2: Gemini Flash (~150ms)
-              │ Director             │  NON-BLOCKING: async analysis
-              │                      │  → Injects PREVIOUS turn guidance
-              │                      │  → Background: analyzes THIS turn
-              │                      │  → Fallback: force call end at 12min
-              └─────────┬───────────┘
-                        │
+              ┌─────────────────────┐     ┌──────────────────────────┐
+              │ Conversation         │     │  Background Analysis      │
+              │ Director             │────►│  (asyncio.create_task)    │
+              │ (PASS-THROUGH)       │     │                           │
+              │                      │     │  Gemini 3 Flash Preview   │
+              │ 1. Injects PREVIOUS  │     │  ~150ms per turn          │
+              │    turn's cached     │     │  Result cached → injected │
+              │    guidance          │     │  on NEXT turn             │
+              │ 2. Passes frame      │     │                           │
+              │    immediately       │     │  Also handles:            │
+              │ 3. Fires background  │     │  • Predictive prefetch    │
+              │    analysis ────────►│     │    (2 waves + interim)    │
+              │                      │     │  • Mid-call memory refresh│
+              │                      │     │    (after 5+ min)         │
+              │                      │     │  • Force winding-down 9min│
+              │                      │     │  • Force call end 12min   │
+              └─────────┬───────────┘     └──────────────────────────┘
+                        │ (no delay)
                         ▼
               ┌─────────────────────┐
               │  Context Aggregator  │  Builds LLM context from
@@ -64,7 +77,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Anthropic LLM      │  Claude Sonnet 4.5 (streaming)
-              │   + Flow Manager     │  Guided by Pipecat Flows
+              │   + Flow Manager     │  5 tools, 4-phase state machine
               └─────────┬───────────┘
                         │ TextFrame
                         ▼
@@ -107,6 +120,8 @@ The pipeline processors don't call each other directly. They communicate through
    - `_goodbye_in_progress` — Set by QuickObserver when strong goodbye detected, read by Director to suppress stale guidance injection
    - `_call_start_time` — Set in bot.py, read by Director for time-based fallbacks
    - `_conversation_tracker` — Reference to the ConversationTracker processor, read by Flow nodes to build tracking summaries
+   - `_prefetch_cache` — `PrefetchCache` instance, written by Director prefetch, read by `search_memories` tool handler
+   - `_last_quick_analysis` — `AnalysisResult` from Quick Observer, read by prefetch engine for family/health/activity signals
 
 3. **Pipeline task reference** — Both QuickObserver and Director receive a `set_pipeline_task(task)` call after pipeline creation. This lets them queue `EndFrame` directly to force call termination, bypassing the normal frame flow.
 
@@ -125,7 +140,7 @@ Instant regex-based analysis with 268 patterns across 19 categories:
 | **Family** | 25+ relationship patterns including pets | Context enrichment |
 | **Safety** | Scams, strangers, emergencies | Safety concern flags |
 | **Engagement** | Response length analysis | Engagement level tracking |
-| **Goodbye** | Strong/weak goodbye detection | **Notifies GoodbyeGate** |
+| **Goodbye** | Strong/weak goodbye detection | **EndFrame after 2s delay** |
 | **Factual/Curiosity** | 18 patterns ("what year", "how tall") | Web search trigger |
 | **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 
@@ -143,8 +158,11 @@ Runs Gemini Flash per turn via `asyncio.create_task()` — never blocks the pipe
    - Injects **PREVIOUS** turn's cached guidance via `LLMMessagesAppendFrame`
    - Takes fallback actions (force end, wrap-up injection)
    - Starts NEW background analysis for this turn
+   - Starts 1st-wave regex prefetch (non-blocking)
 2. Background analysis calls Gemini Flash with full conversation context
-3. Result is cached and applied on the next turn
+3. After analysis completes, starts 2nd-wave director-driven prefetch
+4. Result is cached and applied on the next turn
+5. On `InterimTranscriptionFrame`: debounced prefetch (1s gap, 15+ chars)
 
 **Fallback Actions** (when Claude misses things):
 - **Force winding-down** at 9 minutes — overrides call phase to winding_down
@@ -195,6 +213,66 @@ main/medium/warm | REMIND: Take medication | (concerned)
 winding_down/high/gentle | WINDING DOWN: Summarize key points, begin warm sign-off.
 closing/medium/warm | CLOSING: Say a warm goodbye. Keep it brief.
 ```
+
+### Predictive Context Engine (Speculative Prefetch)
+
+The Director orchestrates a 2-wave speculative memory prefetch that eliminates tool-call latency. Memories are pre-fetched in the background and cached in `session_state["_prefetch_cache"]` so that when Claude calls `search_memories`, results return instantly from cache.
+
+**Implementation**: `services/prefetch.py` (cache + extraction + runner), orchestrated by `conversation_director.py`.
+
+#### Prefetch Timeline
+
+```
+User speaking...
+  ├─ InterimTranscriptionFrame (every ~200ms from Deepgram)
+  │   └─ Debounced prefetch (1s gap, 15+ chars, text changed)
+  │      Regex topic extraction only → memory.search() → cache
+  │
+  └─ TranscriptionFrame (final, after VAD silence)
+      │
+      ├─ 1st wave (0ms): Regex extraction
+      │   Topics (_TOPIC_PATTERNS from conversation_tracker)
+      │   Entities ("my grandson", "my doctor")
+      │   Names ("My grandson Jake" → "Jake")
+      │   Activities ("went to church", "played bingo")
+      │   Quick Observer signals (family, health, activity)
+      │   → memory.search() → cache
+      │
+      └─ 2nd wave (~150ms): Director Gemini analysis
+          next_topic → anticipatory prefetch
+          which_reminder → reminder context prefetch
+          news_topic → personal connection prefetch
+          current_topic (2+ turns) → sustained topic prefetch
+          → memory.search() → cache
+```
+
+#### Cache Design (PrefetchCache)
+
+- **TTL**: 30 seconds per entry
+- **Max entries**: 10 (evicts oldest on overflow)
+- **Lookup**: Jaccard word-overlap similarity (threshold=0.3), no embeddings needed
+- **Dedup**: Skips queries already cached via `get_recent_queries()`
+- **Concurrency**: Max 2 concurrent `memory.search()` calls per wave
+- **Metrics**: Hits/misses/hit rate logged at call end via MetricsLogger
+
+#### Cache-First Tool Handler
+
+`search_memories` in `flows/tools.py` checks the prefetch cache before making a live database query:
+
+```
+Claude calls search_memories("gardening")
+  → cache.get("gardening")  (Jaccard fuzzy match)
+  → HIT: return cached results (~0ms)
+  → MISS: fall through to live memory.search() (200-300ms)
+```
+
+#### Director Guidance Hints
+
+When the prefetch cache has entries, the Director attaches hints to its guidance:
+```
+main/medium/warm | CONTEXT AVAILABLE: Memories about gardening, grandson
+```
+This nudges Claude to call `search_memories` — knowing the call will be instant.
 
 ## Pipecat Flows — Call Phase Management
 
@@ -311,7 +389,8 @@ pipecat/
 │   └── guidance_stripper.py         ← Strips <guidance> tags and [BRACKETED] directives
 │
 ├── services/
-│   ├── director_llm.py              ← Gemini Flash analysis for Director (374 LOC)
+│   ├── prefetch.py                  ← Predictive Context Engine: cache, extraction, runner
+│   ├── director_llm.py              ← Gemini Flash analysis for Director + prefetch hints (374 LOC)
 │   ├── post_call.py                 ← Post-call orchestration (analysis, memory, cleanup)
 │   ├── reminder_delivery.py         ← Reminder delivery CRUD + prompt formatting
 │   ├── call_analysis.py             ← Post-call analysis + call quality scoring (246 LOC)
@@ -490,4 +569,4 @@ RUN_DB_TESTS=1                   # Set to run DB integration tests
 
 ---
 
-*Last updated: February 2026 — v5.0 with circuit breakers, feature flags, caregiver notes, sentiment-aware greetings, graceful shutdown*
+*Last updated: February 2026 — v5.0 with Predictive Context Engine, circuit breakers, feature flags, caregiver notes, sentiment-aware greetings, graceful shutdown*

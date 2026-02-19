@@ -13,6 +13,11 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - **5 LLM Tools** — search_memories, get_news, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
 - **Programmatic Call Ending** — Goodbye detection → EndFrame after 2s delay (bypasses unreliable LLM tool calls)
 - **Director Fallback Actions** — Force winding-down at 9min, force call end at 12min
+- **Predictive Context Engine** — Speculative memory prefetch with 2-wave pipeline:
+  - 1st wave: Regex topic/entity extraction → background memory search (~0ms added latency)
+  - 2nd wave: Director Gemini analysis → anticipatory prefetch (next_topic, reminders, news)
+  - Interim transcription prefetch while user speaks (debounced)
+  - Cache-first `search_memories` tool handler (~0ms hit vs 200-300ms live search)
 - **Barge-in support** — Interrupt detection via Silero VAD
 
 ### Core Capabilities
@@ -92,7 +97,7 @@ make test-regression         # Scenario-based regression tests
 
 ### Pipecat Voice Pipeline (bot.py)
 
-Each box is a Pipecat `FrameProcessor` in a linear `Pipeline`. Frames flow top-to-bottom.
+Linear pipeline of `FrameProcessor`s. The Conversation Director is **non-blocking** — it passes frames through instantly while running Gemini analysis in a background task.
 
 ```
 Phone Call → Twilio → WebSocket → Pipecat Pipeline
@@ -101,19 +106,26 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                                        │ TranscriptionFrame
                                        ▼
                              ┌─────────────────────┐
-                             │   Quick Observer     │  Layer 1 (0ms)
-                             │   268 regex patterns │  Goodbye → EndFrame (2s)
+                             │   Quick Observer     │  Layer 1 (0ms, BLOCKING)
+                             │   268 regex patterns │  Injects guidance for THIS turn
+                             │                      │  Goodbye → EndFrame (2s)
                              └─────────┬───────────┘
+                                       │
                                        ▼
-                             ┌─────────────────────┐
-                             │   Conversation       │  Layer 2 (~150ms)
-                             │   Director           │  NON-BLOCKING
-                             │   (Gemini Flash)     │  Prev-turn guidance
+                             ┌─────────────────────┐   ┌───────────────────┐
+                             │   Conversation       │──►│ Background Task   │
+                             │   Director           │   │ Gemini Flash      │
+                             │   (PASS-THROUGH)     │   │ ~150ms/turn       │
+                             │                      │   │ Result cached for │
+                             │ Injects PREVIOUS     │   │ NEXT turn         │
+                             │ turn's cached result  │   │ Predictive prefetch│
+                             │                      │   └───────────────────┘
                              └─────────┬───────────┘
+                                       │ (no delay)
                                        ▼
                              Context Aggregator (user)
                                        ▼
-                             Claude Sonnet 4.5 + Pipecat Flows
+                             Claude Sonnet 4.5 + Pipecat Flows (5 tools)
                                        │ TextFrame
                                        ▼
                              Conversation Tracker → Guidance Stripper
@@ -137,6 +149,7 @@ The Director runs non-blocking per turn via `asyncio.create_task()`:
 | **Emotional Detection** | Adjust tone for sad/concerned seniors |
 | **Goodbye Suppression** | Skips guidance when Quick Observer detects goodbye |
 | **Time-Based Fallbacks** | Force winding-down at 9min, force end at 12min |
+| **Predictive Prefetch** | 2-wave speculative memory prefetch (regex + Gemini analysis) |
 
 ## Architecture Decision: Two Backends
 
@@ -169,6 +182,7 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 ├── services/
 │   ├── post_call.py                    # Post-call orchestration
 │   ├── call_analysis.py                # Post-call analysis (Gemini Flash)
+│   ├── prefetch.py                     # Predictive Context Engine (speculative prefetch)
 │   ├── director_llm.py                 # Gemini Flash analysis for Director
 │   ├── memory.py                       # Semantic memory (pgvector, decay)
 │   ├── scheduler.py                    # Reminder scheduling + outbound calls

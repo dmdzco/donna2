@@ -180,18 +180,22 @@ class ConversationDirectorProcessor(FrameProcessor):
 
             queries = extract_prefetch_queries(text, self._session_state, source=source)
             if not queries:
+                logger.info("[Prefetch] No queries extracted from {src}: {t!r}", src=source, t=text[:80])
                 return
 
             senior_id = self._session_state.get("senior_id")
             if not senior_id:
+                logger.info("[Prefetch] No senior_id in session_state")
                 return
 
             count = await run_prefetch(senior_id, queries, cache)
             if count > 0:
                 logger.info(
-                    "[Prefetch] {n} queries cached from {src} transcription",
-                    n=count, src=source,
+                    "[Prefetch] {n} queries cached from {src} transcription (queries={q})",
+                    n=count, src=source, q=queries,
                 )
+            else:
+                logger.debug("[Prefetch] 0 results for queries={q}", q=queries)
         except Exception as e:
             logger.warning("[Prefetch] Error: {err}", err=str(e))
 

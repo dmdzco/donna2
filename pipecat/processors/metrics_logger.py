@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 
 from loguru import logger
-from pipecat.frames.frames import Frame, MetricsFrame
+from pipecat.frames.frames import EndFrame, Frame, MetricsFrame
 from pipecat.processors.frame_processor import FrameProcessor
 
 try:
@@ -41,6 +41,10 @@ class MetricsLoggerProcessor(FrameProcessor):
 
         if isinstance(frame, MetricsFrame) and _HAS_METRICS:
             self._log_metrics(frame)
+
+        # Log prefetch stats at call end
+        if isinstance(frame, EndFrame):
+            self._log_prefetch_stats()
 
         await self.push_frame(frame, direction)
 
@@ -95,3 +99,16 @@ class MetricsLoggerProcessor(FrameProcessor):
 
     def _log_tts_usage(self, item: TTSUsageMetricsData):
         logger.info("[Metrics] TTS characters: {n}", n=item.value)
+
+    def _log_prefetch_stats(self):
+        cache = self._session_state.get("_prefetch_cache")
+        if cache:
+            stats = cache.stats()
+            if stats["total"] > 0:
+                logger.info(
+                    "[Metrics] Prefetch: hits={h} misses={m} rate={r}% entries={e}",
+                    h=stats["hits"],
+                    m=stats["misses"],
+                    r=stats["hit_rate_pct"],
+                    e=stats["entries"],
+                )

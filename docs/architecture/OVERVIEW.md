@@ -55,7 +55,8 @@ This document describes the Donna v4.0 system architecture with the **Pipecat vo
 │   │         │  Layer 2: Conversation│  ~150ms — Gemini 3 Flash Preview  │   │
 │   │         │  Director             │  NON-BLOCKING (asyncio.create_task)│   │
 │   │         │                       │  Injects PREVIOUS turn's guidance  │   │
-│   │         │                       │  via LLMMessagesAppendFrame        │   │
+│   │         │                       │  Predictive prefetch (2 waves)     │   │
+│   │         │                       │  Interim transcription prefetch    │   │
 │   │         └───────────┬───────────┘  Fallback: force end at 12min     │   │
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (user) ← builds LLM context              │   │

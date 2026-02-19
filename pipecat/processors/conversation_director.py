@@ -17,7 +17,13 @@ import asyncio
 import time
 
 from loguru import logger
-from pipecat.frames.frames import EndFrame, Frame, TranscriptionFrame, LLMMessagesAppendFrame
+from pipecat.frames.frames import (
+    EndFrame,
+    Frame,
+    InterimTranscriptionFrame,
+    TranscriptionFrame,
+    LLMMessagesAppendFrame,
+)
 from pipecat.processors.frame_processor import FrameProcessor
 
 from services.director_llm import (
@@ -44,6 +50,10 @@ class ConversationDirectorProcessor(FrameProcessor):
     FORCE_WINDING_DOWN_MINUTES = 9.0
     FORCE_END_MINUTES = 12.0
 
+    # Interim transcription debounce settings
+    INTERIM_DEBOUNCE_SECONDS = 1.0
+    INTERIM_MIN_LENGTH = 15
+
     def __init__(self, session_state: dict, **kwargs):
         super().__init__(**kwargs)
         self._session_state = session_state
@@ -54,6 +64,8 @@ class ConversationDirectorProcessor(FrameProcessor):
         self._turn_count = 0
         self._end_scheduled = False
         self._memory_refreshed = False
+        self._last_interim_prefetch_time = 0.0
+        self._last_interim_text = ""
 
     def set_pipeline_task(self, task):
         """Set pipeline task reference for direct actions (EndFrame, etc.)."""
@@ -108,6 +120,9 @@ class ConversationDirectorProcessor(FrameProcessor):
                 self._run_analysis(frame.text, transcript)
             )
 
+            # Start speculative prefetch (non-blocking)
+            asyncio.create_task(self._run_prefetch(frame.text))
+
             # Trigger mid-call memory refresh at 5 minutes
             call_start = self._session_state.get("_call_start_time") or time.time()
             refresh_after = (self._session_state.get("call_settings") or {}).get(
@@ -117,6 +132,19 @@ class ConversationDirectorProcessor(FrameProcessor):
             if minutes_elapsed > refresh_after and not self._memory_refreshed:
                 self._memory_refreshed = True
                 asyncio.create_task(self._refresh_memory())
+
+        # Phase 2: Interim transcription prefetch (debounced)
+        if isinstance(frame, InterimTranscriptionFrame):
+            now = time.time()
+            text = frame.text or ""
+            if (
+                len(text) >= self.INTERIM_MIN_LENGTH
+                and now - self._last_interim_prefetch_time >= self.INTERIM_DEBOUNCE_SECONDS
+                and text != self._last_interim_text
+            ):
+                self._last_interim_prefetch_time = now
+                self._last_interim_text = text
+                asyncio.create_task(self._run_prefetch(text, source="interim"))
 
         # Always pass frames through immediately
         await self.push_frame(frame, direction)
@@ -130,11 +158,73 @@ class ConversationDirectorProcessor(FrameProcessor):
                 conversation_history=transcript,
             )
             self._last_result = result
+
+            # Second-wave prefetch: use Gemini's multi-turn context to
+            # anticipate what Claude will need (next_topic, reminders, news)
+            asyncio.create_task(self._run_director_prefetch(result))
         except asyncio.CancelledError:
             pass
         except Exception as e:
             logger.error("[Director] Background analysis error: {err}", err=str(e))
             self._last_result = get_default_direction()
+
+    async def _run_prefetch(self, text: str, source: str = "final"):
+        """Speculatively prefetch memories based on user speech (non-blocking)."""
+        try:
+            from services.prefetch import PrefetchCache, extract_prefetch_queries, run_prefetch
+
+            # Lazily init cache in session_state
+            if "_prefetch_cache" not in self._session_state:
+                self._session_state["_prefetch_cache"] = PrefetchCache()
+            cache = self._session_state["_prefetch_cache"]
+
+            queries = extract_prefetch_queries(text, self._session_state, source=source)
+            if not queries:
+                return
+
+            senior_id = self._session_state.get("senior_id")
+            if not senior_id:
+                return
+
+            count = await run_prefetch(senior_id, queries, cache)
+            if count > 0:
+                logger.info(
+                    "[Prefetch] {n} queries cached from {src} transcription",
+                    n=count, src=source,
+                )
+        except Exception as e:
+            logger.warning("[Prefetch] Error: {err}", err=str(e))
+
+    async def _run_director_prefetch(self, direction: dict):
+        """Second-wave prefetch using Director's multi-turn analysis.
+
+        Runs after Gemini analysis completes (~150ms). Extracts queries from
+        structured output: next_topic, reminder context, news topics, and
+        sustained current topics.
+        """
+        try:
+            from services.prefetch import PrefetchCache, extract_director_queries, run_prefetch
+
+            if "_prefetch_cache" not in self._session_state:
+                self._session_state["_prefetch_cache"] = PrefetchCache()
+            cache = self._session_state["_prefetch_cache"]
+
+            queries = extract_director_queries(direction, self._session_state)
+            if not queries:
+                return
+
+            senior_id = self._session_state.get("senior_id")
+            if not senior_id:
+                return
+
+            count = await run_prefetch(senior_id, queries, cache)
+            if count > 0:
+                logger.info(
+                    "[Prefetch] {n} queries cached from Director analysis (2nd wave)",
+                    n=count,
+                )
+        except Exception as e:
+            logger.warning("[Prefetch] Director prefetch error: {err}", err=str(e))
 
     async def _take_actions(self, result: dict):
         """Take direct fallback actions when Claude misses things."""

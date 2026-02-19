@@ -12,6 +12,11 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - **Pipecat Flows** — 4-phase call state machine (opening → main → winding_down → closing)
 - **Programmatic Call Ending** — Goodbye detection → EndFrame after 2s delay (bypasses unreliable LLM tool calls)
 - **Director Fallback Actions** — Force winding-down at 9min, force call end at 12min
+- **Predictive Context Engine** — Speculative memory prefetch with 2-wave pipeline:
+  - 1st wave: Regex topic/entity extraction → background memory search (~0ms added latency)
+  - 2nd wave: Director Gemini analysis → anticipatory prefetch (next_topic, reminders, news)
+  - Interim transcription prefetch while user speaks (debounced)
+  - Cache-first `search_memories` tool handler (~0ms hit vs 200-300ms live search)
 - **Barge-in support** — Interrupt detection via Silero VAD
 
 ### Core Capabilities
@@ -90,6 +95,7 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                              │   Conversation       │  Layer 2 (~150ms)
                              │   Director           │  NON-BLOCKING
                              │   (Gemini Flash)     │  Prev-turn guidance
+                             │                      │  Predictive prefetch
                              └─────────┬───────────┘
                                        ▼
                              Context Aggregator (user)
@@ -118,6 +124,7 @@ The Director runs non-blocking per turn via `asyncio.create_task()`:
 | **Emotional Detection** | Adjust tone for sad/concerned seniors |
 | **Goodbye Suppression** | Skips guidance when Quick Observer detects goodbye |
 | **Time-Based Fallbacks** | Force winding-down at 9min, force end at 12min |
+| **Predictive Prefetch** | 2-wave speculative memory prefetch (regex + Gemini analysis) |
 
 ## Architecture Decision: Two Backends
 
@@ -150,6 +157,7 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 ├── services/
 │   ├── post_call.py                    # Post-call orchestration
 │   ├── call_analysis.py                # Post-call analysis (Gemini Flash)
+│   ├── prefetch.py                     # Predictive Context Engine (speculative prefetch)
 │   ├── director_llm.py                 # Gemini Flash analysis for Director
 │   ├── memory.py                       # Semantic memory (pgvector, decay)
 │   ├── scheduler.py                    # Reminder scheduling + outbound calls

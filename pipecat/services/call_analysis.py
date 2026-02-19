@@ -117,7 +117,6 @@ async def analyze_completed_call(
                     system_instruction=ANALYSIS_SYSTEM_INSTRUCTION,
                     max_output_tokens=1500,
                     temperature=0.2,
-                    thinking_config=genai.types.ThinkingConfig(thinking_budget=0),
                 ),
             )
 

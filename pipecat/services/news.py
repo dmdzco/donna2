@@ -5,11 +5,16 @@ Port of services/news.js — fetches senior-friendly news via OpenAI web search.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import random
 import re
 import time
 from loguru import logger
+
+from lib.circuit_breaker import CircuitBreaker
+
+_breaker = CircuitBreaker("openai_news", failure_threshold=3, recovery_timeout=60.0, call_timeout=10.0)
 
 _openai_client = None
 _news_cache: dict[str, dict] = {}
@@ -60,19 +65,25 @@ async def get_news_for_senior(interests: list[str], limit: int = 3) -> str | Non
         interest_list = ", ".join(interests[:5])
         logger.info("Fetching news for interests: {il}", il=interest_list)
 
-        response = client.responses.create(
-            model="gpt-4o-mini",
-            tools=[{"type": "web_search_preview"}],
-            input=(
-                f"Find 7-8 brief, positive news stories from today about: {interest_list}.\n"
-                "These are for an elderly person, so:\n"
-                "- Choose uplifting or interesting stories (avoid distressing news)\n"
-                "- Keep each summary to 1-2 sentences\n"
-                "- Focus on human interest, health tips, local events, or hobby-related news\n\n"
-                "Format as a simple list with bullet points."
-            ),
-            tool_choice="required",
-        )
+        async def _news_call():
+            return await asyncio.to_thread(
+                client.responses.create,
+                model="gpt-4o-mini",
+                tools=[{"type": "web_search_preview"}],
+                input=(
+                    f"Find 7-8 brief, positive news stories from today about: {interest_list}.\n"
+                    "These are for an elderly person, so:\n"
+                    "- Choose uplifting or interesting stories (avoid distressing news)\n"
+                    "- Keep each summary to 1-2 sentences\n"
+                    "- Focus on human interest, health tips, local events, or hobby-related news\n\n"
+                    "Format as a simple list with bullet points."
+                ),
+                tool_choice="required",
+            )
+
+        response = await _breaker.call(_news_call(), fallback=None)
+        if response is None:
+            return None
 
         news_content = (response.output_text or "").strip()
         if not news_content:

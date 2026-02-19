@@ -12,6 +12,10 @@ import os
 from datetime import datetime, timezone
 from loguru import logger
 
+from lib.circuit_breaker import CircuitBreaker
+
+_embedding_breaker = CircuitBreaker("openai_embedding", failure_threshold=3, recovery_timeout=60.0, call_timeout=10.0)
+
 _openai_client = None
 
 DECAY_HALF_LIFE_DAYS = 30
@@ -65,8 +69,12 @@ async def generate_embedding(text: str) -> list[float] | None:
     client = _get_openai()
     if client is None:
         return None
-    response = await client.embeddings.create(model="text-embedding-3-small", input=text)
-    return response.data[0].embedding
+
+    async def _embed():
+        response = await client.embeddings.create(model="text-embedding-3-small", input=text)
+        return response.data[0].embedding
+
+    return await _embedding_breaker.call(_embed(), fallback=None)
 
 
 async def store(

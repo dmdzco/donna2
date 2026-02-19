@@ -12,6 +12,9 @@ import os
 import re
 from loguru import logger
 from db import query_one
+from lib.circuit_breaker import CircuitBreaker
+
+_breaker = CircuitBreaker("gemini_analysis", failure_threshold=3, recovery_timeout=60.0, call_timeout=15.0)
 
 
 ANALYSIS_MODEL = os.environ.get("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview")
@@ -156,14 +159,20 @@ async def analyze_completed_call(
             return _get_default_analysis()
 
         client = genai.Client(api_key=api_key)
-        response = await client.aio.models.generate_content(
-            model=ANALYSIS_MODEL,
-            contents=prompt,
-            config=genai.types.GenerateContentConfig(
-                max_output_tokens=1500,
-                temperature=0.2,
-            ),
-        )
+
+        async def _gemini_call():
+            return await client.aio.models.generate_content(
+                model=ANALYSIS_MODEL,
+                contents=prompt,
+                config=genai.types.GenerateContentConfig(
+                    max_output_tokens=1500,
+                    temperature=0.2,
+                ),
+            )
+
+        response = await _breaker.call(_gemini_call(), fallback=None)
+        if response is None:
+            return _get_default_analysis()
 
         json_text = response.text.strip()
         # Strip markdown fences

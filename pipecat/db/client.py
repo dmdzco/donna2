@@ -49,6 +49,17 @@ async def execute(sql: str, *args) -> str:
         return await conn.execute(sql, *args)
 
 
+async def check_health() -> bool:
+    """Check if the database is reachable."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        return True
+    except Exception:
+        return False
+
+
 async def close_pool():
     """Close the database connection pool."""
     global _pool

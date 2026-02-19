@@ -76,3 +76,26 @@ async def get_assignment(clerk_user_id: str, senior_id: str) -> dict | None:
         clerk_user_id,
         senior_id,
     )
+
+
+async def get_pending_notes(senior_id: str) -> list[dict]:
+    """Get undelivered caregiver notes for a senior."""
+    rows = await query_many(
+        """SELECT cn.*, c.clerk_user_id
+           FROM caregiver_notes cn
+           JOIN caregivers c ON cn.caregiver_id = c.id
+           WHERE cn.senior_id = $1 AND cn.is_delivered = false
+           ORDER BY cn.created_at ASC""",
+        senior_id,
+    )
+    return rows
+
+
+async def mark_note_delivered(note_id: str, call_sid: str) -> None:
+    """Mark a caregiver note as delivered during a call."""
+    await execute(
+        """UPDATE caregiver_notes SET is_delivered = true, delivered_at = NOW(), call_sid = $2
+           WHERE id = $1""",
+        note_id,
+        call_sid,
+    )

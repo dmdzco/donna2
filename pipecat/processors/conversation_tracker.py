@@ -182,6 +182,10 @@ class ConversationTrackerProcessor(FrameProcessor):
             self.state.advice_given,
         )
 
+    def get_topics(self) -> list[str]:
+        """Get list of topics discussed so far (for mid-call memory refresh)."""
+        return list(self.state.topics_discussed)
+
     def record_quick_observer_signals(self, analysis_result) -> None:
         """Record topics from Quick Observer analysis result."""
         track_topics_from_signals(analysis_result, self.state.topics_discussed)

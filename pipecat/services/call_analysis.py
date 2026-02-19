@@ -224,3 +224,14 @@ def get_high_severity_concerns(analysis: dict) -> list[dict]:
     """Return only high-severity concerns from an analysis."""
     concerns = analysis.get("concerns") or []
     return [c for c in concerns if c.get("severity") == "high"]
+
+
+async def get_latest_analysis(senior_id: str) -> dict | None:
+    """Get the most recent call analysis for a senior."""
+    return await query_one(
+        """SELECT engagement_score, call_quality, summary
+           FROM call_analyses
+           WHERE senior_id = $1
+           ORDER BY created_at DESC LIMIT 1""",
+        senior_id,
+    )

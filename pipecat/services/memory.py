@@ -35,6 +35,7 @@ def _calculate_effective_importance(
     base_importance: int,
     created_at: datetime,
     last_accessed_at: datetime | None,
+    decay_half_life_days: int = DECAY_HALF_LIFE_DAYS,
 ) -> int:
     """Apply exponential decay + recent-access boost."""
     now = datetime.now(timezone.utc)
@@ -42,7 +43,7 @@ def _calculate_effective_importance(
     if created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=timezone.utc)
     age_days = (now - created_at).total_seconds() / 86400
-    decay_factor = math.pow(0.5, age_days / DECAY_HALF_LIFE_DAYS)
+    decay_factor = math.pow(0.5, age_days / decay_half_life_days)
     effective = base_importance * decay_factor
 
     if last_accessed_at:
@@ -303,6 +304,34 @@ async def build_context(
     result = "\n".join(parts)
     logger.info("build_context({sid}): total={n} chars, {m} memories included", sid=str(senior_id)[:8], n=len(result), m=len(included_ids))
     return result
+
+
+async def refresh_context(senior_id: str, current_topics: list[str]) -> str | None:
+    """Refresh memory context mid-call, prioritized by current conversation topics.
+
+    Called by ConversationDirector for calls >5 minutes.
+    """
+    parts: list[str] = []
+    included_ids: set[str] = set()
+
+    # Topic-relevant memories first
+    for topic in current_topics[:3]:
+        relevant = await search(senior_id, topic, 3, 0.7)
+        for m in relevant:
+            if m["id"] not in included_ids:
+                parts.append(f"- {m['content']}")
+                included_ids.add(m["id"])
+
+    # Then critical (always)
+    critical = await get_critical(senior_id, 3)
+    for m in critical:
+        if m["id"] not in included_ids:
+            parts.append(f"- {m['content']}")
+            included_ids.add(m["id"])
+
+    logger.info("refresh_context({sid}): {n} memories for {t} topics",
+                sid=str(senior_id)[:8], n=len(parts), t=len(current_topics))
+    return "\n".join(parts) if parts else None
 
 
 async def extract_from_conversation(

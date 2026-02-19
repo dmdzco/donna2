@@ -320,7 +320,9 @@ class QuickObserverProcessor(FrameProcessor):
     async def _force_end_call(self):
         """Wait for goodbye audio to play, then end the call via EndFrame."""
         try:
-            await asyncio.sleep(self.GOODBYE_DELAY_SECONDS)
+            settings = (self._session_state or {}).get("call_settings") or {}
+            delay = settings.get("goodbye_delay_seconds", self.GOODBYE_DELAY_SECONDS)
+            await asyncio.sleep(delay)
             if self._pipeline_task:
                 logger.info("[QuickObserver] Goodbye timeout reached — ending call programmatically")
                 await self._pipeline_task.queue_frame(EndFrame())
@@ -339,6 +341,10 @@ class QuickObserverProcessor(FrameProcessor):
             logger.debug("[QuickObserver] Transcription: {txt!r}", txt=text[:120])
             analysis = quick_analyze(text, self._recent_history)
             self.last_analysis = analysis
+
+            # Store token recommendation in session_state for Director
+            if self._session_state is not None and analysis.model_recommendation:
+                self._session_state["_token_recommendation"] = analysis.model_recommendation
 
             # Track recent history for engagement detection
             self._recent_history.append({"role": "user", "content": text})

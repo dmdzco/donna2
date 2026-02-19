@@ -40,9 +40,8 @@ class ConversationDirectorProcessor(FrameProcessor):
     - Inject reminder delivery guidance when Director recommends it
     """
 
-    # Force winding-down guidance after this many minutes
+    # Default time limits (overridden by call_settings in session_state)
     FORCE_WINDING_DOWN_MINUTES = 9.0
-    # Hard call end after this many minutes
     FORCE_END_MINUTES = 12.0
 
     def __init__(self, session_state: dict, **kwargs):
@@ -54,6 +53,7 @@ class ConversationDirectorProcessor(FrameProcessor):
         self._delayed_end_task: asyncio.Task | None = None
         self._turn_count = 0
         self._end_scheduled = False
+        self._memory_refreshed = False
 
     def set_pipeline_task(self, task):
         """Set pipeline task reference for direct actions (EndFrame, etc.)."""
@@ -75,6 +75,10 @@ class ConversationDirectorProcessor(FrameProcessor):
             if self._last_result and not goodbye_in_progress:
                 guidance_text = format_director_guidance(self._last_result)
                 if guidance_text:
+                    # Append token budget hint from Quick Observer if available
+                    token_rec = self._session_state.get("_token_recommendation") if self._session_state else None
+                    if token_rec:
+                        guidance_text += f"\n[RESPONSE LENGTH: Keep response under {token_rec['max_tokens']} tokens — {token_rec['reason']}]"
                     await self.push_frame(
                         LLMMessagesAppendFrame(
                             messages=[
@@ -104,6 +108,16 @@ class ConversationDirectorProcessor(FrameProcessor):
                 self._run_analysis(frame.text, transcript)
             )
 
+            # Trigger mid-call memory refresh at 5 minutes
+            call_start = self._session_state.get("_call_start_time") or time.time()
+            refresh_after = (self._session_state.get("call_settings") or {}).get(
+                "memory_refresh_after_minutes", 5
+            )
+            minutes_elapsed = (time.time() - call_start) / 60
+            if minutes_elapsed > refresh_after and not self._memory_refreshed:
+                self._memory_refreshed = True
+                asyncio.create_task(self._refresh_memory())
+
         # Always pass frames through immediately
         await self.push_frame(frame, direction)
 
@@ -131,6 +145,11 @@ class ConversationDirectorProcessor(FrameProcessor):
         call_start = self._session_state.get("_call_start_time") or time.time()
         minutes_elapsed = (time.time() - call_start) / 60
 
+        # Read configurable time limits from call_settings
+        settings = self._session_state.get("call_settings") or {}
+        winding_down_minutes = settings.get("winding_down_minutes", self.FORCE_WINDING_DOWN_MINUTES)
+        max_call_minutes = settings.get("max_call_minutes", self.FORCE_END_MINUTES)
+
         # Force call end if Director says closing AND call is long enough
         if phase == "closing" and minutes_elapsed > 8 and not self._end_scheduled:
             if self._pipeline_task:
@@ -144,7 +163,7 @@ class ConversationDirectorProcessor(FrameProcessor):
         # Inject time-pressure guidance if call exceeds limit
         if (
             pacing == "time_to_close"
-            or minutes_elapsed > self.FORCE_WINDING_DOWN_MINUTES
+            or minutes_elapsed > winding_down_minutes
         ):
             if phase not in ("winding_down", "closing"):
                 logger.info(
@@ -161,7 +180,7 @@ class ConversationDirectorProcessor(FrameProcessor):
                     ] = "time_to_close"
 
         # Hard limit — force end
-        if minutes_elapsed > self.FORCE_END_MINUTES and not self._end_scheduled:
+        if minutes_elapsed > max_call_minutes and not self._end_scheduled:
             if self._pipeline_task:
                 logger.info(
                     "[Director] Hard time limit ({m:.1f}min) — forcing end",
@@ -169,6 +188,23 @@ class ConversationDirectorProcessor(FrameProcessor):
                 )
                 self._end_scheduled = True
                 self._delayed_end_task = asyncio.create_task(self._delayed_end(3.0))
+
+    async def _refresh_memory(self):
+        """Refresh memory context mid-call based on current topics."""
+        try:
+            tracker = self._session_state.get("_conversation_tracker")
+            topics = []
+            if tracker and hasattr(tracker, "get_topics"):
+                topics = tracker.get_topics()
+            senior_id = self._session_state.get("senior_id")
+            if senior_id and topics:
+                from services.memory import refresh_context
+                refreshed = await refresh_context(senior_id, topics)
+                if refreshed:
+                    self._session_state["memory_context"] = refreshed
+                    logger.info("[Director] Memory refreshed with {n} topics", n=len(topics))
+        except Exception as e:
+            logger.error("[Director] Memory refresh failed: {err}", err=str(e))
 
     async def _delayed_end(self, delay: float):
         """End the call after a delay (lets current audio play)."""

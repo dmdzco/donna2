@@ -83,6 +83,17 @@ MARK_REMINDER_SCHEMA = {
     "required": ["reminder_id", "status"],
 }
 
+CHECK_CAREGIVER_NOTES_SCHEMA = {
+    "name": "check_caregiver_notes",
+    "description": (
+        "Check if any family members or caregivers have left messages or questions "
+        "for the senior. Use this naturally in conversation, e.g., 'Oh, by the way, "
+        "your daughter wanted me to ask about...'"
+    ),
+    "properties": {},
+    "required": [],
+}
+
 SAVE_DETAIL_SCHEMA = {
     "name": "save_important_detail",
     "description": "Save an important detail the senior mentioned that should be remembered for future calls. Use for significant life events, health changes, new interests, family updates, or emotional state changes.",
@@ -131,8 +142,8 @@ def make_tool_handlers(session_state: dict) -> dict:
             results = await search(senior_id, query, limit=3)
             if not results:
                 return {"status": "success", "result": "No matching memories found."}
-            formatted = "\n".join(
-                f"- {r['content']}" for r in results
+            formatted = "[MEMORY] " + "\n[MEMORY] ".join(
+                r['content'] for r in results
             )
             return {"status": "success", "result": formatted}
         except Exception as e:
@@ -151,7 +162,7 @@ def make_tool_handlers(session_state: dict) -> dict:
             result = await asyncio.wait_for(web_search_query(query), timeout=15.0)
             if not result:
                 return {"status": "success", "result": f"I couldn't find information about {query}."}
-            return {"status": "success", "result": result}
+            return {"status": "success", "result": f"[NEWS] {result}"}
         except asyncio.TimeoutError:
             logger.warning("web_search timed out after 15s for query={q}", q=query)
             return {"status": "success", "result": "Search took too long. Continue naturally."}
@@ -202,16 +213,38 @@ def make_tool_handlers(session_state: dict) -> dict:
                 source="conversation",
                 importance=70,
             )
-            return {"status": "success", "result": f"Noted: {detail}"}
+            return {"status": "success", "result": f"[SAVED] Detail noted and saved to memory."}
         except Exception as e:
             logger.error("save_detail error: {err}", err=str(e))
             return {"status": "success", "result": "Detail noted for this conversation. Continue naturally."}
+
+    async def handle_check_caregiver_notes(args: dict) -> dict:
+        senior_id = session_state.get("senior_id")
+        if not senior_id:
+            return {"status": "success", "result": "[CAREGIVER NOTE] No caregiver notes available."}
+
+        try:
+            from services.caregivers import get_pending_notes, mark_note_delivered
+            notes = await get_pending_notes(senior_id)
+            if not notes:
+                return {"status": "success", "result": "[CAREGIVER NOTE] No new messages from family members."}
+
+            results = []
+            call_sid = session_state.get("call_sid")
+            for note in notes:
+                results.append(f"[CAREGIVER NOTE] Family message: {note['content']}")
+                await mark_note_delivered(note["id"], call_sid)
+            return {"status": "success", "result": "\n".join(results)}
+        except Exception as e:
+            logger.error("check_caregiver_notes error: {err}", err=str(e))
+            return {"status": "success", "result": "[CAREGIVER NOTE] Unable to check notes right now. Continue naturally."}
 
     return {
         "search_memories": handle_search_memories,
         "web_search": handle_web_search,
         "mark_reminder_acknowledged": handle_mark_reminder,
         "save_important_detail": handle_save_detail,
+        "check_caregiver_notes": handle_check_caregiver_notes,
     }
 
 
@@ -223,7 +256,7 @@ def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
     handlers = make_tool_handlers(session_state)
 
     schemas = {}
-    for schema_def in [SEARCH_MEMORIES_SCHEMA, WEB_SEARCH_SCHEMA, MARK_REMINDER_SCHEMA, SAVE_DETAIL_SCHEMA]:
+    for schema_def in [SEARCH_MEMORIES_SCHEMA, WEB_SEARCH_SCHEMA, MARK_REMINDER_SCHEMA, SAVE_DETAIL_SCHEMA, CHECK_CAREGIVER_NOTES_SCHEMA]:
         name = schema_def["name"]
         schemas[name] = FlowsFunctionSchema(
             name=name,

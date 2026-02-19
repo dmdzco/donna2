@@ -109,8 +109,44 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         session_state["recent_turns"] = session_state.get("recent_turns") or metadata.get("recent_turns")
         session_state["todays_context"] = session_state.get("todays_context") or metadata.get("todays_context")
         session_state["news_context"] = session_state.get("news_context") or metadata.get("news_context")
+        session_state["last_call_analysis"] = session_state.get("last_call_analysis") or metadata.get("last_call_analysis")
+        if metadata.get("has_caregiver_notes"):
+            session_state["_has_caregiver_notes"] = True
+        if metadata.get("call_settings"):
+            session_state["call_settings"] = metadata["call_settings"]
         if "is_outbound" in metadata:
             session_state["is_outbound"] = metadata["is_outbound"]
+
+        # Generate sentiment-aware greeting if none was pre-generated
+        if not session_state.get("greeting") and session_state.get("senior"):
+            try:
+                from services.greetings import get_greeting
+                analysis_data = session_state.get("last_call_analysis") or {}
+                # Parse call_quality — may be JSON string or dict
+                call_quality = analysis_data.get("call_quality")
+                if isinstance(call_quality, str):
+                    import json as _json
+                    try:
+                        call_quality = _json.loads(call_quality)
+                    except Exception:
+                        call_quality = {}
+                senior_data = session_state["senior"]
+                settings = session_state.get("call_settings") or {}
+                greeting_result = get_greeting(
+                    senior_name=senior_data.get("name", ""),
+                    timezone=senior_data.get("timezone"),
+                    interests=senior_data.get("interests"),
+                    last_call_summary=analysis_data.get("summary"),
+                    senior_id=senior_data.get("id"),
+                    news_context=session_state.get("news_context"),
+                    interest_scores=senior_data.get("interest_scores"),
+                    last_call_sentiment=(call_quality or {}).get("rapport"),
+                    last_call_engagement=analysis_data.get("engagement_score"),
+                    followup_chance=settings.get("greeting_followup_chance", 0.6),
+                )
+                session_state["greeting"] = greeting_result.get("greeting", "")
+            except Exception as e:
+                logger.error("[{cs}] Error generating greeting: {err}", cs=call_sid, err=str(e))
         logger.info(
             "[{cs}] Populated session: senior={name}, memory={mem_len}ch, greeting={gr}, reminder={rem}",
             cs=call_sid,

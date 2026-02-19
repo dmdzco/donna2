@@ -57,9 +57,6 @@ jobs:
     needs: [python-tests, node-tests, regression-tests]
     runs-on: ubuntu-latest
     environment: staging
-    defaults:
-      run:
-        working-directory: pipecat
     steps:
       - uses: actions/checkout@v4
 
@@ -68,6 +65,12 @@ jobs:
 
       - name: Deploy Pipecat to staging
         run: railway up --service donna-pipecat --environment staging
+        working-directory: pipecat
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Deploy Node.js to staging
+        run: railway up --service donna-api --environment staging
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 

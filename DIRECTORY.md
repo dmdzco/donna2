@@ -146,6 +146,19 @@ apps/
 └── observability/   Call monitoring dashboard (REST polling, low use)
 ```
 
+### Root — Build & Deploy Tooling
+
+```
+/
+├── Makefile                     Deploy commands: make deploy-dev, make test, etc.
+├── scripts/
+│   ├── setup-environments.sh    One-time setup: Neon branches + Railway dev env
+│   └── create-admin.js          Admin user creation
+├── .github/workflows/
+│   ├── ci.yml                   PR pipeline: tests → staging deploy → smoke tests
+│   └── deploy.yml               Production deploy on push to main
+```
+
 ### Root Node.js — Admin APIs + Scheduler (Active, ~4.4k LOC)
 
 Serves all API endpoints that frontends consume. Also runs the reminder scheduler.
@@ -276,16 +289,28 @@ Test files follow `pipecat/tests/test_<module>.py` naming.
 
 ## Deployment
 
-```bash
-# Pipecat voice pipeline (Railway)
-cd pipecat && railway up
+Three environments: **dev** (experiments), **staging** (CI), **production** (customers). Each has its own Neon DB branch and Twilio number.
 
-# Node.js admin API (Railway)
-railway up   # from repo root
+```bash
+# Deploy to dev (your iteration environment)
+make deploy-dev              # Both services
+make deploy-dev-pipecat      # Just Pipecat (faster)
+
+# Deploy to production
+make deploy-prod             # Or push to main → auto-deploys via CI
+
+# Health checks & logs
+make health-dev
+make logs-dev
 
 # Admin dashboard (Vercel)
 cd apps/admin-v2 && npx vercel --prod --yes
+
+# First-time setup (creates Neon branches + Railway env vars)
+make setup
 ```
+
+Workflow: `edit → make deploy-dev-pipecat → call dev number → repeat`
 
 ---
 

@@ -167,7 +167,6 @@ async def analyze_completed_call(
                 config=genai.types.GenerateContentConfig(
                     max_output_tokens=1500,
                     temperature=0.2,
-                    thinking_config=genai.types.ThinkingConfig(thinking_budget=0),
                 ),
             )
 

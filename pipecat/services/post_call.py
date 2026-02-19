@@ -65,6 +65,15 @@ async def run_post_call(
     except Exception as e:
         logger.error("[{cs}] Post-call step 2 (call analysis) failed: {err}", cs=call_sid, err=str(e))
 
+    # 2.5 Trigger caregiver notifications
+    try:
+        if analysis and senior_id:
+            await _trigger_caregiver_notification(
+                senior_id, call_sid, analysis, duration_seconds
+            )
+    except Exception as e:
+        logger.error("[{cs}] Post-call step 2.5 (caregiver notification) failed: {err}", cs=call_sid, err=str(e))
+
     # 3. Extract and store memories
     try:
         if transcript and senior_id:
@@ -164,3 +173,81 @@ async def run_post_call(
         logger.error("[{cs}] Post-call step 6 (cache clearing) failed: {err}", cs=call_sid, err=str(e))
 
     logger.info("[{cs}] Post-call processing complete", cs=call_sid)
+
+
+async def _trigger_caregiver_notification(
+    senior_id: str,
+    call_sid: str,
+    analysis: dict,
+    duration: int,
+) -> None:
+    """POST to Node.js API to trigger caregiver notifications."""
+    import os
+    import httpx
+
+    node_url = os.environ.get(
+        "NODE_API_URL", "https://donna-production.up.railway.app"
+    )
+    api_key = os.environ.get("DONNA_API_KEY", "")
+
+    if not api_key:
+        logger.warning("DONNA_API_KEY not set, skipping caregiver notification")
+        return
+
+    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        # Trigger call_completed notification
+        try:
+            await client.post(
+                f"{node_url}/api/notifications/trigger",
+                json={
+                    "event_type": "call_completed",
+                    "senior_id": senior_id,
+                    "data": {
+                        "call_sid": call_sid,
+                        "duration_seconds": duration,
+                        "summary": analysis.get("summary"),
+                        "topics": analysis.get("topics_discussed", []),
+                        "engagement_score": analysis.get("engagement_score"),
+                        "concerns": analysis.get("concerns", []),
+                        "positive_observations": analysis.get(
+                            "positive_observations", []
+                        ),
+                    },
+                },
+                headers=headers,
+            )
+            logger.info(
+                "[{cs}] Triggered call_completed notification", cs=call_sid
+            )
+        except Exception as e:
+            logger.error(
+                "[{cs}] call_completed notification failed: {err}",
+                cs=call_sid,
+                err=str(e),
+            )
+
+        # Trigger concern_detected for high-severity concerns
+        for concern in analysis.get("concerns") or []:
+            if isinstance(concern, dict) and concern.get("severity") == "high":
+                try:
+                    await client.post(
+                        f"{node_url}/api/notifications/trigger",
+                        json={
+                            "event_type": "concern_detected",
+                            "senior_id": senior_id,
+                            "data": concern,
+                        },
+                        headers=headers,
+                    )
+                    logger.info(
+                        "[{cs}] Triggered concern_detected notification",
+                        cs=call_sid,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "[{cs}] concern_detected notification failed: {err}",
+                        cs=call_sid,
+                        err=str(e),
+                    )

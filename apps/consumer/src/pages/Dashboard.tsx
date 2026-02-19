@@ -39,7 +39,22 @@ interface Call {
   sentiment?: string;
 }
 
+interface NotificationPreferences {
+  callCompleted?: boolean;
+  concernDetected?: boolean;
+  reminderMissed?: boolean;
+  weeklySummary?: boolean;
+  smsEnabled?: boolean;
+  emailEnabled?: boolean;
+  quietHoursStart?: string | null;
+  quietHoursEnd?: string | null;
+  timezone?: string;
+  weeklyReportDay?: number;
+  weeklyReportTime?: string;
+}
+
 const DAYS_OF_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const WEEK_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export default function Dashboard() {
   const { getToken, isLoaded } = useAuth();
@@ -80,6 +95,12 @@ export default function Dashboard() {
   // Schedule editing state
   const [isEditingSchedule, setIsEditingSchedule] = useState(false);
   const [editedSchedule, setEditedSchedule] = useState<{ days: string[]; time: string }>({ days: [], time: '09:00' });
+
+  // Notification preferences state
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences | null>(null);
+  const [isEditingNotifs, setIsEditingNotifs] = useState(false);
+  const [editedNotifPrefs, setEditedNotifPrefs] = useState<NotificationPreferences>({});
+  const [savingNotifs, setSavingNotifs] = useState(false);
 
   const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -130,6 +151,18 @@ export default function Dashboard() {
           });
           if (callsRes.ok) {
             setCalls(await callsRes.json());
+          }
+
+          // Fetch notification preferences
+          try {
+            const notifRes = await fetch(`${API_URL}/api/notifications/preferences`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (notifRes.ok) {
+              setNotifPrefs(await notifRes.json());
+            }
+          } catch {
+            // Notification preferences are optional
           }
         }
       } catch (err) {
@@ -276,6 +309,31 @@ export default function Dashboard() {
       }
     } catch (err) {
       console.error('Failed to update schedule:', err);
+    }
+  };
+
+  const handleSaveNotifPrefs = async () => {
+    setSavingNotifs(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/api/notifications/preferences`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(editedNotifPrefs),
+      });
+
+      if (res.ok) {
+        const updated = await res.json();
+        setNotifPrefs(updated);
+        setIsEditingNotifs(false);
+      }
+    } catch (err) {
+      console.error('Failed to update notification preferences:', err);
+    } finally {
+      setSavingNotifs(false);
     }
   };
 
@@ -871,12 +929,191 @@ export default function Dashboard() {
         {activeTab === 'settings' && (
           <div className="settings-page">
             <h1>Settings</h1>
-            <p className="page-description">Manage your account settings</p>
+            <p className="page-description">Manage your account and notification preferences</p>
 
+            {/* Notification Preferences Card */}
+            <div className="settings-card">
+              <div className="section-header">
+                <h3>Notification Preferences</h3>
+                {!isEditingNotifs ? (
+                  <button className="edit-link" onClick={() => {
+                    setEditedNotifPrefs({
+                      callCompleted: notifPrefs?.callCompleted ?? true,
+                      concernDetected: notifPrefs?.concernDetected ?? true,
+                      reminderMissed: notifPrefs?.reminderMissed ?? true,
+                      weeklySummary: notifPrefs?.weeklySummary ?? true,
+                      smsEnabled: notifPrefs?.smsEnabled ?? true,
+                      emailEnabled: notifPrefs?.emailEnabled ?? true,
+                      quietHoursStart: notifPrefs?.quietHoursStart ?? null,
+                      quietHoursEnd: notifPrefs?.quietHoursEnd ?? null,
+                      timezone: notifPrefs?.timezone ?? 'America/New_York',
+                      weeklyReportDay: notifPrefs?.weeklyReportDay ?? 1,
+                      weeklyReportTime: notifPrefs?.weeklyReportTime ?? '09:00',
+                    });
+                    setIsEditingNotifs(true);
+                  }}>
+                    <Edit2 size={14} /> Edit
+                  </button>
+                ) : (
+                  <div className="edit-actions">
+                    <button className="btn-save" onClick={handleSaveNotifPrefs} disabled={savingNotifs}>
+                      <Save size={14} /> {savingNotifs ? 'Saving...' : 'Save'}
+                    </button>
+                    <button className="btn-cancel" onClick={() => setIsEditingNotifs(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Notifications Section */}
+              <div className="notif-section">
+                <h4 className="notif-section-title">Notifications</h4>
+                <div className="notif-toggle-list">
+                  <label className="toggle-row">
+                    <span className="toggle-label">Call completed summaries</span>
+                    <div
+                      className={`toggle-switch ${(isEditingNotifs ? editedNotifPrefs.callCompleted : notifPrefs?.callCompleted ?? true) ? 'active' : ''}`}
+                      onClick={() => isEditingNotifs && setEditedNotifPrefs({ ...editedNotifPrefs, callCompleted: !editedNotifPrefs.callCompleted })}
+                    >
+                      <div className="toggle-slider" />
+                    </div>
+                  </label>
+                  <label className="toggle-row">
+                    <span className="toggle-label">High-priority concern alerts</span>
+                    <div
+                      className={`toggle-switch ${(isEditingNotifs ? editedNotifPrefs.concernDetected : notifPrefs?.concernDetected ?? true) ? 'active' : ''}`}
+                      onClick={() => isEditingNotifs && setEditedNotifPrefs({ ...editedNotifPrefs, concernDetected: !editedNotifPrefs.concernDetected })}
+                    >
+                      <div className="toggle-slider" />
+                    </div>
+                  </label>
+                  <label className="toggle-row">
+                    <span className="toggle-label">Missed reminder alerts</span>
+                    <div
+                      className={`toggle-switch ${(isEditingNotifs ? editedNotifPrefs.reminderMissed : notifPrefs?.reminderMissed ?? true) ? 'active' : ''}`}
+                      onClick={() => isEditingNotifs && setEditedNotifPrefs({ ...editedNotifPrefs, reminderMissed: !editedNotifPrefs.reminderMissed })}
+                    >
+                      <div className="toggle-slider" />
+                    </div>
+                  </label>
+                  <label className="toggle-row">
+                    <span className="toggle-label">Weekly summary email</span>
+                    <div
+                      className={`toggle-switch ${(isEditingNotifs ? editedNotifPrefs.weeklySummary : notifPrefs?.weeklySummary ?? true) ? 'active' : ''}`}
+                      onClick={() => isEditingNotifs && setEditedNotifPrefs({ ...editedNotifPrefs, weeklySummary: !editedNotifPrefs.weeklySummary })}
+                    >
+                      <div className="toggle-slider" />
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Channels Section */}
+              <div className="notif-section">
+                <h4 className="notif-section-title">Channels</h4>
+                <div className="notif-toggle-list">
+                  <label className="toggle-row">
+                    <span className="toggle-label">SMS notifications</span>
+                    <div
+                      className={`toggle-switch ${(isEditingNotifs ? editedNotifPrefs.smsEnabled : notifPrefs?.smsEnabled ?? true) ? 'active' : ''}`}
+                      onClick={() => isEditingNotifs && setEditedNotifPrefs({ ...editedNotifPrefs, smsEnabled: !editedNotifPrefs.smsEnabled })}
+                    >
+                      <div className="toggle-slider" />
+                    </div>
+                  </label>
+                  <label className="toggle-row">
+                    <span className="toggle-label">Email notifications</span>
+                    <div
+                      className={`toggle-switch ${(isEditingNotifs ? editedNotifPrefs.emailEnabled : notifPrefs?.emailEnabled ?? true) ? 'active' : ''}`}
+                      onClick={() => isEditingNotifs && setEditedNotifPrefs({ ...editedNotifPrefs, emailEnabled: !editedNotifPrefs.emailEnabled })}
+                    >
+                      <div className="toggle-slider" />
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Quiet Hours Section */}
+              <div className="notif-section">
+                <h4 className="notif-section-title">Quiet Hours</h4>
+                <p className="notif-section-desc">No notifications during these hours (except high-priority alerts)</p>
+                <div className="quiet-hours-row">
+                  <div className="quiet-hours-field">
+                    <label>Start</label>
+                    <input
+                      type="time"
+                      value={(isEditingNotifs ? editedNotifPrefs.quietHoursStart : notifPrefs?.quietHoursStart) || ''}
+                      onChange={(e) => isEditingNotifs && setEditedNotifPrefs({ ...editedNotifPrefs, quietHoursStart: e.target.value || null })}
+                      className="time-input"
+                      disabled={!isEditingNotifs}
+                    />
+                  </div>
+                  <div className="quiet-hours-field">
+                    <label>End</label>
+                    <input
+                      type="time"
+                      value={(isEditingNotifs ? editedNotifPrefs.quietHoursEnd : notifPrefs?.quietHoursEnd) || ''}
+                      onChange={(e) => isEditingNotifs && setEditedNotifPrefs({ ...editedNotifPrefs, quietHoursEnd: e.target.value || null })}
+                      className="time-input"
+                      disabled={!isEditingNotifs}
+                    />
+                  </div>
+                </div>
+                <div className="quiet-hours-timezone">
+                  <label>Timezone</label>
+                  <select
+                    value={(isEditingNotifs ? editedNotifPrefs.timezone : notifPrefs?.timezone) || 'America/New_York'}
+                    onChange={(e) => isEditingNotifs && setEditedNotifPrefs({ ...editedNotifPrefs, timezone: e.target.value })}
+                    disabled={!isEditingNotifs}
+                    className="timezone-select"
+                  >
+                    <option value="America/New_York">Eastern Time</option>
+                    <option value="America/Chicago">Central Time</option>
+                    <option value="America/Denver">Mountain Time</option>
+                    <option value="America/Los_Angeles">Pacific Time</option>
+                    <option value="America/Anchorage">Alaska Time</option>
+                    <option value="Pacific/Honolulu">Hawaii Time</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Weekly Report Section */}
+              {(isEditingNotifs ? editedNotifPrefs.weeklySummary : notifPrefs?.weeklySummary ?? true) && (
+                <div className="notif-section">
+                  <h4 className="notif-section-title">Weekly Report Schedule</h4>
+                  <div className="weekly-report-row">
+                    <div className="weekly-report-field">
+                      <label>Day</label>
+                      <select
+                        value={(isEditingNotifs ? editedNotifPrefs.weeklyReportDay : notifPrefs?.weeklyReportDay) ?? 1}
+                        onChange={(e) => isEditingNotifs && setEditedNotifPrefs({ ...editedNotifPrefs, weeklyReportDay: parseInt(e.target.value) })}
+                        disabled={!isEditingNotifs}
+                        className="timezone-select"
+                      >
+                        {WEEK_DAYS.map((day, i) => (
+                          <option key={day} value={i}>{day}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="weekly-report-field">
+                      <label>Time</label>
+                      <input
+                        type="time"
+                        value={(isEditingNotifs ? editedNotifPrefs.weeklyReportTime : notifPrefs?.weeklyReportTime) || '09:00'}
+                        onChange={(e) => isEditingNotifs && setEditedNotifPrefs({ ...editedNotifPrefs, weeklyReportTime: e.target.value })}
+                        className="time-input"
+                        disabled={!isEditingNotifs}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Account Card */}
             <div className="settings-card">
               <h3>Account</h3>
-              <p>Account management features coming soon.</p>
-
               <div className="settings-section">
                 <SignOutButton redirectUrl="/">
                   <button className="btn-danger">

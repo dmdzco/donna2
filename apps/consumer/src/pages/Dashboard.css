@@ -747,6 +747,160 @@ h1 {
   background: #fecaca;
 }
 
+/* Notification Preferences */
+.notif-section {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #f0f0f0;
+}
+
+.notif-section:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.notif-section-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin: 0 0 0.5rem 0;
+}
+
+.notif-section-desc {
+  font-size: 0.8rem;
+  color: #888;
+  margin: 0 0 0.75rem 0;
+}
+
+.notif-toggle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+
+.toggle-label {
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.toggle-switch {
+  width: 44px;
+  height: 24px;
+  background: #d1d5db;
+  border-radius: 12px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.toggle-switch.active {
+  background: var(--color-sage-green);
+}
+
+.toggle-slider {
+  width: 20px;
+  height: 20px;
+  background: white;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.toggle-switch.active .toggle-slider {
+  transform: translateX(20px);
+}
+
+.quiet-hours-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.quiet-hours-field,
+.weekly-report-field {
+  flex: 1;
+}
+
+.quiet-hours-field label,
+.quiet-hours-timezone label,
+.weekly-report-field label {
+  display: block;
+  font-size: 0.8rem;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.timezone-select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: white;
+  color: #333;
+}
+
+.timezone-select:disabled,
+.time-input:disabled {
+  background: #f9fafb;
+  color: #999;
+}
+
+.quiet-hours-timezone {
+  margin-top: 8px;
+}
+
+.weekly-report-row {
+  display: flex;
+  gap: 16px;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-save {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-sage-green);
+  color: white;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-cancel {
+  background: none;
+  color: #666;
+  padding: 6px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
 /* Responsive */
 @media (max-width: 1024px) {
   .content-grid {

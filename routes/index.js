@@ -18,6 +18,7 @@ import observabilityRoutes from './observability.js';
 import adminAuthRoutes from './admin-auth.js';
 import callAnalysesRoutes from './call-analyses.js';
 import dailyContextRoutes from './daily-context.js';
+import notificationRoutes from './notifications.js';
 
 export function mountRoutes(app) {
   app.use(healthRoutes);
@@ -34,4 +35,5 @@ export function mountRoutes(app) {
   app.use(adminAuthRoutes);
   app.use(callAnalysesRoutes);
   app.use(dailyContextRoutes);
+  app.use(notificationRoutes);
 }

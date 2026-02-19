@@ -63,6 +63,21 @@ export const api = {
       }),
   },
 
+  // Notifications
+  notifications: {
+    getPreferences: () =>
+      fetchJson<NotificationPreferences>('/api/notifications/preferences'),
+    updatePreferences: (prefs: Partial<NotificationPreferences>) =>
+      fetchJson<NotificationPreferences>('/api/notifications/preferences', {
+        method: 'PATCH',
+        body: JSON.stringify(prefs),
+      }),
+    list: (page = 1) =>
+      fetchJson<any[]>(`/api/notifications?page=${page}`),
+    markRead: (id: string) =>
+      fetchJson<void>(`/api/notifications/${id}/read`, { method: 'PATCH' }),
+  },
+
   // Calls
   calls: {
     initiate: (phoneNumber: string) =>
@@ -74,6 +89,20 @@ export const api = {
 };
 
 // Types
+export interface NotificationPreferences {
+  callCompleted?: boolean;
+  concernDetected?: boolean;
+  reminderMissed?: boolean;
+  weeklySummary?: boolean;
+  smsEnabled?: boolean;
+  emailEnabled?: boolean;
+  quietHoursStart?: string | null;
+  quietHoursEnd?: string | null;
+  timezone?: string;
+  weeklyReportDay?: number;
+  weeklyReportTime?: string;
+}
+
 export interface OnboardingInput {
   senior: {
     name: string;

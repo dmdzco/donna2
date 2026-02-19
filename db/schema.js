@@ -119,6 +119,42 @@ export const dailyCallContext = pgTable('daily_call_context', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// Notification preferences — per-caregiver notification settings
+export const notificationPreferences = pgTable('notification_preferences', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  caregiverId: uuid('caregiver_id').references(() => caregivers.id).notNull().unique(),
+  // Event toggles (default all on)
+  callCompleted: boolean('call_completed').default(true),
+  concernDetected: boolean('concern_detected').default(true),
+  reminderMissed: boolean('reminder_missed').default(true),
+  weeklySummary: boolean('weekly_summary').default(true),
+  // Channel preferences
+  smsEnabled: boolean('sms_enabled').default(true),
+  emailEnabled: boolean('email_enabled').default(true),
+  // Quiet hours (in caregiver's local time)
+  quietHoursStart: varchar('quiet_hours_start', { length: 5 }), // "22:00"
+  quietHoursEnd: varchar('quiet_hours_end', { length: 5 }),     // "07:00"
+  timezone: varchar('timezone', { length: 100 }).default('America/New_York'),
+  // Weekly report day (0=Sun, 1=Mon, ..., 6=Sat)
+  weeklyReportDay: integer('weekly_report_day').default(1), // Monday
+  weeklyReportTime: varchar('weekly_report_time', { length: 5 }).default('09:00'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Notifications — log of all sent notifications
+export const notifications = pgTable('notifications', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  caregiverId: uuid('caregiver_id').references(() => caregivers.id).notNull(),
+  seniorId: uuid('senior_id').references(() => seniors.id),
+  eventType: varchar('event_type', { length: 50 }).notNull(), // call_completed, concern_detected, reminder_missed, weekly_summary
+  channel: varchar('channel', { length: 20 }).notNull(),      // sms, email
+  content: text('content').notNull(),
+  metadata: json('metadata'),    // event-specific data (analysis id, concern details, etc.)
+  sentAt: timestamp('sent_at').defaultNow(),
+  readAt: timestamp('read_at'),  // for future in-app notification center
+});
+
 // Admin users for dashboard authentication
 export const adminUsers = pgTable('admin_users', {
   id: uuid('id').defaultRandom().primaryKey(),

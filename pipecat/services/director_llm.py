@@ -16,6 +16,10 @@ import time
 
 from loguru import logger
 
+from lib.circuit_breaker import CircuitBreaker
+
+_breaker = CircuitBreaker("gemini_director", failure_threshold=3, recovery_timeout=60.0, call_timeout=5.0)
+
 _genai_client = None
 
 DIRECTOR_MODEL = os.environ.get("FAST_OBSERVER_MODEL", "gemini-3-flash-preview")
@@ -320,14 +324,19 @@ async def analyze_turn(
     try:
         from google import genai
 
-        response = await client.aio.models.generate_content(
-            model=DIRECTOR_MODEL,
-            contents=f'{prompt}\n\nCurrent message from senior: "{user_message}"',
-            config=genai.types.GenerateContentConfig(
-                temperature=0.2,
-                max_output_tokens=1500,
-            ),
-        )
+        async def _gemini_call():
+            return await client.aio.models.generate_content(
+                model=DIRECTOR_MODEL,
+                contents=f'{prompt}\n\nCurrent message from senior: "{user_message}"',
+                config=genai.types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=1500,
+                ),
+            )
+
+        response = await _breaker.call(_gemini_call(), fallback=None)
+        if response is None:
+            return get_default_direction()
 
         text = (response.text or "").strip()
         if not text:

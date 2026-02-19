@@ -192,6 +192,10 @@ class ConversationTrackerProcessor(FrameProcessor):
         if len(self.state.topics_discussed) > _MAX_TOPICS:
             self.state.topics_discussed = self.state.topics_discussed[-_MAX_TOPICS:]
 
+    def flush(self):
+        """Flush any remaining buffered assistant text. Call before post-call."""
+        self._flush_assistant_buffer()
+
     def _flush_assistant_buffer(self):
         """Flush buffered assistant text into shared transcript."""
         text = self._assistant_buffer.strip()

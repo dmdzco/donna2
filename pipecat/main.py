@@ -64,6 +64,23 @@ from bot import run_bot
 app = FastAPI(title="Donna Pipecat", version="0.1.0")
 
 # ---------------------------------------------------------------------------
+# Active call tracking for graceful shutdown
+# ---------------------------------------------------------------------------
+_active_tasks: set[asyncio.Task] = set()
+_shutting_down = False
+
+
+def is_shutting_down() -> bool:
+    """Check if the server is in shutdown mode."""
+    return _shutting_down
+
+
+def register_call_task(task: asyncio.Task) -> None:
+    """Track an active call task for graceful shutdown draining."""
+    _active_tasks.add(task)
+    task.add_done_callback(_active_tasks.discard)
+
+# ---------------------------------------------------------------------------
 # Middleware (order matters — outermost first)
 # ---------------------------------------------------------------------------
 
@@ -102,11 +119,20 @@ app.include_router(calls_router)
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
+    """Health check endpoint with service status."""
+    from db import check_health as db_health
+    from lib.circuit_breaker import get_breaker_states
+
+    db_ok = await db_health()
+    breakers = get_breaker_states()
+    status = "ok" if db_ok else "degraded"
+
     return {
-        "status": "ok",
+        "status": status,
         "service": "donna-pipecat",
         "active_calls": len(call_metadata),
+        "database": "ok" if db_ok else "error",
+        "circuit_breakers": breakers,
     }
 
 
@@ -117,6 +143,11 @@ async def health():
 async def websocket_endpoint(websocket: WebSocket):
     """Twilio connects here via TwiML <Stream>. Runs the Pipecat pipeline."""
     await websocket.accept()
+
+    # Track this task for graceful shutdown draining
+    current_task = asyncio.current_task()
+    if current_task:
+        register_call_task(current_task)
 
     session_state = {
         "senior_id": None,
@@ -181,6 +212,13 @@ async def startup():
     except Exception as e:
         logger.error("Database init failed: {err}", err=str(e))
 
+    # Load feature flags into memory cache
+    try:
+        from lib.feature_flags import refresh_flags
+        await refresh_flags()
+    except Exception as e:
+        logger.warning("Feature flags init failed (table may not exist yet): {err}", err=str(e))
+
     # Start scheduler ONLY if explicitly enabled (prevents dual-scheduler conflict)
     scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "false").lower() == "true"
     base_url = os.getenv("BASE_URL", "")
@@ -198,7 +236,20 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    logger.info("Donna Pipecat shutting down")
+    global _shutting_down
+    _shutting_down = True
+    logger.info("Shutdown: draining {n} active calls", n=len(_active_tasks))
+
+    if _active_tasks:
+        # Give active calls up to 7 seconds to finish (Railway gives 10s)
+        done, pending = await asyncio.wait(list(_active_tasks), timeout=7.0)
+        if pending:
+            logger.warning("Shutdown: {n} calls didn't finish, cancelling", n=len(pending))
+            for t in pending:
+                t.cancel()
+            await asyncio.wait(pending, timeout=2.0)
+
+    # Close DB pool last
     try:
         from db import close_pool
         await close_pool()

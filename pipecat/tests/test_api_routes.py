@@ -22,13 +22,24 @@ def client():
 
 
 class TestHealthEndpoint:
-    def test_health_returns_ok(self, client):
+    @patch("db.check_health", new_callable=AsyncMock, return_value=True)
+    def test_health_returns_ok(self, mock_db_health, client):
         response = client.get("/health")
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "ok"
         assert data["service"] == "donna-pipecat"
         assert "active_calls" in data
+        assert data["database"] == "ok"
+        assert "circuit_breakers" in data
+
+    @patch("db.check_health", new_callable=AsyncMock, return_value=False)
+    def test_health_degraded_when_db_down(self, mock_db_health, client):
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "degraded"
+        assert data["database"] == "error"
 
 
 class TestVoiceAnswerEndpoint:

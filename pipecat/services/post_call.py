@@ -32,7 +32,6 @@ async def run_post_call(
 
     # Collect transcript from session
     transcript = session_state.get("_transcript", [])
-
     analysis = None
 
     # Each step has its own try/except so a failure in one step
@@ -57,7 +56,6 @@ async def run_post_call(
             analysis = await analyze_completed_call(transcript, senior)
             if conversation_id and senior_id:
                 await save_call_analysis(conversation_id, senior_id, analysis)
-
             # Persist summary to conversations table so get_recent_summaries() works
             summary = analysis.get("summary") if analysis else None
             if summary and summary != "Analysis unavailable":
@@ -71,7 +69,6 @@ async def run_post_call(
     try:
         if transcript and senior_id:
             from services.memory import extract_from_conversation
-            # Format transcript list into readable text for LLM extraction
             if isinstance(transcript, list):
                 formatted_transcript = "\n".join(
                     f"{turn.get('role', 'unknown')}: {turn.get('content', '')}"

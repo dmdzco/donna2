@@ -314,6 +314,8 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     async def on_disconnected(transport_ref, websocket_ref):
         elapsed = round(time.time() - start_time)
         logger.info("[{cs}] Client disconnected after {s}s", cs=call_sid, s=elapsed)
+        # Flush any buffered assistant text before post-call reads transcript
+        conversation_tracker.flush()
         # End pipeline first so runner.run() unblocks, then run post-call in background.
         # Previously run_post_call was awaited before EndFrame, so if Gemini/OpenAI
         # hung during analysis the pipeline would never terminate.

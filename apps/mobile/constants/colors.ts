@@ -1,0 +1,15 @@
+export const colors = {
+  bg: '#FDFCF8',
+  primary: '#4A5D4F',
+  primaryDark: '#3d4e42',
+  card: '#F2F0E9',
+  white: '#FFFFFF',
+  textPrimary: '#1A1A1A',
+  textSecondary: '#5E5D5A',
+  fab: '#E8A0A0',
+  goodBg: '#E8F5E9',
+  goodText: '#2E7D32',
+  missedBg: '#FFF3E0',
+  missedText: '#E65100',
+  border: 'rgba(26,26,26,0.1)',
+};

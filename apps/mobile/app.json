@@ -4,47 +4,22 @@
     "slug": "donna-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
     "scheme": "donna",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FDFCF8"
-    },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.donna.mobile",
-      "config": {
-        "googleSignIn": {
-          "reservedClientId": "REPLACE_WITH_GOOGLE_REVERSED_CLIENT_ID"
-        }
-      }
+      "bundleIdentifier": "com.donna.mobile"
     },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FDFCF8"
-      },
       "package": "com.donna.mobile"
     },
     "web": {
       "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/favicon.png"
+      "output": "static"
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store",
-      [
-        "expo-splash-screen",
-        {
-          "image": "./assets/splash.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#FDFCF8"
-        }
-      ]
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true

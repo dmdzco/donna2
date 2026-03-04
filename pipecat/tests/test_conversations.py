@@ -22,7 +22,18 @@ class TestCreate:
             args = mock_q.call_args[0]
             assert "INSERT INTO conversations" in args[0]
             assert args[1] == "senior-1"
-            assert args[2] == "CA-1"
+            assert args[2] is None  # prospect_id
+            assert args[3] == "CA-1"
+
+    @pytest.mark.asyncio
+    async def test_passes_prospect_id(self):
+        with patch("services.conversations.query_one", new_callable=AsyncMock, return_value={"id": "c1"}) as mock_q:
+            from services.conversations import create
+            await create(None, "CA-2", prospect_id="prospect-1")
+            args = mock_q.call_args[0]
+            assert args[1] is None  # senior_id
+            assert args[2] == "prospect-1"
+            assert args[3] == "CA-2"
 
 
 class TestComplete:

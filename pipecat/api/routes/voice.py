@@ -45,6 +45,7 @@ async def voice_answer(request: Request):
     )
 
     senior = None
+    prospect = None
     memory_context = None
     reminder_prompt = None
     pre_generated_greeting = None
@@ -96,6 +97,35 @@ async def voice_answer(request: Request):
                 senior_id=senior.get("id"),
             )
             pre_generated_greeting = greeting_result.get("greeting", "")
+        else:
+            # Unknown caller — onboarding flow
+            call_type = "onboarding"
+            try:
+                from services.prospects import find_by_phone as find_prospect, create as create_prospect
+                prospect = await find_prospect(target_phone)
+                if not prospect:
+                    prospect = await create_prospect(target_phone)
+                logger.info("[{cs}] Onboarding: prospect={pid} call_count={n}",
+                            cs=call_sid, pid=str(prospect["id"])[:8],
+                            n=prospect.get("call_count", 0))
+                # For return callers, load prospect memory context
+                if prospect.get("call_count", 0) > 0:
+                    try:
+                        from services.memory import search as memory_search
+                        results = await memory_search(
+                            senior_id=None, query="caller information",
+                            limit=5, prospect_id=str(prospect["id"]),
+                        )
+                        if results:
+                            memory_context = "\n".join(
+                                f"- {r['content']}" for r in results
+                            )
+                    except Exception as e:
+                        logger.error("[{cs}] Error loading prospect memories: {err}",
+                                     cs=call_sid, err=str(e))
+            except Exception as e:
+                logger.error("[{cs}] Error in prospect lookup/create: {err}",
+                             cs=call_sid, err=str(e))
 
     # 1a. Fetch last call analysis for greeting personalization
     last_call_analysis = None
@@ -148,6 +178,7 @@ async def voice_answer(request: Request):
 
     # 2. Create conversation record
     conversation_id = None
+    prospect_id = str(prospect["id"]) if prospect else None
     if senior:
         try:
             from services.conversations import create
@@ -155,6 +186,13 @@ async def voice_answer(request: Request):
             conversation_id = str(conv["id"]) if conv else None
         except Exception as e:
             logger.error("[{cs}] Error creating conversation: {err}", cs=call_sid, err=str(e))
+    elif prospect:
+        try:
+            from services.conversations import create
+            conv = await create(None, call_sid, prospect_id=prospect_id)
+            conversation_id = str(conv["id"]) if conv else None
+        except Exception as e:
+            logger.error("[{cs}] Error creating onboarding conversation: {err}", cs=call_sid, err=str(e))
 
     # Log memory status
     logger.info(
@@ -169,6 +207,8 @@ async def voice_answer(request: Request):
     # 3. Store metadata for WebSocket handler
     call_metadata[call_sid] = {
         "senior": senior,
+        "prospect": prospect,
+        "prospect_id": prospect_id,
         "memory_context": memory_context,
         "conversation_id": conversation_id,
         "reminder_prompt": reminder_prompt,

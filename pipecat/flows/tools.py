@@ -278,3 +278,126 @@ def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
         )
 
     return schemas
+
+
+# ---------------------------------------------------------------------------
+# Onboarding tool: save_prospect_detail
+# ---------------------------------------------------------------------------
+
+SAVE_PROSPECT_DETAIL_SCHEMA = {
+    "name": "save_prospect_detail",
+    "description": (
+        "Save information learned about the caller during an onboarding call. "
+        "Call this whenever you learn the caller's name, their relationship to a senior, "
+        "the senior's name, their interests, concerns, or any other useful detail. "
+        "Save early and often — this persists across calls."
+    ),
+    "properties": {
+        "detail_type": {
+            "type": "string",
+            "enum": ["name", "relationship", "loved_one_name", "interest", "concern", "context"],
+            "description": (
+                "Type of detail: 'name' (caller's name), 'relationship' (daughter, son, self, etc.), "
+                "'loved_one_name' (name of the senior they're calling about), 'interest' (hobbies, likes), "
+                "'concern' (worries about the senior), 'context' (other useful information)"
+            ),
+        },
+        "value": {
+            "type": "string",
+            "description": "The detail to save (e.g., 'Lisa', 'daughter', 'loves gardening')",
+        },
+    },
+    "required": ["detail_type", "value"],
+}
+
+
+def _make_onboarding_tool_handlers(session_state: dict) -> dict:
+    """Create tool handlers for onboarding calls."""
+
+    async def handle_save_prospect_detail(args: dict) -> dict:
+        detail_type = args.get("detail_type", "context")
+        value = args.get("value", "")
+        prospect_id = session_state.get("prospect_id")
+        prospect = session_state.get("prospect") or {}
+
+        logger.info("Tool: save_prospect_detail type={t} value={v} prospect={pid}",
+                     t=detail_type, v=value, pid=prospect_id)
+
+        if not value:
+            return {"status": "success", "result": "Detail noted."}
+
+        # Direct fields: update prospect table
+        if detail_type in ("name", "relationship", "loved_one_name") and prospect_id:
+            try:
+                from services.prospects import update_after_call
+                field_map = {
+                    "name": "learned_name",
+                    "relationship": "relationship",
+                    "loved_one_name": "loved_one_name",
+                }
+                await update_after_call(prospect_id, {field_map[detail_type]: value})
+                # Also update in-memory prospect for current call
+                prospect[field_map[detail_type]] = value
+            except Exception as e:
+                logger.error("save_prospect_detail DB error: {err}", err=str(e))
+
+        # All types: store as memory for return call recognition
+        if prospect_id:
+            try:
+                from services.memory import store
+                type_map = {
+                    "name": "fact",
+                    "relationship": "relationship",
+                    "loved_one_name": "relationship",
+                    "interest": "preference",
+                    "concern": "concern",
+                    "context": "fact",
+                }
+                await store(
+                    senior_id=None,
+                    type_=type_map.get(detail_type, "fact"),
+                    content=f"[{detail_type}] {value}",
+                    source="onboarding_conversation",
+                    importance=70,
+                    prospect_id=prospect_id,
+                )
+            except Exception as e:
+                logger.error("save_prospect_detail memory error: {err}", err=str(e))
+
+        return {"status": "success", "result": f"[SAVED] {detail_type}: {value}"}
+
+    return {
+        "save_prospect_detail": handle_save_prospect_detail,
+    }
+
+
+def make_onboarding_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
+    """Create FlowsFunctionSchema instances for onboarding calls.
+
+    Returns: save_prospect_detail + web_search (reused from subscriber tools).
+    """
+    # Reuse web_search handler from standard tools
+    standard_handlers = make_tool_handlers(session_state)
+    onboarding_handlers = _make_onboarding_tool_handlers(session_state)
+
+    schemas = {}
+
+    # save_prospect_detail
+    schemas["save_prospect_detail"] = FlowsFunctionSchema(
+        name=SAVE_PROSPECT_DETAIL_SCHEMA["name"],
+        description=SAVE_PROSPECT_DETAIL_SCHEMA["description"],
+        properties=SAVE_PROSPECT_DETAIL_SCHEMA["properties"],
+        required=SAVE_PROSPECT_DETAIL_SCHEMA["required"],
+        handler=onboarding_handlers["save_prospect_detail"],
+    )
+
+    # web_search (reused)
+    schemas["web_search"] = FlowsFunctionSchema(
+        name=WEB_SEARCH_SCHEMA["name"],
+        description=WEB_SEARCH_SCHEMA["description"],
+        properties=WEB_SEARCH_SCHEMA["properties"],
+        required=WEB_SEARCH_SCHEMA["required"],
+        handler=standard_handlers["web_search"],
+    )
+
+    return schemas

@@ -152,6 +152,8 @@ async def websocket_endpoint(websocket: WebSocket):
     session_state = {
         "senior_id": None,
         "senior": None,
+        "prospect": None,
+        "prospect_id": None,
         "memory_context": None,
         "news_context": None,
         "greeting": None,

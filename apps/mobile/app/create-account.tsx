@@ -93,7 +93,7 @@ export default function CreateAccount() {
           <Text style={{ fontSize: 15, color: colors.textSecondary, marginBottom: 36 }}>
             {mode === 'signup'
               ? 'Set up your family account in minutes.'
-              : 'Sign in to manage your loved one's calls.'}
+              : "Sign in to manage your loved one's calls."}
           </Text>
 
           {/* Email */}

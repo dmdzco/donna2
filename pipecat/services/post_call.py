@@ -30,6 +30,12 @@ async def run_post_call(
 
     logger.info("[{cs}] Running post-call processing", cs=call_sid)
 
+    # Route onboarding calls to a separate post-call flow
+    if session_state.get("call_type") == "onboarding":
+        return await _run_onboarding_post_call(
+            session_state, conversation_tracker, duration_seconds
+        )
+
     # Collect transcript from session
     transcript = session_state.get("_transcript", [])
     analysis = None
@@ -173,6 +179,75 @@ async def run_post_call(
         logger.error("[{cs}] Post-call step 6 (cache clearing) failed: {err}", cs=call_sid, err=str(e))
 
     logger.info("[{cs}] Post-call processing complete", cs=call_sid)
+
+
+async def _run_onboarding_post_call(
+    session_state: dict,
+    conversation_tracker,
+    duration_seconds: int,
+) -> None:
+    """Post-call processing for onboarding (unsubscribed caller) calls.
+
+    Lighter than subscriber post-call: no daily context, interest discovery,
+    reminder cleanup, or caregiver notifications.
+    """
+    call_sid = session_state.get("call_sid", "unknown")
+    conversation_id = session_state.get("conversation_id")
+    prospect_id = session_state.get("prospect_id")
+
+    logger.info("[{cs}] Running onboarding post-call processing", cs=call_sid)
+
+    transcript = session_state.get("_transcript", [])
+
+    # 1. Complete conversation record
+    try:
+        if conversation_id:
+            from services.conversations import complete
+            await complete(call_sid, {
+                "duration_seconds": duration_seconds,
+                "status": "completed",
+                "transcript": transcript,
+            })
+    except Exception as e:
+        logger.error("[{cs}] Onboarding post-call step 1 (complete conversation) failed: {err}",
+                     cs=call_sid, err=str(e))
+
+    # 2. Extract and store memories with prospect_id
+    try:
+        if transcript and prospect_id:
+            from services.memory import extract_from_conversation
+            if isinstance(transcript, list):
+                formatted_transcript = "\n".join(
+                    f"{turn.get('role', 'unknown')}: {turn.get('content', '')}"
+                    for turn in transcript
+                    if isinstance(turn, dict)
+                )
+            else:
+                formatted_transcript = str(transcript)
+            await extract_from_conversation(
+                None, formatted_transcript, conversation_id or "unknown",
+                prospect_id=prospect_id,
+            )
+    except Exception as e:
+        logger.error("[{cs}] Onboarding post-call step 2 (memory extraction) failed: {err}",
+                     cs=call_sid, err=str(e))
+
+    # 3. Update prospect record with learned info
+    try:
+        if prospect_id:
+            from services.prospects import update_after_call
+            # Collect what we learned from the conversation tracker
+            update_data: dict = {}
+
+            # The prospect fields (learned_name, relationship, loved_one_name)
+            # are already updated in real-time by save_prospect_detail tool handler.
+            # Here we just increment call_count and update last_call_at.
+            await update_after_call(prospect_id, update_data)
+    except Exception as e:
+        logger.error("[{cs}] Onboarding post-call step 3 (update prospect) failed: {err}",
+                     cs=call_sid, err=str(e))
+
+    logger.info("[{cs}] Onboarding post-call processing complete", cs=call_sid)
 
 
 async def _trigger_caregiver_notification(

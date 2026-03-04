@@ -67,6 +67,16 @@ Low engagement: suggest personal questions, memories, open-ended prompts.
 News: only when engagement medium+ and topic winding down, never during emotional moments.
 Caregiver notes: suggest during natural pauses if available.
 
+## ONBOARDING CALLS (call_type = "onboarding")
+For onboarding calls with unsubscribed callers, use different phases: welcome (0-60s) → discovery (60s-8min) → closing (8-10min).
+Focus on: caller engagement level, interest in the service, readiness to learn more.
+Do NOT suggest reminders — there are none for onboarding calls.
+Do NOT suggest caregiver notes — not applicable.
+Do NOT use RE-ENGAGE or topic shift signals — the caller is exploring the service, not a subscriber.
+Set reminder.should_deliver to false always.
+Priority actions should focus on: ENCOURAGE_DISCOVERY (ask about their loved one), ANSWER_QUESTION (they have a concern), DEMONSTRATE_VALUE (show what Donna can do), WRAP_UP (at 8+ min).
+Force close at 12 min (same as subscriber calls).
+
 ## OUTPUT (JSON only)
 {"analysis":{"call_phase":"opening|main|winding_down|closing","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"warm|empathetic|cheerful|gentle|serious","priority_action":"str","specific_instruction":"str"}}"""
 

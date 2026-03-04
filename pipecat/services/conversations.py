@@ -12,13 +12,17 @@ from loguru import logger
 from db import query_one, query_many, execute
 
 
-async def create(senior_id: str, call_sid: str) -> dict:
-    """Create a new conversation record."""
+async def create(senior_id: str | None, call_sid: str, prospect_id: str | None = None) -> dict:
+    """Create a new conversation record.
+
+    Pass senior_id for subscriber calls, prospect_id for onboarding calls.
+    """
     row = await query_one(
-        """INSERT INTO conversations (senior_id, call_sid, started_at, status)
-           VALUES ($1, $2, $3, 'in_progress')
+        """INSERT INTO conversations (senior_id, prospect_id, call_sid, started_at, status)
+           VALUES ($1, $2, $3, $4, 'in_progress')
            RETURNING *""",
         senior_id,
+        prospect_id,
         call_sid,
         datetime.now(timezone.utc).replace(tzinfo=None),
     )

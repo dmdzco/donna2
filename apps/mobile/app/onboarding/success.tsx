@@ -69,7 +69,7 @@ export default function OnboardingSuccess() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <View style={{ flex: 1 }} pointerEvents="box-none">
+      <View style={{ flex: 1, pointerEvents: 'box-none' }}>
         {confettiPieces.map((p) => (
           <ConfettiPiece key={p.id} color={p.color} delay={p.delay} startX={p.startX} />
         ))}

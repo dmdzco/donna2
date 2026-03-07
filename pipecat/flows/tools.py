@@ -137,16 +137,27 @@ def make_tool_handlers(session_state: dict) -> dict:
         query = args.get("query", "")
         logger.info("Tool: search_memories query={q} senior={sid}", q=query, sid=senior_id)
 
-        # Check prefetch cache first (instant return on hit)
+        # Check prefetch cache (with brief wait for in-flight prefetch)
         cache = session_state.get("_prefetch_cache")
         if cache:
             cached = cache.get(query)
             if cached:
-                logger.info("Tool: search_memories CACHE HIT query={q}", q=query)
+                logger.info("Tool: search_memories CACHE HIT (instant) query={q}", q=query)
                 formatted = "[MEMORY] " + "\n[MEMORY] ".join(
                     r['content'] for r in cached
                 )
                 return {"status": "success", "result": formatted}
+
+            # Groq prefetch may be in-flight — wait up to 200ms (still faster than 200-300ms cold search)
+            for _ in range(4):
+                await asyncio.sleep(0.05)
+                cached = cache.get(query)
+                if cached:
+                    logger.info("Tool: search_memories CACHE HIT (after wait) query={q}", q=query)
+                    formatted = "[MEMORY] " + "\n[MEMORY] ".join(
+                        r['content'] for r in cached
+                    )
+                    return {"status": "success", "result": formatted}
 
         try:
             from services.memory import search
@@ -168,13 +179,21 @@ def make_tool_handlers(session_state: dict) -> dict:
         if not query:
             return {"status": "success", "result": "No query provided."}
 
-        # Check web prefetch cache first (instant return on hit)
+        # Check web prefetch cache (with brief wait for in-flight prefetch)
         web_cache = session_state.get("_web_prefetch_cache")
         if web_cache:
             cached = web_cache.get(query)
             if cached:
-                logger.info("Tool: web_search WEB PREFETCH HIT query={q}", q=query)
+                logger.info("Tool: web_search WEB PREFETCH HIT (instant) query={q}", q=query)
                 return {"status": "success", "result": f"[NEWS] {cached}"}
+
+            # Groq prefetch may be in-flight — wait up to 400ms (still faster than 4-10s cold search)
+            for _ in range(8):
+                await asyncio.sleep(0.05)
+                cached = web_cache.get(query)
+                if cached:
+                    logger.info("Tool: web_search WEB PREFETCH HIT (after wait) query={q}", q=query)
+                    return {"status": "success", "result": f"[NEWS] {cached}"}
 
         try:
             from services.news import web_search_query

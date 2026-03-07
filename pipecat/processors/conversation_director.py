@@ -106,7 +106,7 @@ class ConversationDirectorProcessor(FrameProcessor):
         """Non-blocking: inject guidance, start analysis, pass frame."""
         await super().process_frame(frame, direction)
 
-        # --- End of call: log speculative metrics ---
+        # --- End of call: log speculative + prefetch metrics ---
         if isinstance(frame, EndFrame) and self._speculative_attempts > 0:
             logger.info(
                 "[Director] Call summary: {turns} turns, "
@@ -118,6 +118,14 @@ class ConversationDirectorProcessor(FrameProcessor):
                 pct=round(self._speculative_hits / self._speculative_attempts * 100),
                 cancels=self._speculative_cancels,
             )
+        if isinstance(frame, EndFrame):
+            web_cache = self._session_state.get("_web_prefetch_cache")
+            if web_cache:
+                ws = web_cache.stats()
+                logger.info(
+                    "[Director] Web prefetch: {h}/{t} hits ({p}%), {e} entries",
+                    h=ws["hits"], t=ws["total"], p=ws["hit_rate_pct"], e=ws["entries"],
+                )
 
         # --- Final TranscriptionFrame (after VAD 1.2s silence) ---
         if isinstance(frame, TranscriptionFrame):
@@ -399,28 +407,54 @@ class ConversationDirectorProcessor(FrameProcessor):
             logger.warning("[Prefetch] Error: {err}", err=str(e))
 
     async def _run_director_prefetch(self, direction: dict):
-        """Second-wave prefetch using Director's analysis output."""
-        try:
-            from services.prefetch import PrefetchCache, extract_director_queries, run_prefetch
+        """Second-wave prefetch using Director's analysis output.
 
+        Runs memory prefetch and web search prefetch in parallel.
+        """
+        try:
+            from services.prefetch import (
+                PrefetchCache, WebPrefetchCache,
+                extract_director_queries, extract_web_queries,
+                run_prefetch, run_web_prefetch,
+            )
+
+            # Memory prefetch (existing, enhanced with Groq extraction)
             if "_prefetch_cache" not in self._session_state:
                 self._session_state["_prefetch_cache"] = PrefetchCache()
             cache = self._session_state["_prefetch_cache"]
 
             queries = extract_director_queries(direction, self._session_state)
-            if not queries:
-                return
-
             senior_id = self._session_state.get("senior_id")
-            if not senior_id:
+
+            tasks = []
+            if queries and senior_id:
+                tasks.append(run_prefetch(senior_id, queries, cache))
+
+            # Web search prefetch (new — Director predicts factual questions)
+            web_queries = extract_web_queries(direction)
+            if web_queries:
+                if "_web_prefetch_cache" not in self._session_state:
+                    self._session_state["_web_prefetch_cache"] = WebPrefetchCache()
+                web_cache = self._session_state["_web_prefetch_cache"]
+                tasks.append(run_web_prefetch(web_queries, web_cache))
+
+            if not tasks:
                 return
 
-            count = await run_prefetch(senior_id, queries, cache)
-            if count > 0:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            mem_count = results[0] if len(results) > 0 and not isinstance(results[0], Exception) else 0
+            web_count = results[-1] if len(results) > 1 and not isinstance(results[-1], Exception) else 0
+
+            if mem_count or web_count:
                 logger.info(
-                    "[Prefetch] {n} queries cached from Director analysis (2nd wave)",
-                    n=count,
+                    "[Prefetch] Director 2nd wave: {m} memory, {w} web cached",
+                    m=mem_count, w=web_count,
                 )
+
+            # Store web prefetch hints for guidance injection
+            if web_queries:
+                direction["_web_prefetch_hints"] = web_queries
+
         except Exception as e:
             logger.warning("[Prefetch] Director prefetch error: {err}", err=str(e))
 

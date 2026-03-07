@@ -182,8 +182,14 @@ Set reminder.should_deliver to false always.
 Priority actions should focus on: ENCOURAGE_DISCOVERY (ask about their loved one), ANSWER_QUESTION (they have a concern), DEMONSTRATE_VALUE (show what Donna can do), WRAP_UP (at 8+ min).
 Force close at 12 min (same as subscriber calls).
 
+## PREFETCH (help Donna respond faster)
+Extract topics/entities from the senior's speech for memory search. Predict factual questions they might ask next.
+memory_queries: 1-3 keyword phrases from the current message (names, places, topics, activities mentioned). Extract what they're TALKING ABOUT, not generic categories.
+web_queries: 0-1 factual questions the senior is likely to ask next (only if they seem curious about facts, events, weather, "how to" topics). Empty array if no question anticipated.
+anticipated_tools: which tools Donna will likely need next turn (from: search_memories, web_search, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes).
+
 ## OUTPUT (JSON only)
-{"analysis":{"call_phase":"opening|main|winding_down|closing","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"warm|empathetic|cheerful|gentle|serious","priority_action":"str","specific_instruction":"str"}}"""
+{"analysis":{"call_phase":"opening|main|winding_down|closing","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"warm|empathetic|cheerful|gentle|serious","priority_action":"str","specific_instruction":"str"},"prefetch":{"memory_queries":["topic1"],"web_queries":[],"anticipated_tools":["search_memories"]}}"""
 
 # Dynamic per-turn context — passed as contents
 DIRECTOR_TURN_TEMPLATE = """\
@@ -281,6 +287,11 @@ def get_default_direction() -> dict:
             "priority_action": "Continue conversation naturally",
             "specific_instruction": "Be warm and attentive",
         },
+        "prefetch": {
+            "memory_queries": [],
+            "web_queries": [],
+            "anticipated_tools": [],
+        },
     }
 
 
@@ -344,10 +355,15 @@ def format_director_guidance(direction: dict) -> str | None:
     if emotional_tone in ("sad", "concerned"):
         parts.append(f"({emotional_tone})")
 
-    # Phase 2: Prefetch hints — let Claude know memories are pre-loaded
+    # Prefetch hints — let Claude know memories are pre-loaded
     prefetch_hints = direction.get("_prefetch_hints")
     if prefetch_hints:
         parts.append(f"CONTEXT AVAILABLE: Memories about {', '.join(prefetch_hints[:2])}")
+
+    # Web prefetch hints — let Claude know web results are ready (skip filler speech)
+    web_prefetch_hints = direction.get("_web_prefetch_hints")
+    if web_prefetch_hints:
+        parts.append(f"WEB CONTEXT READY: {', '.join(web_prefetch_hints[:1])}")
 
     return " | ".join(parts) if parts else None
 

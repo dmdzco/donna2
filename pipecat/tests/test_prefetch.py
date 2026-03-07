@@ -8,9 +8,12 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 from services.prefetch import (
     PrefetchCache,
+    WebPrefetchCache,
     extract_prefetch_queries,
     extract_director_queries,
+    extract_web_queries,
     run_prefetch,
+    run_web_prefetch,
 )
 
 
@@ -436,3 +439,219 @@ class TestExtractDirectorQueries:
         # Should include anticipatory queries, capped at 3
         assert len(queries) <= 3
         assert len(queries) >= 2  # at least next_topic + reminder or news
+
+    def test_groq_memory_queries_take_priority(self):
+        """Groq-extracted memory_queries should be included first."""
+        direction = {
+            "analysis": {"current_topic": "travel", "turns_on_current_topic": 1},
+            "direction": {"next_topic": None},
+            "reminder": {"should_deliver": False},
+            "prefetch": {
+                "memory_queries": ["India trip", "wedding in Hyderabad"],
+                "web_queries": [],
+                "anticipated_tools": ["search_memories"],
+            },
+        }
+        queries = extract_director_queries(direction)
+        assert "india trip" in queries
+        assert "wedding in hyderabad" in queries
+
+    def test_groq_memory_queries_with_heuristic_fallback(self):
+        """When Groq provides memory_queries, heuristics still supplement."""
+        direction = {
+            "analysis": {"current_topic": "family", "turns_on_current_topic": 3},
+            "direction": {"next_topic": "health"},
+            "reminder": {"should_deliver": False},
+            "prefetch": {
+                "memory_queries": ["grandson Jake"],
+                "web_queries": [],
+                "anticipated_tools": ["search_memories"],
+            },
+        }
+        queries = extract_director_queries(direction)
+        assert "grandson jake" in queries
+        assert "health" in queries  # from next_topic heuristic
+
+    def test_missing_prefetch_section_uses_heuristics(self):
+        """Backward compatibility: no prefetch section falls back to heuristics."""
+        direction = {
+            "analysis": {"current_topic": "family", "turns_on_current_topic": 3},
+            "direction": {"next_topic": "medication"},
+            "reminder": {"should_deliver": False},
+        }
+        queries = extract_director_queries(direction)
+        assert "medication" in queries
+        assert "family" in queries
+
+
+# ===========================================================================
+# WebPrefetchCache
+# ===========================================================================
+
+
+class TestWebPrefetchCache:
+    def test_put_and_get(self):
+        cache = WebPrefetchCache()
+        cache.put("Indian wedding traditions", "Haldi ceremony involves turmeric...")
+        result = cache.get("Indian wedding traditions")
+        assert result is not None
+        assert "Haldi" in result
+
+    def test_fuzzy_match_with_stop_words(self):
+        cache = WebPrefetchCache()
+        cache.put("Indian wedding customs and traditions", "Rich cultural ceremonies...")
+
+        # Similar query with different stop words should still match
+        result = cache.get("what are Indian wedding traditions")
+        assert result is not None
+
+    def test_miss_on_unrelated_query(self):
+        cache = WebPrefetchCache()
+        cache.put("Indian wedding traditions", "Ceremonies include...")
+        result = cache.get("weather forecast Austin Texas")
+        assert result is None
+
+    def test_ttl_expiry(self):
+        cache = WebPrefetchCache(ttl=0.1)
+        cache.put("test query", "test result")
+        assert cache.get("test query") is not None
+        time.sleep(0.15)
+        assert cache.get("test query") is None
+
+    def test_stats_tracking(self):
+        cache = WebPrefetchCache()
+        cache.put("query1", "result1")
+        cache.get("query1")  # hit
+        cache.get("unrelated")  # miss
+        stats = cache.stats()
+        assert stats["hits"] == 1
+        assert stats["misses"] == 1
+        assert stats["hit_rate_pct"] == 50
+
+    def test_higher_threshold_than_memory_cache(self):
+        cache = WebPrefetchCache()
+        cache.put("Indian wedding traditions customs", "Result here")
+        # Very low overlap — should NOT match at 0.4 threshold
+        result = cache.get("Indian food recipes")
+        assert result is None
+
+
+# ===========================================================================
+# extract_web_queries
+# ===========================================================================
+
+
+class TestExtractWebQueries:
+    def test_returns_queries_when_web_search_anticipated(self):
+        direction = {
+            "prefetch": {
+                "memory_queries": ["India"],
+                "web_queries": ["Indian wedding customs and traditions"],
+                "anticipated_tools": ["search_memories", "web_search"],
+            },
+        }
+        queries = extract_web_queries(direction)
+        assert len(queries) == 1
+        assert "Indian wedding customs and traditions" in queries
+
+    def test_returns_empty_when_web_search_not_anticipated(self):
+        direction = {
+            "prefetch": {
+                "memory_queries": ["India"],
+                "web_queries": ["Indian wedding customs"],
+                "anticipated_tools": ["search_memories"],
+            },
+        }
+        queries = extract_web_queries(direction)
+        assert queries == []
+
+    def test_max_one_query(self):
+        direction = {
+            "prefetch": {
+                "memory_queries": [],
+                "web_queries": ["query1 long enough", "query2 long enough"],
+                "anticipated_tools": ["web_search"],
+            },
+        }
+        queries = extract_web_queries(direction)
+        assert len(queries) <= 1
+
+    def test_skips_short_queries(self):
+        direction = {
+            "prefetch": {
+                "memory_queries": [],
+                "web_queries": ["hi"],
+                "anticipated_tools": ["web_search"],
+            },
+        }
+        queries = extract_web_queries(direction)
+        assert queries == []
+
+    def test_missing_prefetch_section(self):
+        queries = extract_web_queries({})
+        assert queries == []
+
+    def test_missing_anticipated_tools(self):
+        direction = {
+            "prefetch": {
+                "web_queries": ["some question here"],
+            },
+        }
+        queries = extract_web_queries(direction)
+        assert queries == []
+
+
+# ===========================================================================
+# run_web_prefetch
+# ===========================================================================
+
+
+class TestRunWebPrefetch:
+    @pytest.mark.asyncio
+    async def test_successful_web_prefetch(self):
+        cache = WebPrefetchCache()
+
+        with patch("services.news.web_search_query", new_callable=AsyncMock) as mock_ws:
+            mock_ws.return_value = "Indian weddings involve multiple ceremonies..."
+            count = await run_web_prefetch(["Indian wedding traditions"], cache)
+
+        assert count == 1
+        assert cache.get("Indian wedding traditions") is not None
+
+    @pytest.mark.asyncio
+    async def test_dedup_skips_cached(self):
+        cache = WebPrefetchCache()
+        cache.put("Indian wedding traditions", "Already cached result")
+
+        with patch("services.news.web_search_query", new_callable=AsyncMock) as mock_ws:
+            count = await run_web_prefetch(["Indian wedding traditions"], cache)
+
+        assert count == 0
+        mock_ws.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_empty_queries(self):
+        cache = WebPrefetchCache()
+        count = await run_web_prefetch([], cache)
+        assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_error_handled_gracefully(self):
+        cache = WebPrefetchCache()
+
+        with patch("services.news.web_search_query", new_callable=AsyncMock) as mock_ws:
+            mock_ws.side_effect = Exception("API error")
+            count = await run_web_prefetch(["some query here"], cache)
+
+        assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_no_result_not_cached(self):
+        cache = WebPrefetchCache()
+
+        with patch("services.news.web_search_query", new_callable=AsyncMock) as mock_ws:
+            mock_ws.return_value = None
+            count = await run_web_prefetch(["obscure question"], cache)
+
+        assert count == 0
+        assert cache.get("obscure question") is None

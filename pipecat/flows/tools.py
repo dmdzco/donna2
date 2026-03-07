@@ -168,6 +168,14 @@ def make_tool_handlers(session_state: dict) -> dict:
         if not query:
             return {"status": "success", "result": "No query provided."}
 
+        # Check web prefetch cache first (instant return on hit)
+        web_cache = session_state.get("_web_prefetch_cache")
+        if web_cache:
+            cached = web_cache.get(query)
+            if cached:
+                logger.info("Tool: web_search WEB PREFETCH HIT query={q}", q=query)
+                return {"status": "success", "result": f"[NEWS] {cached}"}
+
         try:
             from services.news import web_search_query
             result = await asyncio.wait_for(web_search_query(query), timeout=15.0)

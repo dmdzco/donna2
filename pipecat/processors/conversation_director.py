@@ -338,6 +338,19 @@ class ConversationDirectorProcessor(FrameProcessor):
                 f"{token_rec['max_tokens']} tokens — {token_rec['reason']}]"
             )
 
+        # Inject news content when Director recommends mentioning it
+        # (news removed from system prompt to save ~300 tokens per turn)
+        dir_section = result.get("direction", {})
+        if (
+            dir_section.get("should_mention_news")
+            and not self._session_state.get("_news_injected", False)
+        ):
+            news_ctx = self._session_state.get("news_context")
+            if news_ctx:
+                guidance_text += f"\n\n{news_ctx}"
+                self._session_state["_news_injected"] = True
+                logger.info("[Director] News content injected into context")
+
         await self.push_frame(
             LLMMessagesAppendFrame(
                 messages=[

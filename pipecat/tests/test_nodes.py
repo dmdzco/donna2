@@ -90,14 +90,9 @@ class TestSeniorContext:
         ctx = _build_senior_context(state)
         assert "arthritis" in ctx
 
-    def test_includes_news_context(self):
+    def test_news_not_in_system_prompt(self):
+        """News is no longer in system prompt — injected dynamically by Director."""
         state = _make_session_state(news_context="Here are some recent news items about gardening...")
-        ctx = _build_senior_context(state)
-        assert "gardening" in ctx
-        assert "recent news" in ctx
-
-    def test_no_news_context_when_none(self):
-        state = _make_session_state(news_context=None)
         ctx = _build_senior_context(state)
         assert "recent news" not in ctx
 

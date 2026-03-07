@@ -39,9 +39,13 @@ class Settings:
     elevenlabs_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
     google_api_key: str = ""
     openai_api_key: str = ""
+    cerebras_api_key: str = ""
+    groq_api_key: str = ""
 
     # ---- Model Selection ----
     fast_observer_model: str = "gemini-3-flash-preview"
+    cerebras_director_model: str = "gpt-oss-120b"
+    groq_director_model: str = "openai/gpt-oss-20b"
     call_analysis_model: str = "gemini-3-flash-preview"
     anthropic_model: str = "claude-sonnet-4-5-20250929"
 
@@ -89,8 +93,12 @@ def _load_settings() -> Settings:
         elevenlabs_voice_id=_env("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
         google_api_key=_env("GOOGLE_API_KEY"),
         openai_api_key=_env("OPENAI_API_KEY"),
+        cerebras_api_key=_env("CEREBRAS_API_KEY"),
+        groq_api_key=_env("GROQ_API_KEY"),
         # Model Selection
         fast_observer_model=_env("FAST_OBSERVER_MODEL", "gemini-3-flash-preview"),
+        cerebras_director_model=_env("CEREBRAS_DIRECTOR_MODEL", "gpt-oss-120b"),
+        groq_director_model=_env("GROQ_DIRECTOR_MODEL", "openai/gpt-oss-20b"),
         call_analysis_model=_env("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview"),
         anthropic_model=_env("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"),
         # Auth

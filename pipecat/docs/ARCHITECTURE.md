@@ -150,19 +150,28 @@ Instant regex-based analysis with 268 patterns across 19 categories:
 
 **Programmatic Goodbye**: When a strong goodbye signal is detected (e.g., "goodbye", "talk to you later"), Quick Observer schedules an `EndFrame` after 2 seconds via the pipeline task reference. This bypasses unreliable LLM tool-calling for call termination. It also sets `session_state["_goodbye_in_progress"] = True` to suppress Director guidance injection during the goodbye.
 
-### Layer 2: Conversation Director (~150ms, non-blocking)
+### Layer 2: Conversation Director (non-blocking, speculative pre-processing)
 
-Runs Gemini Flash per turn via `asyncio.create_task()` — never blocks the pipeline:
+Primary LLM: **Cerebras** (~3000 tok/s, ~70ms) with Gemini Flash fallback. Runs via `asyncio.create_task()` — never blocks the pipeline.
 
-1. On each `TranscriptionFrame`:
-   - Injects **PREVIOUS** turn's cached guidance via `LLMMessagesAppendFrame`
+**Speculative pre-processing** enables same-turn guidance injection:
+
+1. On each `InterimTranscriptionFrame` (while user speaks):
+   - Stores latest interim text, resets 250ms silence timer
+   - Cancels any running speculative analysis (text changed)
+   - Debounced memory prefetch (1s gap, 15+ chars)
+2. After 250ms gap in interims (silence detected):
+   - Starts speculative Cerebras analysis using last interim text
+3. On `TranscriptionFrame` (after VAD 1.2s silence):
+   - **Checks speculative result**: if done + Jaccard(interim, final) ≥ 0.7 → injects **SAME-TURN** guidance
+   - Otherwise falls back to **PREVIOUS-TURN** cached guidance (original behavior)
    - Takes fallback actions (force end, wrap-up injection)
-   - Starts NEW background analysis for this turn
+   - If speculative wasn't used → starts regular background analysis
    - Starts 1st-wave regex prefetch (non-blocking)
-2. Background analysis calls Gemini Flash with full conversation context
-3. After analysis completes, starts 2nd-wave director-driven prefetch
-4. Result is cached and applied on the next turn
-5. On `InterimTranscriptionFrame`: debounced prefetch (1s gap, 15+ chars)
+4. Background analysis calls Cerebras (→ Gemini fallback) with full conversation context
+5. After analysis completes, starts 2nd-wave director-driven prefetch
+
+**Metrics** (logged on EndFrame): `[Director] Call summary: 8 turns, 6/7 speculative hits (86%), 1 cancels`
 
 **Fallback Actions** (when Claude misses things):
 - **Force winding-down** at 9 minutes — overrides call phase to winding_down

@@ -1,13 +1,18 @@
-"""Predictive Context Engine — speculative memory prefetch.
+"""Predictive Context Engine — speculative memory + web prefetch.
 
-Extracts likely topics/entities from user speech using regex patterns,
-then pre-fetches memories in the background so that when Claude calls
-search_memories, the results are already cached and return instantly.
+Extracts likely topics/entities from user speech using regex patterns
+and Director LLM analysis, then pre-fetches memories and web results
+in the background so that when Claude calls search_memories or
+web_search, the results are already cached and return instantly.
 
-Two classes + two functions:
-- PrefetchCache: TTL cache stored in session_state
+Key classes + functions:
+- PrefetchCache: TTL cache for memory results (stored in session_state)
+- WebPrefetchCache: TTL cache for web search results (stored in session_state)
 - extract_prefetch_queries(): regex-based topic/entity extraction
+- extract_director_queries(): LLM-extracted topics from Director analysis
+- extract_web_queries(): anticipated web search queries from Director
 - run_prefetch(): async memory search with dedup + concurrency limit
+- run_web_prefetch(): async web search prefetch
 """
 
 from __future__ import annotations
@@ -162,6 +167,105 @@ class PrefetchCache:
 
 
 # ---------------------------------------------------------------------------
+# WebPrefetchCache
+# ---------------------------------------------------------------------------
+
+_WEB_STOP_WORDS = frozenset({
+    "the", "a", "an", "is", "are", "was", "were", "what", "when",
+    "where", "how", "do", "does", "did", "in", "on", "at", "to", "for",
+    "of", "and", "or", "about", "can", "you", "me", "tell", "i",
+})
+
+
+class WebPrefetchCache:
+    """TTL-based cache for prefetched web search results.
+
+    Uses Jaccard word-overlap for fuzzy lookup (with stop-word removal),
+    same pattern as PrefetchCache. Stored in session_state["_web_prefetch_cache"].
+    """
+
+    DEFAULT_TTL = 3600.0  # 1 hour (matches news.py CACHE_TTL)
+    MAX_ENTRIES = 10
+
+    def __init__(self, ttl: float = DEFAULT_TTL):
+        self._ttl = ttl
+        self._entries: dict[str, dict[str, Any]] = {}
+        self._hits = 0
+        self._misses = 0
+
+    def _word_set(self, text: str) -> set[str]:
+        return set(w for w in text.lower().split() if w not in _WEB_STOP_WORDS)
+
+    def put(self, query: str, result: str, source: str = "web_prefetch") -> None:
+        """Store web prefetch result. Evicts oldest entry if at capacity."""
+        key = " ".join(sorted(query.lower().split()))
+        if len(self._entries) >= self.MAX_ENTRIES and key not in self._entries:
+            oldest_key = min(self._entries, key=lambda k: self._entries[k]["ts"])
+            del self._entries[oldest_key]
+        self._entries[key] = {
+            "result": result,
+            "source": source,
+            "ts": time.time(),
+            "query": query,
+        }
+
+    def get(self, query: str, threshold: float = 0.4) -> str | None:
+        """Fuzzy lookup via Jaccard word-overlap (with stop-word removal).
+
+        Higher threshold (0.4) than memory cache (0.3) to avoid false hits.
+        """
+        now = time.time()
+        query_words = self._word_set(query)
+        if not query_words:
+            self._misses += 1
+            return None
+
+        best_match: dict | None = None
+        best_sim = 0.0
+
+        for key, entry in list(self._entries.items()):
+            if now - entry["ts"] > self._ttl:
+                del self._entries[key]
+                continue
+            entry_words = self._word_set(entry["query"])
+            if not entry_words:
+                continue
+            intersection = len(query_words & entry_words)
+            union = len(query_words | entry_words)
+            sim = intersection / union if union > 0 else 0.0
+            if sim > best_sim:
+                best_sim = sim
+                best_match = entry
+
+        if best_match and best_sim >= threshold:
+            self._hits += 1
+            return best_match["result"]
+
+        self._misses += 1
+        return None
+
+    def get_recent_queries(self) -> list[str]:
+        """Return queries from non-expired entries."""
+        now = time.time()
+        return [
+            entry["query"]
+            for entry in self._entries.values()
+            if now - entry["ts"] <= self._ttl
+        ]
+
+    def stats(self) -> dict[str, int]:
+        """Cache statistics for metrics logging."""
+        total = self._hits + self._misses
+        return {
+            "hits": self._hits,
+            "misses": self._misses,
+            "total": total,
+            "hit_rate_pct": round(self._hits / total * 100) if total > 0 else 0,
+            "entries": len(self._entries),
+        }
+
+
+# ---------------------------------------------------------------------------
 # Query extraction
 # ---------------------------------------------------------------------------
 
@@ -248,10 +352,10 @@ def extract_director_queries(
 ) -> list[str]:
     """Extract prefetch queries from Director analysis (multi-turn context).
 
-    Uses Gemini's structured output — current_topic, next_topic, reminder
-    info, news topics — to anticipate what Claude will need next.
+    Uses Groq/Cerebras LLM-extracted memory_queries (highest quality) with
+    heuristic fallbacks from structured output fields.
 
-    Called after Gemini analysis completes (~150ms after first-wave regex).
+    Called after Director analysis completes (~600ms).
     """
     queries: list[str] = []
     seen: set[str] = set()
@@ -262,26 +366,27 @@ def extract_director_queries(
             seen.add(q)
             queries.append(q)
 
+    # 1. LLM-extracted memory queries (highest quality, from prefetch section)
+    prefetch = direction.get("prefetch", {})
+    for mq in prefetch.get("memory_queries", []):
+        if isinstance(mq, str):
+            _add(mq)
+
+    # 2. Heuristic fallbacks from structured analysis
     analysis = direction.get("analysis", {})
     dir_section = direction.get("direction", {})
     reminder = direction.get("reminder", {})
 
-    # 1. Anticipatory: prefetch next_topic before conversation gets there
     next_topic = dir_section.get("next_topic")
     if next_topic and next_topic != analysis.get("current_topic"):
         _add(next_topic)
 
-    # 2. Reminder delivery: prefetch memories related to upcoming reminder
-    #    so Claude can weave it into context ("stay healthy for the grandkids")
     if reminder.get("should_deliver") and reminder.get("which_reminder"):
         _add(reminder["which_reminder"])
 
-    # 3. News topic: prefetch memories so Claude can connect news to personal context
     if dir_section.get("should_mention_news") and dir_section.get("news_topic"):
         _add(dir_section["news_topic"])
 
-    # 4. Current topic with depth — if they've been on a topic for 2+ turns,
-    #    prefetch it (first-wave regex may have missed it on earlier turns)
     current_topic = analysis.get("current_topic")
     turns_on_topic = analysis.get("turns_on_current_topic", 0)
     if current_topic and current_topic != "unknown" and turns_on_topic >= 2:
@@ -350,3 +455,67 @@ async def run_prefetch(
 
     results = await asyncio.gather(*[_search_one(q) for q in new_queries])
     return sum(1 for r in results if r)
+
+
+# ---------------------------------------------------------------------------
+# Web search prefetch (Director-driven)
+# ---------------------------------------------------------------------------
+
+
+def extract_web_queries(direction: dict) -> list[str]:
+    """Extract anticipated web search queries from Director analysis.
+
+    Only returns queries when the Director predicts the senior will ask
+    a factual question. Returns max 1 query to limit API costs.
+    """
+    prefetch = direction.get("prefetch", {})
+    anticipated = prefetch.get("anticipated_tools", [])
+
+    # Only prefetch web if Director explicitly predicts web_search usage
+    if "web_search" not in anticipated:
+        return []
+
+    web_queries = prefetch.get("web_queries", [])
+    return [q.strip() for q in web_queries[:1] if isinstance(q, str) and len(q.strip()) >= 5]
+
+
+async def run_web_prefetch(
+    queries: list[str],
+    web_cache: WebPrefetchCache,
+) -> int:
+    """Run speculative web searches and store results in web cache.
+
+    Skips queries already in cache. Runs max 1 concurrent web search.
+    Returns count of successful prefetches.
+    """
+    if not queries:
+        return 0
+
+    # Dedup: skip queries with fuzzy cache hits
+    new_queries = [q for q in queries if web_cache.get(q) is None]
+    if not new_queries:
+        return 0
+
+    query = new_queries[0]
+
+    try:
+        from services.news import web_search_query
+        start = time.time()
+        result = await asyncio.wait_for(web_search_query(query), timeout=12.0)
+        elapsed_ms = round((time.time() - start) * 1000)
+        if result:
+            web_cache.put(query, result, source="web_prefetch")
+            logger.info(
+                "[WebPrefetch] Cached result for q={q!r} ({ms}ms)",
+                q=query, ms=elapsed_ms,
+            )
+            return 1
+        else:
+            logger.debug("[WebPrefetch] No result for q={q!r} ({ms}ms)", q=query, ms=elapsed_ms)
+            return 0
+    except asyncio.TimeoutError:
+        logger.warning("[WebPrefetch] Timeout for q={q!r}", q=query)
+        return 0
+    except Exception as e:
+        logger.warning("[WebPrefetch] Error for q={q!r}: {err}", q=query, err=str(e))
+        return 0

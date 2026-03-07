@@ -1,6 +1,7 @@
-"""Tests for services/director_llm.py — Gemini Flash conversation direction."""
+"""Tests for services/director_llm.py — Director LLM analysis (Cerebras + Gemini)."""
 
 import json
+import time
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 
@@ -24,6 +25,28 @@ class TestRepairJson:
         from services.director_llm import _repair_json
         valid = '{"key": "value"}'
         assert _repair_json(valid) == valid
+
+
+class TestExtractAndParseJson:
+    def test_plain_json(self):
+        from services.director_llm import _extract_and_parse_json
+        result = _extract_and_parse_json('{"key": "value"}')
+        assert result == {"key": "value"}
+
+    def test_markdown_wrapped(self):
+        from services.director_llm import _extract_and_parse_json
+        result = _extract_and_parse_json('```json\n{"key": "value"}\n```')
+        assert result == {"key": "value"}
+
+    def test_empty_returns_none(self):
+        from services.director_llm import _extract_and_parse_json
+        assert _extract_and_parse_json("") is None
+        assert _extract_and_parse_json("   ") is None
+
+    def test_repairs_truncated(self):
+        from services.director_llm import _extract_and_parse_json
+        result = _extract_and_parse_json('{"a": 1,}')
+        assert result == {"a": 1}
 
 
 class TestFormatHistory:
@@ -73,6 +96,27 @@ class TestFormatReminders:
         reminders = [{"title": "Walk", "description": "evening"}]
         result = _format_reminders(reminders, set())
         assert "Walk" in result
+
+
+class TestBuildTurnContent:
+    def test_returns_formatted_string(self):
+        from services.director_llm import _build_turn_content
+        session = {"senior": {"name": "Margaret"}, "_call_start_time": time.time()}
+        result = _build_turn_content("Hello", session)
+        assert "Margaret" in result
+        assert "Hello" in result
+
+    def test_uses_friend_when_no_name(self):
+        from services.director_llm import _build_turn_content
+        session = {"senior": {}, "_call_start_time": time.time()}
+        result = _build_turn_content("Hello", session)
+        assert "Friend" in result
+
+    def test_includes_call_type(self):
+        from services.director_llm import _build_turn_content
+        session = {"senior": {"name": "Test"}, "_call_start_time": time.time(), "call_type": "onboarding"}
+        result = _build_turn_content("Hello", session)
+        assert "onboarding" in result
 
 
 class TestGetDefaultDirection:
@@ -168,48 +212,130 @@ class TestFormatDirectorGuidance:
         assert "Laugh" not in (result or "")
 
 
+class TestCerebrasAvailable:
+    def test_returns_false_without_key(self):
+        from services.director_llm import cerebras_available
+        with patch.dict("os.environ", {}, clear=True):
+            assert cerebras_available() is False
+
+    def test_returns_true_with_key(self):
+        from services.director_llm import cerebras_available
+        with patch.dict("os.environ", {"CEREBRAS_API_KEY": "test-key"}):
+            assert cerebras_available() is True
+
+
+class TestCerebrasAnalyze:
+    @pytest.mark.asyncio
+    async def test_returns_none_without_client(self):
+        from services.director_llm import _cerebras_analyze, _cerebras_breaker
+        with patch("services.director_llm._get_cerebras_client", return_value=None):
+            result = await _cerebras_analyze("test content", _cerebras_breaker)
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_parses_valid_json_response(self):
+        from services.director_llm import _cerebras_analyze, _cerebras_breaker
+        direction = {
+            "analysis": {"call_phase": "main", "engagement_level": "high"},
+            "direction": {},
+            "reminder": {},
+            "guidance": {},
+        }
+
+        mock_choice = MagicMock()
+        mock_choice.message.content = json.dumps(direction)
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        with patch("services.director_llm._get_cerebras_client", return_value=mock_client):
+            result = await _cerebras_analyze("test", _cerebras_breaker)
+            assert result["analysis"]["call_phase"] == "main"
+
+
 class TestAnalyzeTurn:
     @pytest.mark.asyncio
-    async def test_returns_default_without_api_key(self):
+    async def test_returns_default_without_any_provider(self):
         from services.director_llm import analyze_turn, get_default_direction
-        with patch("services.director_llm._get_client", return_value=None):
-            result = await analyze_turn("hello", {"senior": {"name": "Test"}})
+        with patch("services.director_llm.cerebras_available", return_value=False), \
+             patch("services.director_llm._gemini_analyze", new_callable=AsyncMock, return_value=None):
+            result = await analyze_turn("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
             assert result == get_default_direction()
 
     @pytest.mark.asyncio
-    async def test_returns_default_on_empty_response(self):
+    async def test_cerebras_primary_gemini_fallback(self):
         from services.director_llm import analyze_turn
-        mock_response = MagicMock()
-        mock_response.text = ""
-        mock_client = MagicMock()
-        mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
-        with patch("services.director_llm._get_client", return_value=mock_client):
-            result = await analyze_turn("hello", {"senior": {"name": "Test"}})
-            assert result["analysis"]["call_phase"] == "main"
+        gemini_direction = {
+            "analysis": {"call_phase": "main", "engagement_level": "medium", "emotional_tone": "neutral"},
+            "direction": {},
+            "reminder": {},
+            "guidance": {},
+        }
+        with patch("services.director_llm.cerebras_available", return_value=True), \
+             patch("services.director_llm._cerebras_analyze", new_callable=AsyncMock, return_value=None), \
+             patch("services.director_llm._gemini_analyze", new_callable=AsyncMock, return_value=gemini_direction):
+            result = await analyze_turn("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
+            assert result["analysis"]["engagement_level"] == "medium"
 
     @pytest.mark.asyncio
-    async def test_parses_valid_json(self):
+    async def test_cerebras_used_when_available(self):
         from services.director_llm import analyze_turn
-        direction = {
-            "analysis": {"call_phase": "main", "engagement_level": "high", "emotional_tone": "positive", "current_topic": "garden", "turns_on_current_topic": 3},
-            "direction": {"stay_or_shift": "stay", "next_topic": None, "pacing_note": "good"},
-            "reminder": {"should_deliver": False, "which_reminder": None, "delivery_approach": None},
-            "guidance": {"tone": "warm", "priority_action": "Continue", "specific_instruction": "Ask about roses"},
+        cerebras_direction = {
+            "analysis": {"call_phase": "main", "engagement_level": "high", "emotional_tone": "positive"},
+            "direction": {},
+            "reminder": {},
+            "guidance": {},
         }
-        mock_response = MagicMock()
-        mock_response.text = json.dumps(direction)
-        mock_client = MagicMock()
-        mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
-        with patch("services.director_llm._get_client", return_value=mock_client):
-            result = await analyze_turn("tell me about roses", {"senior": {"name": "Margaret"}, "_call_start_time": 1000000})
-            assert result["analysis"]["call_phase"] == "main"
+        with patch("services.director_llm.cerebras_available", return_value=True), \
+             patch("services.director_llm._cerebras_analyze", new_callable=AsyncMock, return_value=cerebras_direction), \
+             patch("services.director_llm._gemini_analyze", new_callable=AsyncMock) as mock_gemini:
+            result = await analyze_turn("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
+            assert result["analysis"]["engagement_level"] == "high"
+            mock_gemini.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_gemini_only_without_cerebras(self):
+        from services.director_llm import analyze_turn
+        gemini_direction = {
+            "analysis": {"call_phase": "opening", "engagement_level": "medium", "emotional_tone": "neutral"},
+            "direction": {},
+            "reminder": {},
+            "guidance": {},
+        }
+        with patch("services.director_llm.cerebras_available", return_value=False), \
+             patch("services.director_llm._gemini_analyze", new_callable=AsyncMock, return_value=gemini_direction):
+            result = await analyze_turn("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
+            assert result["analysis"]["call_phase"] == "opening"
+
+
+class TestAnalyzeTurnSpeculative:
+    @pytest.mark.asyncio
+    async def test_returns_none_without_cerebras(self):
+        from services.director_llm import analyze_turn_speculative
+        with patch("services.director_llm.cerebras_available", return_value=False):
+            result = await analyze_turn_speculative("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_result_with_cerebras(self):
+        from services.director_llm import analyze_turn_speculative
+        direction = {
+            "analysis": {"call_phase": "main", "engagement_level": "high"},
+            "direction": {},
+            "reminder": {},
+            "guidance": {},
+        }
+        with patch("services.director_llm.cerebras_available", return_value=True), \
+             patch("services.director_llm._cerebras_analyze", new_callable=AsyncMock, return_value=direction):
+            result = await analyze_turn_speculative("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
             assert result["analysis"]["engagement_level"] == "high"
 
     @pytest.mark.asyncio
-    async def test_returns_default_on_exception(self):
-        from services.director_llm import analyze_turn, get_default_direction
-        mock_client = MagicMock()
-        mock_client.aio.models.generate_content = AsyncMock(side_effect=Exception("API error"))
-        with patch("services.director_llm._get_client", return_value=mock_client):
-            result = await analyze_turn("hello", {"senior": {"name": "Test"}})
-            assert result == get_default_direction()
+    async def test_returns_none_on_failure(self):
+        from services.director_llm import analyze_turn_speculative
+        with patch("services.director_llm.cerebras_available", return_value=True), \
+             patch("services.director_llm._cerebras_analyze", new_callable=AsyncMock, side_effect=Exception("fail")):
+            result = await analyze_turn_speculative("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
+            assert result is None

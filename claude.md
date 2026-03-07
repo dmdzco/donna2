@@ -35,7 +35,10 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 ### Working Features (Pipecat)
 - **2-Layer Observer Architecture + Post-Call**
   - Layer 1: Quick Observer (0ms) - 268 regex patterns + programmatic goodbye (2s EndFrame)
-  - Layer 2: Conversation Director (~150ms) - Non-blocking Gemini Flash per-turn analysis + mid-call memory refresh
+  - Layer 2: Conversation Director — Non-blocking per-turn analysis + speculative pre-processing + mid-call memory refresh
+    - Primary: Cerebras (~3000 tok/s, ~70ms) with Gemini Flash fallback
+    - Speculative pre-processing: Detects 250ms silence onset via interim gaps → starts Cerebras analysis → same-turn guidance when ready
+    - Metrics: Logs speculative hit rate per call
   - Post-Call: Analysis, memory extraction, daily context (Gemini Flash)
 - **Predictive Context Engine** — Speculative memory prefetch eliminates tool-call latency
   - 1st wave: Regex entity/topic extraction on final transcriptions → background `memory.search()`
@@ -105,14 +108,16 @@ Twilio Audio ──► FastAPIWebsocketTransport
               │ Conversation         │────►│  Background Analysis      │
               │ Director             │     │  (asyncio.create_task)    │
               │ (PASS-THROUGH)       │     │                           │
-              │                      │     │  Gemini 3 Flash Preview   │
-              │ 1. Injects PREVIOUS  │     │  ~150ms per turn          │
-              │    turn's cached     │     │  Result cached for NEXT   │
-              │    guidance          │     │  turn's injection         │
-              │ 2. Passes frame      │     │                           │
-              │    immediately       │     │  Also: mid-call memory    │
-              │ 3. Fires background  │     │  refresh after 5+ min     │
-              │    analysis ────────►│     │  Predictive prefetch      │
+              │                      │     │  Cerebras (~70ms) primary │
+              │ 1. Check speculative │     │  Gemini Flash fallback    │
+              │    → inject SAME or  │     │                           │
+              │    PREVIOUS turn's   │     │  Speculative: on 250ms    │
+              │    guidance          │     │  silence onset, starts    │
+              │ 2. Passes frame      │     │  Cerebras analysis early  │
+              │    immediately       │     │                           │
+              │ 3. Fires background  │     │  Also: mid-call memory   │
+              │    analysis ────────►│     │  refresh after 5+ min     │
+              │                      │     │  Predictive prefetch      │
               │                      │     │  (1st + 2nd wave)         │
               │                      │     │  Fallback: force end      │
               │                      │     │  at 9min / 12min          │
@@ -135,7 +140,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
               Context Aggregator (assistant) ← tracks assistant responses
 ```
 
-**Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. Quick Observer's guidance is for the **current** turn (instant regex). Director's guidance is from the **previous** turn (cached Gemini result). Both appear as user-role messages in Claude's context before the next LLM call.
+**Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. Quick Observer's guidance is for the **current** turn (instant regex). Director's guidance can be **same-turn** (when speculative Cerebras analysis completes before the final transcription) or **previous-turn** (fallback). Both appear as user-role messages in Claude's context before the next LLM call.
 
 **Predictive Context Engine**: The Director also runs speculative memory prefetch in the background. On each transcription, regex extracts topics/entities and pre-fetches memories. After Gemini analysis completes (~150ms), a second wave prefetches based on `next_topic`, upcoming reminders, and news topics. Results are cached in `session_state["_prefetch_cache"]` (TTL=30s, Jaccard fuzzy match). When Claude calls `search_memories`, the tool handler checks the cache first — cache hit returns instantly (~0ms vs 200-300ms). Interim transcriptions also trigger debounced prefetch while the user is still speaking.
 
@@ -438,6 +443,7 @@ DEEPGRAM_API_KEY=...             # STT
 ELEVENLABS_API_KEY=...           # TTS
 ELEVENLABS_VOICE_ID=...          # Voice ID (optional)
 OPENAI_API_KEY=...               # Embeddings + news search
+CEREBRAS_API_KEY=...             # Cerebras (Director primary, speculative pre-processing)
 
 # Auth
 JWT_SECRET=...
@@ -450,7 +456,8 @@ SCHEDULER_ENABLED=false          # MUST be false (Node.js runs scheduler)
 SENTRY_DSN=...                               # Error monitoring (optional, both backends)
 
 # Optional
-FAST_OBSERVER_MODEL=gemini-3-flash-preview   # Director model
+FAST_OBSERVER_MODEL=gemini-3-flash-preview   # Director model (Gemini fallback)
+CEREBRAS_DIRECTOR_MODEL=gpt-oss-120b         # Director model (Cerebras primary)
 CALL_ANALYSIS_MODEL=gemini-3-flash-preview   # Post-call analysis model
 LOG_LEVEL=INFO                               # DEBUG for verbose pipecat logs
 ```

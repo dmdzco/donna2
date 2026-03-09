@@ -313,7 +313,7 @@ router.get('/api/observability/calls/:id/turns', requireAdmin, async (req, res) 
 router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, res) => {
   try {
     const [call] = await db.select({
-      transcript: conversations.transcript,
+      id: conversations.id,
       concerns: conversations.concerns,
       sentiment: conversations.sentiment,
     })
@@ -324,51 +324,80 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
       return res.status(404).json({ error: 'Call not found' });
     }
 
-    // Extract observer signals from transcript
+    // Query call_analyses for post-call analysis data
+    const analysisRows = await db.execute(sql`
+      SELECT engagement_score, concerns, positive_observations,
+             call_quality, summary
+      FROM call_analyses
+      WHERE conversation_id = ${call.id}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+
     const signals = [];
     const engagementDistribution = {};
     const emotionalStateDistribution = {};
     const allConcerns = [];
-    let totalConfidence = 0;
 
-    if (call.transcript && Array.isArray(call.transcript)) {
-      call.transcript.forEach((turn, index) => {
-        if (turn.observer) {
-          const engagementLevel = turn.observer.engagement_level || turn.observer.engagementLevel || 'medium';
-          const emotionalState = turn.observer.emotional_state || turn.observer.emotionalState || 'neutral';
-          const confidenceScore = turn.observer.confidence_score || turn.observer.confidenceScore || 0.5;
-          const concerns = turn.observer.concerns || [];
+    if (analysisRows.rows.length > 0) {
+      const analysis = analysisRows.rows[0];
 
-          signals.push({
-            turnId: String(index),
-            speaker: turn.role === 'user' ? 'Senior' : 'Donna',
-            turnContent: turn.content || '',
-            timestamp: turn.timestamp,
-            signal: {
-              engagementLevel,
-              emotionalState,
-              confidenceScore,
-              concerns,
-              shouldDeliverReminder: turn.observer.should_deliver_reminder || turn.observer.shouldDeliverReminder || false,
-              shouldEndCall: turn.observer.should_end_call || turn.observer.shouldEndCall || false,
-            },
-          });
+      // Parse JSONB fields — usually objects already, but safety-parse if string
+      const concerns = typeof analysis.concerns === 'string'
+        ? JSON.parse(analysis.concerns) : (analysis.concerns || []);
+      const callQuality = typeof analysis.call_quality === 'string'
+        ? JSON.parse(analysis.call_quality) : (analysis.call_quality || {});
 
-          engagementDistribution[engagementLevel] = (engagementDistribution[engagementLevel] || 0) + 1;
-          emotionalStateDistribution[emotionalState] = (emotionalStateDistribution[emotionalState] || 0) + 1;
-          totalConfidence += confidenceScore;
-          allConcerns.push(...concerns);
-        }
+      // Map engagement_score (1-10) to engagement level
+      const score = analysis.engagement_score || 5;
+      const engagementLevel = score >= 7 ? 'high' : score >= 4 ? 'medium' : 'low';
+
+      // Map call_quality.rapport to emotional state
+      const rapport = callQuality.rapport || 'moderate';
+      const emotionalStateMap = { strong: 'positive', moderate: 'neutral', weak: 'disengaged' };
+      const emotionalState = emotionalStateMap[rapport] || 'neutral';
+
+      // Confidence based on engagement score normalized to 0-1
+      const confidenceScore = Math.min(1, Math.max(0, score / 10));
+
+      // Extract concern descriptions
+      const concernDescriptions = Array.isArray(concerns)
+        ? concerns.map(c => c.description || (typeof c === 'string' ? c : JSON.stringify(c)))
+        : [];
+
+      // Create a single call-level signal from the analysis
+      signals.push({
+        turnId: 'call-analysis',
+        speaker: 'System',
+        turnContent: analysis.summary || '',
+        timestamp: null,
+        signal: {
+          engagementLevel,
+          emotionalState,
+          confidenceScore,
+          concerns: concernDescriptions,
+          engagementScore: score,
+          rapport: callQuality.rapport || null,
+          goalsAchieved: callQuality.goals_achieved ?? null,
+          durationAppropriate: callQuality.duration_appropriate ?? null,
+          positiveObservations: analysis.positive_observations || [],
+        },
       });
+
+      engagementDistribution[engagementLevel] = 1;
+      emotionalStateDistribution[emotionalState] = 1;
+      allConcerns.push(...concernDescriptions);
     }
 
-    const uniqueConcerns = [...new Set([...allConcerns, ...(call.concerns || [])])];
+    // Merge in conversation-level concerns from conversations table
+    const conversationConcerns = call.concerns || [];
+    const uniqueConcerns = [...new Set([...allConcerns, ...conversationConcerns])];
 
     res.json({
       signals,
       count: signals.length,
       summary: {
-        averageConfidence: signals.length > 0 ? totalConfidence / signals.length : 0,
+        averageConfidence: signals.length > 0 ? signals[0].signal.confidenceScore : 0,
         engagementDistribution,
         emotionalStateDistribution,
         totalConcerns: uniqueConcerns.length,

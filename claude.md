@@ -491,4 +491,11 @@ Both share the same Neon PostgreSQL database. Dual service implementations (e.g.
 
 ---
 
+## Business Context
+
+Meeting notes from co-founder conversations are in `docs/meeting-notes/`.
+Consult these for product direction, decisions, and priorities.
+
+---
+
 *Last updated: February 2026 — v5.0 with Predictive Context Engine, circuit breakers, feature flags, caregiver notes, sentiment-aware greetings, CI/CD*

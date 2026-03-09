@@ -16,6 +16,14 @@ export default defineConfig({
   },
 
   projects: [
+    // Setup: Clerk testing token (runs first)
+    {
+      name: 'clerk-setup',
+      testMatch: /global\.setup\.ts/,
+      testDir: './tests/e2e',
+    },
+
+    // Admin dashboard tests (JWT auth, no Clerk dependency)
     {
       name: 'admin',
       testDir: './tests/e2e/admin',
@@ -24,14 +32,31 @@ export default defineConfig({
         baseURL: 'http://localhost:5175',
       },
     },
+
+    // Consumer public pages (no auth needed)
     {
       name: 'consumer',
       testDir: './tests/e2e/consumer',
+      testIgnore: ['**/authenticated/**'],
       use: {
         ...devices['Desktop Chrome'],
         baseURL: 'http://localhost:5174',
       },
     },
+
+    // Consumer authenticated pages (signs in via @clerk/testing per test)
+    {
+      name: 'consumer-authenticated',
+      testDir: './tests/e2e/consumer/authenticated',
+      dependencies: ['clerk-setup'],
+      timeout: 60000,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: 'http://localhost:5174',
+      },
+    },
+
+    // Observability dashboard tests (JWT auth, no Clerk dependency)
     {
       name: 'observability',
       testDir: './tests/e2e/observability',

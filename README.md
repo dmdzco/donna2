@@ -7,17 +7,19 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 ### Voice Pipeline (Pipecat)
 - **2-Layer Conversation Director Architecture**
   - Layer 1: Quick Observer (0ms) — 268 regex patterns for health, emotion, safety, goodbye
-  - Layer 2: Conversation Director (~150ms) — Gemini 3 Flash non-blocking call guidance
+  - Layer 2: Conversation Director — Multi-provider non-blocking call guidance (Groq/Cerebras primary, Gemini fallback)
   - Post-Call Analysis — Summary, concerns, engagement score (Gemini Flash)
 - **Pipecat Flows** — 4-phase call state machine (opening → main → winding_down → closing)
-- **5 LLM Tools** — search_memories, get_news, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
+- **5 LLM Tools** — search_memories, web_search, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
 - **Programmatic Call Ending** — Goodbye detection → EndFrame after 2s delay (bypasses unreliable LLM tool calls)
 - **Director Fallback Actions** — Force winding-down at 9min, force call end at 12min
-- **Predictive Context Engine** — Speculative memory prefetch with 2-wave pipeline:
+- **Predictive Context Engine** — Speculative prefetch with 2-wave pipeline:
   - 1st wave: Regex topic/entity extraction → background memory search (~0ms added latency)
-  - 2nd wave: Director Gemini analysis → anticipatory prefetch (next_topic, reminders, news)
+  - 2nd wave: Director analysis → anticipatory prefetch (next_topic, reminders, web queries)
+  - Web search prefetch: Director predicts questions with location/date context → pre-fetched via OpenAI
   - Interim transcription prefetch while user speaks (debounced)
-  - Cache-first `search_memories` tool handler (~0ms hit vs 200-300ms live search)
+  - Cache-first tool handlers (~0ms hit vs 200-300ms memory search, ~0ms vs 4-10s web search)
+- **Director-Driven News Injection** — News context injected dynamically when Director signals relevance (saves ~300 tokens/turn vs static system prompt)
 - **Barge-in support** — Interrupt detection via Silero VAD
 
 ### Core Capabilities
@@ -32,7 +34,8 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Mid-call memory refresh (after 5+ minutes, refreshes context with current topics)
 - Same-day cross-call memory (timezone-aware daily context + call summaries)
 - Sentiment-aware greetings (uses last call's engagement/rapport for tone)
-- News via OpenAI web search (1hr cache)
+- News via OpenAI web search (1hr cache, Director-driven injection)
+- Web search via OpenAI (async, prefetch-accelerated)
 - Scheduled reminder calls with delivery tracking
 - Call context snapshot (pre-computed JSONB, eliminates 6 DB queries per call)
 - Context + news pre-caching at 5 AM local time
@@ -41,7 +44,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - 5 LLM tools: search_memories, get_news, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
 
 ### Infrastructure & Reliability
-- Circuit breakers for external services (Gemini, OpenAI embeddings, news)
+- Circuit breakers for external services (Groq, Cerebras, Gemini, OpenAI embeddings, news)
 - DB-backed feature flags with 5-minute cache
 - Graceful shutdown with active call tracking (7s drain on SIGTERM)
 - Enhanced /health endpoint (database + circuit breaker states)
@@ -98,7 +101,7 @@ make test-regression         # Scenario-based regression tests
 
 ### Pipecat Voice Pipeline (bot.py)
 
-Linear pipeline of `FrameProcessor`s. The Conversation Director is **non-blocking** — it passes frames through instantly while running Gemini analysis in a background task.
+Linear pipeline of `FrameProcessor`s. The Conversation Director is **non-blocking** — it passes frames through instantly while running analysis in a background task.
 
 ```
 Phone Call → Twilio → WebSocket → Pipecat Pipeline
@@ -113,14 +116,16 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                              └─────────┬───────────┘
                                        │
                                        ▼
-                             ┌─────────────────────┐   ┌───────────────────┐
-                             │   Conversation       │──►│ Background Task   │
-                             │   Director           │   │ Gemini Flash      │
-                             │   (PASS-THROUGH)     │   │ ~150ms/turn       │
-                             │                      │   │ Result cached for │
-                             │ Injects PREVIOUS     │   │ NEXT turn         │
-                             │ turn's cached result  │   │ Predictive prefetch│
-                             │                      │   └───────────────────┘
+                             ┌─────────────────────┐   ┌───────────────────────┐
+                             │   Conversation       │──►│ Background Analysis    │
+                             │   Director           │   │ Groq/Cerebras primary │
+                             │   (PASS-THROUGH)     │   │ Gemini Flash fallback  │
+                             │                      │   │ Result cached → next   │
+                             │ Injects guidance +   │   │ turn (or same-turn     │
+                             │ dynamic news context │   │ via speculative)       │
+                             │                      │   │ + Predictive prefetch  │
+                             │                      │   │ + Web search prefetch  │
+                             │                      │   └───────────────────────┘
                              └─────────┬───────────┘
                                        │ (no delay)
                                        ▼
@@ -139,7 +144,7 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
 
 ### Conversation Director
 
-The Director runs non-blocking per turn via `asyncio.create_task()`:
+The Director runs non-blocking per turn via `asyncio.create_task()`. Multi-provider: Groq (~70ms) / Cerebras (~70ms) primary, Gemini Flash fallback. Speculative analysis during silence gaps enables same-turn guidance.
 
 | Feature | Description |
 |---------|-------------|
@@ -150,7 +155,10 @@ The Director runs non-blocking per turn via `asyncio.create_task()`:
 | **Emotional Detection** | Adjust tone for sad/concerned seniors |
 | **Goodbye Suppression** | Skips guidance when Quick Observer detects goodbye |
 | **Time-Based Fallbacks** | Force winding-down at 9min, force end at 12min |
-| **Predictive Prefetch** | 2-wave speculative memory prefetch (regex + Gemini analysis) |
+| **Predictive Prefetch** | 2-wave speculative prefetch (regex + Director analysis) |
+| **Web Search Prefetch** | Director predicts questions with location/date → pre-fetched via OpenAI |
+| **Dynamic News Injection** | News injected into context only when Director signals relevance |
+| **Location/Date Context** | Senior's city/state + today's date passed to Director for specific predictions |
 
 ## Architecture Decision: Two Backends
 
@@ -254,7 +262,9 @@ DONNA_API_KEY=...                       # API key auth
 SCHEDULER_ENABLED=false                 # Must be false (Node.js runs scheduler)
 
 # Optional
-FAST_OBSERVER_MODEL=gemini-3-flash-preview  # Director model
+FAST_OBSERVER_MODEL=gemini-3-flash-preview  # Director fallback model
+GROQ_API_KEY=...                        # Groq (primary Director provider)
+CEREBRAS_API_KEY=...                    # Cerebras (primary Director provider)
 ELEVENLABS_VOICE_ID=...                 # Voice ID (has default)
 ```
 

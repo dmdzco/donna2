@@ -54,6 +54,10 @@ export default defineConfig({
       url: 'http://localhost:5174',
       reuseExistingServer: !process.env.CI,
       timeout: 120000,
+      env: {
+        ...process.env,
+        VITE_CLERK_PUBLISHABLE_KEY: 'pk_test_ZXhwZXJ0LWFudC01Ny5jbGVyay5hY2NvdW50cy5kZXYk',
+      },
     },
     {
       command: 'npm run dev --prefix apps/observability',

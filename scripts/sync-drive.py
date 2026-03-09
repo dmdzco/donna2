@@ -50,8 +50,42 @@ def get_access_token(client_id: str, client_secret: str, refresh_token: str) -> 
     return resp.json()["access_token"]
 
 
-def list_files_in_folder(access_token: str, folder_id: str) -> list[dict]:
-    """List all supported files in the given Drive folder."""
+def list_subfolders(access_token: str, folder_id: str) -> list[dict]:
+    """List all subfolders in the given Drive folder."""
+    folders = []
+    page_token = None
+
+    while True:
+        params = {
+            "q": f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+            "fields": "nextPageToken,files(id,name)",
+            "pageSize": 100,
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
+        }
+        if page_token:
+            params["pageToken"] = page_token
+
+        resp = requests.get(
+            f"{DRIVE_API}/files",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params=params,
+        )
+        if not resp.ok:
+            print(f"Error listing subfolders: {resp.status_code} {resp.text}", file=sys.stderr)
+            resp.raise_for_status()
+        data = resp.json()
+        folders.extend(data.get("files", []))
+
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+
+    return folders
+
+
+def list_files_in_folder(access_token: str, folder_id: str, recurse: bool = True) -> list[dict]:
+    """List all supported files in the given Drive folder, recursing into subfolders."""
     mime_filter = " or ".join(f"mimeType='{m}'" for m in SUPPORTED_MIMES)
     query = f"'{folder_id}' in parents and ({mime_filter}) and trashed=false"
 
@@ -83,6 +117,12 @@ def list_files_in_folder(access_token: str, folder_id: str) -> list[dict]:
         page_token = data.get("nextPageToken")
         if not page_token:
             break
+
+    if recurse:
+        subfolders = list_subfolders(access_token, folder_id)
+        for sf in subfolders:
+            print(f"  Entering subfolder: {sf['name']}")
+            files.extend(list_files_in_folder(access_token, sf["id"], recurse=True))
 
     return files
 

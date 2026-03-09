@@ -8,7 +8,6 @@ const router = Router();
 
 // Dashboard statistics (admin only for aggregate stats)
 router.get('/api/stats', requireAdmin, async (req, res) => {
-  const sessions = req.app.get('sessions');
   try {
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -57,7 +56,7 @@ router.get('/api/stats', requireAdmin, async (req, res) => {
       totalSeniors: parseInt(totalSeniors) || 0,
       callsToday: parseInt(callsToday) || 0,
       upcomingRemindersCount: upcomingReminders.length,
-      activeCalls: sessions.size,
+      activeCalls: 0,
       upcomingReminders,
       recentCalls,
     });

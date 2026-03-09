@@ -119,7 +119,7 @@ def _load_settings() -> Settings:
         cerebras_director_model=_env("CEREBRAS_DIRECTOR_MODEL", "gpt-oss-120b"),
         groq_director_model=_env("GROQ_DIRECTOR_MODEL", "openai/gpt-oss-20b"),
         call_analysis_model=_env("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview"),
-        anthropic_model=_env("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+        anthropic_model=_env("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"),
         # Auth
         jwt_secret=_env("JWT_SECRET", "donna-admin-secret-change-me"),
         donna_api_key=_env("DONNA_API_KEY"),

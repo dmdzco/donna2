@@ -44,7 +44,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼ (no delay)
               Context Aggregator (user) ← builds LLM context from transcriptions
                         ▼
-              Claude Sonnet 4.6 + FlowManager (4-phase state machine)
+              Claude Sonnet 4.5 + FlowManager (4-phase state machine)
                         │ TextFrame
                         ▼
               Conversation Tracker (topics, questions, advice + shared transcript)
@@ -146,7 +146,7 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 |-----------|-----------|---------|
 | Voice Pipeline | Pipecat | v0.0.101+ |
 | Call State Machine | Pipecat Flows | v0.0.22+ |
-| Primary LLM | Anthropic Claude Sonnet 4.6 | claude-sonnet-4-6 |
+| Primary LLM | Anthropic Claude Sonnet 4.5 | claude-sonnet-4-5-20250929 |
 | Director LLM (primary) | Groq / Cerebras | gpt-oss-20b / gpt-oss-120b (~70ms) |
 | Director LLM (fallback) | Google Gemini Flash | gemini-3-flash-preview (~150ms) |
 | Post-Call Analysis | Google Gemini Flash | gemini-3-flash-preview |

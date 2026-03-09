@@ -131,9 +131,10 @@ Phases: opening(0-30s) → main(30s-8min) → winding_down(8-9min) → closing(9
 Reminders: natural pauses + high engagement only. Never during emotions/low engagement. Never repeat delivered.
 Low engagement: suggest personal questions or memories. News: medium+ engagement, topic winding down.
 Onboarding calls (call_type="onboarding"): no reminders, no re-engage signals, focus on discovery.
-memory_queries: 1-3 keywords from current message (names, places, topics). Extract what they're TALKING ABOUT.
+PREFETCH — help Donna respond faster by extracting topics for memory search:
+memory_queries: CRITICAL — ALWAYS extract 1-3 keyword phrases from the senior's current message. Extract names, places, topics, activities, hobbies, people they mention. Extract what they're TALKING ABOUT, not generic categories. Examples: "paddle" not "sports", "grandson Jake" not "family", "Torchy's Tacos" not "food". NEVER return empty — if the senior said anything substantive, extract at least one query.
 web_queries: CRITICAL — you are the ONLY way web searches happen. Extract full Google-style queries for ANY factual question. Include city/state and current date for location/time-sensitive queries. Example: "Austin Texas weather March 10 2026". Empty array if no factual question. Be aggressive — if there's any chance the user wants current info, include a query.
-anticipated_tools: from [search_memories, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes].
+anticipated_tools: from [search_memories, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes]. ALWAYS include search_memories when memory_queries is non-empty.
 
 JSON:{"analysis":{"call_phase":"str","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"str","priority_action":"str","specific_instruction":"str"},"prefetch":{"memory_queries":[],"web_queries":[],"anticipated_tools":[]}}"""
 

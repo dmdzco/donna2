@@ -64,7 +64,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Context Pre-caching** - Senior context + news cached at 5 AM local time, news persisted to `seniors.cached_news`
 - Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3 via Pipecat)
-- LLM responses (Claude Sonnet 4.6 via Pipecat AnthropicLLMService, prompt caching enabled)
+- LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - TTS (ElevenLabs via Pipecat)
 - VAD (Silero — confidence=0.6, stop_secs=1.2, min_volume=0.5)
 - News via OpenAI web search (1hr cache)
@@ -130,7 +130,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               Context Aggregator (user) ← builds LLM context from transcriptions
                         ▼
-              Claude Sonnet 4.6 + FlowManager (4-phase state machine)
+              Claude Sonnet 4.5 + FlowManager (4-phase state machine)
                         │ TextFrame
                         ▼
               Conversation Tracker (topics, questions, advice + shared transcript)
@@ -558,4 +558,4 @@ Consult these for product direction, decisions, and priorities.
 
 ---
 
-*Last updated: March 2026 — v5.2 with multi-provider Director, web search prefetch, Claude Sonnet 4.6, GrowthBook feature flags, observability & reliability*
+*Last updated: March 2026 — v5.2 with multi-provider Director, web search prefetch, Claude Sonnet 4.5, GrowthBook feature flags, observability & reliability*

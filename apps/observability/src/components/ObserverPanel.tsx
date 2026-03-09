@@ -88,6 +88,39 @@ export function ObserverPanel({ callId }: ObserverPanelProps) {
         </div>
       )}
 
+      {/* Analysis Summary (from post-call analysis) */}
+      {data.analysis && (
+        <div className="analysis-section">
+          <h4>Post-Call Analysis</h4>
+          <div className="analysis-details">
+            {data.analysis.engagementScore != null && (
+              <div className="analysis-row">
+                <span className="analysis-label">Engagement Score</span>
+                <span className="analysis-value">{data.analysis.engagementScore}/10</span>
+              </div>
+            )}
+            {data.analysis.rapport && (
+              <div className="analysis-row">
+                <span className="analysis-label">Rapport</span>
+                <span className={`rapport-badge rapport-${data.analysis.rapport}`}>{data.analysis.rapport}</span>
+              </div>
+            )}
+            {data.analysis.goalsAchieved != null && (
+              <div className="analysis-row">
+                <span className="analysis-label">Goals Achieved</span>
+                <span className="analysis-value">{data.analysis.goalsAchieved ? 'Yes' : 'No'}</span>
+              </div>
+            )}
+            {data.analysis.positiveObservations?.length > 0 && (
+              <div className="analysis-row analysis-list">
+                <span className="analysis-label">Positive Observations</span>
+                <ul>{data.analysis.positiveObservations.map((obs: string, i: number) => <li key={i}>{obs}</li>)}</ul>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Signal Timeline */}
       <div className="signals-section">
         <h4>Signal History</h4>

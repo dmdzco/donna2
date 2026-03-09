@@ -15,7 +15,7 @@ export function MetricsPanel({ callId }: MetricsPanelProps) {
     return <div className="metrics-panel error">Error: {error}</div>;
   }
 
-  if (!data || (!data.callMetrics && data.turnMetrics.length === 0)) {
+  if (!data || (!data.callMetrics && (!data.turnMetrics || data.turnMetrics.length === 0))) {
     return (
       <div className="metrics-panel empty">
         <p>No metrics data for this call</p>

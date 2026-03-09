@@ -26,6 +26,20 @@ export const prefetchedContextByPhone = new Map();
 // Normalize phone to last 10 digits (matches seniors.js)
 const normalizePhone = (phone) => phone.replace(/\D/g, '').slice(-10);
 
+// Retry Twilio calls.create() with exponential backoff (3 attempts, 1s → 2s → 4s)
+async function retryTwilioCall(client, params, maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await client.calls.create(params);
+    } catch (err) {
+      if (attempt === maxAttempts) throw err;
+      const delay = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
+      log.warn('Twilio call retry', { attempt, maxAttempts, delay_ms: delay, error: err.message, to: params.to });
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
 // Welfare check tracking — prevents calling the same senior twice per day
 const welfareCalledToday = new Set();
 let lastWelfareClearDate = new Date().toISOString().slice(0, 10);
@@ -281,7 +295,7 @@ export const schedulerService = {
 
     log.info('Context ready, triggering reminder call', { contextLen: memoryContext?.length || 0 });
 
-    const call = await client.calls.create({
+    const call = await retryTwilioCall(client, {
       to: senior.phone,
       from: process.env.TWILIO_PHONE_NUMBER,
       url: `${baseUrl}/voice/answer`,
@@ -327,7 +341,8 @@ export const schedulerService = {
       reminderPrompt, // PRE-FORMATTED
       triggeredAt: new Date(),
       delivery,       // Include delivery record for acknowledgment tracking
-      scheduledFor: targetScheduledFor
+      scheduledFor: targetScheduledFor,
+      _createdAt: Date.now(),
     });
 
     log.info('Reminder call initiated', { callSid: call.sid, name: senior.name });
@@ -345,7 +360,7 @@ export const schedulerService = {
 
     await this.prefetchForPhone(senior.phone, senior);
 
-    const call = await client.calls.create({
+    const call = await retryTwilioCall(client, {
       to: senior.phone,
       from: process.env.TWILIO_PHONE_NUMBER,
       url: `${baseUrl}/voice/answer`,
@@ -389,7 +404,8 @@ export const schedulerService = {
       senior,
       memoryContext,
       preGeneratedGreeting,
-      fetchedAt: new Date()
+      fetchedAt: new Date(),
+      _createdAt: Date.now(),
     });
 
     log.info('Pre-fetch complete', { phone: normalized, greetingReady: !!preGeneratedGreeting });
@@ -716,6 +732,26 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
     log.error('Initial pre-fetch error', { error: err.message });
     try { import('@sentry/node').then(Sentry => Sentry.captureException(err)); } catch {}
   });
+
+  // Cleanup stale pending contexts every 5 minutes (TTL: 30 minutes)
+  const PENDING_TTL_MS = 30 * 60 * 1000;
+  setInterval(() => {
+    const now = Date.now();
+    let cleaned = 0;
+    for (const [key, value] of pendingReminderCalls.entries()) {
+      if (value._createdAt && now - value._createdAt > PENDING_TTL_MS) {
+        pendingReminderCalls.delete(key);
+        cleaned++;
+      }
+    }
+    for (const [key, value] of prefetchedContextByPhone.entries()) {
+      if (value._createdAt && now - value._createdAt > PENDING_TTL_MS) {
+        prefetchedContextByPhone.delete(key);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) log.info('Cleaned stale pending contexts', { cleaned });
+  }, 5 * 60 * 1000);
 
   log.info('Context pre-caching enabled (hourly check for 5 AM local time)');
   log.info('Unified scheduler ready (reminders + welfare every 60s)');

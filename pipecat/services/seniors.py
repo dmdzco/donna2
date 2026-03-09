@@ -95,7 +95,10 @@ async def update(senior_id: str, data: dict) -> dict | None:
 
 async def list_active() -> list[dict]:
     """List all active seniors."""
-    return await query_many("SELECT * FROM seniors WHERE is_active = true")
+    return await query_many(
+        "SELECT id, name, phone, timezone, interests, is_active, city, state"
+        " FROM seniors WHERE is_active = true"
+    )
 
 
 async def get_by_id(senior_id: str) -> dict | None:

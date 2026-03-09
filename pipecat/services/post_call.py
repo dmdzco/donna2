@@ -8,6 +8,8 @@ Extracted from bot.py to keep the pipeline assembly module focused.
 
 from __future__ import annotations
 
+import asyncio
+
 from loguru import logger
 
 
@@ -40,10 +42,7 @@ async def run_post_call(
     transcript = session_state.get("_transcript", [])
     analysis = None
 
-    # Each step has its own try/except so a failure in one step
-    # (e.g. Gemini outage) doesn't prevent the others from running.
-
-    # 1. Complete conversation record
+    # Step 1: Complete conversation (must run first — prerequisite for all)
     try:
         if conversation_id:
             from services.conversations import complete
@@ -55,21 +54,72 @@ async def run_post_call(
     except Exception as e:
         logger.error("[{cs}] Post-call step 1 (complete conversation) failed: {err}", cs=call_sid, err=str(e))
 
-    # 2. Run call analysis (Gemini Flash)
-    try:
-        if transcript and senior:
-            from services.call_analysis import analyze_completed_call, save_call_analysis
-            analysis = await analyze_completed_call(transcript, senior)
-            if conversation_id and senior_id:
-                await save_call_analysis(conversation_id, senior_id, analysis)
-            # Persist summary to conversations table so get_recent_summaries() works
-            summary = analysis.get("summary") if analysis else None
-            if summary and summary != "Analysis unavailable":
-                from services.conversations import update_summary
-                await update_summary(call_sid, summary)
-                logger.info("[{cs}] Persisted call summary ({n} chars)", cs=call_sid, n=len(summary))
-    except Exception as e:
-        logger.error("[{cs}] Post-call step 2 (call analysis) failed: {err}", cs=call_sid, err=str(e))
+    # --- Parallel group: independent steps (2, 3, 5, 6) ---
+    async def _step2_analysis():
+        if not (transcript and senior):
+            return None
+        from services.call_analysis import analyze_completed_call, save_call_analysis
+        result = await analyze_completed_call(transcript, senior)
+        if conversation_id and senior_id:
+            await save_call_analysis(conversation_id, senior_id, result)
+        summary = result.get("summary") if result else None
+        if summary and summary != "Analysis unavailable":
+            from services.conversations import update_summary
+            await update_summary(call_sid, summary)
+            logger.info("[{cs}] Persisted call summary ({n} chars)", cs=call_sid, n=len(summary))
+        return result
+
+    async def _step3_memory():
+        if not (transcript and senior_id):
+            return
+        from services.memory import extract_from_conversation
+        if isinstance(transcript, list):
+            formatted = "\n".join(
+                f"{t.get('role', 'unknown')}: {t.get('content', '')}"
+                for t in transcript if isinstance(t, dict)
+            )
+        else:
+            formatted = str(transcript)
+        await extract_from_conversation(senior_id, formatted, conversation_id or "unknown")
+
+    async def _step5_reminder():
+        reminder_delivery = session_state.get("reminder_delivery")
+        if reminder_delivery:
+            delivered_set = session_state.get("reminders_delivered", set())
+            if not delivered_set:
+                from services.reminder_delivery import mark_call_ended_without_acknowledgment
+                await mark_call_ended_without_acknowledgment(reminder_delivery["id"])
+
+    async def _step6_cache():
+        if senior_id:
+            from services.context_cache import clear_cache
+            clear_cache(senior_id)
+        if call_sid:
+            from services.scheduler import clear_reminder_context
+            clear_reminder_context(call_sid)
+
+    results = await asyncio.gather(
+        _step2_analysis(),
+        _step3_memory(),
+        _step5_reminder(),
+        _step6_cache(),
+        return_exceptions=True,
+    )
+
+    # Extract analysis result (step 2)
+    analysis_result = results[0]
+    if isinstance(analysis_result, Exception):
+        logger.error("[{cs}] Post-call step 2 (call analysis) failed: {err}", cs=call_sid, err=str(analysis_result))
+    else:
+        analysis = analysis_result
+    for i, (step_name, r) in enumerate(zip(
+        ["call analysis", "memory extraction", "reminder cleanup", "cache clearing"],
+        results,
+    )):
+        if isinstance(r, Exception) and i > 0:  # step 2 already logged above
+            logger.error("[{cs}] Post-call ({step}) failed: {err}", cs=call_sid, step=step_name, err=str(r))
+
+    # --- Sequential group: steps that depend on analysis ---
 
     # 2.5 Trigger caregiver notifications
     try:
@@ -79,24 +129,6 @@ async def run_post_call(
             )
     except Exception as e:
         logger.error("[{cs}] Post-call step 2.5 (caregiver notification) failed: {err}", cs=call_sid, err=str(e))
-
-    # 3. Extract and store memories
-    try:
-        if transcript and senior_id:
-            from services.memory import extract_from_conversation
-            if isinstance(transcript, list):
-                formatted_transcript = "\n".join(
-                    f"{turn.get('role', 'unknown')}: {turn.get('content', '')}"
-                    for turn in transcript
-                    if isinstance(turn, dict)
-                )
-            else:
-                formatted_transcript = str(transcript)
-            await extract_from_conversation(
-                senior_id, formatted_transcript, conversation_id or "unknown"
-            )
-    except Exception as e:
-        logger.error("[{cs}] Post-call step 3 (memory extraction) failed: {err}", cs=call_sid, err=str(e))
 
     # 3.5 Discover new interests from the call
     try:
@@ -114,7 +146,6 @@ async def run_post_call(
                 updated = await add_interests_to_senior(
                     senior_id, new_interests, existing_interests
                 )
-                # Update senior dict in session so step 3.6 uses fresh interests
                 senior["interests"] = updated
                 logger.info(
                     "[{cs}] Discovered {n} new interests: {new}",
@@ -155,28 +186,6 @@ async def run_post_call(
             )
     except Exception as e:
         logger.error("[{cs}] Post-call step 4 (daily context) failed: {err}", cs=call_sid, err=str(e))
-
-    # 5. Handle reminder cleanup
-    try:
-        reminder_delivery = session_state.get("reminder_delivery")
-        if reminder_delivery:
-            delivered_set = session_state.get("reminders_delivered", set())
-            if not delivered_set:
-                from services.reminder_delivery import mark_call_ended_without_acknowledgment
-                await mark_call_ended_without_acknowledgment(reminder_delivery["id"])
-    except Exception as e:
-        logger.error("[{cs}] Post-call step 5 (reminder cleanup) failed: {err}", cs=call_sid, err=str(e))
-
-    # 6. Clear caches (always runs even if earlier steps failed)
-    try:
-        if senior_id:
-            from services.context_cache import clear_cache
-            clear_cache(senior_id)
-        if call_sid:
-            from services.scheduler import clear_reminder_context
-            clear_reminder_context(call_sid)
-    except Exception as e:
-        logger.error("[{cs}] Post-call step 6 (cache clearing) failed: {err}", cs=call_sid, err=str(e))
 
     # 7. Rebuild call context snapshot for next call
     try:

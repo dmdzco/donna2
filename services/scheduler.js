@@ -26,6 +26,20 @@ export const prefetchedContextByPhone = new Map();
 // Normalize phone to last 10 digits (matches seniors.js)
 const normalizePhone = (phone) => phone.replace(/\D/g, '').slice(-10);
 
+// Retry Twilio calls.create() with exponential backoff (3 attempts, 1s → 2s → 4s)
+async function retryTwilioCall(client, params, maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await client.calls.create(params);
+    } catch (err) {
+      if (attempt === maxAttempts) throw err;
+      const delay = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
+      log.warn('Twilio call retry', { attempt, maxAttempts, delay_ms: delay, error: err.message, to: params.to });
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
 // Welfare check tracking — prevents calling the same senior twice per day
 const welfareCalledToday = new Set();
 let lastWelfareClearDate = new Date().toISOString().slice(0, 10);
@@ -281,7 +295,7 @@ export const schedulerService = {
 
     log.info('Context ready, triggering reminder call', { contextLen: memoryContext?.length || 0 });
 
-    const call = await client.calls.create({
+    const call = await retryTwilioCall(client, {
       to: senior.phone,
       from: process.env.TWILIO_PHONE_NUMBER,
       url: `${baseUrl}/voice/answer`,
@@ -327,7 +341,8 @@ export const schedulerService = {
       reminderPrompt, // PRE-FORMATTED
       triggeredAt: new Date(),
       delivery,       // Include delivery record for acknowledgment tracking
-      scheduledFor: targetScheduledFor
+      scheduledFor: targetScheduledFor,
+      _createdAt: Date.now(),
     });
 
     log.info('Reminder call initiated', { callSid: call.sid, name: senior.name });
@@ -345,7 +360,7 @@ export const schedulerService = {
 
     await this.prefetchForPhone(senior.phone, senior);
 
-    const call = await client.calls.create({
+    const call = await retryTwilioCall(client, {
       to: senior.phone,
       from: process.env.TWILIO_PHONE_NUMBER,
       url: `${baseUrl}/voice/answer`,
@@ -389,7 +404,8 @@ export const schedulerService = {
       senior,
       memoryContext,
       preGeneratedGreeting,
-      fetchedAt: new Date()
+      fetchedAt: new Date(),
+      _createdAt: Date.now(),
     });
 
     log.info('Pre-fetch complete', { phone: normalized, greetingReady: !!preGeneratedGreeting });
@@ -581,10 +597,30 @@ export const schedulerService = {
  * Welfare SQL is cheap (NOT EXISTS), so running every minute means
  * newly-eligible seniors get called within ~1 minute instead of ~59.
  */
+// Advisory lock ID for scheduler leader election (matches Python scheduler)
+const SCHEDULER_LOCK_ID = 8675309;
+
+async function tryAcquireLeaderLock() {
+  try {
+    const result = await db.execute(
+      sql`SELECT pg_try_advisory_lock(${SCHEDULER_LOCK_ID}) AS acquired`
+    );
+    return result.rows?.[0]?.acquired === true;
+  } catch (err) {
+    log.warn('Failed to acquire scheduler lock', { error: err.message });
+    return false;
+  }
+}
+
 export function startScheduler(baseUrl, intervalMs = 60000) {
   log.info('Starting unified scheduler', { intervalSeconds: intervalMs / 1000 });
+  let isLeader = false;
 
   const runUnifiedCheck = async () => {
+    const cycleStart = Date.now();
+    let attempted = 0;
+    let succeeded = 0;
+    let failed = 0;
     try {
       // Date-rollover clear of welfare tracking
       const today = new Date().toISOString().slice(0, 10);
@@ -609,39 +645,77 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
         log.info('Unified call plan', { total: callPlan.length, reminders: reminderCount, welfare: welfareCount });
       }
 
-      // Execute calls sequentially with 5s stagger
-      let executed = 0;
-      for (const spec of callPlan) {
-        const call = await schedulerService.triggerOutboundCall(spec, baseUrl);
-        if (call) {
-          // Post-call bookkeeping
-          if (spec.type === 'reminder') {
-            await schedulerService.markDelivered(spec.reminder.id);
-          } else {
-            welfareCalledToday.add(spec.senior.id);
-          }
-          executed++;
-          // 5s stagger between calls to avoid overwhelming Twilio
-          if (executed < callPlan.length) {
-            await new Promise(resolve => setTimeout(resolve, 5000));
-          }
-        }
-      }
+      // Execute calls in parallel with concurrency limit of 10
+      attempted = callPlan.length;
+      const CONCURRENCY = 10;
+      let inFlight = 0;
 
-      if (executed > 0) {
-        log.info('Unified check complete', { executed, planned: callPlan.length });
+      const triggerOne = async (spec) => {
+        // Simple semaphore: wait until slot available
+        while (inFlight >= CONCURRENCY) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        inFlight++;
+        try {
+          const call = await schedulerService.triggerOutboundCall(spec, baseUrl);
+          if (call) {
+            if (spec.type === 'reminder') {
+              await schedulerService.markDelivered(spec.reminder.id);
+            } else {
+              welfareCalledToday.add(spec.senior.id);
+            }
+            succeeded++;
+          } else {
+            failed++;
+          }
+        } catch (err) {
+          log.error('Trigger failed', { type: spec.type, error: err.message });
+          failed++;
+        } finally {
+          inFlight--;
+        }
+      };
+
+      const results = await Promise.allSettled(callPlan.map(triggerOne));
+
+      if (succeeded > 0) {
+        log.info('Unified check complete', { succeeded, failed, planned: callPlan.length });
       }
     } catch (error) {
       log.error('Unified check error', { error: error.message });
       try { const Sentry = await import('@sentry/node'); Sentry.captureException(error); } catch {}
+    } finally {
+      const cycleDurationMs = Date.now() - cycleStart;
+      if (attempted > 0 || cycleDurationMs > 5000) {
+        log.info('Scheduler cycle', {
+          duration_ms: cycleDurationMs,
+          attempted,
+          succeeded,
+          failed,
+          pending_contexts: pendingReminderCalls.size,
+        });
+      }
+    }
+  };
+
+  // Leader election wrapper — only the leader runs the unified check
+  const leaderCheck = async () => {
+    if (!isLeader) {
+      isLeader = await tryAcquireLeaderLock();
+      if (isLeader) {
+        log.info('Acquired scheduler leader lock — this instance is the scheduler leader');
+      }
+    }
+    if (isLeader) {
+      await runUnifiedCheck();
     }
   };
 
   // Initial check after 5s delay (let server warm up)
-  setTimeout(runUnifiedCheck, 5000);
+  setTimeout(leaderCheck, 5000);
 
   // Single 60-second polling loop for both reminders and welfare
-  const schedulerIntervalId = setInterval(runUnifiedCheck, intervalMs);
+  const schedulerIntervalId = setInterval(leaderCheck, intervalMs);
 
   // Hourly context pre-caching (unchanged)
   const prefetchIntervalId = setInterval(async () => {
@@ -658,6 +732,26 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
     log.error('Initial pre-fetch error', { error: err.message });
     try { import('@sentry/node').then(Sentry => Sentry.captureException(err)); } catch {}
   });
+
+  // Cleanup stale pending contexts every 5 minutes (TTL: 30 minutes)
+  const PENDING_TTL_MS = 30 * 60 * 1000;
+  setInterval(() => {
+    const now = Date.now();
+    let cleaned = 0;
+    for (const [key, value] of pendingReminderCalls.entries()) {
+      if (value._createdAt && now - value._createdAt > PENDING_TTL_MS) {
+        pendingReminderCalls.delete(key);
+        cleaned++;
+      }
+    }
+    for (const [key, value] of prefetchedContextByPhone.entries()) {
+      if (value._createdAt && now - value._createdAt > PENDING_TTL_MS) {
+        prefetchedContextByPhone.delete(key);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) log.info('Cleaned stale pending contexts', { cleaned });
+  }, 5 * 60 * 1000);
 
   log.info('Context pre-caching enabled (hourly check for 5 AM local time)');
   log.info('Unified scheduler ready (reminders + welfare every 60s)');

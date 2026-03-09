@@ -1,0 +1,228 @@
+# Testing Architecture
+
+> Testing infrastructure for the Donna voice pipeline — unit tests, integration tests, load tests, and regression scenarios.
+
+---
+
+## Overview
+
+| Category | Count | Coverage |
+|----------|-------|----------|
+| Unit tests | 543+ | Processors, services, utilities, flows |
+| Skipped (require APIs) | 14 | Integration, LLM, simulation tests |
+| Test files | 61 | Across 3 testing levels |
+| Load test files | 5 | DB, WebSocket, scheduler throughput |
+
+### Quick Start
+
+```bash
+# Run all unit tests (no API keys needed)
+cd pipecat && uv run python -m pytest tests/ -m "not integration and not llm" -q
+
+# Run with coverage
+cd pipecat && uv run python -m pytest tests/ -m "not integration and not llm" --cov=. --cov-report=term-missing
+
+# Run specific test markers
+cd pipecat && uv run python -m pytest tests/ -m regression -q
+```
+
+---
+
+## Three Testing Levels
+
+```
+Level 3: Call Simulation Tests        ← Full call lifecycle end-to-end
+  │  Uses: TestTransport, MockLLM, MockSTT, MockTTS, pipeline_builder
+  │  Tests: Complete call lifecycle, phase transitions, goodbye flow, post-call
+  │
+Level 2: Pipeline Integration Tests   ← Multi-processor frame flow
+  │  Uses: Pipeline(), PipelineRunner, mock services
+  │  Tests: Frame flow through 2+ processors, context injection, tool calls
+  │
+Level 1: Processor Frame Tests        ← Single processor as FrameProcessor
+  │  Uses: Custom run_processor_test() helper
+  │  Tests: Each processor's process_frame() with real Frame objects
+  │
+Existing: Pure Function Tests (163+)  ← Already covered
+```
+
+### Level 1: Processor Frame Tests
+Test individual processors in isolation with real Pipecat Frame objects:
+- Quick Observer pattern matching
+- Conversation Tracker topic extraction
+- Guidance Stripper tag removal
+- Metrics Logger frame counting
+
+### Level 2: Pipeline Integration Tests
+Test frame flow through multiple connected processors:
+- Observer → Director guidance injection
+- Context aggregation across turns
+- Tool call handling through FlowManager
+
+### Level 3: Call Simulation Tests
+Full call lifecycle from WebSocket connect to post-call processing:
+- Happy path: greeting → conversation → goodbye
+- Goodbye detection: various goodbye phrases
+- Reminder delivery: reminder acknowledged flow
+- Emotional support: crisis detection and response
+
+---
+
+## Test Markers
+
+| Marker | Purpose | When to Use |
+|--------|---------|------------|
+| `integration` | Requires DATABASE_URL, API keys | CI with secrets configured |
+| `llm` | Requires ANTHROPIC_API_KEY | LLM response validation |
+| `llm_simulation` | LLM-vs-LLM simulation (slow) | Manual validation |
+| `regression` | Full pipeline scenario tests | Before deployment |
+
+---
+
+## Mock Infrastructure
+
+**Directory**: `pipecat/tests/mocks/`
+
+| Mock | File | Purpose |
+|------|------|---------|
+| `MockSTTProcessor` | `mocks/mock_stt.py` | Emits TranscriptionFrames from scripted text |
+| `MockLLMProcessor` | `mocks/mock_llm.py` | Returns configurable responses, tracks tool calls |
+| `MockTTSProcessor` | `mocks/mock_tts.py` | Passes through text as audio frames |
+| `TestTransport` | `mocks/test_transport.py` | Simulates Twilio WebSocket transport |
+| `FakeDBPool` | `conftest.py` | In-memory database mock |
+
+### LOAD_TEST_MODE
+
+**File**: `pipecat/bot.py`
+
+Set `LOAD_TEST_MODE=true` to swap real services for mocks in the pipeline:
+- Deepgram STT → MockSTTProcessor
+- Claude Sonnet → MockLLMProcessor (returns canned responses)
+- ElevenLabs TTS → MockTTSProcessor
+
+This isolates pipeline/transport/DB performance from external API latency during load tests.
+
+---
+
+## Regression Scenarios
+
+**Directory**: `pipecat/tests/scenarios/`
+
+YAML-based conversation scripts that simulate full calls:
+
+| Scenario | Tests |
+|----------|-------|
+| Happy path | Greeting → topics → natural goodbye |
+| Strong goodbye | "I gotta go" → immediate EndFrame (3.5s) |
+| Reminder delivery | Medication reminder → acknowledged |
+| Emotional support | Distress signals → empathetic response |
+| Multiple topics | Topic switching during conversation |
+| News discussion | get_news tool call → discussion |
+
+---
+
+## Load Testing Infrastructure
+
+**Directory**: `pipecat/tests/load/`
+
+Built on Locust (Python-native, supports WebSocket via custom client):
+
+### Test Files
+
+| File | Tests | Duration |
+|------|-------|----------|
+| `locustfile_db.py` | Database query performance (search, store, summaries) | Configurable |
+| `locustfile_ws.py` | WebSocket pipeline (mock Twilio protocol) | 30s-10min per call |
+| `locustfile_scheduler.py` | Scheduler throughput (reminder initiation) | Single run |
+| `twilio_mock.py` | Mock Twilio Media Stream WebSocket protocol | Utility |
+| `conftest.py` | Shared load test configuration | — |
+
+### Runner Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `tests/load/run_load_tests.sh` | Comprehensive runner with predefined scenarios |
+| `tests/load/monitor_health.sh` | Continuous health monitoring to CSV |
+
+### Predefined Scenarios
+
+```bash
+# Baseline: 50 concurrent, 2 minutes
+bash tests/load/run_load_tests.sh baseline
+
+# Target: 500 concurrent, 10 minutes
+bash tests/load/run_load_tests.sh target
+
+# Stress: 2,000 concurrent, 10 minutes
+bash tests/load/run_load_tests.sh stress
+
+# Soak: variable load, 8 hours
+bash tests/load/run_load_tests.sh soak
+
+# Morning spike: 4,800 reminders in 2-hour window
+bash tests/load/run_load_tests.sh spike
+
+# Database only
+bash tests/load/run_load_tests.sh db
+```
+
+### Mock Twilio WebSocket Protocol (`twilio_mock.py`)
+Simulates Twilio Media Stream messages:
+1. `connected` — WebSocket established
+2. `start` — Stream started (includes streamSid)
+3. `media` — Base64 audio frames (8kHz mulaw, every 20ms)
+4. `stop` — Stream ended
+
+### Technical Note: Locust + asyncio
+Locust uses gevent (greenlets) which conflicts with `asyncio.run_until_complete()`. Solution: run asyncio event loop in a dedicated thread with `asyncio.run_coroutine_threadsafe()`.
+
+---
+
+## Key Test Files
+
+```
+pipecat/tests/
+├── conftest.py                      ← Shared fixtures, session_state factory
+├── TESTING_DESIGN.md                ← Detailed test architecture document
+│
+├── mocks/
+│   ├── mock_stt.py                  ← MockSTTProcessor
+│   ├── mock_llm.py                  ← MockLLMProcessor
+│   └── mock_tts.py                  ← MockTTSProcessor
+│
+├── scenarios/                       ← YAML regression scenarios
+│
+├── load/
+│   ├── locustfile_db.py             ← Database load tests
+│   ├── locustfile_ws.py             ← WebSocket load tests
+│   ├── locustfile_scheduler.py      ← Scheduler throughput tests
+│   ├── twilio_mock.py               ← Mock Twilio protocol
+│   ├── run_load_tests.sh            ← Test runner with scenarios
+│   └── monitor_health.sh            ← Health monitoring to CSV
+│
+├── test_quick_observer.py           ← Observer pattern matching
+├── test_conversation_tracker.py     ← Topic/question extraction
+├── test_guidance_stripper.py        ← Tag stripping
+├── test_memory.py                   ← Memory search, store, decay
+├── test_greetings.py                ← Greeting rotation
+├── test_scheduler.py                ← Reminder scheduling
+├── test_context_cache.py            ← Pre-caching logic
+├── test_post_call.py                ← Post-call processing
+├── test_flows.py                    ← Phase transitions
+└── ... (50+ additional test files)
+```
+
+---
+
+## CI Integration
+
+Tests run automatically before each commit (pre-commit hook):
+
+```bash
+cd pipecat && uv run python -m pytest tests/ -m "not integration and not llm" -q --tb=short
+```
+
+For full validation before deployment, also run:
+```bash
+cd pipecat && uv run python -m pytest tests/ -m regression -q
+```

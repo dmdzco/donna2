@@ -38,3 +38,6 @@ __pycache__/
 *.egg-info/
 .venv/
 pipecat/.venv/
+
+# Drive sync state (tracked per-run, not committed)
+docs/meeting-notes/.sync-state.json

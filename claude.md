@@ -86,7 +86,9 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 
 ## Architecture
 
-**Full documentation**: [pipecat/docs/ARCHITECTURE.md](pipecat/docs/ARCHITECTURE.md)
+**Full documentation**: [docs/architecture/](docs/architecture/) — Architecture, Security, Scalability, Cost, Testing, Performance
+
+**Pipeline details**: [pipecat/docs/ARCHITECTURE.md](pipecat/docs/ARCHITECTURE.md)
 
 ### Pipecat Pipeline (bot.py)
 
@@ -395,7 +397,7 @@ After each commit that adds features or changes architecture, update:
 2. **`pipecat/docs/ARCHITECTURE.md`** - Pipeline diagrams, file structure, tech stack
 3. **`CLAUDE.md`** (this file) - Working features, key files, AI assistant reference
 4. **`README.md`** - Features, quick start, project structure
-5. **`docs/architecture/OVERVIEW.md`** - High-level architecture overview
+5. **`docs/architecture/`** - Architecture suite (OVERVIEW, ARCHITECTURE, SECURITY, SCALABILITY, COST, TESTING, PERFORMANCE)
 
 ### Deployment
 
@@ -494,4 +496,11 @@ Both share the same Neon PostgreSQL database. Dual service implementations (e.g.
 
 ---
 
-*Last updated: March 2026 — v5.1 with call answer optimization (parallel fetches + snapshot + cached news), Anthropic prompt caching*
+## Business Context
+
+Meeting notes from co-founder conversations are in `docs/meeting-notes/`.
+Consult these for product direction, decisions, and priorities.
+
+---
+
+*Last updated: March 2026 — v5.1 with Director improvements, web search fix, news injection*

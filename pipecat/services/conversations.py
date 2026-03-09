@@ -64,13 +64,20 @@ async def complete(call_sid: str, data: dict) -> dict | None:
 
 async def get_by_call_sid(call_sid: str) -> dict | None:
     """Get a conversation by its Twilio call SID."""
-    return await query_one("SELECT * FROM conversations WHERE call_sid = $1", call_sid)
+    return await query_one(
+        """SELECT id, senior_id, call_sid, started_at, ended_at,
+                  duration_seconds, status, summary, sentiment, concerns
+           FROM conversations WHERE call_sid = $1""",
+        call_sid,
+    )
 
 
 async def get_for_senior(senior_id: str, limit: int = 10) -> list[dict]:
     """Get recent conversations for a senior."""
     return await query_many(
-        "SELECT * FROM conversations WHERE senior_id = $1 ORDER BY started_at DESC LIMIT $2",
+        """SELECT id, senior_id, call_sid, started_at, ended_at,
+                  duration_seconds, status, summary, sentiment, concerns
+           FROM conversations WHERE senior_id = $1 ORDER BY started_at DESC LIMIT $2""",
         senior_id,
         limit,
     )

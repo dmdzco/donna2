@@ -6,6 +6,19 @@ This document describes the Donna v5.0 system architecture with the **Pipecat vo
 
 ---
 
+## Documentation Index
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](ARCHITECTURE.md) | System architecture: pipeline, two-backend design, database schema, tech stack |
+| [Security](SECURITY.md) | Authentication, rate limiting, input validation, PII protection, security headers |
+| [Scalability](SCALABILITY.md) | Admission control, DB indexes, connection pooling, leader election, Redis, rollout |
+| [Cost](COST.md) | Per-call cost breakdown, infrastructure costs, optimization strategies |
+| [Testing](TESTING.md) | 3-level test architecture, load testing, regression scenarios, mock infrastructure |
+| [Performance](PERFORMANCE.md) | Pipeline latency, predictive prefetch, circuit breakers, graceful shutdown |
+
+---
+
 ## High-Level Architecture
 
 ```

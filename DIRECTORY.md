@@ -36,6 +36,7 @@
 | Change admin/consumer API endpoints | `routes/*.js` (Node.js — serves all /api/* for frontends) |
 | Change admin API middleware/auth | `middleware/*.js` (Node.js) |
 | Change database schema | `db/schema.js` (Drizzle ORM, shared by both backends) |
+| Add/modify frontend E2E tests | `tests/e2e/` + `playwright.config.ts` — see [guide](docs/guides/FRONTEND_TESTING.md) |
 
 ---
 
@@ -160,6 +161,38 @@ apps/
 │
 └── observability/   Call monitoring dashboard (REST polling, low use)
 ```
+
+### `tests/e2e/` — Frontend E2E Tests (Playwright, 31 tests)
+
+Browser tests for all 3 frontend apps. Mock API responses by default (no backend needed).
+
+```
+tests/e2e/
+├── global.setup.ts              Clerk testing token initialization
+├── fixtures/
+│   ├── test-data.ts             Mock data (seniors, calls, reminders, etc.)
+│   ├── auth.ts                  JWT auth helpers for admin/observability
+│   └── api-mocks.ts             page.route() API mock setup functions
+├── admin/                       Admin dashboard tests (17 tests)
+│   ├── login.spec.ts            Login flow, error handling
+│   ├── navigation.spec.ts       Sidebar navigation, responsive layout
+│   ├── seniors.spec.ts          Senior list, create form
+│   ├── calls.spec.ts            Call history, transcript modal
+│   └── reminders.spec.ts        Reminder CRUD
+├── consumer/                    Consumer app tests
+│   ├── landing.spec.ts          Landing page, FAQ (public)
+│   ├── dashboard.spec.ts        Protected route redirects (public)
+│   └── authenticated/           Clerk-authenticated tests (5 tests)
+│       ├── dashboard.spec.ts    Dashboard access, nav, sign out
+│       └── onboarding.spec.ts   Onboarding flow access
+├── observability/               Observability tests (4 tests)
+│   ├── history.spec.ts          Call history, timeline
+│   └── navigation.spec.ts       History/Live toggle, view switching
+└── integration/                 Real API integration tests (excluded by default)
+    └── admin-smoke.spec.ts      Smoke test against live admin app
+```
+
+Config: `playwright.config.ts` (root). Guide: [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md).
 
 ### Root — Build & Deploy Tooling
 
@@ -305,14 +338,20 @@ make test-python
 # Regression scenario tests
 make test-regression
 
-# Node.js (4 test files + e2e)
+# Node.js (4 test files)
 npm test
 
-# E2E (Playwright — admin dashboard)
-npx playwright test
+# Frontend E2E tests (Playwright — all 3 apps, 31 tests)
+npm run test:e2e                  # Full suite (~15s)
+npm run test:e2e:admin            # Admin dashboard only
+npm run test:e2e:consumer         # Consumer public + authenticated
+npm run test:e2e:observability    # Observability dashboard only
+npx playwright test --ui          # Interactive debug mode
 ```
 
-Test files follow `pipecat/tests/test_<module>.py` naming. Regression scenarios in `pipecat/tests/scenarios/`.
+Python test files follow `pipecat/tests/test_<module>.py` naming. Regression scenarios in `pipecat/tests/scenarios/`.
+
+Frontend E2E tests are in `tests/e2e/` — see [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) for full guide.
 
 ---
 

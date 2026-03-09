@@ -235,9 +235,9 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 ```
 docs/
 ├── PRODUCT_PLAN.md               Product roadmap (40KB)
-├── architecture/OVERVIEW.md      v5.0 high-level architecture (current)
+├── architecture/OVERVIEW.md      v5.2 high-level architecture (current)
 ├── plans/
-│   ├── 2026-02-18-v5-execution-plan.md         v5.0 execution plan (7 workstreams)
+│   ├── 2026-02-18-v5-execution-plan.md         v5 execution plan (7 workstreams, historical)
 │   ├── 2026-02-07-roadmap-and-feature-flags.md Feature flag roadmap
 │   └── 2026-02-05-multi-senior-management.md   Multi-senior management plan
 ├── guides/
@@ -339,4 +339,4 @@ Workflow: `edit → make deploy-dev-pipecat → call dev number → repeat`
 
 ---
 
-*Source of truth for codebase navigation. Update when directories or responsibilities change. Last updated: March 2026 — v5.1*
+*Source of truth for codebase navigation. Update when directories or responsibilities change. Last updated: March 2026 — v5.2*

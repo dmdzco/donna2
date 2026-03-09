@@ -79,7 +79,7 @@ This document describes the Donna v5.2 system architecture with the **Pipecat vo
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (user) ← builds LLM context              │   │
 │   │                     ▼                                                │   │
-│   │         Claude Sonnet 4.5 + FlowManager (5 tools)                   │   │
+│   │         Claude Sonnet 4.6 + FlowManager (5 tools)                   │   │
 │   │         (4 phases: opening → main → winding_down → closing)         │   │
 │   │                     │ TextFrame                                      │   │
 │   │                     ▼                                                │   │
@@ -240,7 +240,7 @@ The Director runs **non-blocking** via `asyncio.create_task()`. Multi-provider: 
 | **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
-| **Voice LLM** | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | AnthropicLLMService (prompt caching enabled) |
+| **Voice LLM** | Claude Sonnet 4.6 (`claude-sonnet-4-6`) | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Groq (`gpt-oss-20b`) / Cerebras (`gpt-oss-120b`) | ~70ms primary, random selection per call |
 | **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | ~150ms when Groq/Cerebras unavailable |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |

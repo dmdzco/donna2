@@ -18,7 +18,7 @@ User speaks → [STT] → [Observer] → [Director] → [LLM] → [TTS] → Audi
 | Deepgram STT | ~200-300ms | Streaming | Nova 3, 8kHz mulaw, interim results |
 | Quick Observer | 0ms | Blocking | 268 regex patterns, inline |
 | Conversation Director | ~150ms | Non-blocking | `asyncio.create_task`, results cached for next turn |
-| Claude Sonnet 4.5 | ~500-1500ms | Streaming | Token-by-token via Pipecat |
+| Claude Sonnet 4.6 | ~500-1500ms | Streaming | Token-by-token via Pipecat |
 | ElevenLabs TTS | ~200-400ms | Streaming | turbo_v2_5, first chunk |
 | **Total perceived** | **~1-2s** | | First audio chunk to user |
 

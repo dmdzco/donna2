@@ -78,7 +78,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         │
                         ▼
               ┌─────────────────────┐
-              │   Anthropic LLM      │  Claude Sonnet 4.5 (streaming)
+              │   Anthropic LLM      │  Claude Sonnet 4.6 (streaming)
               │   + Flow Manager     │  5 tools, 3-phase state machine
               └─────────┬───────────┘
                         │ TextFrame
@@ -373,7 +373,7 @@ The opening phase is merged into main — the bot starts directly in main (or re
 | Tool | Purpose |
 |------|---------|
 | `search_memories` | Semantic search of senior's memory bank (pgvector + HNSW) |
-| `get_news` | Web search for current events via OpenAI (circuit breaker protected) |
+| `web_search` | Web search for current events via OpenAI (cache-first: prefetch → live fallback via `asyncio.to_thread`) |
 | `save_important_detail` | Store new memories (health, family, preference, life_event, emotional, activity) |
 | `mark_reminder_acknowledged` | Track reminder delivery with acknowledgment status |
 | `check_caregiver_notes` | Retrieve and deliver pending notes from caregivers |
@@ -532,7 +532,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
-| **Voice LLM** | Claude Sonnet 4.5 | AnthropicLLMService (prompt caching enabled) |
+| **Voice LLM** | Claude Sonnet 4.6 (`claude-sonnet-4-6`) | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Groq (`gpt-oss-20b`) / Cerebras (`gpt-oss-120b`) | ~70ms primary, random selection |
 | **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | ~150ms when Groq/Cerebras unavailable |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |

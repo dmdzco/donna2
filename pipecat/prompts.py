@@ -32,11 +32,13 @@ HUMOR: Gentle wordplay and puns when the moment fits (NOT during emotional topic
 # ---------------------------------------------------------------------------
 
 GREETING_TASK_OUTBOUND = (
-    "START THE CALL: Greet the senior warmly and ask how they are doing."
+    "START THE CALL: Greet the senior warmly and ask how they are doing. "
+    "Then continue into natural conversation."
 )
 
 GREETING_TASK_INBOUND = (
-    "INBOUND CALL: The senior is calling you. Respond warmly to their greeting."
+    "INBOUND CALL: The senior is calling you. Respond warmly to their greeting "
+    "and continue into natural conversation."
 )
 
 

@@ -82,11 +82,11 @@ def test_cartesia_uses_sonic3_model(cartesia_env):
 
 
 def test_cartesia_speed_configured(cartesia_env):
-    """Cartesia generation config has speed=0.9 for elderly pacing."""
+    """Cartesia generation config has speed=1.0."""
     from bot import create_tts_service
 
     session_state = {"_flags": {"tts_provider": "cartesia"}}
     tts = create_tts_service(session_state)
     gen_config = tts._settings.get("generation_config")
     assert gen_config is not None
-    assert gen_config.speed == 0.9
+    assert gen_config.speed == 1.0

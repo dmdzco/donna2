@@ -60,7 +60,7 @@ def create_tts_service(session_state: dict):
         logger.info("TTS provider: Cartesia Sonic 3")
         return CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY", ""),
-            voice_id=os.getenv("CARTESIA_VOICE_ID", "e8e5fffb-252c-436d-b842-8879b84445b6"),
+            voice_id=os.getenv("CARTESIA_VOICE_ID", "f786b574-daa5-4673-aa0c-cbe3e8534c02"),
             model="sonic-3",
             params=CartesiaTTSService.InputParams(
                 generation_config=GenerationConfig(speed=1.0, volume=1.2, emotion="friendly"),
@@ -258,7 +258,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         # Real LLM needed for create_context_aggregator(); mock replaces it in pipeline
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY", "fake-key-load-test"),
-            model="claude-sonnet-4-6",
+            model="claude-sonnet-4-5-20250929",
         )
     else:
         stt = DeepgramSTTService(
@@ -277,7 +277,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
 
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-            model="claude-sonnet-4-6",
+            model="claude-sonnet-4-5-20250929",
             params=AnthropicLLMService.InputParams(
                 enable_prompt_caching=True,
             ),

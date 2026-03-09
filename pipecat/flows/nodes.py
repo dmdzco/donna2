@@ -68,9 +68,8 @@ def _build_senior_context(session_state: dict) -> str:
     else:
         logger.warning("No memory context in session_state for system prompt")
 
-    news_ctx = session_state.get("news_context")
-    if news_ctx:
-        parts.append(f"\n{news_ctx}")
+    # News is NOT in system prompt — injected dynamically by Director
+    # when should_mention_news is true (saves ~300 tokens per turn)
 
     return "\n".join(parts)
 

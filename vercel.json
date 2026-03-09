@@ -1,0 +1,8 @@
+{
+  "buildCommand": "cd apps/consumer && npm install --include=dev && npm run build",
+  "outputDirectory": "apps/consumer/dist",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

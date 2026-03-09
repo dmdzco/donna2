@@ -43,6 +43,7 @@ class Settings:
     cartesia_voice_id: str = "e8e5fffb-252c-436d-b842-8879b84445b6"  # Cathy
     google_api_key: str = ""
     openai_api_key: str = ""
+    tavily_api_key: str = ""
     cerebras_api_key: str = ""
     groq_api_key: str = ""
 
@@ -110,6 +111,7 @@ def _load_settings() -> Settings:
         cartesia_voice_id=_env("CARTESIA_VOICE_ID", "e8e5fffb-252c-436d-b842-8879b84445b6"),
         google_api_key=_env("GOOGLE_API_KEY"),
         openai_api_key=_env("OPENAI_API_KEY"),
+        tavily_api_key=_env("TAVILY_API_KEY"),
         cerebras_api_key=_env("CEREBRAS_API_KEY"),
         groq_api_key=_env("GROQ_API_KEY"),
         # Model Selection

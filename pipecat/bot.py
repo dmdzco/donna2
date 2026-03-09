@@ -63,7 +63,7 @@ def create_tts_service(session_state: dict):
             voice_id=os.getenv("CARTESIA_VOICE_ID", "e8e5fffb-252c-436d-b842-8879b84445b6"),
             model="sonic-3",
             params=CartesiaTTSService.InputParams(
-                generation_config=GenerationConfig(speed=0.9),
+                generation_config=GenerationConfig(speed=1.0, volume=1.2, emotion="friendly"),
             ),
         )
 
@@ -372,6 +372,9 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     @transport.event_handler("on_client_connected")
     async def on_connected(transport_ref, websocket_ref):
         logger.info("[{cs}] Client connected, initializing flow", cs=call_sid)
+        # Warm up Groq/Cerebras TCP+TLS immediately — before greeting plays
+        from services.director_llm import warmup_fast_providers
+        asyncio.create_task(warmup_fast_providers())
         await flow_manager.initialize(initial_node)
 
     @transport.event_handler("on_client_disconnected")

@@ -61,15 +61,15 @@ def test_defaults_to_cartesia_when_no_flags(cartesia_env):
     assert isinstance(tts, CartesiaTTSService)
 
 
-def test_cartesia_uses_mulaw_8khz(cartesia_env):
-    """Cartesia is configured for Twilio-compatible audio."""
+def test_cartesia_uses_pcm_s16le_8khz(cartesia_env):
+    """Cartesia outputs PCM so Pipecat's serializer handles mulaw conversion."""
     from bot import create_tts_service
     from pipecat.services.cartesia.tts import CartesiaTTSService
 
     session_state = {"_flags": {"tts_provider": "cartesia"}}
     tts = create_tts_service(session_state)
     assert isinstance(tts, CartesiaTTSService)
-    assert tts._settings["output_format"]["encoding"] == "pcm_mulaw"
+    assert tts._settings["output_format"]["encoding"] == "pcm_s16le"
     assert tts._settings["output_format"]["container"] == "raw"
 
 

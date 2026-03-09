@@ -159,11 +159,8 @@ class TestPrefetchAndCache:
     async def test_populates_cache(self):
         senior = {"id": "s1", "name": "Margaret", "interests": ["gardening"], "timezone": "America/New_York", "interest_scores": {"gardening": 5.0}}
         with patch("services.seniors.get_by_id", new_callable=AsyncMock, return_value=senior), \
-             patch("services.conversations.get_recent_summaries", new_callable=AsyncMock, return_value="Recent call summary"), \
-             patch("services.conversations.get_recent_turns", new_callable=AsyncMock, return_value="Turn history"), \
-             patch("services.memory.get_critical", new_callable=AsyncMock, return_value=[]), \
-             patch("services.memory.get_important", new_callable=AsyncMock, return_value=[]), \
-             patch("services.memory.get_recent", new_callable=AsyncMock, return_value=[]), \
+             patch("services.context_cache._fetch_conversations_consolidated", new_callable=AsyncMock, return_value=("Recent call summary", "Turn history")), \
+             patch("services.context_cache._fetch_memories_consolidated", new_callable=AsyncMock, return_value=([], [], [])), \
              patch("services.news.get_news_for_senior", new_callable=AsyncMock, return_value=None), \
              patch("services.news.select_stories_for_call", return_value=None), \
              patch("services.greetings.get_greeting", return_value={"greeting": "Hi Margaret!", "period": "morning", "template_index": 0, "selected_interest": "gardening"}):

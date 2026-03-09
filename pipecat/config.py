@@ -26,6 +26,8 @@ class Settings:
 
     # ---- Database ----
     database_url: str = ""  # Required in production
+    db_pool_min: int = 5
+    db_pool_max: int = 50
 
     # ---- Twilio ----
     twilio_account_sid: str = ""
@@ -59,6 +61,10 @@ class Settings:
     # ---- Monitoring ----
     sentry_dsn: str = ""
 
+    # ---- Scalability ----
+    max_concurrent_calls: int = 50
+    load_test_mode: bool = False
+
     # ---- Feature Flags ----
     scheduler_enabled: bool = False
 
@@ -82,6 +88,8 @@ def _load_settings() -> Settings:
         railway_public_domain=_env("RAILWAY_PUBLIC_DOMAIN"),
         # Database
         database_url=_env("DATABASE_URL"),
+        db_pool_min=int(_env("DB_POOL_MIN", "5")),
+        db_pool_max=int(_env("DB_POOL_MAX", "50")),
         # Twilio
         twilio_account_sid=_env("TWILIO_ACCOUNT_SID"),
         twilio_auth_token=_env("TWILIO_AUTH_TOKEN"),
@@ -109,6 +117,9 @@ def _load_settings() -> Settings:
         clerk_secret_key=_env("CLERK_SECRET_KEY"),
         # Monitoring
         sentry_dsn=_env("SENTRY_DSN"),
+        # Scalability
+        max_concurrent_calls=int(_env("MAX_CONCURRENT_CALLS", "50")),
+        load_test_mode=_env("LOAD_TEST_MODE", "false").lower() == "true",
         # Feature Flags
         scheduler_enabled=_env("SCHEDULER_ENABLED", "false").lower() == "true",
     )

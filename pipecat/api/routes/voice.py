@@ -7,6 +7,7 @@ Port of routes/voice.js. Handles:
 
 from __future__ import annotations
 
+import asyncio
 import os
 from xml.sax.saxutils import escape as xml_escape
 
@@ -18,11 +19,23 @@ router = APIRouter()
 # In-memory call metadata (shared with WebSocket handler)
 # call_sid → {senior, memory_context, conversation_id, reminder_prompt, ...}
 call_metadata: dict[str, dict] = {}
+_metadata_lock = asyncio.Lock()
 
 
 @router.post("/voice/answer")
 async def voice_answer(request: Request):
     """Twilio calls this when a call is answered — returns TwiML pointing to WebSocket."""
+    # Check capacity before doing any work
+    from main import _call_semaphore
+    if _call_semaphore.locked():
+        logger.warning("At capacity — returning TwiML fallback")
+        fallback = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="Polly.Joanna">I'm sorry, all lines are busy right now. I'll call you back in a few minutes. Goodbye!</Say>
+    <Hangup/>
+</Response>"""
+        return Response(content=fallback, media_type="text/xml")
+
     form = await request.form()
     call_sid = form.get("CallSid", "")
     from_number = form.get("From", "")
@@ -264,27 +277,28 @@ async def voice_answer(request: Request):
         ct=call_type,
     )
 
-    # 3. Store metadata for WebSocket handler
-    call_metadata[call_sid] = {
-        "senior": senior,
-        "prospect": prospect,
-        "prospect_id": prospect_id,
-        "memory_context": memory_context,
-        "conversation_id": conversation_id,
-        "reminder_prompt": reminder_prompt,
-        "reminder_context": reminder_context,
-        "pre_generated_greeting": pre_generated_greeting,
-        "previous_calls_summary": previous_calls_summary,
-        "recent_turns": recent_turns,
-        "todays_context": todays_context,
-        "news_context": news_context,
-        "is_outbound": is_outbound,
-        "call_type": call_type,
-        "target_phone": target_phone,
-        "last_call_analysis": last_call_analysis,
-        "has_caregiver_notes": has_caregiver_notes,
-        "call_settings": call_settings,
-    }
+    # 3. Store metadata for WebSocket handler (locked for concurrent writes)
+    async with _metadata_lock:
+        call_metadata[call_sid] = {
+            "senior": senior,
+            "prospect": prospect,
+            "prospect_id": prospect_id,
+            "memory_context": memory_context,
+            "conversation_id": conversation_id,
+            "reminder_prompt": reminder_prompt,
+            "reminder_context": reminder_context,
+            "pre_generated_greeting": pre_generated_greeting,
+            "previous_calls_summary": previous_calls_summary,
+            "recent_turns": recent_turns,
+            "todays_context": todays_context,
+            "news_context": news_context,
+            "is_outbound": is_outbound,
+            "call_type": call_type,
+            "target_phone": target_phone,
+            "last_call_analysis": last_call_analysis,
+            "has_caregiver_notes": has_caregiver_notes,
+            "call_settings": call_settings,
+        }
 
     # 4. Return TwiML
     base_url = os.getenv("BASE_URL", "")

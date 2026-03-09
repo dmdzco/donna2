@@ -20,7 +20,13 @@ def _normalize_phone(phone: str) -> str:
 async def find_by_phone(phone: str) -> dict | None:
     """Find a senior by phone number (normalized to last 10 digits)."""
     normalized = _normalize_phone(phone)
-    return await query_one("SELECT * FROM seniors WHERE phone = $1", normalized)
+    return await query_one(
+        """SELECT id, name, phone, timezone, interests, family_info,
+                  medical_notes, preferred_call_times, is_active,
+                  city, state, zip_code, additional_info
+           FROM seniors WHERE phone = $1""",
+        normalized,
+    )
 
 
 async def create(data: dict) -> dict:

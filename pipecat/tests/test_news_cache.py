@@ -19,11 +19,8 @@ async def test_prefetch_persists_news_to_db():
     }
 
     with patch("services.seniors.get_by_id", new_callable=AsyncMock, return_value=mock_senior), \
-         patch("services.conversations.get_recent_summaries", new_callable=AsyncMock, return_value=None), \
-         patch("services.conversations.get_recent_turns", new_callable=AsyncMock, return_value=None), \
-         patch("services.memory.get_critical", new_callable=AsyncMock, return_value=[]), \
-         patch("services.memory.get_important", new_callable=AsyncMock, return_value=[]), \
-         patch("services.memory.get_recent", new_callable=AsyncMock, return_value=[]), \
+         patch("services.context_cache._fetch_conversations_consolidated", new_callable=AsyncMock, return_value=(None, None)), \
+         patch("services.context_cache._fetch_memories_consolidated", new_callable=AsyncMock, return_value=([], [], [])), \
          patch("services.news.get_news_for_senior", new_callable=AsyncMock, return_value="NEWS: gardening tips"), \
          patch("services.news.select_stories_for_call", return_value="NEWS: gardening tips"), \
          patch("services.greetings.get_greeting", return_value={"greeting": "Hi", "period": "morning", "template_index": 0}), \
@@ -52,11 +49,8 @@ async def test_prefetch_skips_news_persistence_when_no_news():
     }
 
     with patch("services.seniors.get_by_id", new_callable=AsyncMock, return_value=mock_senior), \
-         patch("services.conversations.get_recent_summaries", new_callable=AsyncMock, return_value=None), \
-         patch("services.conversations.get_recent_turns", new_callable=AsyncMock, return_value=None), \
-         patch("services.memory.get_critical", new_callable=AsyncMock, return_value=[]), \
-         patch("services.memory.get_important", new_callable=AsyncMock, return_value=[]), \
-         patch("services.memory.get_recent", new_callable=AsyncMock, return_value=[]), \
+         patch("services.context_cache._fetch_conversations_consolidated", new_callable=AsyncMock, return_value=(None, None)), \
+         patch("services.context_cache._fetch_memories_consolidated", new_callable=AsyncMock, return_value=([], [], [])), \
          patch("services.news.get_news_for_senior", new_callable=AsyncMock, return_value=None), \
          patch("services.news.select_stories_for_call", return_value=None), \
          patch("services.greetings.get_greeting", return_value={"greeting": "Hi", "period": "morning", "template_index": 0}), \

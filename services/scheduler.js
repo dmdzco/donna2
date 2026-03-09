@@ -585,6 +585,10 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
   log.info('Starting unified scheduler', { intervalSeconds: intervalMs / 1000 });
 
   const runUnifiedCheck = async () => {
+    const cycleStart = Date.now();
+    let attempted = 0;
+    let succeeded = 0;
+    let failed = 0;
     try {
       // Date-rollover clear of welfare tracking
       const today = new Date().toISOString().slice(0, 10);
@@ -609,31 +613,56 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
         log.info('Unified call plan', { total: callPlan.length, reminders: reminderCount, welfare: welfareCount });
       }
 
-      // Execute calls sequentially with 5s stagger
-      let executed = 0;
-      for (const spec of callPlan) {
-        const call = await schedulerService.triggerOutboundCall(spec, baseUrl);
-        if (call) {
-          // Post-call bookkeeping
-          if (spec.type === 'reminder') {
-            await schedulerService.markDelivered(spec.reminder.id);
-          } else {
-            welfareCalledToday.add(spec.senior.id);
-          }
-          executed++;
-          // 5s stagger between calls to avoid overwhelming Twilio
-          if (executed < callPlan.length) {
-            await new Promise(resolve => setTimeout(resolve, 5000));
-          }
-        }
-      }
+      // Execute calls in parallel with concurrency limit of 10
+      attempted = callPlan.length;
+      const CONCURRENCY = 10;
+      let inFlight = 0;
 
-      if (executed > 0) {
-        log.info('Unified check complete', { executed, planned: callPlan.length });
+      const triggerOne = async (spec) => {
+        // Simple semaphore: wait until slot available
+        while (inFlight >= CONCURRENCY) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        inFlight++;
+        try {
+          const call = await schedulerService.triggerOutboundCall(spec, baseUrl);
+          if (call) {
+            if (spec.type === 'reminder') {
+              await schedulerService.markDelivered(spec.reminder.id);
+            } else {
+              welfareCalledToday.add(spec.senior.id);
+            }
+            succeeded++;
+          } else {
+            failed++;
+          }
+        } catch (err) {
+          log.error('Trigger failed', { type: spec.type, error: err.message });
+          failed++;
+        } finally {
+          inFlight--;
+        }
+      };
+
+      const results = await Promise.allSettled(callPlan.map(triggerOne));
+
+      if (succeeded > 0) {
+        log.info('Unified check complete', { succeeded, failed, planned: callPlan.length });
       }
     } catch (error) {
       log.error('Unified check error', { error: error.message });
       try { const Sentry = await import('@sentry/node'); Sentry.captureException(error); } catch {}
+    } finally {
+      const cycleDurationMs = Date.now() - cycleStart;
+      if (attempted > 0 || cycleDurationMs > 5000) {
+        log.info('Scheduler cycle', {
+          duration_ms: cycleDurationMs,
+          attempted,
+          succeeded,
+          failed,
+          pending_contexts: pendingReminderCalls.size,
+        });
+      }
     }
   };
 

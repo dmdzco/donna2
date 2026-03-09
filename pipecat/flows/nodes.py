@@ -10,6 +10,8 @@ Prompt text lives in prompts.py — edit prompts there, edit flow logic here.
 
 from __future__ import annotations
 
+import time
+
 from loguru import logger
 from pipecat_flows import (
     FlowsFunctionSchema,
@@ -102,6 +104,18 @@ def _build_tracking_context(session_state: dict) -> str:
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _record_phase_transition(session_state: dict, new_phase: str) -> None:
+    """Record phase timing: compute duration of previous phase, start new one."""
+    now = time.time()
+    durations = session_state.setdefault("_phase_durations", {})
+    prev_phase = session_state.get("_current_phase")
+    phase_start = session_state.get("_phase_start_time")
+    if prev_phase and phase_start:
+        durations[prev_phase] = round(now - phase_start)
+    session_state["_current_phase"] = new_phase
+    session_state["_phase_start_time"] = now
+
+
 def _update_tracking_context(session_state: dict) -> None:
     """Pull current tracking summary from ConversationTracker into session_state."""
     tracker = session_state.get("_conversation_tracker")
@@ -132,6 +146,7 @@ def _make_transition_reminder_to_main(session_state: dict, flows_tools: dict):
 
     async def transition_to_main(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
         logger.info("Transitioning: reminder → main")
+        _record_phase_transition(session_state, "main")
         _update_tracking_context(session_state)
         return (
             {"status": "success"},
@@ -146,6 +161,7 @@ def _make_transition_to_winding_down(session_state: dict, flows_tools: dict):
 
     async def transition_to_winding_down(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
         logger.info("Transitioning: main → winding_down")
+        _record_phase_transition(session_state, "winding_down")
         _update_tracking_context(session_state)
         return (
             {"status": "success"},
@@ -160,6 +176,7 @@ def _make_transition_to_closing(session_state: dict):
 
     async def transition_to_closing(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
         logger.info("Transitioning → closing")
+        _record_phase_transition(session_state, "closing")
         return (
             {"status": "success"},
             build_closing_node(session_state),
@@ -370,6 +387,7 @@ def _make_transition_to_onboarding_closing(session_state: dict):
 
     async def transition_to_closing(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
         logger.info("Transitioning: onboarding → closing")
+        _record_phase_transition(session_state, "closing")
         return (
             {"status": "success"},
             build_onboarding_closing_node(session_state),
@@ -463,6 +481,7 @@ def build_initial_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     # Onboarding flow for unsubscribed callers
     if session_state.get("call_type") == "onboarding":
         logger.info("Initial node: onboarding (unsubscribed caller)")
+        _record_phase_transition(session_state, "onboarding")
         return build_onboarding_node(session_state, flows_tools)
 
     reminder_prompt = session_state.get("reminder_prompt")
@@ -470,7 +489,9 @@ def build_initial_node(session_state: dict, flows_tools: dict) -> NodeConfig:
 
     if reminder_prompt and not reminders_delivered:
         logger.info("Initial node: reminder (pending reminders)")
+        _record_phase_transition(session_state, "reminder")
         return build_reminder_node(session_state, flows_tools, with_greeting=True)
 
     logger.info("Initial node: main (no pending reminders)")
+    _record_phase_transition(session_state, "main")
     return build_main_node(session_state, flows_tools, with_greeting=True)

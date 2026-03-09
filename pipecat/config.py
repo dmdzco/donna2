@@ -66,6 +66,10 @@ class Settings:
     load_test_mode: bool = False
     redis_url: str = ""  # Optional — enables multi-instance shared state
 
+    # ---- GrowthBook ----
+    growthbook_api_host: str = ""
+    growthbook_client_key: str = ""
+
     # ---- Feature Flags ----
     scheduler_enabled: bool = False
 
@@ -122,6 +126,9 @@ def _load_settings() -> Settings:
         max_concurrent_calls=int(_env("MAX_CONCURRENT_CALLS", "50")),
         load_test_mode=_env("LOAD_TEST_MODE", "false").lower() == "true",
         redis_url=_env("REDIS_URL"),
+        # GrowthBook
+        growthbook_api_host=_env("GROWTHBOOK_API_HOST"),
+        growthbook_client_key=_env("GROWTHBOOK_CLIENT_KEY"),
         # Feature Flags
         scheduler_enabled=_env("SCHEDULER_ENABLED", "false").lower() == "true",
     )

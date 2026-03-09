@@ -4,6 +4,9 @@ Intercepts MetricsFrame system frames emitted by Pipecat services when
 enable_metrics=True. Logs TTFB for LLM and TTS, token usage, and
 total turn latency (user speech → first audio output).
 
+Accumulates structured metrics into session_state["_call_metrics"] so
+post_call.py can persist them to the call_metrics table.
+
 Place at the end of the pipeline — system frames flow through all processors.
 """
 
@@ -29,12 +32,34 @@ except ImportError:
 
 
 class MetricsLoggerProcessor(FrameProcessor):
-    """Logs LLM TTFB, TTS TTFB, token usage, and per-turn latency."""
+    """Logs LLM TTFB, TTS TTFB, token usage, and per-turn latency.
+
+    Accumulates per-call metrics into session_state["_call_metrics"]:
+    - llm_ttfb_values: list of LLM TTFB ms values
+    - tts_ttfb_values: list of TTS TTFB ms values
+    - turn_latency_values: list of end-to-end turn latency ms values
+    - token_usage: {prompt_tokens, completion_tokens, cache_read_tokens}
+    - tts_characters: total TTS characters
+    - turn_count: number of LLM turns
+    """
 
     def __init__(self, session_state: dict, **kwargs):
         super().__init__(**kwargs)
         self._session_state = session_state
         self._turn_count = 0
+        # Initialize metrics accumulator
+        self._session_state["_call_metrics"] = {
+            "llm_ttfb_values": [],
+            "tts_ttfb_values": [],
+            "turn_latency_values": [],
+            "token_usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "cache_read_tokens": 0,
+            },
+            "tts_characters": 0,
+            "turn_count": 0,
+        }
 
     async def process_frame(self, frame: Frame, direction):
         await super().process_frame(frame, direction)
@@ -68,6 +93,7 @@ class MetricsLoggerProcessor(FrameProcessor):
     def _log_ttfb(self, item: TTFBMetricsData):
         ms = round(item.value * 1000)
         proc = item.processor or "unknown"
+        metrics = self._session_state["_call_metrics"]
 
         # Identify service type from processor name
         is_llm = "llm" in proc.lower() or "anthropic" in proc.lower()
@@ -75,13 +101,17 @@ class MetricsLoggerProcessor(FrameProcessor):
 
         if is_llm:
             logger.info("[Metrics] LLM TTFB: {ms}ms", ms=ms)
+            metrics["llm_ttfb_values"].append(ms)
+            metrics["turn_count"] += 1
         elif is_tts:
             logger.info("[Metrics] TTS TTFB: {ms}ms", ms=ms)
+            metrics["tts_ttfb_values"].append(ms)
             # Calculate total turn latency (user speech end → first audio)
             speech_time = self._session_state.get("_last_user_speech_time")
             if speech_time:
                 turn_ms = round((time.time() - speech_time) * 1000)
                 logger.info("[Metrics] Turn latency (speech→audio): {ms}ms", ms=turn_ms)
+                metrics["turn_latency_values"].append(turn_ms)
         else:
             logger.info("[Metrics] {proc} TTFB: {ms}ms", proc=proc, ms=ms)
 
@@ -97,8 +127,15 @@ class MetricsLoggerProcessor(FrameProcessor):
             parts.append(f"cache_read={cache_read}")
         logger.info("[Metrics] LLM tokens: {info}", info=", ".join(parts))
 
+        # Accumulate totals
+        usage = self._session_state["_call_metrics"]["token_usage"]
+        usage["prompt_tokens"] += prompt
+        usage["completion_tokens"] += completion
+        usage["cache_read_tokens"] += cache_read
+
     def _log_tts_usage(self, item: TTSUsageMetricsData):
         logger.info("[Metrics] TTS characters: {n}", n=item.value)
+        self._session_state["_call_metrics"]["tts_characters"] += (item.value or 0)
 
     def _log_prefetch_stats(self):
         cache = self._session_state.get("_prefetch_cache")

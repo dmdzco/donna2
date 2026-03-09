@@ -130,6 +130,10 @@ def make_tool_handlers(session_state: dict) -> dict:
     """
 
     async def handle_search_memories(args: dict) -> dict:
+        from lib.growthbook import is_on
+        if not is_on("memory_search_enabled", session_state):
+            return {"status": "success", "result": "No memories available right now. Continue the conversation naturally."}
+
         senior_id = session_state.get("senior_id")
         if not senior_id:
             return {"status": "success", "result": "No memories available right now. Continue the conversation naturally."}
@@ -173,6 +177,10 @@ def make_tool_handlers(session_state: dict) -> dict:
             return {"status": "success", "result": "Memory search is temporarily unavailable. Continue the conversation naturally — don't mention any technical issues."}
 
     async def handle_web_search(args: dict) -> dict:
+        from lib.growthbook import is_on
+        if not is_on("news_search_enabled", session_state):
+            return {"status": "success", "result": "Search unavailable. Continue naturally."}
+
         query = args.get("query", "")
         logger.info("Tool: web_search query={q}", q=query)
 
@@ -278,13 +286,25 @@ def make_tool_handlers(session_state: dict) -> dict:
             logger.error("check_caregiver_notes error: {err}", err=str(e))
             return {"status": "success", "result": "[CAREGIVER NOTE] Unable to check notes right now. Continue naturally."}
 
-    return {
+    handlers = {
         "search_memories": handle_search_memories,
         "web_search": handle_web_search,
         "mark_reminder_acknowledged": handle_mark_reminder,
         "save_important_detail": handle_save_detail,
         "check_caregiver_notes": handle_check_caregiver_notes,
     }
+
+    # Wrap each handler to track tools_used in session_state for metrics
+    tools_used = session_state.setdefault("_tools_used", [])
+
+    def _wrap(name, fn):
+        async def tracked(args):
+            if name not in tools_used:
+                tools_used.append(name)
+            return await fn(args)
+        return tracked
+
+    return {name: _wrap(name, fn) for name, fn in handlers.items()}
 
 
 def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:

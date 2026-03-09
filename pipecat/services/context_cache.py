@@ -409,6 +409,11 @@ def clear_all() -> None:
 
 async def run_daily_prefetch() -> None:
     """Run pre-fetch for seniors whose local time is 5 AM. Called hourly by scheduler."""
+    from lib.growthbook import is_on
+    if not is_on("context_cache_enabled", {}):
+        logger.info("Context cache disabled via GrowthBook flag — skipping prefetch")
+        return
+
     logger.info("Running daily pre-fetch check...")
 
     try:

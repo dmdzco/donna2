@@ -132,6 +132,12 @@ class ConversationDirectorProcessor(FrameProcessor):
             self._turn_count += 1
             self._session_state["_last_user_speech_time"] = time.time()
 
+            # Feature flag: skip Director analysis when disabled
+            from lib.growthbook import is_on
+            if not is_on("director_enabled", self._session_state):
+                await self.push_frame(frame, direction)
+                return
+
             # Cerebras warmup on first transcription (warms TCP/TLS)
             if not self._warmup_done:
                 self._warmup_done = True
@@ -551,6 +557,7 @@ class ConversationDirectorProcessor(FrameProcessor):
             await asyncio.sleep(delay)
             if self._pipeline_task:
                 logger.info("[Director] Forcing call end via EndFrame")
+                self._session_state["_end_reason"] = "director_timeout"
                 await self._pipeline_task.queue_frame(EndFrame())
         except asyncio.CancelledError:
             pass

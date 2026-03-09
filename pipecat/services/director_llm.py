@@ -18,6 +18,7 @@ import os
 import random
 import re
 import time
+from datetime import date
 
 from loguru import logger
 
@@ -163,40 +164,25 @@ def _extract_and_parse_json(text: str) -> dict | None:
 
 # Static instructions — passed as system_instruction (separated from per-turn content)
 DIRECTOR_SYSTEM_INSTRUCTION = """\
-You direct Donna, an AI companion calling elderly individuals. Analyze the conversation and return JSON guidance.
+Direct Donna, an AI companion calling elderly people. Return JSON guidance.
 
-## RULES
-Phases: opening (0-30s) → main (30s-8min) → winding_down (8-9min) → closing (9-10min). If past 30s and still opening, set to "main".
-Reminders: deliver at natural pauses with high engagement. NEVER during emotional moments or low engagement. Never repeat delivered.
-Low engagement: suggest personal questions, memories, open-ended prompts.
-News: only when engagement medium+ and topic winding down, never during emotional moments.
-Caregiver notes: suggest during natural pauses if available.
+Phases: opening(0-30s) → main(30s-8min) → winding_down(8-9min) → closing(9-10min). Past 30s still opening → "main".
+Reminders: natural pauses + high engagement only. Never during emotions/low engagement. Never repeat delivered.
+Low engagement: suggest personal questions or memories. News: medium+ engagement, topic winding down.
+Onboarding calls (call_type="onboarding"): no reminders, no re-engage signals, focus on discovery.
+memory_queries: 1-3 keywords from current message (names, places, topics). Extract what they're TALKING ABOUT.
+web_queries: Full Google query for factual questions. Include city/state and date. Example: "Austin Texas weather March 10 2026". Empty array if none.
+anticipated_tools: from [search_memories, web_search, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes].
 
-## ONBOARDING CALLS (call_type = "onboarding")
-For onboarding calls with unsubscribed callers, use different phases: welcome (0-60s) → discovery (60s-8min) → closing (8-10min).
-Focus on: caller engagement level, interest in the service, readiness to learn more.
-Do NOT suggest reminders — there are none for onboarding calls.
-Do NOT suggest caregiver notes — not applicable.
-Do NOT use RE-ENGAGE or topic shift signals — the caller is exploring the service, not a subscriber.
-Set reminder.should_deliver to false always.
-Priority actions should focus on: ENCOURAGE_DISCOVERY (ask about their loved one), ANSWER_QUESTION (they have a concern), DEMONSTRATE_VALUE (show what Donna can do), WRAP_UP (at 8+ min).
-Force close at 12 min (same as subscriber calls).
-
-## PREFETCH (help Donna respond faster)
-Extract topics/entities from the senior's speech for memory search. Predict factual questions they might ask next.
-memory_queries: 1-3 keyword phrases from the current message (names, places, topics, activities mentioned). Extract what they're TALKING ABOUT, not generic categories.
-web_queries: 0-1 factual questions the senior is likely to ask next (only if they seem curious about facts, events, weather, "how to" topics). Empty array if no question anticipated.
-anticipated_tools: which tools Donna will likely need next turn (from: search_memories, web_search, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes).
-
-## OUTPUT (JSON only)
-{"analysis":{"call_phase":"opening|main|winding_down|closing","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"warm|empathetic|cheerful|gentle|serious","priority_action":"str","specific_instruction":"str"},"prefetch":{"memory_queries":["topic1"],"web_queries":[],"anticipated_tools":["search_memories"]}}"""
+JSON:{"analysis":{"call_phase":"str","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"str","priority_action":"str","specific_instruction":"str"},"prefetch":{"memory_queries":[],"web_queries":[],"anticipated_tools":[]}}"""
 
 # Dynamic per-turn context — passed as contents
 DIRECTOR_TURN_TEMPLATE = """\
-Senior: {senior_name} | {minutes_elapsed}min / {max_duration}min max | {call_type}
+Senior: {senior_name} | {location} | {minutes_elapsed}min / {max_duration}min max | {call_type}
+Today: {today_date}
+Interests: {interests}
 Reminders pending: {pending_reminders}
 Delivered (don't repeat): {delivered_reminders}
-Interests: {interests}
 Has memories: {has_memories} | Has news: {has_news} | Caregiver notes: {has_caregiver_notes} | Calls today: {num_calls_today}
 
 {conversation_history}
@@ -214,8 +200,18 @@ def _format_history(history: list[dict]) -> str:
         return "Call just started"
     return "\n".join(
         f"{'DONNA' if m.get('role') == 'assistant' else 'SENIOR'}: {m.get('content', '')}"
-        for m in history[-4:]
+        for m in history[-6:]
     )
+
+
+
+def _format_location(senior: dict) -> str:
+    """Format location from senior profile (city, state)."""
+    city = senior.get("city") or ""
+    state = senior.get("state") or ""
+    if city and state:
+        return f"{city}, {state}"
+    return city or state or "unknown location"
 
 
 def _format_reminders(reminders: list, delivered: set) -> str:
@@ -247,6 +243,8 @@ def _build_turn_content(
 
     return DIRECTOR_TURN_TEMPLATE.format(
         senior_name=(senior.get("name") or "").split(" ")[0] or "Friend",
+        location=_format_location(senior),
+        today_date=date.today().strftime("%B %d, %Y"),
         minutes_elapsed=f"{minutes_elapsed:.1f}",
         max_duration=max_duration,
         call_type=session_state.get("call_type", "check-in"),

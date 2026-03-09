@@ -136,7 +136,8 @@ async def web_search_query(query: str) -> str | None:
     try:
         logger.info("Web search query: {q}", q=query)
 
-        response = client.responses.create(
+        response = await asyncio.to_thread(
+            client.responses.create,
             model="gpt-4o-mini",
             tools=[{"type": "web_search_preview"}],
             input=(

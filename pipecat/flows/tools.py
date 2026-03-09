@@ -205,7 +205,8 @@ def make_tool_handlers(session_state: dict) -> dict:
             logger.warning("web_search timed out after 15s for query={q}", q=query)
             return {"status": "success", "result": "Search took too long. Continue naturally."}
         except Exception as e:
-            logger.error("web_search error: {err}", err=str(e))
+            import traceback
+            logger.error("web_search error: {err}\n{tb}", err=str(e), tb=traceback.format_exc())
             return {"status": "success", "result": "Search unavailable. Continue naturally."}
 
     async def handle_mark_reminder(args: dict) -> dict:

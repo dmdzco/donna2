@@ -39,7 +39,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
     - Primary: Cerebras (~3000 tok/s, ~70ms) with Gemini Flash fallback
     - Speculative pre-processing: Detects 250ms silence onset via interim gaps → starts Cerebras analysis → same-turn guidance when ready
     - Metrics: Logs speculative hit rate per call
-  - Post-Call: Analysis, memory extraction, daily context (Gemini Flash)
+  - Post-Call: Analysis, memory extraction, daily context, snapshot rebuild (Gemini Flash)
 - **Predictive Context Engine** — Speculative memory prefetch eliminates tool-call latency
   - 1st wave: Regex entity/topic extraction on final transcriptions → background `memory.search()`
   - 2nd wave: Director Gemini analysis (next_topic, reminders, news) → anticipatory prefetch
@@ -59,10 +59,11 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Caregiver Notes** - Family can leave notes that are read during calls (check_caregiver_notes tool)
 - **Per-Senior Call Settings** - Configurable time limits, greeting style, memory decay via `call_settings` JSONB
 - **Scheduled Reminder Calls** - Polling scheduler with prefetch + delivery tracking
-- **Context Pre-caching** - Senior context cached at 5 AM local time
+- **Call Context Snapshot** - Pre-computed JSONB snapshot (analysis, summaries, turns, daily context) rebuilt after each call, eliminates 6 DB queries at call time
+- **Context Pre-caching** - Senior context + news cached at 5 AM local time, news persisted to `seniors.cached_news`
 - Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3 via Pipecat)
-- LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService)
+- LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - TTS (ElevenLabs via Pipecat)
 - VAD (Silero — confidence=0.6, stop_secs=1.2, min_volume=0.5)
 - News via OpenAI web search (1hr cache)
@@ -157,7 +158,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
 
 ### Post-Call Processing
 
-On disconnect: complete conversation → call analysis (Gemini) → summary persistence → memory extraction (OpenAI) → daily context save → reminder cleanup → cache clear.
+On disconnect: complete conversation → call analysis (Gemini) → summary persistence → caregiver notification → memory extraction (OpenAI) → interest discovery → interest scores → daily context save → reminder cleanup → cache clear → **snapshot rebuild**.
 
 ---
 
@@ -166,7 +167,7 @@ On disconnect: complete conversation → call analysis (Gemini) → summary pers
 ```
 pipecat/
 ├── main.py                          ← FastAPI entry, /health, /ws, graceful shutdown (258 LOC)
-├── bot.py                           ← Pipeline assembly + sentiment greetings (335 LOC)
+├── bot.py                           ← Pipeline assembly + sentiment greetings + prompt caching (335 LOC)
 ├── config.py                        ← All env vars centralized (110 LOC)
 ├── prompts.py                       ← System prompts + phase task instructions (129 LOC)
 │
@@ -186,13 +187,14 @@ pipecat/
 ├── services/
 │   ├── scheduler.py                 ← Reminder polling + outbound calls (427 LOC)
 │   ├── reminder_delivery.py         ← Delivery CRUD + prompt formatting (95 LOC)
-│   ├── post_call.py                 ← Post-call: analysis, memory, cleanup (169 LOC)
+│   ├── post_call.py                 ← Post-call: analysis, memory, cleanup, snapshot rebuild (338 LOC)
 │   ├── prefetch.py                  ← Predictive Context Engine: cache + query extraction + runner (250 LOC)
 │   ├── director_llm.py              ← Gemini Flash analysis for Director + prefetch hints (350 LOC)
 │   ├── call_analysis.py             ← Post-call analysis + call quality scoring (246 LOC)
 │   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (392 LOC)
 │   ├── interest_discovery.py        ← Interest extraction from conversations (183 LOC)
-│   ├── context_cache.py             ← Pre-cache at 5 AM local (290 LOC)
+│   ├── call_snapshot.py             ← Pre-computed call context snapshot for seniors (53 LOC)
+│   ├── context_cache.py             ← Pre-cache at 5 AM local + news persistence (304 LOC)
 │   ├── conversations.py             ← Conversation CRUD (250 LOC)
 │   ├── daily_context.py             ← Cross-call same-day memory (161 LOC)
 │   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation (326 LOC)
@@ -207,14 +209,14 @@ pipecat/
 │
 ├── api/
 │   ├── routes/
-│   │   ├── voice.py                 ← /voice/answer (TwiML), /voice/status (230 LOC)
+│   │   ├── voice.py                 ← /voice/answer (TwiML + parallel fetch + snapshot), /voice/status (330 LOC)
 │   │   └── calls.py                 ← /api/call, /api/calls
 │   ├── middleware/                   ← auth, api_auth, rate_limit, security, twilio, error_handler
 │   └── validators/schemas.py        ← Pydantic input validation
 │
 ├── db/
 │   ├── client.py                    ← asyncpg pool + query helpers + health check (69 LOC)
-│   └── migrations/                  ← SQL migrations (HNSW index, feature_flags table)
+│   └── migrations/                  ← SQL migrations (HNSW index, feature_flags, call_context_snapshot)
 ├── tests/                           ← 61 test files + helpers/mocks/scenarios
 ├── pyproject.toml                   ← Python 3.12, Pipecat v0.0.101+
 └── Dockerfile                       ← python:3.12-slim + uv
@@ -365,7 +367,7 @@ The Railway project has two services per environment:
 | Modify Conversation Director | `pipecat/processors/conversation_director.py` + `pipecat/services/director_llm.py` |
 | Modify call ending behavior | `pipecat/processors/quick_observer.py` (goodbye detection) + `pipecat/processors/goodbye_gate.py` (grace period) + `pipecat/processors/conversation_director.py` (time-based) |
 | Change pipeline assembly | `pipecat/bot.py` |
-| Modify post-call processing | `pipecat/services/post_call.py` |
+| Modify post-call processing | `pipecat/services/post_call.py` + `pipecat/services/call_snapshot.py` (snapshot rebuild) |
 | Modify post-call analysis | `pipecat/services/call_analysis.py` |
 | Modify memory system | `pipecat/services/memory.py` |
 | Modify predictive prefetch | `pipecat/services/prefetch.py` (cache + extraction + runner) + `pipecat/processors/conversation_director.py` (orchestration) |
@@ -488,7 +490,8 @@ Both share the same Neon PostgreSQL database. Dual service implementations (e.g.
 - ~~Conversation Quality (v5.0)~~ ✓ Completed (sentiment greetings, mid-call memory refresh, caregiver notes, per-senior settings, HNSW index)
 - ~~CI/CD Pipelines~~ ✓ Completed (GitHub Actions: tests → staging → production)
 - Pipecat context migration: `OpenAILLMContext` → `LLMContext` + `LLMContextAggregatorPair` (blocked — `AnthropicLLMService.create_context_aggregator()` requires `set_llm_adapter()` which only exists on `OpenAILLMContext` in v0.0.101. Revisit when pipecat updates the Anthropic adapter. Deprecation warnings are suppressed in `main.py`.)
-- Prompt Caching (Anthropic)
+- ~~Prompt Caching (Anthropic)~~ ✓ Completed (`enable_prompt_caching=True` in AnthropicLLMService)
+- ~~Call Answer Optimization~~ ✓ Completed (parallel fetches + pre-computed snapshot + cached news: ~9s → ~2s inbound)
 - Telnyx Migration (65% cost savings)
 
 ---
@@ -500,4 +503,4 @@ Consult these for product direction, decisions, and priorities.
 
 ---
 
-*Last updated: February 2026 — v5.0 with Predictive Context Engine, circuit breakers, feature flags, caregiver notes, sentiment-aware greetings, CI/CD*
+*Last updated: March 2026 — v5.1 with Director improvements, web search fix, news injection*

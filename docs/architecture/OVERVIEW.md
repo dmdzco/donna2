@@ -99,6 +99,7 @@ This document describes the Donna v5.0 system architecture with the **Pipecat vo
 │   │              3. Memory extraction — OpenAI (facts, preferences)      │   │
 │   │              4. Daily context — cross-call same-day memory            │   │
 │   │              5. Reminder cleanup + cache clearing                     │   │
+│   │              6. Snapshot rebuild — pre-compute context for next call  │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
@@ -225,7 +226,7 @@ The Director runs **non-blocking** via `asyncio.create_task()`:
 | **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
-| **Voice LLM** | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | AnthropicLLMService |
+| **Voice LLM** | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | ~150ms non-blocking analysis |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
 | **STT** | Deepgram Nova 3 (`nova-3-general`) | Real-time, interim results, 8kHz |
@@ -269,7 +270,8 @@ pipecat/
 │   ├── call_analysis.py             ← Post-call analysis (Gemini Flash)
 │   ├── memory.py                    ← Semantic memory (pgvector, decay, dedup)
 │   ├── scheduler.py                 ← Reminder scheduling + outbound calls
-│   ├── context_cache.py             ← Pre-cache at 5 AM local
+│   ├── call_snapshot.py             ← Pre-computed call context snapshot
+│   ├── context_cache.py             ← Pre-cache at 5 AM local + news persistence
 │   ├── conversations.py             ← Conversation CRUD + transcripts
 │   ├── daily_context.py             ← Cross-call same-day memory
 │   ├── greetings.py                 ← Greeting templates + rotation
@@ -294,7 +296,7 @@ pipecat/
 
 | Table | Purpose | Key Fields |
 |-------|---------|------------|
-| **seniors** | User profiles | name, phone, interests, familyInfo, medicalNotes, timezone, call_settings (JSONB) |
+| **seniors** | User profiles | name, phone, interests, familyInfo, medicalNotes, timezone, call_settings (JSONB), call_context_snapshot (JSONB), cached_news (TEXT) |
 | **conversations** | Call records | callSid, transcript, duration, status, summary |
 | **memories** | Long-term memory | content, type, importance, embedding (1536d, HNSW index) |
 | **reminders** | Scheduled reminders | title, scheduledTime, isRecurring, type |
@@ -349,4 +351,4 @@ Three environments: **dev** (experiments), **staging** (CI), **production** (cus
 
 ---
 
-*Last updated: February 2026 — v5.0 with circuit breakers, feature flags, caregiver notes, sentiment-aware greetings*
+*Last updated: March 2026 — v5.1 with call answer optimization (parallel fetches + snapshot + cached news), Anthropic prompt caching*

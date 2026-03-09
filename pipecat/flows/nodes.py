@@ -39,7 +39,11 @@ def _build_senior_context(session_state: dict) -> str:
     senior = session_state.get("senior") or {}
 
     first_name = (senior.get("name") or "").split(" ")[0] or "there"
-    parts.append(f"You are speaking with {first_name}.")
+    city = senior.get("city") or ""
+    state = senior.get("state") or ""
+    location = f"{city}, {state}" if city and state else city or state or ""
+    location_note = f" They live in {location}." if location else ""
+    parts.append(f"You are speaking with {first_name}.{location_note}")
 
     interests = senior.get("interests") or []
     if interests:
@@ -64,9 +68,8 @@ def _build_senior_context(session_state: dict) -> str:
     else:
         logger.warning("No memory context in session_state for system prompt")
 
-    news_ctx = session_state.get("news_context")
-    if news_ctx:
-        parts.append(f"\n{news_ctx}")
+    # News is NOT in system prompt — injected dynamically by Director
+    # when should_mention_news is true (saves ~300 tokens per turn)
 
     return "\n".join(parts)
 

@@ -581,8 +581,24 @@ export const schedulerService = {
  * Welfare SQL is cheap (NOT EXISTS), so running every minute means
  * newly-eligible seniors get called within ~1 minute instead of ~59.
  */
+// Advisory lock ID for scheduler leader election (matches Python scheduler)
+const SCHEDULER_LOCK_ID = 8675309;
+
+async function tryAcquireLeaderLock() {
+  try {
+    const result = await db.execute(
+      sql`SELECT pg_try_advisory_lock(${SCHEDULER_LOCK_ID}) AS acquired`
+    );
+    return result.rows?.[0]?.acquired === true;
+  } catch (err) {
+    log.warn('Failed to acquire scheduler lock', { error: err.message });
+    return false;
+  }
+}
+
 export function startScheduler(baseUrl, intervalMs = 60000) {
   log.info('Starting unified scheduler', { intervalSeconds: intervalMs / 1000 });
+  let isLeader = false;
 
   const runUnifiedCheck = async () => {
     const cycleStart = Date.now();
@@ -666,11 +682,24 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
     }
   };
 
+  // Leader election wrapper — only the leader runs the unified check
+  const leaderCheck = async () => {
+    if (!isLeader) {
+      isLeader = await tryAcquireLeaderLock();
+      if (isLeader) {
+        log.info('Acquired scheduler leader lock — this instance is the scheduler leader');
+      }
+    }
+    if (isLeader) {
+      await runUnifiedCheck();
+    }
+  };
+
   // Initial check after 5s delay (let server warm up)
-  setTimeout(runUnifiedCheck, 5000);
+  setTimeout(leaderCheck, 5000);
 
   // Single 60-second polling loop for both reminders and welfare
-  const schedulerIntervalId = setInterval(runUnifiedCheck, intervalMs);
+  const schedulerIntervalId = setInterval(leaderCheck, intervalMs);
 
   // Hourly context pre-caching (unchanged)
   const prefetchIntervalId = setInterval(async () => {

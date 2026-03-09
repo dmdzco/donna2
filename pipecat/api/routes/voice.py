@@ -18,8 +18,36 @@ router = APIRouter()
 
 # In-memory call metadata (shared with WebSocket handler)
 # call_sid → {senior, memory_context, conversation_id, reminder_prompt, ...}
+# When REDIS_URL is set, metadata is also persisted to Redis for multi-instance.
 call_metadata: dict[str, dict] = {}
 _metadata_lock = asyncio.Lock()
+
+
+async def _persist_metadata(call_sid: str, data: dict) -> None:
+    """Write metadata to Redis if configured (for multi-instance routing)."""
+    try:
+        from lib.redis_client import get_shared_state
+        state = get_shared_state()
+        if hasattr(state, '_url'):  # RedisState, not InMemoryState
+            await state.set(f"call_metadata:{call_sid}", data, ttl=1800)
+    except Exception:
+        pass  # Redis is optional — failure is non-fatal
+
+
+async def _cleanup_metadata(call_sid: str) -> dict | None:
+    """Remove metadata from local dict and Redis."""
+    metadata = call_metadata.pop(call_sid, None)
+    try:
+        from lib.redis_client import get_shared_state
+        state = get_shared_state()
+        if hasattr(state, '_url'):
+            if metadata is None:
+                # May be on a different instance — try Redis
+                metadata = await state.get(f"call_metadata:{call_sid}")
+            await state.delete(f"call_metadata:{call_sid}")
+    except Exception:
+        pass
+    return metadata
 
 
 @router.post("/voice/answer")
@@ -300,6 +328,9 @@ async def voice_answer(request: Request):
             "call_settings": call_settings,
         }
 
+    # Also persist to Redis for multi-instance routing
+    await _persist_metadata(call_sid, call_metadata[call_sid])
+
     # 4. Return TwiML
     base_url = os.getenv("BASE_URL", "")
     ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://")
@@ -331,8 +362,8 @@ async def voice_status(request: Request):
     logger.info("Call {cs}: {status} ({dur}s)", cs=call_sid, status=call_status, dur=call_duration)
 
     if call_status in ("completed", "failed", "busy", "no-answer"):
-        # Clean up metadata
-        metadata = call_metadata.pop(call_sid, None)
+        # Clean up metadata (local + Redis)
+        metadata = await _cleanup_metadata(call_sid)
 
         # Clear reminder context
         from services.scheduler import clear_reminder_context

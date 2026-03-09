@@ -64,6 +64,7 @@ class Settings:
     # ---- Scalability ----
     max_concurrent_calls: int = 50
     load_test_mode: bool = False
+    redis_url: str = ""  # Optional — enables multi-instance shared state
 
     # ---- Feature Flags ----
     scheduler_enabled: bool = False
@@ -120,6 +121,7 @@ def _load_settings() -> Settings:
         # Scalability
         max_concurrent_calls=int(_env("MAX_CONCURRENT_CALLS", "50")),
         load_test_mode=_env("LOAD_TEST_MODE", "false").lower() == "true",
+        redis_url=_env("REDIS_URL"),
         # Feature Flags
         scheduler_enabled=_env("SCHEDULER_ENABLED", "false").lower() == "true",
     )

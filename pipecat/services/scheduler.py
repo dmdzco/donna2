@@ -341,8 +341,18 @@ def get_reminder_context(call_sid: str) -> dict | None:
 
 
 def clear_reminder_context(call_sid: str) -> None:
-    """Clear reminder context after call ends."""
+    """Clear reminder context after call ends (local + Redis)."""
     pending_reminder_calls.pop(call_sid, None)
+    try:
+        from lib.redis_client import get_shared_state
+        import asyncio
+        state = get_shared_state()
+        if hasattr(state, '_url'):
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(state.delete(f"reminder_ctx:{call_sid}"))
+    except Exception:
+        pass
 
 
 def cleanup_stale_contexts(max_age_minutes: int = 30) -> int:
@@ -410,8 +420,35 @@ def _extract_delivery(row: dict) -> dict:
 # Scheduler loop (replaces Node.js setInterval)
 # ---------------------------------------------------------------------------
 
+# Advisory lock ID for scheduler leader election.
+# Only one instance can hold this lock at a time.
+SCHEDULER_LOCK_ID = 8675309  # Arbitrary unique int64
+
+
+async def _try_acquire_leader_lock() -> bool:
+    """Try to acquire the scheduler advisory lock. Non-blocking."""
+    try:
+        row = await query_one("SELECT pg_try_advisory_lock($1) AS acquired", SCHEDULER_LOCK_ID)
+        return row and row.get("acquired", False)
+    except Exception as e:
+        logger.warning("Failed to acquire scheduler lock: {err}", err=str(e))
+        return False
+
+
+async def _release_leader_lock() -> None:
+    """Release the scheduler advisory lock."""
+    try:
+        await query_one("SELECT pg_advisory_unlock($1)", SCHEDULER_LOCK_ID)
+    except Exception as e:
+        logger.warning("Failed to release scheduler lock: {err}", err=str(e))
+
+
 async def start_scheduler(base_url: str, interval_seconds: int = 60) -> None:
     """Start the reminder polling loop and hourly context pre-fetch.
+
+    Uses PostgreSQL advisory locks for leader election — only one instance
+    runs the scheduler at a time. If the leader dies, another instance
+    acquires the lock within one polling interval.
 
     This runs forever — call as an asyncio task:
         asyncio.create_task(start_scheduler(base_url))
@@ -471,13 +508,21 @@ async def start_scheduler(base_url: str, interval_seconds: int = 60) -> None:
                 logger.error("Context pre-fetch error: {err}", err=str(e))
             await asyncio.sleep(3600)  # Every hour
 
-    # Initial checks
-    await check_reminders()
-
+    # Prefetch runs on all instances (read-only, safe to duplicate)
     asyncio.create_task(prefetch_loop())
     logger.info("Context pre-caching enabled (hourly check for 5 AM local time)")
 
-    # Polling loop
+    # Leader election loop — only the leader runs check_reminders()
+    is_leader = False
     while True:
+        if not is_leader:
+            is_leader = await _try_acquire_leader_lock()
+            if is_leader:
+                logger.info("Acquired scheduler leader lock — this instance is the scheduler leader")
+                await check_reminders()  # Initial check on becoming leader
+            else:
+                logger.debug("Another instance holds scheduler lock — standing by")
+        else:
+            await check_reminders()
+
         await asyncio.sleep(interval_seconds)
-        await check_reminders()

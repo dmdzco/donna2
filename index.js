@@ -19,6 +19,7 @@ import { apiLimiter } from './middleware/rate-limit.js';
 import { clerkMiddleware } from './middleware/auth.js';
 import { mountRoutes } from './routes/index.js';
 import { startScheduler } from './services/scheduler.js';
+import { initGrowthBook, closeGrowthBook } from './lib/growthbook.js';
 
 // Security middleware
 import { securityHeaders, requestId } from './middleware/security.js';
@@ -103,12 +104,22 @@ app.use(errorHandler);
 // Create HTTP server
 const server = createServer(app);
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`Donna v4.0 listening on port ${PORT}`);
   console.log(`Voice webhook: ${BASE_URL}/voice/answer`);
   console.log(`Pipeline: Pipecat voice + 2-layer observer + Gemini Director`);
   console.log(`Features: Admin APIs, Reminder scheduler, Call initiation`);
 
+  // Initialize GrowthBook feature flags
+  await initGrowthBook();
+
   // Start the reminder scheduler (check every minute)
   startScheduler(BASE_URL, 60000);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down...');
+  closeGrowthBook();
+  server.close(() => process.exit(0));
 });

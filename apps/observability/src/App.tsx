@@ -4,12 +4,13 @@ import { CallTimeline } from './components/CallTimeline';
 import { ObserverPanel } from './components/ObserverPanel';
 import { MetricsPanel } from './components/MetricsPanel';
 import { LiveCallMonitor } from './components/LiveCallMonitor';
+import { InfraDashboard } from './components/InfraDashboard';
 import { LoginPage } from './components/LoginPage';
 import { getToken, clearToken } from './hooks/useApi';
 import type { Call } from './types';
 import './App.css';
 
-type AppMode = 'history' | 'live';
+type AppMode = 'history' | 'live' | 'infra';
 type ViewMode = 'timeline' | 'observer' | 'metrics';
 
 export default function App() {
@@ -50,6 +51,12 @@ export default function App() {
             <span className="live-dot" />
             Live
           </button>
+          <button
+            className={appMode === 'infra' ? 'active' : ''}
+            onClick={() => setAppMode('infra')}
+          >
+            Infra
+          </button>
         </div>
         <button className="logout-btn" onClick={handleLogout}>
           Logout
@@ -58,6 +65,10 @@ export default function App() {
 
       {appMode === 'live' ? (
         <LiveCallMonitor />
+      ) : appMode === 'infra' ? (
+        <div className="infra-content">
+          <InfraDashboard />
+        </div>
       ) : (
       <div className="app-content">
         {/* Left Sidebar - Call List */}

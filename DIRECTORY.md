@@ -240,8 +240,6 @@ docs/
 │   ├── 2026-02-18-v5-execution-plan.md         v5 execution plan (7 workstreams, historical)
 │   ├── 2026-02-07-roadmap-and-feature-flags.md Feature flag roadmap
 │   └── 2026-02-05-multi-senior-management.md   Multi-senior management plan
-├── guides/
-│   └── DEPLOYMENT_PLAN.md        Railway deployment guide
 └── decisions/                    Historical decisions (reference only):
     ├── DONNA_ON_PIPECAT.md, DONNA_ON_LIVEKIT.md, VOICE_AI_FRAMEWORK_ANALYSIS.md
     ├── ARCHITECTURE_ASSESSMENT.md

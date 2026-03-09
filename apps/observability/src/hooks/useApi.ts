@@ -203,6 +203,124 @@ export function useContinuity(seniorId: string | undefined) {
   return { continuity, loading, error };
 }
 
+// -------------------------------------------------------------------------
+// Infrastructure Metrics (from call_metrics table)
+// -------------------------------------------------------------------------
+
+export interface InfraMetric {
+  call_sid: string;
+  senior_id: string | null;
+  call_type: string;
+  duration_seconds: number | null;
+  end_reason: string | null;
+  turn_count: number;
+  phase_durations: Record<string, number> | null;
+  latency: Record<string, number> | null;
+  breaker_states: Record<string, string> | null;
+  tools_used: string[] | null;
+  token_usage: Record<string, number> | null;
+  error_count: number;
+  created_at: string;
+}
+
+export interface MetricsSummary {
+  total_calls: number;
+  successful_calls: number;
+  avg_duration_seconds: number | null;
+  avg_turn_count: number | null;
+  avg_llm_ttfb_ms: number | null;
+  avg_tts_ttfb_ms: number | null;
+  avg_turn_latency_ms: number | null;
+}
+
+export interface LatencyPoint {
+  hour: string;
+  call_count: number;
+  llm_ttfb_ms: number | null;
+  tts_ttfb_ms: number | null;
+  turn_latency_ms: number | null;
+  avg_duration: number | null;
+}
+
+export function useInfraMetrics(hours = 24) {
+  const [metrics, setMetrics] = useState<InfraMetric[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await fetchJson<{ metrics: InfraMetric[] }>(
+        `${API_BASE}/metrics/calls?hours=${hours}&limit=100`
+      );
+      setMetrics(data.metrics);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [hours]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+  return { metrics, loading, error, refresh };
+}
+
+export function useMetricsSummary(hours = 24) {
+  const [summary, setSummary] = useState<MetricsSummary | null>(null);
+  const [endReasons, setEndReasons] = useState<Array<{ end_reason: string; count: number }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await fetchJson<{
+        summary: MetricsSummary;
+        end_reasons: Array<{ end_reason: string; count: number }>;
+      }>(`${API_BASE}/metrics/summary?hours=${hours}`);
+      setSummary(data.summary);
+      setEndReasons(data.end_reasons);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [hours]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+  return { summary, endReasons, loading, error, refresh };
+}
+
+export function useLatencyTrends(hours = 24) {
+  const [data, setData] = useState<LatencyPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await fetchJson<{ latency: LatencyPoint[] }>(
+        `${API_BASE}/metrics/latency?hours=${hours}`
+      );
+      setData(result.latency);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [hours]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+  return { data, loading, error, refresh };
+}
+
+// -------------------------------------------------------------------------
+// Per-call metrics (existing, from conversations table)
+// -------------------------------------------------------------------------
+
 export function useCallMetrics(callId: string | undefined) {
   const [data, setData] = useState<MetricsData | null>(null);
   const [loading, setLoading] = useState(true);

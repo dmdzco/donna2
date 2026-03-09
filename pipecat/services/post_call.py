@@ -56,7 +56,8 @@ async def run_post_call(
 
     # --- Parallel group: independent steps (2, 3, 5, 6) ---
     async def _step2_analysis():
-        if not (transcript and senior):
+        from lib.growthbook import is_on
+        if not (transcript and senior and is_on("post_call_analysis_enabled", session_state)):
             return None
         from services.call_analysis import analyze_completed_call, save_call_analysis
         result = await analyze_completed_call(transcript, senior)
@@ -197,7 +198,85 @@ async def run_post_call(
     except Exception as e:
         logger.error("[{cs}] Post-call step 7 (call snapshot) failed: {err}", cs=call_sid, err=str(e))
 
+    # 8. Persist call metrics for observability
+    try:
+        await _persist_call_metrics(session_state, duration_seconds, conversation_tracker)
+    except Exception as e:
+        logger.error("[{cs}] Post-call step 8 (call metrics) failed: {err}", cs=call_sid, err=str(e))
+
     logger.info("[{cs}] Post-call processing complete", cs=call_sid)
+
+
+async def _persist_call_metrics(
+    session_state: dict,
+    duration_seconds: int,
+    conversation_tracker,
+) -> None:
+    """Write per-call metrics to call_metrics table for observability."""
+    import time
+    from db.client import execute
+    from lib.circuit_breaker import get_breaker_states
+
+    call_sid = session_state.get("call_sid")
+    senior_id = session_state.get("senior_id")
+    call_type = session_state.get("call_type", "check-in")
+
+    # Finalize the last phase duration
+    phase_durations = session_state.get("_phase_durations", {})
+    current_phase = session_state.get("_current_phase")
+    phase_start = session_state.get("_phase_start_time")
+    if current_phase and phase_start:
+        phase_durations[current_phase] = round(time.time() - phase_start)
+
+    # Gather accumulated metrics from MetricsLogger
+    cm = session_state.get("_call_metrics", {})
+    llm_vals = cm.get("llm_ttfb_values", [])
+    tts_vals = cm.get("tts_ttfb_values", [])
+    turn_vals = cm.get("turn_latency_values", [])
+
+    latency = {}
+    if llm_vals:
+        latency["llm_ttfb_avg_ms"] = round(sum(llm_vals) / len(llm_vals))
+    if tts_vals:
+        latency["tts_ttfb_avg_ms"] = round(sum(tts_vals) / len(tts_vals))
+    if turn_vals:
+        latency["turn_avg_ms"] = round(sum(turn_vals) / len(turn_vals))
+
+    token_usage = cm.get("token_usage", {})
+    if cm.get("tts_characters"):
+        token_usage["tts_characters"] = cm["tts_characters"]
+
+    turn_count = cm.get("turn_count", 0)
+    tools_used = session_state.get("_tools_used", [])
+    breaker_states = get_breaker_states()
+
+    # Determine end_reason from session state
+    end_reason = session_state.get("_end_reason", "unknown")
+
+    import json
+    await execute(
+        """INSERT INTO call_metrics
+           (call_sid, senior_id, call_type, duration_seconds, end_reason,
+            turn_count, phase_durations, latency, breaker_states,
+            tools_used, token_usage, error_count)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
+        call_sid,
+        senior_id,
+        call_type,
+        duration_seconds,
+        end_reason,
+        turn_count,
+        json.dumps(phase_durations) if phase_durations else None,
+        json.dumps(latency) if latency else None,
+        json.dumps(breaker_states) if breaker_states else None,
+        tools_used or None,
+        json.dumps(token_usage) if any(token_usage.values()) else None,
+        0,
+    )
+    logger.info(
+        "[{cs}] Call metrics persisted (turns={t}, duration={d}s)",
+        cs=call_sid, t=turn_count, d=duration_seconds,
+    )
 
 
 async def _run_onboarding_post_call(

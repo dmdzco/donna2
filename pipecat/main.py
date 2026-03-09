@@ -7,6 +7,7 @@ Serves:
 - /ws — WebSocket endpoint for Pipecat voice pipeline
 - /api/call — outbound call initiation
 - /api/calls — active call listing (admin)
+- /api/metrics/* — call metrics for observability dashboard (admin)
 """
 
 from __future__ import annotations
@@ -60,6 +61,7 @@ from api.middleware.error_handler import register_error_handlers
 from api.middleware.rate_limit import limiter
 from api.middleware.security import SecurityHeadersMiddleware
 from api.routes.calls import router as calls_router
+from api.routes.metrics import router as metrics_router
 from api.routes.voice import router as voice_router, call_metadata
 from bot import run_bot
 
@@ -126,6 +128,7 @@ register_error_handlers(app)
 # ---------------------------------------------------------------------------
 app.include_router(voice_router)
 app.include_router(calls_router)
+app.include_router(metrics_router)
 
 
 @app.get("/health")
@@ -134,6 +137,7 @@ async def health():
     from db import check_health as db_health
     from db.client import get_pool_stats
     from lib.circuit_breaker import get_breaker_states
+    from lib.cache_cleanup import get_cache_sizes
 
     db_ok = await db_health()
     try:
@@ -141,18 +145,22 @@ async def health():
     except Exception:
         pool_stats = {}
     breakers = get_breaker_states()
+    caches = get_cache_sizes()
+    any_breaker_open = any(s == "open" for s in breakers.values())
 
     status_code = 200 if db_ok else 503
     body = {
-        "status": "ok" if db_ok else "degraded",
+        "status": "degraded" if (not db_ok or any_breaker_open) else "ok",
         "service": "donna-pipecat",
         "active_calls": _active_calls,
         "peak_calls": _peak_calls,
         "max_calls": MAX_CALLS,
         "uptime_seconds": round(time.monotonic() - _startup_time),
+        "shutting_down": _shutting_down,
         "database": "ok" if db_ok else "error",
         "pool": pool_stats,
         "circuit_breakers": breakers,
+        "cache": caches,
     }
     return JSONResponse(content=body, status_code=status_code)
 
@@ -164,6 +172,11 @@ async def health():
 async def websocket_endpoint(websocket: WebSocket):
     """Twilio connects here via TwiML <Stream>. Runs the Pipecat pipeline."""
     global _active_calls, _peak_calls
+
+    if _shutting_down:
+        await websocket.close(code=1001, reason="Server shutting down")
+        return
+
     await websocket.accept()
 
     # Admission control: reject if at capacity
@@ -253,12 +266,16 @@ async def startup():
     except Exception as e:
         logger.error("Database init failed: {err}", err=str(e))
 
-    # Load feature flags into memory cache
+    # Initialize GrowthBook feature flags
     try:
-        from lib.feature_flags import refresh_flags
-        await refresh_flags()
+        from lib.growthbook import init_growthbook
+        await init_growthbook()
     except Exception as e:
-        logger.warning("Feature flags init failed (table may not exist yet): {err}", err=str(e))
+        logger.warning("GrowthBook init failed — flags will use defaults: {err}", err=str(e))
+
+    # Start background cache cleanup loop
+    from lib.cache_cleanup import start_cleanup_loop
+    asyncio.create_task(start_cleanup_loop())
 
     # Start scheduler ONLY if explicitly enabled (prevents dual-scheduler conflict)
     scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "false").lower() == "true"
@@ -289,6 +306,13 @@ async def shutdown():
             for t in pending:
                 t.cancel()
             await asyncio.wait(pending, timeout=2.0)
+
+    # Close GrowthBook client
+    try:
+        from lib.growthbook import close_growthbook
+        await close_growthbook()
+    except Exception:
+        pass
 
     # Close DB pool last
     try:

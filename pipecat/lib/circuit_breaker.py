@@ -12,6 +12,24 @@ import time
 
 from loguru import logger
 
+try:
+    import sentry_sdk
+    _HAS_SENTRY = True
+except ImportError:
+    _HAS_SENTRY = False
+
+
+def _sentry_breadcrumb(breaker_name: str, old_state: str, new_state: str, message: str = ""):
+    """Add a Sentry breadcrumb on circuit breaker state change."""
+    if not _HAS_SENTRY:
+        return
+    sentry_sdk.add_breadcrumb(
+        category="circuit_breaker",
+        message=f"[CB:{breaker_name}] {old_state} → {new_state}" + (f": {message}" if message else ""),
+        level="warning" if new_state == "open" else "info",
+        data={"breaker": breaker_name, "old_state": old_state, "new_state": new_state},
+    )
+
 # Module-level registry of all breakers for health reporting
 _breakers: dict[str, CircuitBreaker] = {}
 
@@ -44,6 +62,7 @@ class CircuitBreaker:
         """
         if self.state == "open":
             if time.time() - self.last_failure_time > self.recovery_timeout:
+                _sentry_breadcrumb(self.name, "open", "half_open")
                 self.state = "half_open"
                 logger.info("[CB:{name}] Half-open, testing recovery", name=self.name)
             else:
@@ -56,6 +75,7 @@ class CircuitBreaker:
         try:
             result = await asyncio.wait_for(coro, timeout=self.call_timeout)
             if self.state == "half_open":
+                _sentry_breadcrumb(self.name, "half_open", "closed")
                 self.state = "closed"
                 self.failure_count = 0
                 logger.info("[CB:{name}] Circuit recovered, closed", name=self.name)
@@ -65,6 +85,7 @@ class CircuitBreaker:
             self.last_failure_time = time.time()
             err_msg = f"timeout ({self.call_timeout}s)" if isinstance(e, asyncio.TimeoutError) else str(e)
             if self.failure_count >= self.failure_threshold:
+                _sentry_breadcrumb(self.name, self.state, "open", err_msg)
                 self.state = "open"
                 logger.error(
                     "[CB:{name}] Circuit opened after {n} failures: {err}",

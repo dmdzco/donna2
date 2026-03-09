@@ -97,6 +97,11 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
         turnCount = call.transcript.filter(t => t.role === 'assistant').length;
       }
 
+      // Build CallMetrics object matching frontend CallMetrics interface
+      const promptTokens = tokenUsage?.prompt_tokens || 0;
+      const completionTokens = tokenUsage?.completion_tokens || 0;
+      const totalTokens = promptTokens + completionTokens;
+
       return {
         id: call.id,
         call_sid: call.callSid,
@@ -110,10 +115,15 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
         summary: call.summary,
         sentiment: call.sentiment,
         concerns: call.concerns,
-        call_metrics: tokenUsage || latency ? {
-          token_usage: tokenUsage,
-          latency,
-          estimated_cost: estimateCost(tokenUsage),
+        call_metrics: totalTokens > 0 ? {
+          totalInputTokens: promptTokens,
+          totalOutputTokens: completionTokens,
+          totalTokens,
+          avgResponseTime: latency?.turn_avg_ms || null,
+          avgTtfa: latency?.llm_ttfb_avg_ms || null,
+          turnCount,
+          estimatedCost: estimateCost(tokenUsage),
+          modelsUsed: ['claude-sonnet-4-6'],
         } : null,
         turn_count: turnCount,
       };
@@ -247,14 +257,6 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
             data: { content: turn.content, turnIndex: index },
           });
         }
-        // Add observer signals if present
-        if (turn.observer) {
-          timeline.push({
-            type: 'observer.signal',
-            timestamp: turn.timestamp || call.startedAt,
-            data: turn.observer,
-          });
-        }
       });
     }
 
@@ -354,7 +356,7 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
 
       // Map call_quality.rapport to emotional state
       const rapport = callQuality.rapport || 'moderate';
-      const emotionalStateMap = { strong: 'positive', moderate: 'neutral', weak: 'disengaged' };
+      const emotionalStateMap = { strong: 'positive', moderate: 'neutral', weak: 'negative' };
       const emotionalState = emotionalStateMap[rapport] || 'neutral';
 
       // Confidence based on engagement score normalized to 0-1
@@ -376,11 +378,8 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
           emotionalState,
           confidenceScore,
           concerns: concernDescriptions,
-          engagementScore: score,
-          rapport: callQuality.rapport || null,
-          goalsAchieved: callQuality.goals_achieved ?? null,
-          durationAppropriate: callQuality.duration_appropriate ?? null,
-          positiveObservations: analysis.positive_observations || [],
+          shouldDeliverReminder: false,
+          shouldEndCall: false,
         },
       });
 
@@ -393,6 +392,19 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
     const conversationConcerns = call.concerns || [];
     const uniqueConcerns = [...new Set([...allConcerns, ...conversationConcerns])];
 
+    // Build analysis object for frontend (from call_analyses data)
+    const analysisData = analysisRows.rows.length > 0 ? (() => {
+      const a = analysisRows.rows[0];
+      const cq = typeof a.call_quality === 'string' ? JSON.parse(a.call_quality) : (a.call_quality || {});
+      return {
+        engagementScore: a.engagement_score || null,
+        rapport: cq.rapport || null,
+        goalsAchieved: cq.goals_achieved ?? null,
+        positiveObservations: a.positive_observations || [],
+        topics: a.topics || [],
+      };
+    })() : null;
+
     res.json({
       signals,
       count: signals.length,
@@ -403,6 +415,7 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
         totalConcerns: uniqueConcerns.length,
         uniqueConcerns,
       },
+      analysis: analysisData,
     });
   } catch (error) {
     console.error('Error fetching observer data:', error);
@@ -441,16 +454,19 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
         const phaseDurations = typeof m.phase_durations === 'string' ? JSON.parse(m.phase_durations) : m.phase_durations;
         const breakerStates = typeof m.breaker_states === 'string' ? JSON.parse(m.breaker_states) : m.breaker_states;
 
+        const promptTokens = tokenUsage?.prompt_tokens || 0;
+        const completionTokens = tokenUsage?.completion_tokens || 0;
+        const totalTokens = promptTokens + completionTokens;
+
         callMetrics = {
-          turn_count: m.turn_count,
-          token_usage: tokenUsage,
-          latency,
-          phase_durations: phaseDurations,
-          breaker_states: breakerStates,
-          tools_used: m.tools_used,
-          error_count: m.error_count,
-          end_reason: m.end_reason,
-          estimated_cost: estimateCost(tokenUsage),
+          totalInputTokens: promptTokens,
+          totalOutputTokens: completionTokens,
+          totalTokens,
+          avgResponseTime: latency?.turn_avg_ms || null,
+          avgTtfa: latency?.llm_ttfb_avg_ms || null,
+          turnCount: m.turn_count || 0,
+          estimatedCost: estimateCost(tokenUsage),
+          modelsUsed: ['claude-sonnet-4-6'],
         };
       }
     }

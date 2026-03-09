@@ -71,7 +71,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 
 ### Infrastructure & Reliability
 - **Circuit Breakers** - Gemini (5s), OpenAI embedding (10s), news (10s) — `lib/circuit_breaker.py`
-- **Feature Flags** - DB-backed with 5-min cache — `lib/feature_flags.py`
+- **Feature Flags** - GrowthBook Cloud SDK integrated (Pipecat + Node.js), managed at app.growthbook.io
 - **Graceful Shutdown** - Tracks active calls, 7s drain on SIGTERM
 - **Enhanced /health** - Database connectivity + circuit breaker states
 - **CI/CD Pipelines** - PR → tests → staging → smoke tests; push to main → production
@@ -203,20 +203,20 @@ pipecat/
 │   └── news.py                      ← OpenAI web search + circuit breaker (213 LOC)
 │
 ├── lib/
+│   ├── growthbook.py                ← GrowthBook feature flag SDK helper (99 LOC)
 │   ├── circuit_breaker.py           ← Async circuit breaker for external services (84 LOC)
-│   ├── feature_flags.py             ← DB-backed feature flags, 5-min cache (41 LOC)
 │   └── sanitize.py                  ← PII-safe logging
 │
 ├── api/
 │   ├── routes/
 │   │   ├── voice.py                 ← /voice/answer (TwiML + parallel fetch + snapshot), /voice/status (330 LOC)
 │   │   └── calls.py                 ← /api/call, /api/calls
-│   ├── middleware/                   ← auth, api_auth, rate_limit, security, twilio, error_handler
+│   ├── middleware/                   ← auth, rate_limit, security, error_handler
 │   └── validators/schemas.py        ← Pydantic input validation
 │
 ├── db/
 │   ├── client.py                    ← asyncpg pool + query helpers + health check (69 LOC)
-│   └── migrations/                  ← SQL migrations (HNSW index, feature_flags, call_context_snapshot)
+│   └── migrations/                  ← SQL migrations (HNSW index, call_context_snapshot, call_metrics)
 ├── tests/                           ← 61 test files + helpers/mocks/scenarios
 ├── pyproject.toml                   ← Python 3.12, Pipecat v0.0.101+
 └── Dockerfile                       ← python:3.12-slim + uv
@@ -227,6 +227,8 @@ pipecat/
 ```
 /
 ├── index.js                    ← Express server (port 3001, admin/consumer APIs)
+├── lib/
+│   └── growthbook.js           ← GrowthBook feature flag SDK helper (Node.js)
 ├── services/                   ← 9 service files (dual implementation with pipecat/services/)
 ├── routes/                     ← 16 route modules (all /api/* endpoints)
 ├── middleware/                  ← 7 middleware files (auth, rate-limit, security)
@@ -335,12 +337,13 @@ make setup                   # Create Neon branches + Railway environments
 
 ### Railway Services
 
-The Railway project has two services per environment:
+The Railway project has four services per environment:
 
 | Service | Railway Name | Port | Responsibility |
 |---|---|---|---|
 | Pipecat (Python) | `donna-pipecat` | 7860 | Voice pipeline: STT → Observer → Director → Claude → TTS |
 | Node.js API | `donna-api` | 3001 | Admin/consumer APIs, reminder scheduler, call initiation |
+**GrowthBook (feature flags):** Hosted on GrowthBook Cloud (app.growthbook.io), not self-hosted. Admin UI at app.growthbook.io, SDK connects to cdn.growthbook.io. No Railway services needed.
 
 **Railway CLI is linked to production by default.** Use `--environment dev` or `--environment staging` flags for other environments. If you switch with `railway environment dev`, remember to switch back with `railway environment production`.
 
@@ -378,7 +381,7 @@ The Railway project has two services per environment:
 | Modify per-senior call settings | `pipecat/services/seniors.py` (`get_call_settings()`) |
 | Modify caregiver notes delivery | `pipecat/services/caregivers.py` + `pipecat/flows/tools.py` |
 | Modify circuit breaker behavior | `pipecat/lib/circuit_breaker.py` |
-| Modify feature flags | `pipecat/lib/feature_flags.py` + `feature_flags` DB table |
+| Modify feature flags | `pipecat/lib/growthbook.py` (GrowthBook SDK integration) |
 | Check/add environment variables | `pipecat/config.py` |
 | Modify in-call tracking | `pipecat/processors/conversation_tracker.py` |
 | Modify guidance stripping | `pipecat/processors/guidance_stripper.py` |
@@ -456,6 +459,10 @@ DONNA_API_KEY=...
 # Scheduler
 SCHEDULER_ENABLED=false          # MUST be false (Node.js runs scheduler)
 
+# Feature Flags (GrowthBook Cloud)
+GROWTHBOOK_API_HOST=...          # https://cdn.growthbook.io
+GROWTHBOOK_CLIENT_KEY=...        # SDK connection key from app.growthbook.io
+
 # Monitoring
 SENTRY_DSN=...                               # Error monitoring (optional, both backends)
 
@@ -492,6 +499,7 @@ Both share the same Neon PostgreSQL database. Dual service implementations (e.g.
 - Pipecat context migration: `OpenAILLMContext` → `LLMContext` + `LLMContextAggregatorPair` (blocked — `AnthropicLLMService.create_context_aggregator()` requires `set_llm_adapter()` which only exists on `OpenAILLMContext` in v0.0.101. Revisit when pipecat updates the Anthropic adapter. Deprecation warnings are suppressed in `main.py`.)
 - ~~Prompt Caching (Anthropic)~~ ✓ Completed (`enable_prompt_caching=True` in AnthropicLLMService)
 - ~~Call Answer Optimization~~ ✓ Completed (parallel fetches + pre-computed snapshot + cached news: ~9s → ~2s inbound)
+- ~~Observability & Reliability~~ ✓ Completed (call_metrics table, GrowthBook feature flags, circuit breakers, graceful shutdown)
 - Telnyx Migration (65% cost savings)
 
 ---
@@ -503,4 +511,4 @@ Consult these for product direction, decisions, and priorities.
 
 ---
 
-*Last updated: March 2026 — v5.2 with multi-provider Director, web search prefetch, news injection, Claude Sonnet 4.6*
+*Last updated: March 2026 — v5.2 with multi-provider Director, web search prefetch, Claude Sonnet 4.6, GrowthBook feature flags, observability & reliability*

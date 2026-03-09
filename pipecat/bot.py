@@ -169,6 +169,18 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     if body.get("call_type") and session_state.get("call_type") == "check-in":
         session_state["call_type"] = body["call_type"]
 
+    # Resolve feature flags for this call
+    try:
+        from lib.growthbook import resolve_flags
+        senior = session_state.get("senior") or {}
+        session_state["_flags"] = await resolve_flags(
+            senior_id=session_state.get("senior_id"),
+            timezone=senior.get("timezone"),
+            call_type=session_state.get("call_type", "check-in"),
+        )
+    except Exception as e:
+        logger.warning("[{cs}] Flag resolution failed — using defaults: {err}", cs=call_sid, err=str(e))
+
     senior_name = (session_state.get("senior") or {}).get("name", "unknown")
     logger.info("[{cs}] Starting pipeline for {name}", cs=call_sid, name=senior_name)
 
@@ -341,6 +353,8 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     async def on_disconnected(transport_ref, websocket_ref):
         elapsed = round(time.time() - start_time)
         logger.info("[{cs}] Client disconnected after {s}s", cs=call_sid, s=elapsed)
+        # Set end_reason if not already set by Quick Observer or Director
+        session_state.setdefault("_end_reason", "user_hangup")
         # Flush any buffered assistant text before post-call reads transcript
         conversation_tracker.flush()
         # End pipeline first so runner.run() unblocks, then run post-call in background.

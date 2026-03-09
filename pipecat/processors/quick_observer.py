@@ -325,6 +325,8 @@ class QuickObserverProcessor(FrameProcessor):
             await asyncio.sleep(delay)
             if self._pipeline_task:
                 logger.info("[QuickObserver] Goodbye timeout reached — ending call programmatically")
+                if self._session_state is not None:
+                    self._session_state["_end_reason"] = "goodbye_detected"
                 await self._pipeline_task.queue_frame(EndFrame())
             else:
                 logger.warning("[QuickObserver] No pipeline_task set — cannot force end call")

@@ -365,4 +365,96 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
   }
 });
 
+// -------------------------------------------------------------------------
+// Infrastructure Metrics (from call_metrics table)
+// -------------------------------------------------------------------------
+
+// Get recent call metrics for the infrastructure dashboard
+router.get('/api/observability/metrics/calls', requireAdmin, async (req, res) => {
+  try {
+    const hours = Math.min(Math.max(parseInt(req.query.hours) || 24, 1), 168);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 500);
+
+    const rows = await db.execute(sql`
+      SELECT call_sid, senior_id, call_type, duration_seconds,
+             end_reason, turn_count, phase_durations, latency,
+             breaker_states, tools_used, token_usage, error_count,
+             created_at
+      FROM call_metrics
+      WHERE created_at >= NOW() - ${hours + ' hours'}::interval
+      ORDER BY created_at DESC
+      LIMIT ${limit}
+    `);
+
+    res.json({ metrics: rows.rows, hours });
+  } catch (error) {
+    console.error('Error fetching call metrics:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get aggregated metrics summary for dashboard widgets
+router.get('/api/observability/metrics/summary', requireAdmin, async (req, res) => {
+  try {
+    const hours = Math.min(Math.max(parseInt(req.query.hours) || 24, 1), 168);
+
+    const summaryResult = await db.execute(sql`
+      SELECT
+        COUNT(*) AS total_calls,
+        COUNT(*) FILTER (WHERE error_count = 0) AS successful_calls,
+        ROUND(AVG(duration_seconds)) AS avg_duration_seconds,
+        ROUND(AVG(turn_count)) AS avg_turn_count,
+        ROUND(AVG((latency->>'llm_ttfb_avg_ms')::numeric)) AS avg_llm_ttfb_ms,
+        ROUND(AVG((latency->>'tts_ttfb_avg_ms')::numeric)) AS avg_tts_ttfb_ms,
+        ROUND(AVG((latency->>'turn_avg_ms')::numeric)) AS avg_turn_latency_ms
+      FROM call_metrics
+      WHERE created_at >= NOW() - ${hours + ' hours'}::interval
+    `);
+
+    const endReasons = await db.execute(sql`
+      SELECT end_reason, COUNT(*)::int AS count
+      FROM call_metrics
+      WHERE created_at >= NOW() - ${hours + ' hours'}::interval
+      GROUP BY end_reason
+      ORDER BY count DESC
+    `);
+
+    res.json({
+      summary: summaryResult.rows[0] || {},
+      end_reasons: endReasons.rows,
+      hours,
+    });
+  } catch (error) {
+    console.error('Error fetching metrics summary:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get latency trends (hourly averages for charts)
+router.get('/api/observability/metrics/latency', requireAdmin, async (req, res) => {
+  try {
+    const hours = Math.min(Math.max(parseInt(req.query.hours) || 24, 1), 168);
+
+    const rows = await db.execute(sql`
+      SELECT
+        date_trunc('hour', created_at) AS hour,
+        COUNT(*) AS call_count,
+        ROUND(AVG((latency->>'llm_ttfb_avg_ms')::numeric)) AS llm_ttfb_ms,
+        ROUND(AVG((latency->>'tts_ttfb_avg_ms')::numeric)) AS tts_ttfb_ms,
+        ROUND(AVG((latency->>'turn_avg_ms')::numeric)) AS turn_latency_ms,
+        ROUND(AVG(duration_seconds)) AS avg_duration
+      FROM call_metrics
+      WHERE created_at >= NOW() - ${hours + ' hours'}::interval
+        AND latency IS NOT NULL
+      GROUP BY date_trunc('hour', created_at)
+      ORDER BY hour ASC
+    `);
+
+    res.json({ latency: rows.rows, hours });
+  } catch (error) {
+    console.error('Error fetching latency trends:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

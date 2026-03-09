@@ -5,6 +5,7 @@ import twilio from 'twilio';
 import { memoryService } from './memory.js';
 import { contextCacheService } from './context-cache.js';
 import { createLogger } from '../lib/logger.js';
+import { resolveFlags, getValue } from '../lib/growthbook.js';
 
 const log = createLogger('Scheduler');
 
@@ -644,6 +645,9 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
         const welfareCount = callPlan.filter(s => s.type === 'welfare').length;
         log.info('Unified call plan', { total: callPlan.length, reminders: reminderCount, welfare: welfareCount });
       }
+
+      // Resolve flags once per scheduler cycle
+      const flags = await resolveFlags({ source: 'scheduler' });
 
       // Execute calls in parallel with concurrency limit of 10
       attempted = callPlan.length;

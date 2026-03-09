@@ -311,10 +311,9 @@ cd apps/consumer && npx vercel --prod --yes      # Consumer app
 ## Documentation
 
 - [pipecat/docs/ARCHITECTURE.md](./pipecat/docs/ARCHITECTURE.md) — Pipecat pipeline architecture (authoritative)
-- [docs/architecture/OVERVIEW.md](./docs/architecture/OVERVIEW.md) — System architecture overview
-- [docs/PRODUCT_PLAN.md](./docs/PRODUCT_PLAN.md) — Product plan and feature log
+- [docs/architecture/](./docs/architecture/) — Architecture suite (overview, features, security, cost, testing, performance)
 - [docs/decisions/DONNA_ON_PIPECAT.md](./docs/decisions/DONNA_ON_PIPECAT.md) — Pipecat migration architecture
-- [CLAUDE.md](./CLAUDE.md) — AI assistant context
+- [claude.md](./claude.md) — AI assistant context
 
 ## License
 

@@ -3,7 +3,7 @@
 **Date:** 2026-03-07
 **Branch:** `feat/droid-4-workspace`
 **Timeline:** 3-4 weeks (phased, alongside other feature work)
-**Status:** In Progress
+**Status:** Complete
 
 ---
 
@@ -20,7 +20,7 @@ Three pillars:
 
 ## Pillar 1: GrowthBook (Feature Flags + Experiments)
 
-**Status:** Complete (dev environment deployed)
+**Status:** Complete (all environments deployed)
 **Timeline:** Week 1-2
 
 ### Deployment: GrowthBook Cloud
@@ -115,10 +115,10 @@ Also delete unused middleware files:
 7. [x] Integrate into `services/scheduler.js` — resolve flags per cycle
 8. [x] Wire flags into existing code paths (Director, news, memory, post-call analysis)
 9. [x] Deploy GrowthBook + FerretDB on Railway (dev environment)
-10. [ ] Create initial org + SDK connection in GrowthBook admin UI
-11. [ ] Set `GROWTHBOOK_CLIENT_KEY` on donna-pipecat + donna-api (dev)
-12. [ ] Seed initial flags via GrowthBook admin UI
-13. [ ] Deploy GrowthBook + FerretDB to staging + production
+10. [x] Create initial org + SDK connection in GrowthBook Cloud
+11. [x] Set `GROWTHBOOK_CLIENT_KEY` on donna-pipecat + donna-api (all environments)
+12. [x] Seed initial flags via GrowthBook REST API
+13. [x] Deploy to staging + production (GrowthBook Cloud — no self-hosted services)
 
 ---
 
@@ -377,4 +377,4 @@ Upgrade `/health` from basic "ok" to detailed service health:
 
 ---
 
-*Design validated 2026-03-07. Implementation in progress on `feat/droid-4-workspace`.*
+*Design validated 2026-03-07. Implementation complete. Deployed to dev, staging, and production.*

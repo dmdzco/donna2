@@ -3,12 +3,13 @@
 
 Usage:
     1. Create a Google Cloud project and enable the Drive API.
-    2. Create OAuth 2.0 credentials (Desktop app type).
+    2. Create OAuth 2.0 credentials (Desktop app or Web app type).
     3. Download the client ID and secret.
     4. Run this script:
          GOOGLE_CLIENT_ID=xxx GOOGLE_CLIENT_SECRET=yyy python scripts/generate-drive-token.py
-    5. Follow the browser prompt to authorize.
-    6. Copy the printed refresh token into your GitHub secrets as GOOGLE_REFRESH_TOKEN.
+    5. Open the printed URL in your browser and authorize.
+    6. Paste the full redirect URL back into the terminal.
+    7. Copy the printed refresh token into your GitHub secrets as GOOGLE_REFRESH_TOKEN.
 
 Dependencies: requests (pip install requests)
 """
@@ -16,42 +17,14 @@ Dependencies: requests (pip install requests)
 import os
 import sys
 import webbrowser
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlencode, urlparse, parse_qs
 
 import requests
 
 SCOPES = "https://www.googleapis.com/auth/drive.readonly"
-REDIRECT_PORT = 8090
-REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}"
+REDIRECT_URI = "http://localhost"  # Not actually listening — user pastes the URL
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-
-# Will be set by the callback handler
-_auth_code = None
-
-
-class CallbackHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        global _auth_code
-        query = parse_qs(urlparse(self.path).query)
-
-        if "error" in query:
-            self.send_response(400)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-            self.wfile.write(b"<h1>Authorization failed.</h1><p>You can close this tab.</p>")
-            _auth_code = None
-            return
-
-        _auth_code = query.get("code", [None])[0]
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html")
-        self.end_headers()
-        self.wfile.write(b"<h1>Success!</h1><p>You can close this tab and return to the terminal.</p>")
-
-    def log_message(self, format, *args):
-        pass  # Suppress request logs
 
 
 def main():
@@ -62,7 +35,7 @@ def main():
         print("Error: Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET env vars.", file=sys.stderr)
         print("\nSteps:", file=sys.stderr)
         print("  1. Go to https://console.cloud.google.com/apis/credentials", file=sys.stderr)
-        print("  2. Create OAuth 2.0 Client ID (Desktop app type)", file=sys.stderr)
+        print("  2. Create OAuth 2.0 Client ID", file=sys.stderr)
         print("  3. Copy the Client ID and Client Secret", file=sys.stderr)
         print(f"  4. Run: GOOGLE_CLIENT_ID=xxx GOOGLE_CLIENT_SECRET=yyy python {sys.argv[0]}", file=sys.stderr)
         sys.exit(1)
@@ -78,26 +51,39 @@ def main():
     }
     auth_url = f"{AUTH_URL}?{urlencode(auth_params)}"
 
-    print(f"Opening browser for authorization...")
-    print(f"If it doesn't open, visit:\n  {auth_url}\n")
+    print("=" * 60)
+    print("Open this URL in your browser and authorize:\n")
+    print(f"  {auth_url}\n")
+    print("=" * 60)
     webbrowser.open(auth_url)
 
-    # Start a local server to receive the callback
-    server = HTTPServer(("localhost", REDIRECT_PORT), CallbackHandler)
-    print(f"Waiting for authorization callback on port {REDIRECT_PORT}...")
-    server.handle_request()  # Handle exactly one request
-    server.server_close()
+    print("\nAfter authorizing, your browser will redirect to a URL that")
+    print("starts with http://localhost/?code=...")
+    print("The page won't load (that's expected). Just copy the FULL URL")
+    print("from your browser's address bar and paste it below.\n")
 
-    if not _auth_code:
-        print("Error: No authorization code received.", file=sys.stderr)
+    redirect_url = input("Paste the redirect URL here: ").strip()
+
+    # Extract the authorization code from the pasted URL
+    parsed = urlparse(redirect_url)
+    query = parse_qs(parsed.query)
+
+    if "error" in query:
+        print(f"Error: Authorization failed: {query['error'][0]}", file=sys.stderr)
+        sys.exit(1)
+
+    auth_code = query.get("code", [None])[0]
+    if not auth_code:
+        print("Error: Could not find authorization code in the URL.", file=sys.stderr)
+        print("Make sure you copied the full URL from the address bar.", file=sys.stderr)
         sys.exit(1)
 
     # Exchange the auth code for tokens
-    print("Exchanging authorization code for tokens...")
+    print("\nExchanging authorization code for tokens...")
     resp = requests.post(TOKEN_URL, data={
         "client_id": client_id,
         "client_secret": client_secret,
-        "code": _auth_code,
+        "code": auth_code,
         "grant_type": "authorization_code",
         "redirect_uri": REDIRECT_URI,
     })

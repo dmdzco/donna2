@@ -25,7 +25,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 ### Core Capabilities
 - Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3)
-- LLM responses (Claude Sonnet 4.6 via Pipecat AnthropicLLMService, prompt caching enabled)
+- LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - Text-to-speech (ElevenLabs via Pipecat)
 - Semantic memory with decay + deduplication (pgvector + HNSW index)
 - Full in-call context retention (APPEND strategy, no summary truncation)
@@ -142,7 +142,7 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                                        ▼
                              Context Aggregator (user)
                                        ▼
-                             Claude Sonnet 4.6 + Pipecat Flows (5 tools)
+                             Claude Sonnet 4.5 + Pipecat Flows (5 tools)
                                        │ TextFrame
                                        ▼
                              Conversation Tracker → Guidance Stripper
@@ -259,7 +259,7 @@ TWILIO_PHONE_NUMBER=+1...
 DATABASE_URL=postgresql://...           # Neon PostgreSQL + pgvector
 
 # AI Services
-ANTHROPIC_API_KEY=...                   # Claude Sonnet 4.6 (voice LLM)
+ANTHROPIC_API_KEY=...                   # Claude Sonnet 4.5 (voice LLM)
 GOOGLE_API_KEY=...                      # Gemini 3 Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...                    # STT (Nova 3)
 ELEVENLABS_API_KEY=...                  # TTS

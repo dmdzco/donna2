@@ -70,32 +70,9 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
   }
 });
 
-// Get active calls
+// Get active calls — voice sessions are tracked by Pipecat, not Node.js
 router.get('/api/observability/active', requireAdmin, async (req, res) => {
-  const sessions = req.app.get('sessions');
-  const callMetadata = req.app.get('callMetadata');
-  try {
-    const activeCalls = [];
-    for (const [callSid, session] of sessions.entries()) {
-      const metadata = callMetadata.get(callSid);
-      if (metadata) {
-        activeCalls.push({
-          id: callSid,
-          call_sid: callSid,
-          senior_id: metadata.senior?.id,
-          senior_name: metadata.senior?.name || 'Unknown',
-          senior_phone: metadata.senior?.phone || 'Unknown',
-          started_at: metadata.startedAt || new Date().toISOString(),
-          status: 'in_progress',
-          turn_count: session.turnCount || 0,
-        });
-      }
-    }
-    res.json({ activeCalls });
-  } catch (error) {
-    console.error('Error fetching active calls:', error);
-    res.status(500).json({ error: error.message });
-  }
+  res.json({ activeCalls: [] });
 });
 
 // Get call details by ID

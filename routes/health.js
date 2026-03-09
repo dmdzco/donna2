@@ -6,7 +6,6 @@ const router = Router();
 
 // Health check with DB connectivity verification
 router.get('/health', async (req, res) => {
-  const sessions = req.app.get('sessions');
   let dbStatus = 'connected';
 
   try {
@@ -18,11 +17,9 @@ router.get('/health', async (req, res) => {
   const statusCode = dbStatus === 'connected' ? 200 : 503;
   res.status(statusCode).json({
     status: dbStatus === 'connected' ? 'ok' : 'degraded',
-    version: '4.0',
-    activeSessions: sessions.size,
+    version: '4.1',
     db: dbStatus,
-    pipeline: 'pipecat + 2-layer-observer + gemini-director',
-    features: ['pipecat-voice-pipeline', 'conversation-director', 'scheduled-reminders'],
+    features: ['admin-apis', 'reminder-scheduler', 'call-initiation'],
   });
 });
 

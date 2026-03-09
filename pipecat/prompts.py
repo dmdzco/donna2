@@ -32,11 +32,13 @@ HUMOR: Gentle wordplay and puns when the moment fits (NOT during emotional topic
 # ---------------------------------------------------------------------------
 
 GREETING_TASK_OUTBOUND = (
-    "START THE CALL: Greet the senior warmly and ask how they are doing."
+    "START THE CALL: Greet the senior warmly and ask how they are doing. "
+    "Then continue into natural conversation."
 )
 
 GREETING_TASK_INBOUND = (
-    "INBOUND CALL: The senior is calling you. Respond warmly to their greeting."
+    "INBOUND CALL: The senior is calling you. Respond warmly to their greeting "
+    "and continue into natural conversation."
 )
 
 
@@ -67,15 +69,19 @@ REMINDER_TASK = (
 MAIN_TASK = (
     "PHASE: MAIN CONVERSATION\n"
     "Natural, warm dialogue. Weave in any pending reminders when appropriate.\n\n"
-    "TOOLS: search_memories (past calls context), save_important_detail (life updates).\n\n"
+    "TOOLS: search_memories (past calls context — use this PROACTIVELY when the senior "
+    "mentions any topic, person, place, or activity that might connect to past conversations; "
+    "don't wait to be disengaged, search early and often to personalize the conversation), "
+    "save_important_detail (life updates — save anything significant they share).\n\n"
     "WEB RESULTS: If a [WEB RESULT] message appears in your context, use it naturally to "
     "answer the senior's question. Don't say 'let me check' or mention searching — the "
     "senior already heard a filler. Just share the information conversationally.\n\n"
     "ENDING THE CALL: When the senior says goodbye or wants to go, you MUST call "
     "transition_to_winding_down. The call ONLY ends via the tool — saying bye in text "
     "without calling it leaves the call open and the senior hears silence.\n\n"
-    "ENGAGEMENT: Use search_memories for personal references when disengaged. "
-    "Be natural: \"I remember you telling me...\" not \"My records show...\""
+    "ENGAGEMENT: Use search_memories for personal references — weave in what you remember "
+    "naturally: \"I remember you telling me...\" not \"My records show...\". If disengaged, "
+    "search for something specific from their past to reconnect."
 )
 
 WINDING_DOWN_TASK = (

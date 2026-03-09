@@ -44,11 +44,11 @@ router.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSche
 });
 
 // API: List active calls (admin only)
+// Active calls are tracked by Pipecat — query its /health endpoint
 router.get('/api/calls', requireAdmin, (req, res) => {
-  const sessions = req.app.get('sessions');
   res.json({
-    activeCalls: sessions.size,
-    callSids: Array.from(sessions.keys()),
+    activeCalls: 0,
+    callSids: [],
   });
 });
 

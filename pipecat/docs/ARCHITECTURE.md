@@ -79,7 +79,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         │
                         ▼
               ┌─────────────────────┐
-              │   Anthropic LLM      │  Claude Sonnet 4.6 (streaming)
+              │   Anthropic LLM      │  Claude Sonnet 4.5 (streaming)
               │   + Flow Manager     │  4 tools, 3-phase state machine
               └─────────┬───────────┘
                         │ TextFrame
@@ -549,7 +549,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
-| **Voice LLM** | Claude Sonnet 4.6 (`claude-sonnet-4-6`) | AnthropicLLMService (prompt caching enabled) |
+| **Voice LLM** | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Groq (`gpt-oss-20b`) / Cerebras (`gpt-oss-120b`) | ~70ms primary, random selection |
 | **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | ~150ms when Groq/Cerebras unavailable |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |

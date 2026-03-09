@@ -234,18 +234,22 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 
 ```
 docs/
-├── PRODUCT_PLAN.md               Product roadmap (40KB)
-├── architecture/OVERVIEW.md      v5.2 high-level architecture (current)
+├── architecture/                 Architecture suite (current, authoritative)
+│   ├── OVERVIEW.md               v5.2 high-level architecture
+│   ├── ARCHITECTURE.md           System architecture reference
+│   ├── FEATURES.md               Complete product feature inventory
+│   ├── SECURITY.md               Authentication, validation, PII
+│   ├── SCALABILITY.md            Admission control, pooling, Redis
+│   ├── COST.md                   Per-call cost breakdown
+│   ├── TESTING.md                3-level test architecture
+│   └── PERFORMANCE.md            Latency, prefetch, circuit breakers
 ├── plans/
-│   ├── 2026-02-18-v5-execution-plan.md         v5 execution plan (7 workstreams, historical)
-│   ├── 2026-02-07-roadmap-and-feature-flags.md Feature flag roadmap
-│   └── 2026-02-05-multi-senior-management.md   Multi-senior management plan
-├── guides/
-│   └── DEPLOYMENT_PLAN.md        Railway deployment guide
-└── decisions/                    Historical decisions (reference only):
-    ├── DONNA_ON_PIPECAT.md, DONNA_ON_LIVEKIT.md, VOICE_AI_FRAMEWORK_ANALYSIS.md
-    ├── ARCHITECTURE_ASSESSMENT.md
-    └── 2026-02-05-pipecat-migration-REVIEWED.md, 2026-02-05-security-hardening.md
+│   ├── 2026-02-07-roadmap-and-feature-flags.md  Feature flag roadmap (future)
+│   ├── 2026-02-05-multi-senior-management.md    Multi-senior management (future)
+│   └── unsubscribed-caller                       Onboarding call flow design
+└── decisions/
+    ├── DONNA_ON_PIPECAT.md       Pipecat migration architecture (reference)
+    └── VOICE_AI_FRAMEWORK_ANALYSIS.md  Framework comparison (reference)
 ```
 
 ---

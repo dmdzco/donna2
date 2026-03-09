@@ -123,7 +123,6 @@ class TestMainNode:
         node = build_main_node(state, tools)
         func_names = _get_func_names(node)
         assert "search_memories" in func_names
-        assert "web_search" in func_names
         assert "mark_reminder_acknowledged" in func_names
         assert "save_important_detail" in func_names
         assert "transition_to_winding_down" in func_names

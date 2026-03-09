@@ -62,9 +62,6 @@ def create_tts_service(session_state: dict):
             api_key=os.getenv("CARTESIA_API_KEY", ""),
             voice_id=os.getenv("CARTESIA_VOICE_ID", "e8e5fffb-252c-436d-b842-8879b84445b6"),
             model="sonic-3",
-            sample_rate=8000,
-            encoding="pcm_s16le",
-            container="raw",
             params=CartesiaTTSService.InputParams(
                 generation_config=GenerationConfig(speed=0.9),
             ),

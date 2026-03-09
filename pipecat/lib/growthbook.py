@@ -90,6 +90,7 @@ async def resolve_flags(
         "news_search_enabled": True,
         "memory_search_enabled": True,
         "tts_fallback": False,
+        "tts_provider": "cartesia",  # "cartesia" or "elevenlabs"
         "context_cache_enabled": True,
         "post_call_analysis_enabled": True,
         "scheduler_call_stagger_ms": 5000,

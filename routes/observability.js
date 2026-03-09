@@ -316,6 +316,7 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
   try {
     const [call] = await db.select({
       id: conversations.id,
+      callSid: conversations.callSid,
       concerns: conversations.concerns,
       sentiment: conversations.sentiment,
     })
@@ -327,11 +328,15 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
     }
 
     // Query call_analyses for post-call analysis data
+    // Build lookup values: always include conversation UUID, optionally call_sid
+    const lookupValues = [sql`${call.id}`];
+    if (call.callSid) lookupValues.push(sql`${call.callSid}`);
+
     const analysisRows = await db.execute(sql`
       SELECT engagement_score, concerns, positive_observations,
              call_quality, summary
       FROM call_analyses
-      WHERE conversation_id IN (${call.id}, ${call.callSid})
+      WHERE conversation_id IN (${sql.join(lookupValues, sql`, `)})
       ORDER BY created_at DESC
       LIMIT 1
     `);

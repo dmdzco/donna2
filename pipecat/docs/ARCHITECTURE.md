@@ -406,13 +406,12 @@ pipecat/
 ├── api/
 │   ├── routes/
 │   │   ├── voice.py                 ← /voice/answer (TwiML), /voice/status
-│   │   └── calls.py                 ← /api/call, /api/calls, /api/calls/:sid/end
+│   │   ├── calls.py                 ← /api/call, /api/calls, /api/calls/:sid/end
+│   │   └── metrics.py               ← /api/metrics/* (call metrics for observability)
 │   ├── middleware/
 │   │   ├── auth.py                  ← 3-tier auth (cofounder key, JWT, Clerk)
-│   │   ├── api_auth.py              ← API key auth (DONNA_API_KEY)
 │   │   ├── rate_limit.py            ← Rate limiting (slowapi)
 │   │   ├── security.py              ← Security headers (HSTS, X-Frame-Options)
-│   │   ├── twilio.py                ← Twilio webhook signature validation
 │   │   └── error_handler.py         ← Global error handlers
 │   └── validators/
 │       └── schemas.py               ← Pydantic input validation
@@ -450,11 +449,12 @@ pipecat/
 │
 ├── db/
 │   ├── client.py                    ← asyncpg pool + query helpers + health check (69 LOC)
-│   └── migrations/                  ← SQL migrations (HNSW index, feature_flags, call_context_snapshot)
+│   └── migrations/                  ← SQL migrations (HNSW index, call_context_snapshot, call_metrics)
 │
 ├── lib/
-│   ├── circuit_breaker.py           ← Async circuit breaker for external services (84 LOC)
-│   ├── feature_flags.py             ← DB-backed feature flags, 5-min cache (41 LOC)
+│   ├── circuit_breaker.py           ← Async circuit breaker for external services + Sentry breadcrumbs
+│   ├── growthbook.py                ← GrowthBook SDK wrapper (feature flags + kill switches)
+│   ├── cache_cleanup.py             ← Background TTL-based cache eviction loop
 │   └── sanitize.py                  ← PII-safe logging (phone, name masking)
 │
 ├── docs/
@@ -558,7 +558,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | `caregiver_notes` | Notes from caregivers delivered during calls |
 | `call_analyses` | Post-call AI analysis |
 | `daily_call_context` | Cross-call same-day memory |
-| `feature_flags` | Feature flag toggles (DB-backed, 5-min cache) |
+| `call_metrics` | Per-call observability metrics (latency, phases, tokens) |
 | `admin_users` | Admin dashboard accounts (bcrypt) |
 
 ### Memory System
@@ -615,4 +615,4 @@ RUN_DB_TESTS=1                   # Set to run DB integration tests
 
 ---
 
-*Last updated: March 2026 — v5.2 with multi-provider Director (Groq/Cerebras), web search prefetch, Director-driven news injection, location/date context*
+*Last updated: March 2026 — v5.2 with multi-provider Director, web search prefetch, GrowthBook feature flags, call metrics observability, enhanced health endpoint*

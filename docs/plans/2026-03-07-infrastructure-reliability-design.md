@@ -367,12 +367,12 @@ Upgrade `/health` from basic "ok" to detailed service health:
 - [ ] Remove `cofounder_api_key_1/2` from `pipecat/config.py` (kept — auth.py reads via os.getenv)
 - [x] Delete `pipecat/api/middleware/api_auth.py`
 - [x] Delete `pipecat/api/middleware/twilio.py`
-- [ ] Delete `docs/guides/DEPLOYMENT_PLAN.md`
-- [ ] Delete root `vercel.json`
+- [x] Delete `docs/guides/DEPLOYMENT_PLAN.md`
+- [x] Delete root `vercel.json`
 - [x] Remove `@google/generative-ai` from root `package.json`
 - [x] Remove `services/daily-context.js` (Node.js, unused)
 - [x] Fix broken links in `README.md`
-- [ ] Fix duplicate entries in `pipecat/docs/ARCHITECTURE.md`
+- [x] Fix duplicate entries in `pipecat/docs/ARCHITECTURE.md`
 - [x] Update `DIRECTORY.md` references
 
 ---

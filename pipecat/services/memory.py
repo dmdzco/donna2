@@ -201,7 +201,8 @@ async def get_recent(senior_id: str, limit: int = 10) -> list[dict]:
     from db import query_many
 
     return await query_many(
-        "SELECT * FROM memories WHERE senior_id = $1 ORDER BY created_at DESC LIMIT $2",
+        """SELECT id, type, content, importance, metadata, created_at, last_accessed_at
+           FROM memories WHERE senior_id = $1 ORDER BY created_at DESC LIMIT $2""",
         senior_id,
         limit,
     )
@@ -212,7 +213,8 @@ async def get_important(senior_id: str, limit: int = 5) -> list[dict]:
     from db import query_many
 
     rows = await query_many(
-        """SELECT * FROM memories
+        """SELECT id, type, content, importance, metadata, created_at, last_accessed_at
+           FROM memories
            WHERE senior_id = $1 AND importance >= 50
            ORDER BY importance DESC
            LIMIT $2""",
@@ -237,7 +239,8 @@ async def get_critical(senior_id: str, limit: int = 3) -> list[dict]:
     from db import query_many
 
     return await query_many(
-        """SELECT * FROM memories
+        """SELECT id, type, content, importance, metadata, created_at, last_accessed_at
+           FROM memories
            WHERE senior_id = $1
              AND (type = 'concern' OR importance >= 80)
            ORDER BY importance DESC

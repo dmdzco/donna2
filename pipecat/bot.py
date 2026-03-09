@@ -198,42 +198,55 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     )
 
     # -------------------------------------------------------------------------
-    # STT (Deepgram)
+    # STT / LLM / TTS — swap for mocks in load test mode
     # -------------------------------------------------------------------------
-    stt = DeepgramSTTService(
-        api_key=os.getenv("DEEPGRAM_API_KEY", ""),
-        live_options=LiveOptions(
-            model="nova-3-general",
-            language="en",
-            sample_rate=8000,
-            encoding="linear16",
-            channels=1,
-            interim_results=True,
-            smart_format=True,
-            punctuate=True,
-        ),
-    )
+    load_test = os.getenv("LOAD_TEST_MODE", "false").lower() == "true"
 
-    # -------------------------------------------------------------------------
-    # LLM (Anthropic Claude)
-    # -------------------------------------------------------------------------
-    llm = AnthropicLLMService(
-        api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-        model="claude-sonnet-4-5-20250929",
-        params=AnthropicLLMService.InputParams(
-            enable_prompt_caching=True,
-        ),
-    )
+    if load_test:
+        logger.warning("LOAD_TEST_MODE enabled — using mock STT/LLM/TTS")
+        from tests.mocks.mock_stt import MockSTTProcessor
+        from tests.mocks.mock_llm import MockLLMProcessor
+        from tests.mocks.mock_tts import MockTTSProcessor
 
-    # -------------------------------------------------------------------------
-    # TTS (ElevenLabs)
-    # -------------------------------------------------------------------------
-    tts = ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
-        model="eleven_turbo_v2_5",
-        params=ElevenLabsTTSService.InputParams(speed=0.9),
-    )
+        stt = MockSTTProcessor()
+        mock_llm = MockLLMProcessor(
+            default_response="That's wonderful! I'm glad to hear you're doing well today.",
+        )
+        tts = MockTTSProcessor()
+        # Real LLM needed for create_context_aggregator(); mock replaces it in pipeline
+        llm = AnthropicLLMService(
+            api_key=os.getenv("ANTHROPIC_API_KEY", "fake-key-load-test"),
+            model="claude-sonnet-4-5-20250929",
+        )
+    else:
+        stt = DeepgramSTTService(
+            api_key=os.getenv("DEEPGRAM_API_KEY", ""),
+            live_options=LiveOptions(
+                model="nova-3-general",
+                language="en",
+                sample_rate=8000,
+                encoding="linear16",
+                channels=1,
+                interim_results=True,
+                smart_format=True,
+                punctuate=True,
+            ),
+        )
+
+        llm = AnthropicLLMService(
+            api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+            model="claude-sonnet-4-5-20250929",
+            params=AnthropicLLMService.InputParams(
+                enable_prompt_caching=True,
+            ),
+        )
+
+        tts = ElevenLabsTTSService(
+            api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
+            model="eleven_turbo_v2_5",
+            params=ElevenLabsTTSService.InputParams(speed=0.9),
+        )
 
     # -------------------------------------------------------------------------
     # Custom processors
@@ -259,6 +272,9 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     # -------------------------------------------------------------------------
     # Pipeline assembly
     # -------------------------------------------------------------------------
+    # In load test mode, swap the real LLM for the mock in the pipeline
+    pipeline_llm = mock_llm if load_test else llm
+
     pipeline = Pipeline(
         [
             transport.input(),
@@ -266,7 +282,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             quick_observer,
             conversation_director,
             context_aggregator.user(),
-            llm,
+            pipeline_llm,
             conversation_tracker,
             guidance_stripper,
             tts,

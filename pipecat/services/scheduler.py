@@ -13,6 +13,7 @@ import os
 import re
 from datetime import datetime, timezone, timedelta
 from loguru import logger
+from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from db import query_one, query_many, execute
 from services.reminder_delivery import mark_delivered, format_reminder_prompt
 
@@ -65,15 +66,18 @@ async def get_due_reminders() -> list[dict]:
     Checks: non-recurring past due, recurring time-of-day match,
     and retry-pending deliveries ready for retry (>30 min since last attempt).
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     one_minute = now + timedelta(minutes=1)
     thirty_minutes_ago = now - timedelta(minutes=30)
 
     # Non-recurring reminders due now
     non_recurring = await query_many(
-        """SELECT r.*, s.*,
-                  r.id AS reminder_id, s.id AS senior_id,
-                  r.is_active AS r_active, s.is_active AS s_active
+        """SELECT r.id AS reminder_id, s.id AS senior_id,
+                  r.type, r.title, r.description, r.scheduled_time,
+                  r.is_recurring, r.cron_expression, r.is_active AS r_active,
+                  r.last_delivered_at,
+                  s.name, s.phone, s.timezone, s.interests,
+                  s.family_info, s.medical_notes, s.is_active AS s_active
            FROM reminders r
            INNER JOIN seniors s ON r.senior_id = s.id
            WHERE r.is_active = true
@@ -85,9 +89,12 @@ async def get_due_reminders() -> list[dict]:
 
     # Recurring reminders (all active — filter by time-of-day in Python)
     recurring_all = await query_many(
-        """SELECT r.*, s.*,
-                  r.id AS reminder_id, s.id AS senior_id,
-                  r.is_active AS r_active, s.is_active AS s_active
+        """SELECT r.id AS reminder_id, s.id AS senior_id,
+                  r.type, r.title, r.description, r.scheduled_time,
+                  r.is_recurring, r.cron_expression, r.is_active AS r_active,
+                  r.last_delivered_at,
+                  s.name, s.phone, s.timezone, s.interests,
+                  s.family_info, s.medical_notes, s.is_active AS s_active
            FROM reminders r
            INNER JOIN seniors s ON r.senior_id = s.id
            WHERE r.is_active = true
@@ -171,9 +178,14 @@ async def get_due_reminders() -> list[dict]:
 
     # Retries: retry_pending deliveries >30 min since last attempt
     retries = await query_many(
-        """SELECT rd.*, r.*, s.*,
-                  rd.id AS delivery_id, r.id AS reminder_id, s.id AS senior_id,
-                  rd.status AS delivery_status
+        """SELECT rd.id AS delivery_id, rd.scheduled_for, rd.delivered_at,
+                  rd.status AS delivery_status, rd.attempt_count, rd.call_sid,
+                  r.id AS reminder_id, s.id AS senior_id,
+                  r.type, r.title, r.description, r.scheduled_time,
+                  r.is_recurring, r.cron_expression, r.is_active AS r_active,
+                  r.last_delivered_at,
+                  s.name, s.phone, s.timezone, s.interests,
+                  s.family_info, s.medical_notes, s.is_active AS s_active
            FROM reminder_deliveries rd
            INNER JOIN reminders r ON rd.reminder_id = r.id
            INNER JOIN seniors s ON r.senior_id = s.id
@@ -216,13 +228,22 @@ async def trigger_reminder_call(
 
         logger.info("Context ready, triggering call (ctx_len={n})", n=len(memory_context or ""))
 
-        call = client.calls.create(
-            to=senior["phone"],
-            from_=os.environ["TWILIO_PHONE_NUMBER"],
-            url=f"{base_url}/voice/answer",
-            status_callback=f"{base_url}/voice/status",
-            status_callback_event=["initiated", "ringing", "answered", "completed"],
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=1, max=4),
+            before_sleep=before_sleep_log(logger, "WARNING"),
+            reraise=True,
         )
+        def _create_call():
+            return client.calls.create(
+                to=senior["phone"],
+                from_=os.environ["TWILIO_PHONE_NUMBER"],
+                url=f"{base_url}/voice/answer",
+                status_callback=f"{base_url}/voice/status",
+                status_callback_event=["initiated", "ringing", "answered", "completed"],
+            )
+
+        call = await asyncio.get_event_loop().run_in_executor(None, _create_call)
 
         target_scheduled_for = scheduled_for or get_scheduled_for_time(reminder) or datetime.now(timezone.utc)
 
@@ -320,8 +341,32 @@ def get_reminder_context(call_sid: str) -> dict | None:
 
 
 def clear_reminder_context(call_sid: str) -> None:
-    """Clear reminder context after call ends."""
+    """Clear reminder context after call ends (local + Redis)."""
     pending_reminder_calls.pop(call_sid, None)
+    try:
+        from lib.redis_client import get_shared_state
+        import asyncio
+        state = get_shared_state()
+        if hasattr(state, '_url'):
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(state.delete(f"reminder_ctx:{call_sid}"))
+    except Exception:
+        pass
+
+
+def cleanup_stale_contexts(max_age_minutes: int = 30) -> int:
+    """Remove pending_reminder_calls entries older than max_age_minutes."""
+    now = datetime.now(timezone.utc)
+    stale = [
+        sid for sid, ctx in pending_reminder_calls.items()
+        if (now - ctx.get("triggered_at", now)).total_seconds() > max_age_minutes * 60
+    ]
+    for sid in stale:
+        pending_reminder_calls.pop(sid, None)
+    if stale:
+        logger.info("Cleaned up {n} stale reminder contexts", n=len(stale))
+    return len(stale)
 
 
 # ---------------------------------------------------------------------------
@@ -375,8 +420,35 @@ def _extract_delivery(row: dict) -> dict:
 # Scheduler loop (replaces Node.js setInterval)
 # ---------------------------------------------------------------------------
 
+# Advisory lock ID for scheduler leader election.
+# Only one instance can hold this lock at a time.
+SCHEDULER_LOCK_ID = 8675309  # Arbitrary unique int64
+
+
+async def _try_acquire_leader_lock() -> bool:
+    """Try to acquire the scheduler advisory lock. Non-blocking."""
+    try:
+        row = await query_one("SELECT pg_try_advisory_lock($1) AS acquired", SCHEDULER_LOCK_ID)
+        return row and row.get("acquired", False)
+    except Exception as e:
+        logger.warning("Failed to acquire scheduler lock: {err}", err=str(e))
+        return False
+
+
+async def _release_leader_lock() -> None:
+    """Release the scheduler advisory lock."""
+    try:
+        await query_one("SELECT pg_advisory_unlock($1)", SCHEDULER_LOCK_ID)
+    except Exception as e:
+        logger.warning("Failed to release scheduler lock: {err}", err=str(e))
+
+
 async def start_scheduler(base_url: str, interval_seconds: int = 60) -> None:
     """Start the reminder polling loop and hourly context pre-fetch.
+
+    Uses PostgreSQL advisory locks for leader election — only one instance
+    runs the scheduler at a time. If the leader dies, another instance
+    acquires the lock within one polling interval.
 
     This runs forever — call as an asyncio task:
         asyncio.create_task(start_scheduler(base_url))
@@ -388,40 +460,69 @@ async def start_scheduler(base_url: str, interval_seconds: int = 60) -> None:
 
     logger.info("Starting scheduler (interval={i}s)", i=interval_seconds)
 
+    _trigger_sem = asyncio.Semaphore(10)  # Limit concurrent Twilio API calls
+
     async def check_reminders():
         try:
+            cleanup_stale_contexts()
             due = await get_due_reminders()
-            if due:
-                logger.info("Found {n} due reminders", n=len(due))
-            for item in due:
-                result = await trigger_reminder_call(
-                    item["reminder"],
-                    item["senior"],
-                    base_url,
-                    item.get("scheduled_for"),
-                    item.get("existing_delivery"),
-                )
-                if result:
-                    await mark_delivered(item["reminder"]["id"])
+            if not due:
+                return
+            logger.info("Found {n} due reminders", n=len(due))
+
+            async def _limited_trigger(item):
+                async with _trigger_sem:
+                    result = await trigger_reminder_call(
+                        item["reminder"],
+                        item["senior"],
+                        base_url,
+                        item.get("scheduled_for"),
+                        item.get("existing_delivery"),
+                    )
+                    if result:
+                        await mark_delivered(item["reminder"]["id"])
+                    return result
+
+            results = await asyncio.gather(
+                *[_limited_trigger(item) for item in due],
+                return_exceptions=True,
+            )
+            succeeded = sum(1 for r in results if r and not isinstance(r, Exception))
+            failed = sum(1 for r in results if isinstance(r, Exception))
+            if failed:
+                for i, r in enumerate(results):
+                    if isinstance(r, Exception):
+                        logger.error("Reminder trigger failed: {err}", err=str(r))
+            logger.info("Triggered {ok}/{total} reminders ({fail} failed)",
+                        ok=succeeded, total=len(due), fail=failed)
         except Exception as e:
             logger.error("Error checking reminders: {err}", err=str(e))
 
     async def prefetch_loop():
         while True:
             try:
-                from services.context_cache import run_daily_prefetch
+                from services.context_cache import run_daily_prefetch, cleanup_expired
+                cleanup_expired()
                 await run_daily_prefetch()
             except Exception as e:
                 logger.error("Context pre-fetch error: {err}", err=str(e))
             await asyncio.sleep(3600)  # Every hour
 
-    # Initial checks
-    await check_reminders()
-
+    # Prefetch runs on all instances (read-only, safe to duplicate)
     asyncio.create_task(prefetch_loop())
     logger.info("Context pre-caching enabled (hourly check for 5 AM local time)")
 
-    # Polling loop
+    # Leader election loop — only the leader runs check_reminders()
+    is_leader = False
     while True:
+        if not is_leader:
+            is_leader = await _try_acquire_leader_lock()
+            if is_leader:
+                logger.info("Acquired scheduler leader lock — this instance is the scheduler leader")
+                await check_reminders()  # Initial check on becoming leader
+            else:
+                logger.debug("Another instance holds scheduler lock — standing by")
+        else:
+            await check_reminders()
+
         await asyncio.sleep(interval_seconds)
-        await check_reminders()

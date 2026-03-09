@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
 import warnings
 
 from loguru import logger
@@ -51,6 +52,7 @@ except ImportError:
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -79,6 +81,15 @@ def register_call_task(task: asyncio.Task) -> None:
     """Track an active call task for graceful shutdown draining."""
     _active_tasks.add(task)
     task.add_done_callback(_active_tasks.discard)
+
+# ---------------------------------------------------------------------------
+# Scalability: Concurrency control & metrics
+# ---------------------------------------------------------------------------
+MAX_CALLS = int(os.getenv("MAX_CONCURRENT_CALLS", "50"))
+_call_semaphore = asyncio.Semaphore(MAX_CALLS)
+_active_calls = 0
+_peak_calls = 0
+_startup_time = time.monotonic()
 
 # ---------------------------------------------------------------------------
 # Middleware (order matters — outermost first)
@@ -119,21 +130,31 @@ app.include_router(calls_router)
 
 @app.get("/health")
 async def health():
-    """Health check endpoint with service status."""
+    """Health check endpoint with service status, pool stats, and call metrics."""
     from db import check_health as db_health
+    from db.client import get_pool_stats
     from lib.circuit_breaker import get_breaker_states
 
     db_ok = await db_health()
+    try:
+        pool_stats = await get_pool_stats()
+    except Exception:
+        pool_stats = {}
     breakers = get_breaker_states()
-    status = "ok" if db_ok else "degraded"
 
-    return {
-        "status": status,
+    status_code = 200 if db_ok else 503
+    body = {
+        "status": "ok" if db_ok else "degraded",
         "service": "donna-pipecat",
-        "active_calls": len(call_metadata),
+        "active_calls": _active_calls,
+        "peak_calls": _peak_calls,
+        "max_calls": MAX_CALLS,
+        "uptime_seconds": round(time.monotonic() - _startup_time),
         "database": "ok" if db_ok else "error",
+        "pool": pool_stats,
         "circuit_breakers": breakers,
     }
+    return JSONResponse(content=body, status_code=status_code)
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +163,19 @@ async def health():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """Twilio connects here via TwiML <Stream>. Runs the Pipecat pipeline."""
+    global _active_calls, _peak_calls
     await websocket.accept()
+
+    # Admission control: reject if at capacity
+    if _call_semaphore.locked():
+        logger.warning("Rejected call: at capacity ({max})", max=MAX_CALLS)
+        await websocket.close(code=1013)  # Try Again Later
+        return
+
+    await _call_semaphore.acquire()
+    _active_calls += 1
+    if _active_calls > _peak_calls:
+        _peak_calls = _active_calls
 
     # Track this task for graceful shutdown draining
     current_task = asyncio.current_task()
@@ -187,6 +220,8 @@ async def websocket_endpoint(websocket: WebSocket):
         except ImportError:
             pass
     finally:
+        _call_semaphore.release()
+        _active_calls -= 1
         # Clean up call_metadata to prevent memory leaks on crashes
         cs = session_state.get("call_sid")
         if cs:
@@ -204,11 +239,15 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.on_event("startup")
 async def startup():
     port = os.getenv("PORT", "7860")
-    logger.info("Donna Pipecat starting on port {port}", port=port)
+    logger.info(
+        "Donna Pipecat starting on port {port} (max_concurrent_calls={max})",
+        port=port,
+        max=MAX_CALLS,
+    )
 
     # Initialize database pool
     try:
-        from db import get_pool
+        from db.client import get_pool
         await get_pool()
         logger.info("Database pool initialized")
     except Exception as e:
@@ -253,7 +292,7 @@ async def shutdown():
 
     # Close DB pool last
     try:
-        from db import close_pool
+        from db.client import close_pool
         await close_pool()
         logger.info("Database pool closed")
     except Exception as e:

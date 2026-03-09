@@ -25,6 +25,7 @@ from db import execute
 _cache: dict[str, dict] = {}
 
 CACHE_TTL_SECONDS = 24 * 60 * 60  # 24 hours
+MAX_CACHE_SIZE = 2000
 PREFETCH_HOUR = 5  # 5 AM local
 
 # Greeting templates — {name} and {interest} replaced dynamically
@@ -128,14 +129,140 @@ def generate_templated_greeting(
     }
 
 
+async def _fetch_conversations_consolidated(senior_id: str, limit: int = 3) -> tuple:
+    """Fetch recent conversations once, return (summaries_text, turns_text).
+
+    Consolidates get_recent_summaries + get_recent_turns into a single DB query.
+    """
+    from db import query_many
+    import json
+    import math
+    from datetime import datetime, timezone
+
+    rows = await query_many(
+        """SELECT summary, transcript, started_at, duration_seconds
+           FROM conversations
+           WHERE senior_id = $1
+             AND status = 'completed'
+             AND (summary IS NOT NULL OR transcript IS NOT NULL)
+           ORDER BY started_at DESC
+           LIMIT $2""",
+        senior_id,
+        limit,
+    )
+
+    if not rows:
+        return None, None
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    def _time_label(started_at):
+        if started_at.tzinfo is not None:
+            started_at = started_at.replace(tzinfo=None)
+        days_ago = (now - started_at).days
+        if days_ago == 0:
+            return "Earlier today"
+        elif days_ago == 1:
+            return "Yesterday"
+        return f"{days_ago} days ago"
+
+    # Build summaries text
+    summary_lines = []
+    for row in rows:
+        if row.get("summary"):
+            time_ago = _time_label(row["started_at"])
+            dur = f"({round(row['duration_seconds'] / 60)} min)" if row.get("duration_seconds") else ""
+            summary_lines.append(f"- {time_ago} {dur}: {row['summary']}")
+    summaries_text = "\n".join(summary_lines) if summary_lines else None
+
+    # Build turns text
+    sections: list[str] = []
+    total_turns = 0
+    turns_per_call = 7
+    max_turns = 20
+    for row in rows:
+        try:
+            transcript = row.get("transcript")
+            if not transcript:
+                continue
+            if isinstance(transcript, str):
+                transcript = json.loads(transcript)
+            if not isinstance(transcript, list) or not transcript:
+                continue
+            recent = transcript[-turns_per_call:]
+            time_label = _time_label(row["started_at"])
+            dur = row.get("duration_seconds")
+            dur_str = f" ({math.ceil(dur / 60)} min)" if dur else ""
+            lines: list[str] = [f"[{time_label}{dur_str}]"]
+            for turn in recent:
+                if not isinstance(turn, dict):
+                    continue
+                role = turn.get("role", "unknown")
+                content = turn.get("content", "").strip()
+                if not content:
+                    continue
+                speaker = "Donna" if role == "assistant" else "Senior"
+                lines.append(f"  {speaker}: {content}")
+                total_turns += 1
+            if len(lines) > 1:
+                sections.append("\n".join(lines))
+        except Exception:
+            continue
+        if total_turns >= max_turns:
+            break
+
+    turns_text = None
+    if sections:
+        header = "RECENT CONVERSATIONS (from previous calls):"
+        footer = "(Reference these naturally — show you remember without repeating exactly.)"
+        turns_text = f"{header}\n" + "\n".join(sections) + f"\n{footer}"
+
+    return summaries_text, turns_text
+
+
+async def _fetch_memories_consolidated(senior_id: str) -> tuple:
+    """Fetch memories once, return (critical, important, recent).
+
+    Consolidates get_critical + get_important + get_recent into a single DB query.
+    """
+    from db import query_many
+    from services.memory import _calculate_effective_importance
+
+    rows = await query_many(
+        """SELECT id, type, content, importance, metadata, created_at, last_accessed_at
+           FROM memories
+           WHERE senior_id = $1
+           ORDER BY importance DESC, created_at DESC
+           LIMIT 30""",
+        senior_id,
+    )
+
+    # Split into tiers
+    critical = [m for m in rows if m.get("type") == "concern" or (m.get("importance") or 0) >= 80][:3]
+
+    important_candidates = [m for m in rows if (m.get("importance") or 0) >= 50]
+    with_effective = []
+    for m in important_candidates:
+        eff = _calculate_effective_importance(
+            m["importance"], m["created_at"], m.get("last_accessed_at")
+        )
+        if eff >= 50:
+            with_effective.append({**m, "effective_importance": eff})
+    with_effective.sort(key=lambda m: m["effective_importance"], reverse=True)
+    important = with_effective[:5]
+
+    recent = sorted(rows, key=lambda m: m["created_at"], reverse=True)[:10]
+
+    return critical, important, recent
+
+
 async def prefetch_and_cache(senior_id: str) -> dict | None:
-    """Pre-fetch and cache context for a senior (parallel DB fetches)."""
+    """Pre-fetch and cache context for a senior (consolidated DB fetches)."""
     start = time.time()
 
     try:
         from services.seniors import get_by_id
-        from services.conversations import get_recent_summaries, get_recent_turns
-        from services.memory import get_critical, get_important, get_recent, group_by_type, format_grouped_memories
+        from services.memory import group_by_type, format_grouped_memories
         from services.greetings import get_greeting
 
         senior = await get_by_id(senior_id)
@@ -143,13 +270,10 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
             logger.info("Senior {sid} not found, skipping", sid=senior_id)
             return None
 
-        # Parallel fetches
-        summaries, recent_turns, critical, important, recent_mems = await asyncio.gather(
-            get_recent_summaries(senior_id, 3),
-            get_recent_turns(senior_id),
-            get_critical(senior_id, 3),
-            get_important(senior_id, 5),
-            get_recent(senior_id, 10),
+        # Consolidated fetches: 2 queries instead of 5
+        (summaries, recent_turns), (critical, important, recent_mems) = await asyncio.gather(
+            _fetch_conversations_consolidated(senior_id, 3),
+            _fetch_memories_consolidated(senior_id),
         )
 
         # Fetch news for seniors with interests (fetch full set, pick subset for prompt)
@@ -234,6 +358,14 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
             "expires_at": now + CACHE_TTL_SECONDS,
         }
 
+        # Evict oldest entries if cache exceeds max size
+        if len(_cache) >= MAX_CACHE_SIZE:
+            entries = sorted(_cache.items(), key=lambda kv: kv[1]["cached_at"])
+            evict_count = len(_cache) - MAX_CACHE_SIZE + 1
+            for key, _ in entries[:evict_count]:
+                del _cache[key]
+            logger.info("Evicted {n} oldest cache entries", n=evict_count)
+
         _cache[senior_id] = cached
 
         elapsed = round((time.time() - start) * 1000)
@@ -294,6 +426,17 @@ async def run_daily_prefetch() -> None:
             logger.info("Pre-fetched context for {n} seniors", n=prefetched)
     except Exception as e:
         logger.error("Daily pre-fetch error: {err}", err=str(e))
+
+
+def cleanup_expired() -> int:
+    """Remove expired entries from cache. Returns count removed."""
+    now = time.time()
+    expired_keys = [k for k, v in _cache.items() if now > v["expires_at"]]
+    for k in expired_keys:
+        del _cache[k]
+    if expired_keys:
+        logger.info("Cleaned up {n} expired cache entries", n=len(expired_keys))
+    return len(expired_keys)
 
 
 def get_stats() -> dict:

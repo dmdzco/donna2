@@ -85,7 +85,9 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 
 ## Architecture
 
-**Full documentation**: [pipecat/docs/ARCHITECTURE.md](pipecat/docs/ARCHITECTURE.md)
+**Full documentation**: [docs/architecture/](docs/architecture/) — Architecture, Security, Scalability, Cost, Testing, Performance
+
+**Pipeline details**: [pipecat/docs/ARCHITECTURE.md](pipecat/docs/ARCHITECTURE.md)
 
 ### Pipecat Pipeline (bot.py)
 
@@ -393,7 +395,7 @@ After each commit that adds features or changes architecture, update:
 2. **`pipecat/docs/ARCHITECTURE.md`** - Pipeline diagrams, file structure, tech stack
 3. **`CLAUDE.md`** (this file) - Working features, key files, AI assistant reference
 4. **`README.md`** - Features, quick start, project structure
-5. **`docs/architecture/OVERVIEW.md`** - High-level architecture overview
+5. **`docs/architecture/`** - Architecture suite (OVERVIEW, ARCHITECTURE, SECURITY, SCALABILITY, COST, TESTING, PERFORMANCE)
 
 ### Deployment
 

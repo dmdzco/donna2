@@ -23,7 +23,8 @@ def client():
 
 class TestHealthEndpoint:
     @patch("db.check_health", new_callable=AsyncMock, return_value=True)
-    def test_health_returns_ok(self, mock_db_health, client):
+    @patch("db.client.get_pool_stats", new_callable=AsyncMock, return_value={"size": 5, "idle": 3, "max": 50, "min": 5})
+    def test_health_returns_ok(self, mock_pool_stats, mock_db_health, client):
         response = client.get("/health")
         assert response.status_code == 200
         data = response.json()
@@ -31,12 +32,14 @@ class TestHealthEndpoint:
         assert data["service"] == "donna-pipecat"
         assert "active_calls" in data
         assert data["database"] == "ok"
+        assert "pool" in data
         assert "circuit_breakers" in data
 
     @patch("db.check_health", new_callable=AsyncMock, return_value=False)
-    def test_health_degraded_when_db_down(self, mock_db_health, client):
+    @patch("db.client.get_pool_stats", new_callable=AsyncMock, return_value={})
+    def test_health_degraded_when_db_down(self, mock_pool_stats, mock_db_health, client):
         response = client.get("/health")
-        assert response.status_code == 200
+        assert response.status_code == 503
         data = response.json()
         assert data["status"] == "degraded"
         assert data["database"] == "error"

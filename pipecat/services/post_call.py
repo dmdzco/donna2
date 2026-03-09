@@ -70,33 +70,39 @@ async def run_post_call(
             logger.info("[{cs}] Persisted call summary ({n} chars)", cs=call_sid, n=len(summary))
 
         # Persist sentiment and concerns to conversations for dashboard
-        sentiment = None
-        if result.get("call_quality", {}).get("rapport"):
-            sentiment = result["call_quality"]["rapport"]
+        try:
+            sentiment = None
+            if result.get("call_quality", {}).get("rapport"):
+                sentiment = result["call_quality"]["rapport"]
 
-        concerns_list = []
-        for c in (result.get("concerns") or []):
-            if isinstance(c, dict):
-                desc = c.get("description", c.get("type", ""))
-                if desc:
-                    concerns_list.append(desc)
-            elif isinstance(c, str):
-                concerns_list.append(c)
+            concerns_list = []
+            for c in (result.get("concerns") or []):
+                if isinstance(c, dict):
+                    desc = c.get("description", c.get("type", ""))
+                    if desc:
+                        concerns_list.append(desc)
+                elif isinstance(c, str):
+                    concerns_list.append(c)
 
-        if sentiment or concerns_list:
-            from db.client import execute as db_execute
-            await db_execute(
-                """UPDATE conversations
-                   SET sentiment = COALESCE($1, sentiment),
-                       concerns = COALESCE($2, concerns)
-                   WHERE call_sid = $3""",
-                sentiment,
-                concerns_list or None,
-                call_sid,
-            )
-            logger.info(
-                "[{cs}] Persisted sentiment={s}, concerns={n}",
-                cs=call_sid, s=sentiment, n=len(concerns_list),
+            if sentiment or concerns_list:
+                from db.client import execute as db_execute
+                await db_execute(
+                    """UPDATE conversations
+                       SET sentiment = COALESCE($1, sentiment),
+                           concerns = COALESCE($2, concerns)
+                       WHERE call_sid = $3""",
+                    sentiment,
+                    concerns_list or None,
+                    call_sid,
+                )
+                logger.info(
+                    "[{cs}] Persisted sentiment={s}, concerns={n}",
+                    cs=call_sid, s=sentiment, n=len(concerns_list),
+                )
+        except Exception as e:
+            logger.error(
+                "[{cs}] Sentiment/concerns update failed: {err}",
+                cs=call_sid, err=str(e),
             )
 
         return result
@@ -130,11 +136,15 @@ async def run_post_call(
             from services.scheduler import clear_reminder_context
             clear_reminder_context(call_sid)
 
+    async def _step8_metrics():
+        await _persist_call_metrics(session_state, duration_seconds, conversation_tracker)
+
     results = await asyncio.gather(
         _step2_analysis(),
         _step3_memory(),
         _step5_reminder(),
         _step6_cache(),
+        _step8_metrics(),
         return_exceptions=True,
     )
 
@@ -145,7 +155,7 @@ async def run_post_call(
     else:
         analysis = analysis_result
     for i, (step_name, r) in enumerate(zip(
-        ["call analysis", "memory extraction", "reminder cleanup", "cache clearing"],
+        ["call analysis", "memory extraction", "reminder cleanup", "cache clearing", "call metrics"],
         results,
     )):
         if isinstance(r, Exception) and i > 0:  # step 2 already logged above
@@ -228,12 +238,6 @@ async def run_post_call(
             await save_snapshot(senior_id, snapshot)
     except Exception as e:
         logger.error("[{cs}] Post-call step 7 (call snapshot) failed: {err}", cs=call_sid, err=str(e))
-
-    # 8. Persist call metrics for observability
-    try:
-        await _persist_call_metrics(session_state, duration_seconds, conversation_tracker)
-    except Exception as e:
-        logger.error("[{cs}] Post-call step 8 (call metrics) failed: {err}", cs=call_sid, err=str(e))
 
     logger.info("[{cs}] Post-call processing complete", cs=call_sid)
 

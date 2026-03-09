@@ -36,7 +36,11 @@ class TestPostCallProcessing:
              patch("services.context_cache.clear_cache") as mock_cache_clear, \
              patch("services.scheduler.clear_reminder_context") as mock_sched_clear:
 
-            mock_analyze.return_value = {"mood": "positive", "summary": "Good call"}
+            mock_analyze.return_value = {
+                    "mood": "positive",
+                    "caregiver_sms": "Donna just chatted with Margaret for 2 minutes. She was in great spirits today!",
+                    "summary": "Good call",
+                }
 
             from services.post_call import run_post_call
             await run_post_call(session_state, tracker, duration_seconds=120)
@@ -81,7 +85,11 @@ class TestPostCallProcessing:
              patch("services.scheduler.clear_reminder_context"), \
              patch("services.reminder_delivery.mark_call_ended_without_acknowledgment", new_callable=AsyncMock) as mock_no_ack:
 
-            mock_analyze.return_value = {"mood": "neutral", "summary": "Short call"}
+            mock_analyze.return_value = {
+                    "mood": "neutral",
+                    "caregiver_sms": "Donna spoke with Margaret briefly today.",
+                    "summary": "Short call",
+                }
 
             from services.post_call import run_post_call
             await run_post_call(reminder_session_state, tracker, duration_seconds=30)

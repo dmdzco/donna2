@@ -583,7 +583,7 @@ class ConversationRunner:
                     ("services.reminder_delivery.mark_call_ended_without_acknowledgment", AsyncMock(return_value=None), False),
                     ("services.scheduler.clear_reminder_context", AsyncMock(return_value=None), False),
                     ("services.conversations.complete", AsyncMock(return_value=None), False),
-                    ("services.call_analysis.analyze_completed_call", AsyncMock(return_value={"mood": "positive"}), False),
+                    ("services.call_analysis.analyze_completed_call", AsyncMock(return_value={"mood": "positive", "caregiver_sms": "Donna chatted with the senior today. They seemed cheerful!", "summary": "Good call"}), False),
                     ("services.call_analysis.save_call_analysis", AsyncMock(return_value=None), False),
                     ("services.daily_context.save_call_context", AsyncMock(return_value=None), False),
                     ("services.context_cache.clear_cache", MagicMock(), False),

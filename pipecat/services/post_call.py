@@ -68,6 +68,37 @@ async def run_post_call(
             from services.conversations import update_summary
             await update_summary(call_sid, summary)
             logger.info("[{cs}] Persisted call summary ({n} chars)", cs=call_sid, n=len(summary))
+
+        # Persist sentiment and concerns to conversations for dashboard
+        sentiment = None
+        if result.get("call_quality", {}).get("rapport"):
+            sentiment = result["call_quality"]["rapport"]
+
+        concerns_list = []
+        for c in (result.get("concerns") or []):
+            if isinstance(c, dict):
+                desc = c.get("description", c.get("type", ""))
+                if desc:
+                    concerns_list.append(desc)
+            elif isinstance(c, str):
+                concerns_list.append(c)
+
+        if sentiment or concerns_list:
+            from db.client import execute as db_execute
+            await db_execute(
+                """UPDATE conversations
+                   SET sentiment = COALESCE($1, sentiment),
+                       concerns = COALESCE($2, concerns)
+                   WHERE call_sid = $3""",
+                sentiment,
+                concerns_list or None,
+                call_sid,
+            )
+            logger.info(
+                "[{cs}] Persisted sentiment={s}, concerns={n}",
+                cs=call_sid, s=sentiment, n=len(concerns_list),
+            )
+
         return result
 
     async def _step3_memory():

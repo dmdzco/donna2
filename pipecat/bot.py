@@ -216,7 +216,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         # Real LLM needed for create_context_aggregator(); mock replaces it in pipeline
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY", "fake-key-load-test"),
-            model="claude-sonnet-4-5-20250929",
+            model="claude-sonnet-4-6",
         )
     else:
         stt = DeepgramSTTService(
@@ -235,7 +235,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
 
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-            model="claude-sonnet-4-5-20250929",
+            model="claude-sonnet-4-6",
             params=AnthropicLLMService.InputParams(
                 enable_prompt_caching=True,
             ),

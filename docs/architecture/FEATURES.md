@@ -1,0 +1,263 @@
+# Donna Product Features
+
+> Current state of all features in the Donna AI companion system.
+
+---
+
+## Voice Calling
+
+### Outbound Calls (Donna calls seniors)
+- Scheduled daily check-in calls at configurable times per senior
+- Reminder-triggered calls (medication, appointments, etc.)
+- Manual outbound calls via admin dashboard or API
+- Time-of-day awareness (greetings adapt to morning/afternoon/evening)
+
+### Inbound Calls (seniors call Donna)
+- Seniors can call Donna's number anytime
+- Caller ID lookup matches to senior profile
+- Unsubscribed callers routed to onboarding flow
+- Return caller recognition with conversation memory
+
+### Onboarding Calls
+- Unrecognized callers get a warm onboarding conversation
+- Learns caller name, relationship to senior, senior's name, interests, concerns
+- Saves details progressively via `save_prospect_detail` tool
+- Return callers recognized and greeted by name with prior context
+
+---
+
+## Conversation
+
+### Natural Dialogue
+- Claude Sonnet 4.5 powers the conversation (streaming responses)
+- Full in-call context retention (APPEND strategy, no truncation)
+- Warm, grandchild-like tone tuned for elderly users
+- Barge-in support via Silero VAD (interrupt detection)
+
+### 4-Phase Call State Machine (Pipecat Flows)
+- **Reminder phase** (conditional) — Delivers pending reminders before main conversation
+- **Main phase** — Free-form conversation with all tools available
+- **Winding Down** — Summarize, deliver remaining reminders, prepare goodbye
+- **Closing** — Warm goodbye, automatic call termination
+
+### Greeting System
+- Time-based greeting templates (morning/afternoon/evening)
+- Sentiment-aware greetings (uses last call's engagement/rapport to set tone)
+- Interest-based follow-ups woven into greetings
+- Previous conversation references ("Last time you mentioned...")
+- Rotation to prevent repetitive greetings
+
+### 2-Layer Conversation Director
+- **Layer 1: Quick Observer** — 268 regex patterns (0ms), instant guidance injection
+  - Health signal detection (pain, falls, medication, symptoms)
+  - Emotion detection with valence/intensity
+  - Family/relationship pattern matching
+  - Safety concern flagging (scams, strangers, emergencies)
+  - Cognitive signal detection (confusion, repetition)
+  - Factual curiosity detection (triggers web search)
+  - Goodbye detection → programmatic call end (2s EndFrame)
+- **Layer 2: Conversation Director** — Multi-provider LLM analysis (non-blocking)
+  - Call phase tracking and pacing guidance
+  - Topic management (stay, transition, or wrap up)
+  - Engagement monitoring with re-engagement suggestions
+  - Emotional tone detection and tone adjustment
+  - Reminder delivery timing (natural pauses only)
+  - Time-based fallbacks (force winding-down at 9min, end at 12min)
+
+---
+
+## Memory System
+
+### Semantic Memory (pgvector)
+- OpenAI `text-embedding-3-small` embeddings (1536 dimensions)
+- HNSW index for fast approximate nearest-neighbor search
+- Cosine similarity with 0.7 minimum threshold
+- Deduplication (skip if cosine > 0.9 with existing memory)
+- Importance decay: `base * 0.5^(days/30)` (30-day half-life)
+- Access boost: +10 importance if accessed in last week
+- Tiered retrieval: Critical → Contextual → Background
+- Circuit breaker on embedding calls (10s timeout, 3-failure threshold)
+
+### In-Call Memory
+- Real-time topic, question, and advice tracking (ConversationTracker)
+- Mid-call memory refresh after 5+ minutes (re-fetches with current topics)
+- Shared transcript via session_state for Director analysis
+
+### Cross-Call Memory
+- Recent turns from previous calls loaded into system prompt
+- Same-day cross-call context (topics, advice, reminders persist across calls in a day)
+- Call summaries stored for multi-day context
+- Post-call memory extraction (OpenAI extracts facts, preferences, events from transcript)
+
+### Interest Discovery
+- Automatic interest extraction from conversations
+- Engagement scores computed per interest topic
+- Interest-weighted news story selection
+
+---
+
+## Reminders
+
+### Reminder Management
+- One-time and recurring reminder support
+- Reminder scheduling with timezone awareness
+- Priority levels and natural delivery timing
+- Delivery tracking with acknowledgment status (acknowledged/confirmed)
+
+### Reminder Delivery
+- Reminders woven naturally into conversation (Director-timed)
+- `mark_reminder_acknowledged` tool tracks senior's response
+- Undelivered reminders retried on next call
+- Caregiver visibility into delivery status
+
+---
+
+## News & Web Search
+
+### Curated News
+- OpenAI GPT-4o-mini with web search tool fetches senior-friendly news
+- Filtered by senior's interests (7-8 uplifting stories per fetch)
+- 1-hour cache to avoid redundant API calls
+- Interest-weighted story selection per call (top 3 from cache)
+- Director-driven injection (news appears in conversation only when contextually relevant)
+
+### Web Search (In-Call)
+- Senior can ask any factual question during a call
+- `web_search` tool powered by OpenAI web search
+- Async execution via `asyncio.to_thread` (non-blocking)
+- 15-second timeout with graceful fallback
+- Prefetch-accelerated (see Optimizations below)
+
+---
+
+## Caregiver Features
+
+### Caregiver Dashboard (Consumer App)
+- Clerk OAuth authentication
+- Link caregiver to senior
+- View call summaries and engagement scores
+- View concern alerts
+
+### Caregiver Notes
+- Caregivers can leave notes for Donna to deliver during calls
+- `check_caregiver_notes` tool retrieves pending notes
+- Natural delivery ("Oh, by the way, your daughter wanted me to ask about...")
+- Notes marked as delivered with call reference
+
+### Post-Call Notifications
+- Automatic notification to Node.js API on call completion
+- Concern detection triggers caregiver alerts
+- Call summary available via API
+
+---
+
+## Post-Call Processing
+
+Runs automatically after every call disconnect:
+
+1. **Conversation completion** — Duration, status, transcript saved to DB
+2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions
+3. **Caregiver notification** — Alerts sent for completed calls and detected concerns
+4. **Summary persistence** — Enables cross-call context
+5. **Interest discovery** — Extracts new interests, computes engagement scores
+6. **Memory extraction** — OpenAI extracts facts/preferences/events, stores with embeddings
+7. **Daily context save** — Topics, advice, reminders for same-day cross-call memory
+8. **Reminder cleanup** — Marks unacknowledged reminders for retry
+9. **Cache clearing** — Clears per-senior context and reminder caches
+10. **Snapshot rebuild** — Pre-computes `call_context_snapshot` JSONB for next call
+
+---
+
+## Admin Dashboard
+
+- Senior management (CRUD, interests, medical notes, timezone)
+- Call history with transcripts and analysis
+- Reminder management (create, edit, schedule)
+- Caregiver management
+- Call analysis viewer (summaries, concerns, engagement scores)
+- Manual call initiation
+- JWT authentication
+
+---
+
+## Infrastructure
+
+### Security
+- JWT admin authentication + cofounder API keys
+- API key authentication (DONNA_API_KEY)
+- Twilio webhook signature verification
+- Rate limiting (slowapi)
+- Security headers (HSTS, X-Frame-Options)
+- Pydantic input validation
+- PII-safe logging (phone/name masking)
+
+### Reliability
+- Circuit breakers for all external services (Groq, Cerebras, Gemini, OpenAI, news)
+- DB-backed feature flags with 5-minute in-memory cache
+- Graceful shutdown with active call tracking (7s drain on SIGTERM)
+- Enhanced /health endpoint (database + circuit breaker states)
+
+### Deployment
+- Three environments: dev, staging, production
+- CI/CD: PRs → tests → staging deploy → smoke tests → production
+- Railway (Pipecat + Node.js), Vercel (frontends)
+- Neon PostgreSQL with branch-per-environment
+
+---
+
+## Special Optimizations
+
+### Call Answer Speed (~700ms)
+- **Parallel DB fetches** — Senior profile, memories, news, reminders, and context all fetched concurrently via `asyncio.gather` instead of sequentially
+- **Call context snapshot** — Post-call processing pre-computes a JSONB snapshot (`seniors.call_context_snapshot`) containing last call analysis, recent summaries, recent turns, daily context, and call settings. At call time, a single column read replaces 6 separate DB queries
+- **Cached news** — News fetched at 5 AM local time and stored in `seniors.cached_news`. Call answer reads it from the snapshot instead of making a 4-10s OpenAI web search
+
+### Predictive Context Engine (Speculative Prefetch)
+Eliminates tool-call latency by pre-fetching results before Claude asks for them:
+
+- **1st wave (0ms)** — Regex extraction of topics, entities, names, activities from transcription. Fires background `memory.search()` calls → results cached in `PrefetchCache`
+- **2nd wave (~70ms)** — Director analysis predicts `memory_queries`, `web_queries`, and `anticipated_tools`. Fires anticipatory prefetches for next_topic, reminders, web searches
+- **Interim prefetch** — Debounced prefetch during user speech (1s gap, 15+ chars)
+- **Cache-first tool handlers** — `search_memories` and `web_search` check prefetch caches before live calls. Cache hit = ~0ms vs 200-300ms (memory) or 4-10s (web search)
+- **Jaccard matching** — Cache lookup uses word-overlap similarity (memory: 0.3 threshold, web: 0.4 threshold) with stop-word removal. No embedding calls needed
+
+### Speculative Director Analysis
+Starts Director analysis before the user finishes speaking:
+
+- **Silence detection** — 250ms gap in interim transcriptions triggers speculative Groq/Cerebras analysis
+- **Same-turn injection** — If speculative result completes before final transcription + Jaccard overlap ≥ 0.7, guidance is injected for the CURRENT turn (not one turn behind)
+- **Typical hit rate** — 70-90% of turns get same-turn guidance
+- **Automatic cancellation** — New interim text cancels stale speculative analysis
+
+### Director-Driven News Injection
+- News is NOT in the system prompt (saves ~300 tokens per turn)
+- Director signals `should_mention_news: true` when conversation topic aligns
+- Conversation Director processor injects news into guidance (one-shot per call)
+- Reduces per-turn token count while keeping news contextually relevant
+
+### Location & Date Context for Prefetch
+- Senior's city/state and today's date passed in every Director turn template
+- Enables specific predictions: `"Austin Texas weather March 2026"` instead of `"weather tomorrow"`
+- Dramatically improves web search prefetch cache hit rates (Jaccard overlap 0.85+ vs 0.25)
+
+### Multi-Provider Director with Fallback Chain
+- **Groq** (`gpt-oss-20b`, ~70ms) and **Cerebras** (`gpt-oss-120b`, ~70ms) randomly selected per call
+- **Gemini Flash** (`gemini-3-flash-preview`, ~150ms) as fallback when fast providers unavailable
+- Separate circuit breakers per provider (Groq 5s, Cerebras 5s/3s speculative, Gemini 10s)
+- System instruction separated from per-turn content for Gemini caching
+- Trimmed system instruction: 429 → 144 tokens
+
+### Anthropic Prompt Caching
+- Enabled on Claude Sonnet 4.5 for the voice LLM
+- System prompt and senior context cached across turns within a call
+- Reduces per-turn input token costs
+
+### Programmatic Call Ending
+- LLM tool calls for ending calls are unreliable (Claude says "goodbye" but doesn't call transition tools)
+- Quick Observer detects strong goodbye patterns via regex → queues EndFrame after 2s delay
+- Bypasses the LLM entirely for call termination
+- `_goodbye_in_progress` flag suppresses stale Director guidance during goodbye sequence
+
+---
+
+*Last updated: March 2026 — v5.2*

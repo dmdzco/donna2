@@ -72,7 +72,7 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
       const metricsRows = await db.execute(sql`
         SELECT call_sid, turn_count, token_usage, latency
         FROM call_metrics
-        WHERE call_sid = ANY(${callSids})
+        WHERE call_sid IN (${sql.join(callSids.map(s => sql`${s}`), sql`, `)})
       `);
       for (const row of metricsRows.rows) {
         metricsMap[row.call_sid] = row;
@@ -331,7 +331,7 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
       SELECT engagement_score, concerns, positive_observations,
              call_quality, summary
       FROM call_analyses
-      WHERE conversation_id = ${call.id}
+      WHERE conversation_id IN (${call.id}, ${call.callSid})
       ORDER BY created_at DESC
       LIMIT 1
     `);

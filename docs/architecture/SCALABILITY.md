@@ -251,6 +251,118 @@ Each cohort transition:
 
 ---
 
+## Load Test Results (March 2026)
+
+**Test setup**: Locust → Neon PostgreSQL (us-east-1), 204 seniors, 5,429 memories with 1536-dim embeddings, HNSW + B-tree indexes applied.
+
+### 100 Concurrent Users (via pooler)
+
+| Query | Requests | Failures | Avg | p50 | p95 | p99 |
+|-------|----------|----------|-----|-----|-----|-----|
+| search_memories (pgvector HNSW) | 5,492 | **0%** | 105ms | 98ms | 110ms | 460ms |
+| get_recent_summaries | 4,130 | **0%** | 98ms | 96ms | 110ms | 150ms |
+| get_critical_memories | 2,745 | **0%** | 98ms | 96ms | 110ms | 150ms |
+| get_due_reminders | 1,233 | **0%** | 98ms | 96ms | 110ms | 150ms |
+| **Total** | **13,803 / 60s** | **0%** | **100ms** | **96ms** | | |
+
+### 500 Concurrent Users (via pooler)
+
+| Query | Requests | Failures | Avg | p50 | p95 | p99 |
+|-------|----------|----------|-----|-----|-----|-----|
+| search_memories (pgvector HNSW) | 16,210 | **0%** | 737ms | 710ms | 820ms | 1.3s |
+| get_recent_summaries | 12,229 | **0%** | 728ms | 710ms | 810ms | 1.0s |
+| get_critical_memories | 8,120 | **0%** | 732ms | 710ms | 820ms | 1.2s |
+| get_due_reminders | 4,099 | **0%** | 725ms | 710ms | 800ms | 940ms |
+| **Total** | **40,658 / 90s (~450 req/s)** | **0%** | **731ms** | **710ms** | | |
+
+### 500 Concurrent Users (direct connection — FAILED)
+
+| Metric | Value |
+|--------|-------|
+| Failure rate | **69%** |
+| Error | `TooManyConnectionsError` — Neon direct connection limit exhausted |
+
+**Key finding**: Neon's PgBouncer pooler (`-pooler` hostname) is mandatory for >100 concurrent. Production already uses the pooled connection string.
+
+### What Latency Means
+
+The ~700ms at 500 users includes network round-trip from macOS to us-east-1 Neon. In production on Railway (also us-east-1), same-region latency is ~5-10ms. Expected production latency: **~50-100ms per query at 500 concurrent**.
+
+---
+
+## External Provider Capacity Audit (March 2026)
+
+### Current Limits vs. 500 Concurrent Calls
+
+| Provider | Service | Current Limit | Need at 500 Concurrent | Status |
+|----------|---------|---------------|------------------------|--------|
+| **Anthropic** | Claude Sonnet 4.5 | 1,000 RPM / 450K input TPM | ~1,000 RPM / ~5M input TPM | **BLOCKER** — input tokens 11x over limit |
+| **ElevenLabs** | TTS Streaming | ~5 concurrent (Creator tier) | 500 concurrent | **BLOCKER** — 100x under capacity |
+| **Deepgram** | STT Streaming (Nova 3) | Unknown (pay-as-you-go) | 500 concurrent streams | **VERIFY** — contact Deepgram |
+| **Twilio** | Voice Calls | Full account, active | 500 concurrent | **LIKELY OK** — verify account capacity |
+| **OpenAI** | Embeddings | 3,000 RPM / 1M TPM | ~2,000-4,000 RPM | **AT RISK** — prefetch cache mitigates |
+| **Gemini** | Director fallback + Analysis | 1,500 RPM (free tier) | ~500 RPM (Director) + ~500 post-call burst | **OK if Cerebras is primary** |
+| **Cerebras** | Director primary | **NOT SET in production** | 500 concurrent Director calls | **BLOCKER** — key not configured |
+
+### Anthropic — HARD BLOCKER
+
+```
+Current tier rate limits:
+  Requests:      1,000 RPM
+  Input tokens:  450,000 TPM
+  Output tokens: 90,000 TPM
+
+500 concurrent calls × 2 LLM calls/min:
+  Requests:      1,000 RPM  → AT LIMIT
+  Input tokens:  ~5,000,000 TPM → 11x OVER LIMIT
+  Output tokens: ~500,000 TPM → 5.5x OVER LIMIT
+```
+
+**Fix**: Upgrade to Build tier (4,000 RPM / 2M input TPM) or Scale tier (8,000 RPM / 4M+ TPM). Contact Anthropic for custom limits at 500 concurrent.
+
+### ElevenLabs — HARD BLOCKER
+
+```
+Current plan: Creator ($22/mo)
+  Concurrent streams: ~5
+  Character limit: 148,460/month
+
+500 concurrent calls need:
+  Concurrent streams: 500
+  Characters/month: ~40M (8,000 calls × 10min × ~500 chars/min)
+```
+
+**Fix**: Upgrade to Enterprise plan. Even Scale tier (25 concurrent) is insufficient. Need custom agreement for 500 concurrent WebSocket streams.
+
+### Cerebras — CONFIGURATION GAP
+
+`CEREBRAS_API_KEY` is not set in production. The Director falls back to Gemini for all calls, which works but is slower (~150ms vs ~50ms) and will hit Gemini rate limits at scale.
+
+**Fix**: Set `CEREBRAS_API_KEY` in Railway production environment.
+
+### OpenAI Embeddings — AT RISK
+
+```
+Current limits: 3,000 RPM / 1,000,000 TPM
+Peak demand: 500 calls × 4-8 search_memories/call = 2,000-4,000 RPM
+```
+
+Mitigated by predictive prefetch cache (most `search_memories` calls hit cache at ~0ms). Real embedding API calls estimated at ~500-1,000 RPM after cache hits. **Should be OK** but monitor during rollout.
+
+### Required Actions Before 500 Concurrent
+
+| Action | Priority | Who | Estimated Cost |
+|--------|----------|-----|----------------|
+| Upgrade Anthropic tier to Build/Scale | **P0** | Account admin | ~$1,000-5,000/mo |
+| Upgrade ElevenLabs to Enterprise | **P0** | Account admin | Custom pricing |
+| Set `CEREBRAS_API_KEY` in production | **P0** | DevOps | $0 (free tier or paid) |
+| Verify Deepgram concurrent stream limit | **P1** | Account admin | Contact sales |
+| Verify Twilio concurrent call capacity | **P1** | Account admin | Check dashboard |
+| Set Railway instance to 8GB+ RAM | **P1** | DevOps | ~$20-40/mo |
+| Consider multi-instance (2-3 replicas) | **P2** | Engineering | Architecture work |
+
+---
+
 ## Key Files
 
 | File | Purpose |

@@ -52,6 +52,11 @@ async def voice_answer(request: Request):
     news_context = None
     recent_turns = None
     call_type = "check-in"
+    last_call_analysis = None
+    call_settings = None
+    has_caregiver_notes = False
+    previous_calls_summary = None
+    todays_context = None
 
     # 1. Check for reminder call (pre-fetched context)
     from services.scheduler import get_reminder_context, get_prefetched_context
@@ -81,16 +86,81 @@ async def voice_answer(request: Request):
                      found=senior.get("name") if senior else "NOT FOUND")
         if senior:
             logger.info("[{cs}] Inbound from {name}", cs=call_sid, name=senior.get("name", "?"))
+
+            # --- Parallel fetch: memory + caregiver notes (only dynamic queries) ---
+            import asyncio
             from services.memory import build_context
-            memory_context = await build_context(senior["id"], None, senior)
-            # Fetch news for inbound calls (not pre-cached)
-            if senior.get("interests"):
+            from services.caregivers import get_pending_notes
+
+            mem_result, notes_result = await asyncio.gather(
+                build_context(senior["id"], None, senior),
+                get_pending_notes(senior["id"]),
+                return_exceptions=True,
+            )
+
+            memory_context = mem_result if not isinstance(mem_result, Exception) else None
+            if isinstance(mem_result, Exception):
+                logger.error("[{cs}] Memory fetch failed: {err}", cs=call_sid, err=mem_result)
+
+            caregiver_notes = notes_result if not isinstance(notes_result, Exception) else []
+            if isinstance(notes_result, Exception):
+                logger.error("[{cs}] Caregiver notes fetch failed: {err}", cs=call_sid, err=notes_result)
+
+            has_caregiver_notes = bool(caregiver_notes)
+
+            # --- News: read from DB (pre-cached daily at 5 AM, never fetched live) ---
+            import json as _json
+            raw_cached_news = senior.get("cached_news")
+            if raw_cached_news:
                 try:
-                    from services.news import get_news_for_senior
-                    news_context = await get_news_for_senior(senior["interests"], limit=3)
-                except Exception as e:
-                    logger.error("[{cs}] Error fetching news for inbound: {err}", cs=call_sid, err=str(e))
-            # Inbound: use short, receptive greeting — let the senior lead
+                    from services.news import select_stories_for_call
+                    news_context = select_stories_for_call(
+                        raw_cached_news,
+                        interests=senior.get("interests"),
+                        interest_scores=senior.get("interest_scores"),
+                        count=3,
+                    )
+                except Exception:
+                    news_context = raw_cached_news  # fallback: use full cached text
+
+            # --- Read pre-computed snapshot (came with find_by_phone) ---
+            snapshot = senior.get("call_context_snapshot")
+            if isinstance(snapshot, str):
+                try:
+                    snapshot = _json.loads(snapshot)
+                except Exception:
+                    snapshot = None
+
+            if snapshot:
+                last_call_analysis = snapshot.get("last_call_analysis")
+                previous_calls_summary = snapshot.get("recent_summaries")
+                recent_turns = snapshot.get("recent_turns")
+                todays_context = snapshot.get("todays_context")
+                logger.info("[{cs}] Using pre-computed snapshot (updated {ts})",
+                            cs=call_sid, ts=snapshot.get("snapshot_updated_at", "?"))
+            else:
+                # No snapshot yet (first call ever) — fetch individually
+                logger.info("[{cs}] No snapshot, fetching context individually", cs=call_sid)
+                from services.call_analysis import get_latest_analysis
+                from services.conversations import get_recent_summaries, get_recent_turns
+                from services.daily_context import get_todays_context, format_todays_context
+                last_call_analysis = await get_latest_analysis(senior["id"])
+                previous_calls_summary = await get_recent_summaries(senior["id"], 3)
+                recent_turns = await get_recent_turns(senior["id"])
+                raw_ctx = await get_todays_context(senior["id"], senior.get("timezone", "America/New_York"))
+                todays_context = format_todays_context(raw_ctx)
+
+            # --- call_settings from senior row (no extra query needed) ---
+            from services.seniors import DEFAULT_CALL_SETTINGS
+            raw_settings = senior.get("call_settings") or {}
+            if isinstance(raw_settings, str):
+                try:
+                    raw_settings = _json.loads(raw_settings)
+                except Exception:
+                    raw_settings = {}
+            call_settings = {**DEFAULT_CALL_SETTINGS, **raw_settings}
+
+            # --- Inbound greeting ---
             from services.greetings import get_inbound_greeting
             greeting_result = get_inbound_greeting(
                 senior_name=senior.get("name", ""),
@@ -127,54 +197,44 @@ async def voice_answer(request: Request):
                 logger.error("[{cs}] Error in prospect lookup/create: {err}",
                              cs=call_sid, err=str(e))
 
-    # 1a. Fetch last call analysis for greeting personalization
-    last_call_analysis = None
-    if senior:
-        try:
-            from services.call_analysis import get_latest_analysis
-            last_call_analysis = await get_latest_analysis(senior["id"])
-        except Exception as e:
-            logger.error("[{cs}] Error fetching last analysis: {err}", cs=call_sid, err=str(e))
+    # Load remaining context for outbound paths (reminder/prefetched).
+    # Inbound path handles everything inline above via snapshot + parallel.
+    if senior and (reminder_context or prefetched):
+        import json as _json
 
-    # 1a2. Fetch per-senior call settings
-    call_settings = None
-    if senior:
-        try:
-            from services.seniors import get_call_settings
-            call_settings = await get_call_settings(senior["id"])
-        except Exception as e:
-            logger.error("[{cs}] Error fetching call settings: {err}", cs=call_sid, err=str(e))
+        # Read snapshot from senior row (free — already loaded)
+        snapshot = senior.get("call_context_snapshot")
+        if isinstance(snapshot, str):
+            try:
+                snapshot = _json.loads(snapshot)
+            except Exception:
+                snapshot = None
+        if snapshot:
+            last_call_analysis = snapshot.get("last_call_analysis")
+            if not previous_calls_summary:
+                previous_calls_summary = snapshot.get("recent_summaries")
+            if not recent_turns:
+                recent_turns = snapshot.get("recent_turns")
+            if not todays_context:
+                todays_context = snapshot.get("todays_context")
 
-    # 1a3. Pre-fetch caregiver notes
-    has_caregiver_notes = False
-    if senior:
+        # call_settings from senior row (no extra query)
+        from services.seniors import DEFAULT_CALL_SETTINGS
+        raw_settings = senior.get("call_settings") or {}
+        if isinstance(raw_settings, str):
+            try:
+                raw_settings = _json.loads(raw_settings)
+            except Exception:
+                raw_settings = {}
+        call_settings = {**DEFAULT_CALL_SETTINGS, **raw_settings}
+
+        # Caregiver notes
         try:
-            from services.caregivers import get_pending_notes
-            caregiver_notes = await get_pending_notes(senior["id"])
-            if caregiver_notes:
-                has_caregiver_notes = True
+            from services.caregivers import get_pending_notes as _get_notes
+            caregiver_notes = await _get_notes(senior["id"])
+            has_caregiver_notes = bool(caregiver_notes)
         except Exception as e:
             logger.error("[{cs}] Error fetching caregiver notes: {err}", cs=call_sid, err=str(e))
-
-    # 1b. Fetch call summaries, recent turns, and daily context for any identified senior
-    previous_calls_summary = None
-    todays_context = None
-    # Only fetch recent_turns from DB if not already provided by prefetch
-    if senior:
-        try:
-            from services.conversations import get_recent_summaries, get_recent_turns
-            from services.daily_context import get_todays_context, format_todays_context
-            previous_calls_summary = await get_recent_summaries(senior["id"], 3)
-            if not recent_turns:
-                recent_turns = await get_recent_turns(senior["id"])
-            raw_ctx = await get_todays_context(senior["id"], senior.get("timezone", "America/New_York"))
-            todays_context = format_todays_context(raw_ctx)
-            logger.info("[{cs}] Summaries={s}ch, recent_turns={rt}ch, daily_ctx={d}ch", cs=call_sid,
-                        s=len(previous_calls_summary) if previous_calls_summary else 0,
-                        rt=len(recent_turns) if recent_turns else 0,
-                        d=len(todays_context) if todays_context else 0)
-        except Exception as e:
-            logger.error("[{cs}] Error fetching summaries/daily context: {err}", cs=call_sid, err=str(e))
 
     # 2. Create conversation record
     conversation_id = None

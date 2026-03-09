@@ -178,6 +178,16 @@ async def run_post_call(
     except Exception as e:
         logger.error("[{cs}] Post-call step 6 (cache clearing) failed: {err}", cs=call_sid, err=str(e))
 
+    # 7. Rebuild call context snapshot for next call
+    try:
+        if senior_id:
+            from services.call_snapshot import build_snapshot, save_snapshot
+            tz = (senior or {}).get("timezone", "America/New_York")
+            snapshot = await build_snapshot(senior_id, tz, analysis)
+            await save_snapshot(senior_id, snapshot)
+    except Exception as e:
+        logger.error("[{cs}] Post-call step 7 (call snapshot) failed: {err}", cs=call_sid, err=str(e))
+
     logger.info("[{cs}] Post-call processing complete", cs=call_sid)
 
 

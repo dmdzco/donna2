@@ -351,10 +351,53 @@ The Railway project has four services per environment:
 
 - **Unit tests (local):** `make test` — runs Python + Node.js tests, no external deps needed
 - **Voice/call features:** Deploy to dev, test with real phone calls to dev number
-- **Frontend apps:** Run locally against dev API, or deploy to Vercel
+- **Frontend E2E tests:** `npm run test:e2e` — Playwright browser tests across all 3 frontend apps (31 tests, ~15s)
 - **Regression:** `make test-regression` — scenario-based tests run in CI on every PR
 
 **Do NOT** test voice features locally with ngrok — always deploy to Railway dev environment
+
+### Frontend E2E Tests (Playwright)
+
+Browser tests for admin, consumer, and observability apps. Tests mock API responses by default — no backend needed.
+
+```bash
+# Run all E2E tests (starts dev servers automatically)
+npm run test:e2e
+
+# Run specific app tests
+npm run test:e2e:admin            # Admin dashboard (17 tests)
+npm run test:e2e:consumer         # Consumer public pages (4 tests)
+npm run test:e2e:observability    # Observability dashboard (4 tests)
+
+# Run authenticated consumer tests (requires .env.test with Clerk credentials)
+npx playwright test --project=clerk-setup --project=consumer-authenticated
+
+# Debug with UI mode
+npx playwright test --ui
+
+# First-time setup
+npx playwright install chromium
+```
+
+**5 Playwright projects** in `playwright.config.ts`:
+
+| Project | Tests | Auth |
+|---------|-------|------|
+| `clerk-setup` | Global Clerk token init | — |
+| `admin` | Login, navigation, seniors, calls, reminders | JWT via localStorage |
+| `consumer` | Landing page, protected route redirects | None |
+| `consumer-authenticated` | Dashboard access, onboarding, sign out | Clerk `@clerk/testing` |
+| `observability` | Call history, navigation, view switching | JWT via localStorage |
+
+**Key files:**
+- Config: `playwright.config.ts`
+- Mock data: `tests/e2e/fixtures/test-data.ts`
+- Auth helpers: `tests/e2e/fixtures/auth.ts`
+- API mocks: `tests/e2e/fixtures/api-mocks.ts`
+- Clerk setup: `tests/e2e/global.setup.ts`
+- Clerk credentials: `tests/e2e/.env.test` (gitignored)
+
+**Full guide:** [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md)
 
 ---
 
@@ -391,6 +434,7 @@ The Railway project has four services per environment:
 | Server setup / graceful shutdown | `pipecat/main.py` |
 | Update admin UI (v2) | `apps/admin-v2/src/pages/` |
 | Update admin API client | `apps/admin-v2/src/lib/api.ts` |
+| Add/modify frontend E2E tests | `tests/e2e/` — see [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) |
 
 ### Documentation Updates
 

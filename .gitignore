@@ -41,3 +41,6 @@ pipecat/.venv/
 
 # Drive sync state (tracked per-run, not committed)
 docs/meeting-notes/.sync-state.json
+playwright-report/
+tests/e2e/.env.test
+playwright/.clerk/

@@ -92,10 +92,21 @@ make test-python             # Pipecat only
 make test-regression         # Scenario-based regression tests
 ```
 
+**Frontend E2E tests** (Playwright, 31 tests across all 3 apps):
+```bash
+npx playwright install chromium  # First time only
+npm run test:e2e                 # Run all (~15s)
+npm run test:e2e:admin           # Admin dashboard only
+npm run test:e2e:consumer        # Consumer app only
+npx playwright test --ui         # Interactive debug mode
+```
+
+See [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) for full guide.
+
 **Frontend apps** (run locally against the Railway API):
 - Admin dashboard: `cd apps/admin-v2 && npm run dev` → http://localhost:5175
-- Consumer app: `cd apps/consumer && npm run dev` → http://localhost:5173
-- Observability: `cd apps/observability && npm run dev` → http://localhost:5174
+- Consumer app: `cd apps/consumer && npm run dev` → http://localhost:5174
+- Observability: `cd apps/observability && npm run dev` → http://localhost:3002
 
 ## Architecture
 
@@ -312,8 +323,9 @@ cd apps/consumer && npx vercel --prod --yes      # Consumer app
 
 - [pipecat/docs/ARCHITECTURE.md](./pipecat/docs/ARCHITECTURE.md) — Pipecat pipeline architecture (authoritative)
 - [docs/architecture/](./docs/architecture/) — Architecture suite (overview, features, security, cost, testing, performance)
+- [docs/guides/FRONTEND_TESTING.md](./docs/guides/FRONTEND_TESTING.md) — Frontend E2E testing guide (Playwright)
 - [docs/decisions/DONNA_ON_PIPECAT.md](./docs/decisions/DONNA_ON_PIPECAT.md) — Pipecat migration architecture
-- [claude.md](./claude.md) — AI assistant context
+- [CLAUDE.md](./CLAUDE.md) — AI assistant context
 
 ## License
 

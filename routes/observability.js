@@ -20,6 +20,27 @@ db.update(conversations)
   })
   .catch(err => console.error('[Observability] Cleanup error:', err.message));
 
+// Claude Sonnet 4.6 pricing (per million tokens)
+const CLAUDE_PRICING = {
+  input: 3.0,      // $3/M input tokens
+  output: 15.0,    // $15/M output tokens
+  cache_read: 0.30, // $0.30/M cache-read tokens
+};
+
+function estimateCost(tokenUsage) {
+  if (!tokenUsage) return null;
+  const prompt = tokenUsage.prompt_tokens || 0;
+  const completion = tokenUsage.completion_tokens || 0;
+  const cacheRead = tokenUsage.cache_read_tokens || 0;
+  // Subtract cache_read from prompt since cache_read tokens are charged at the lower rate
+  const nonCachedInput = Math.max(0, prompt - cacheRead);
+  const cost =
+    (nonCachedInput / 1_000_000) * CLAUDE_PRICING.input +
+    (completion / 1_000_000) * CLAUDE_PRICING.output +
+    (cacheRead / 1_000_000) * CLAUDE_PRICING.cache_read;
+  return Math.round(cost * 10000) / 10000; // 4 decimal places
+}
+
 // Get recent calls for observability dashboard
 router.get('/api/observability/calls', requireAdmin, async (req, res) => {
   try {
@@ -37,7 +58,6 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
       summary: conversations.summary,
       sentiment: conversations.sentiment,
       concerns: conversations.concerns,
-      callMetrics: conversations.callMetrics,
       transcript: conversations.transcript,
     })
     .from(conversations)
@@ -45,23 +65,59 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
     .orderBy(desc(conversations.startedAt))
     .limit(limit);
 
+    // Batch-fetch call_metrics for all call_sids in this page
+    const callSids = calls.map(c => c.callSid).filter(Boolean);
+    let metricsMap = {};
+    if (callSids.length > 0) {
+      const metricsRows = await db.execute(sql`
+        SELECT call_sid, turn_count, token_usage, latency
+        FROM call_metrics
+        WHERE call_sid = ANY(${callSids})
+      `);
+      for (const row of metricsRows.rows) {
+        metricsMap[row.call_sid] = row;
+      }
+    }
+
     // Transform to match dashboard expected format
-    const formattedCalls = calls.map(call => ({
-      id: call.id,
-      call_sid: call.callSid,
-      senior_id: call.seniorId,
-      senior_name: call.seniorName,
-      senior_phone: call.seniorPhone,
-      started_at: call.startedAt,
-      ended_at: call.endedAt,
-      duration_seconds: call.durationSeconds,
-      status: call.status || 'completed',
-      summary: call.summary,
-      sentiment: call.sentiment,
-      concerns: call.concerns,
-      call_metrics: call.callMetrics || null,
-      turn_count: Array.isArray(call.transcript) ? call.transcript.length : 0,
-    }));
+    const formattedCalls = calls.map(call => {
+      const m = metricsMap[call.callSid] || null;
+      const tokenUsage = m?.token_usage
+        ? (typeof m.token_usage === 'string' ? JSON.parse(m.token_usage) : m.token_usage)
+        : null;
+      const latency = m?.latency
+        ? (typeof m.latency === 'string' ? JSON.parse(m.latency) : m.latency)
+        : null;
+
+      // Turn count: prefer call_metrics, fallback to assistant-only transcript entries
+      let turnCount = 0;
+      if (m?.turn_count != null) {
+        turnCount = m.turn_count;
+      } else if (Array.isArray(call.transcript)) {
+        turnCount = call.transcript.filter(t => t.role === 'assistant').length;
+      }
+
+      return {
+        id: call.id,
+        call_sid: call.callSid,
+        senior_id: call.seniorId,
+        senior_name: call.seniorName,
+        senior_phone: call.seniorPhone,
+        started_at: call.startedAt,
+        ended_at: call.endedAt,
+        duration_seconds: call.durationSeconds,
+        status: call.status || 'completed',
+        summary: call.summary,
+        sentiment: call.sentiment,
+        concerns: call.concerns,
+        call_metrics: tokenUsage || latency ? {
+          token_usage: tokenUsage,
+          latency,
+          estimated_cost: estimateCost(tokenUsage),
+        } : null,
+        turn_count: turnCount,
+      };
+    });
 
     res.json({ calls: formattedCalls });
   } catch (error) {

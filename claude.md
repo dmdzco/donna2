@@ -28,7 +28,7 @@ Do NOT confuse the Node.js `services/` with `pipecat/services/` — they are sep
 
 ---
 
-## Current Status: v5.0
+## Current Status: v5.2
 
 The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (repo root) serves admin/consumer APIs and the reminder scheduler. See "Architecture Decision: Two Backends" below.
 
@@ -46,7 +46,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
   - Interim transcriptions: Debounced prefetch while user is still speaking (1s gap, 15+ chars)
   - Cache-first tool handlers: `search_memories` returns instantly on cache hit (~0ms vs 200-300ms)
 - **Pipecat Flows** - 4-phase call state machine (opening → main → winding_down → closing)
-- **5 LLM Tools** - search_memories, get_news, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
+- **5 LLM Tools** - search_memories, web_search, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
 - **Programmatic Call Ending** - Quick Observer detects goodbye → EndFrame after 2s delay (bypasses LLM)
 - **Director Fallback Actions** - Force winding-down at 9min, force end at 12min (configurable per-senior)
 - **Full In-Call Context Retention** - APPEND strategy keeps complete conversation history (no summary truncation)
@@ -63,13 +63,13 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Context Pre-caching** - Senior context + news cached at 5 AM local time, news persisted to `seniors.cached_news`
 - Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3 via Pipecat)
-- LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
+- LLM responses (Claude Sonnet 4.6 via Pipecat AnthropicLLMService, prompt caching enabled)
 - TTS (ElevenLabs via Pipecat)
 - VAD (Silero — confidence=0.6, stop_secs=1.2, min_volume=0.5)
 - News via OpenAI web search (1hr cache)
 - Security: JWT admin auth, API key auth, Twilio webhook validation, rate limiting, security headers
 
-### Infrastructure & Reliability (v5.0)
+### Infrastructure & Reliability
 - **Circuit Breakers** - Gemini (5s), OpenAI embedding (10s), news (10s) — `lib/circuit_breaker.py`
 - **Feature Flags** - DB-backed with 5-min cache — `lib/feature_flags.py`
 - **Graceful Shutdown** - Tracks active calls, 7s drain on SIGTERM
@@ -129,7 +129,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               Context Aggregator (user) ← builds LLM context from transcriptions
                         ▼
-              Claude Sonnet 4.5 + FlowManager (4-phase state machine)
+              Claude Sonnet 4.6 + FlowManager (4-phase state machine)
                         │ TextFrame
                         ▼
               Conversation Tracker (topics, questions, advice + shared transcript)
@@ -152,7 +152,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
 | Phase | Tools | Context Strategy |
 |-------|-------|-----------------|
 | **Opening** | search_memories, save_important_detail, check_caregiver_notes, transition_to_main | APPEND, respond_immediately |
-| **Main** | search_memories, get_news, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes, transition_to_winding_down | APPEND |
+| **Main** | search_memories, web_search, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes, transition_to_winding_down | APPEND |
 | **Winding Down** | mark_reminder_acknowledged, save_important_detail, transition_to_closing | APPEND |
 | **Closing** | *(none — post_action: end_conversation)* | APPEND |
 
@@ -486,8 +486,8 @@ Both share the same Neon PostgreSQL database. Dual service implementations (e.g.
 - ~~Security Hardening~~ ✓ Completed
 - ~~Pipecat Migration~~ ✓ Completed (voice pipeline ported, Director ported)
 - ~~Multi-Environment Workflow~~ ✓ Completed (dev/staging/prod with Neon branching + Railway environments)
-- ~~Infrastructure Reliability (v5.0)~~ ✓ Completed (circuit breakers, feature flags, graceful shutdown, enhanced /health)
-- ~~Conversation Quality (v5.0)~~ ✓ Completed (sentiment greetings, mid-call memory refresh, caregiver notes, per-senior settings, HNSW index)
+- ~~Infrastructure Reliability~~ ✓ Completed (circuit breakers, feature flags, graceful shutdown, enhanced /health)
+- ~~Conversation Quality~~ ✓ Completed (sentiment greetings, mid-call memory refresh, caregiver notes, per-senior settings, HNSW index)
 - ~~CI/CD Pipelines~~ ✓ Completed (GitHub Actions: tests → staging → production)
 - Pipecat context migration: `OpenAILLMContext` → `LLMContext` + `LLMContextAggregatorPair` (blocked — `AnthropicLLMService.create_context_aggregator()` requires `set_llm_adapter()` which only exists on `OpenAILLMContext` in v0.0.101. Revisit when pipecat updates the Anthropic adapter. Deprecation warnings are suppressed in `main.py`.)
 - ~~Prompt Caching (Anthropic)~~ ✓ Completed (`enable_prompt_caching=True` in AnthropicLLMService)
@@ -503,4 +503,4 @@ Consult these for product direction, decisions, and priorities.
 
 ---
 
-*Last updated: March 2026 — v5.1 with Director improvements, web search fix, news injection*
+*Last updated: March 2026 — v5.2 with multi-provider Director, web search prefetch, news injection, Claude Sonnet 4.6*

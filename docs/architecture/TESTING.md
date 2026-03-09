@@ -117,7 +117,7 @@ YAML-based conversation scripts that simulate full calls:
 | Reminder delivery | Medication reminder → acknowledged |
 | Emotional support | Distress signals → empathetic response |
 | Multiple topics | Topic switching during conversation |
-| News discussion | get_news tool call → discussion |
+| News discussion | web_search tool call → discussion |
 
 ---
 

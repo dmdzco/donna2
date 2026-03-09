@@ -99,11 +99,12 @@ pipecat/
 ├── services/            Business logic — mostly independent, DB-only deps
 │   ├── scheduler.py         Reminder polling + outbound calls (427 LOC)
 │   ├── reminder_delivery.py Delivery CRUD + prompt formatting (95 LOC)
-│   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup (169 LOC)
+│   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup, snapshot rebuild (338 LOC)
 │   ├── memory.py            Semantic memory: pgvector, HNSW, decay, dedup, circuit breaker (392 LOC)
 │   ├── prefetch.py          Predictive Context Engine: cache, extraction, runner (250 LOC)
 │   ├── director_llm.py      Gemini Flash analysis prompts + prefetch hints (350 LOC)
-│   ├── context_cache.py     Pre-cache senior context at 5 AM (290 LOC)
+│   ├── call_snapshot.py     Pre-computed call context snapshot for seniors (53 LOC)
+│   ├── context_cache.py     Pre-cache senior context + news at 5 AM (304 LOC)
 │   ├── call_analysis.py     Post-call analysis via Gemini + call quality (246 LOC)
 │   ├── interest_discovery.py Interest extraction from conversations (183 LOC)
 │   ├── greetings.py         Sentiment-aware greeting templates + rotation (326 LOC)
@@ -119,14 +120,14 @@ pipecat/
 │   └── sanitize.py          PII masking for logs (38 LOC)
 │
 ├── api/                 HTTP layer
-│   ├── routes/voice.py      /voice/answer (TwiML), /voice/status (230 LOC)
+│   ├── routes/voice.py      /voice/answer (TwiML + parallel fetch + snapshot), /voice/status (330 LOC)
 │   ├── routes/calls.py      /api/call, /api/calls
 │   ├── middleware/           auth, api_auth, rate_limit, security, twilio, error_handler
 │   └── validators/schemas.py  Pydantic request validation (142 LOC)
 │
 ├── db/
 │   ├── client.py            asyncpg pool + query helpers + health check (69 LOC)
-│   └── migrations/          SQL migrations (HNSW index, feature_flags table)
+│   └── migrations/          SQL migrations (HNSW index, feature_flags, call_context_snapshot)
 ├── tests/               61 test files + helpers/mocks/scenarios
 ├── docs/ARCHITECTURE.md Full architecture docs
 ├── pyproject.toml       Python 3.12, dependencies
@@ -135,7 +136,8 @@ pipecat/
 
 **Service dependency graph** (most services only import `db`):
 ```
-context_cache → seniors, conversations, memory, greetings  (orchestrator)
+context_cache → seniors, conversations, memory, greetings, news  (orchestrator, persists cached news)
+call_snapshot → conversations, daily_context                     (rebuilds snapshot post-call)
 scheduler → memory, context_cache                           (needs context for calls)
 memory, news → lib/circuit_breaker                          (external service resilience)
 All other services → db only                                (independent)
@@ -337,4 +339,4 @@ Workflow: `edit → make deploy-dev-pipecat → call dev number → repeat`
 
 ---
 
-*Source of truth for codebase navigation. Update when directories or responsibilities change. Last updated: February 2026 — v5.0*
+*Source of truth for codebase navigation. Update when directories or responsibilities change. Last updated: March 2026 — v5.1*

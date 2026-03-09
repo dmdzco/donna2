@@ -39,7 +39,11 @@ def _build_senior_context(session_state: dict) -> str:
     senior = session_state.get("senior") or {}
 
     first_name = (senior.get("name") or "").split(" ")[0] or "there"
-    parts.append(f"You are speaking with {first_name}.")
+    city = senior.get("city") or ""
+    state = senior.get("state") or ""
+    location = f"{city}, {state}" if city and state else city or state or ""
+    location_note = f" They live in {location}." if location else ""
+    parts.append(f"You are speaking with {first_name}.{location_note}")
 
     interests = senior.get("interests") or []
     if interests:

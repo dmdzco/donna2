@@ -360,11 +360,15 @@ When the Twilio client disconnects, `run_post_call()` in `services/post_call.py`
 
 1. **Complete conversation** — Updates DB with duration, status, transcript
 2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions
+2.5. **Caregiver notification** — POST to Node.js API for call_completed + concern_detected alerts
 3. **Summary persistence** — Writes analysis summary to `conversations.summary` (enables `get_recent_summaries()` and cross-call context)
+3.5. **Interest discovery** — Extracts new interests from conversation, updates senior profile
+3.6. **Interest scores** — Computes engagement scores per interest topic
 4. **Memory extraction** — OpenAI extracts facts/preferences/events from transcript, stores with embeddings
 5. **Daily context** — Saves topics, advice, reminders, and summary for same-day cross-call memory
 6. **Reminder cleanup** — Marks unacknowledged reminders for retry
 7. **Cache clearing** — Clears senior context cache and reminder context
+8. **Snapshot rebuild** — Rebuilds `seniors.call_context_snapshot` JSONB (analysis, summaries, turns, daily context) so next call reads a single column instead of 6 queries
 
 ## Directory Structure
 
@@ -405,7 +409,7 @@ pipecat/
 ├── services/
 │   ├── prefetch.py                  ← Predictive Context Engine: cache, extraction, runner
 │   ├── director_llm.py              ← Gemini Flash analysis for Director + prefetch hints (374 LOC)
-│   ├── post_call.py                 ← Post-call orchestration (analysis, memory, cleanup)
+│   ├── post_call.py                 ← Post-call orchestration (analysis, memory, cleanup, snapshot rebuild)
 │   ├── reminder_delivery.py         ← Reminder delivery CRUD + prompt formatting
 │   ├── call_analysis.py             ← Post-call analysis + call quality scoring (246 LOC)
 │   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (392 LOC)
@@ -415,13 +419,14 @@ pipecat/
 │   ├── seniors.py                   ← Senior profile + per-senior call_settings (131 LOC)
 │   ├── caregivers.py                ← Caregiver relationships + notes delivery (101 LOC)
 │   ├── scheduler.py                 ← Reminder scheduling + outbound calls
-│   ├── context_cache.py             ← Pre-cache senior context (5 AM local)
+│   ├── call_snapshot.py             ← Pre-computed call context snapshot (53 LOC)
+│   ├── context_cache.py             ← Pre-cache senior context + news persistence (5 AM local)
 │   ├── daily_context.py             ← Cross-call same-day memory
 │   └── news.py                      ← News via OpenAI web search + circuit breaker (213 LOC)
 │
 ├── db/
 │   ├── client.py                    ← asyncpg pool + query helpers + health check (69 LOC)
-│   └── migrations/                  ← SQL migrations (HNSW index, feature_flags table)
+│   └── migrations/                  ← SQL migrations (HNSW index, feature_flags, call_context_snapshot)
 │
 ├── lib/
 │   ├── circuit_breaker.py           ← Async circuit breaker for external services (84 LOC)
@@ -503,7 +508,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
-| **Voice LLM** | Claude Sonnet 4.5 | AnthropicLLMService |
+| **Voice LLM** | Claude Sonnet 4.5 | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | ~150ms non-blocking analysis |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
 | **STT** | Deepgram Nova 3 | Real-time, interim results |
@@ -519,7 +524,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 
 | Table | Purpose |
 |-------|---------|
-| `seniors` | Senior profiles (name, phone, interests, timezone, call_settings JSONB) |
+| `seniors` | Senior profiles (name, phone, interests, timezone, call_settings JSONB, call_context_snapshot JSONB, cached_news TEXT) |
 | `conversations` | Call records (duration, metrics, transcript) |
 | `memories` | Semantic memories (pgvector embeddings, HNSW index, decay) |
 | `reminders` | Scheduled reminders |
@@ -583,4 +588,4 @@ RUN_DB_TESTS=1                   # Set to run DB integration tests
 
 ---
 
-*Last updated: February 2026 — v5.0 with Predictive Context Engine, circuit breakers, feature flags, caregiver notes, sentiment-aware greetings, graceful shutdown*
+*Last updated: March 2026 — v5.1 with call answer optimization (parallel fetches + snapshot + cached news), Anthropic prompt caching*

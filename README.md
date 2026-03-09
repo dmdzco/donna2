@@ -23,7 +23,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 ### Core Capabilities
 - Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3)
-- LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService)
+- LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - Text-to-speech (ElevenLabs via Pipecat)
 - Semantic memory with decay + deduplication (pgvector + HNSW index)
 - Full in-call context retention (APPEND strategy, no summary truncation)
@@ -34,7 +34,8 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Sentiment-aware greetings (uses last call's engagement/rapport for tone)
 - News via OpenAI web search (1hr cache)
 - Scheduled reminder calls with delivery tracking
-- Context pre-caching at 5 AM local time
+- Call context snapshot (pre-computed JSONB, eliminates 6 DB queries per call)
+- Context + news pre-caching at 5 AM local time
 - Caregiver notes delivery (family can leave notes read during calls)
 - Per-senior call settings (configurable time limits, greeting style, memory decay)
 - 5 LLM tools: search_memories, get_news, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
@@ -180,14 +181,15 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── goodbye_gate.py                 # False-goodbye grace period (not in active pipeline)
 │   └── guidance_stripper.py            # Strip <guidance> tags before TTS
 ├── services/
-│   ├── post_call.py                    # Post-call orchestration
+│   ├── post_call.py                    # Post-call orchestration + snapshot rebuild
 │   ├── call_analysis.py                # Post-call analysis (Gemini Flash)
 │   ├── prefetch.py                     # Predictive Context Engine (speculative prefetch)
 │   ├── director_llm.py                 # Gemini Flash analysis for Director
 │   ├── memory.py                       # Semantic memory (pgvector, decay)
 │   ├── scheduler.py                    # Reminder scheduling + outbound calls
 │   ├── reminder_delivery.py            # Delivery CRUD + prompt formatting
-│   ├── context_cache.py                # Pre-cache at 5 AM local
+│   ├── call_snapshot.py                # Pre-computed call context snapshot
+│   ├── context_cache.py                # Pre-cache at 5 AM local + news persistence
 │   ├── conversations.py                # Conversation CRUD
 │   ├── daily_context.py                # Cross-call same-day memory
 │   ├── greetings.py                    # Greeting templates + rotation
@@ -201,7 +203,7 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   └── validators/schemas.py           # Pydantic input validation
 ├── db/
 │   ├── client.py                       # asyncpg pool + query helpers + health check
-│   └── migrations/                     # SQL migrations (HNSW index, feature_flags)
+│   └── migrations/                     # SQL migrations (HNSW index, feature_flags, call_context_snapshot)
 ├── lib/
 │   ├── circuit_breaker.py              # Async circuit breaker for external services
 │   ├── feature_flags.py                # DB-backed feature flags (5-min cache)

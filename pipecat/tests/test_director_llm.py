@@ -64,12 +64,12 @@ class TestFormatHistory:
         assert "DONNA: Hello!" in result
         assert "SENIOR: Hi there" in result
 
-    def test_limits_to_4_messages(self):
+    def test_limits_to_6_messages(self):
         from services.director_llm import _format_history
         history = [{"role": "user", "content": f"msg {i}"} for i in range(15)]
         result = _format_history(history)
         lines = result.strip().split("\n")
-        assert len(lines) == 4
+        assert len(lines) == 6
 
 
 class TestFormatReminders:
@@ -117,6 +117,34 @@ class TestBuildTurnContent:
         session = {"senior": {"name": "Test"}, "_call_start_time": time.time(), "call_type": "onboarding"}
         result = _build_turn_content("Hello", session)
         assert "onboarding" in result
+
+    def test_includes_location_city_and_state(self):
+        from services.director_llm import _build_turn_content
+        session = {
+            "senior": {"name": "Margaret", "city": "Austin", "state": "Texas"},
+            "_call_start_time": time.time(),
+        }
+        result = _build_turn_content("Hello", session)
+        assert "Austin, Texas" in result
+
+    def test_includes_location_unknown_when_missing(self):
+        from services.director_llm import _build_turn_content
+        session = {
+            "senior": {"name": "Margaret"},
+            "_call_start_time": time.time(),
+        }
+        result = _build_turn_content("Hello", session)
+        assert "unknown location" in result
+
+    def test_includes_today_date(self):
+        from services.director_llm import _build_turn_content
+        from datetime import date
+        session = {
+            "senior": {"name": "Margaret"},
+            "_call_start_time": time.time(),
+        }
+        result = _build_turn_content("Hello", session)
+        assert date.today().strftime("%B %d, %Y") in result
 
 
 class TestGetDefaultDirection:

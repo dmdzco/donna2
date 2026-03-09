@@ -51,6 +51,8 @@ def list_docs_in_folder(access_token: str, folder_id: str) -> list[dict]:
             "q": f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.document' and trashed=false",
             "fields": "nextPageToken,files(id,name,modifiedTime,webViewLink)",
             "pageSize": 100,
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
         }
         if page_token:
             params["pageToken"] = page_token
@@ -60,7 +62,9 @@ def list_docs_in_folder(access_token: str, folder_id: str) -> list[dict]:
             headers={"Authorization": f"Bearer {access_token}"},
             params=params,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            print(f"Error listing files: {resp.status_code} {resp.text}", file=sys.stderr)
+            resp.raise_for_status()
         data = resp.json()
         docs.extend(data.get("files", []))
 

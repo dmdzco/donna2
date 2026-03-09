@@ -385,8 +385,7 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
 router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res) => {
   try {
     const [call] = await db.select({
-      transcript: conversations.transcript,
-      callMetrics: conversations.callMetrics,
+      callSid: conversations.callSid,
       durationSeconds: conversations.durationSeconds,
     })
     .from(conversations)
@@ -396,23 +395,40 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
       return res.status(404).json({ error: 'Call not found' });
     }
 
-    // Extract per-turn metrics from transcript
-    const turnMetrics = [];
-    if (call.transcript && Array.isArray(call.transcript)) {
-      call.transcript.forEach((turn, index) => {
-        if (turn.metrics) {
-          turnMetrics.push({
-            turnIndex: index,
-            role: turn.role,
-            ...turn.metrics,
-          });
-        }
-      });
+    // Fetch real metrics from call_metrics table
+    let callMetrics = null;
+    if (call.callSid) {
+      const metricsRows = await db.execute(sql`
+        SELECT turn_count, token_usage, latency, phase_durations,
+               breaker_states, tools_used, error_count, end_reason
+        FROM call_metrics
+        WHERE call_sid = ${call.callSid}
+        LIMIT 1
+      `);
+      if (metricsRows.rows.length > 0) {
+        const m = metricsRows.rows[0];
+        const tokenUsage = typeof m.token_usage === 'string' ? JSON.parse(m.token_usage) : m.token_usage;
+        const latency = typeof m.latency === 'string' ? JSON.parse(m.latency) : m.latency;
+        const phaseDurations = typeof m.phase_durations === 'string' ? JSON.parse(m.phase_durations) : m.phase_durations;
+        const breakerStates = typeof m.breaker_states === 'string' ? JSON.parse(m.breaker_states) : m.breaker_states;
+
+        callMetrics = {
+          turn_count: m.turn_count,
+          token_usage: tokenUsage,
+          latency,
+          phase_durations: phaseDurations,
+          breaker_states: breakerStates,
+          tools_used: m.tools_used,
+          error_count: m.error_count,
+          end_reason: m.end_reason,
+          estimated_cost: estimateCost(tokenUsage),
+        };
+      }
     }
 
     res.json({
-      turnMetrics,
-      callMetrics: call.callMetrics || null,
+      turnMetrics: [], // Per-turn metrics not captured yet
+      callMetrics,
       durationSeconds: call.durationSeconds,
     });
   } catch (error) {

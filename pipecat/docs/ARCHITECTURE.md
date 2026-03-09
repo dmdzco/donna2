@@ -54,15 +54,17 @@ Twilio Audio ──► FastAPIWebsocketTransport
               │ Conversation         │     │  Background Analysis      │
               │ Director             │────►│  (asyncio.create_task)    │
               │ (PASS-THROUGH)       │     │                           │
-              │                      │     │  Gemini 3 Flash Preview   │
-              │ 1. Injects PREVIOUS  │     │  ~150ms per turn          │
-              │    turn's cached     │     │  Result cached → injected │
-              │    guidance          │     │  on NEXT turn             │
-              │ 2. Passes frame      │     │                           │
-              │    immediately       │     │  Also handles:            │
-              │ 3. Fires background  │     │  • Predictive prefetch    │
-              │    analysis ────────►│     │    (2 waves + interim)    │
-              │                      │     │  • Mid-call memory refresh│
+              │                      │     │  Groq/Cerebras (~70ms)    │
+              │ 1. Injects guidance  │     │  Gemini fallback (~150ms) │
+              │    (same-turn via    │     │  Result cached → injected │
+              │    speculative, or   │     │  on NEXT turn (or same    │
+              │    previous-turn)    │     │  via speculative)         │
+              │ 2. Injects news when │     │                           │
+              │    Director signals  │     │  Also handles:            │
+              │ 3. Passes frame      │     │  • Predictive prefetch    │
+              │    immediately       │     │    (2 waves + interim)    │
+              │ 4. Fires background  │     │  • Web search prefetch    │
+              │    analysis ────────►│     │  • Mid-call memory refresh│
               │                      │     │    (after 5+ min)         │
               │                      │     │  • Force winding-down 9min│
               │                      │     │  • Force call end 12min   │
@@ -121,6 +123,9 @@ The pipeline processors don't call each other directly. They communicate through
    - `_call_start_time` — Set in bot.py, read by Director for time-based fallbacks
    - `_conversation_tracker` — Reference to the ConversationTracker processor, read by Flow nodes to build tracking summaries
    - `_prefetch_cache` — `PrefetchCache` instance, written by Director prefetch, read by `search_memories` tool handler
+   - `_web_prefetch_cache` — `WebPrefetchCache` instance, written by Director web prefetch, read by `web_search` tool handler
+   - `_news_injected` — Boolean flag, set by Director after injecting news context (one-shot per call)
+   - `news_context` — Pre-fetched news string, read by Director for dynamic injection when `should_mention_news` is true
    - `_last_quick_analysis` — `AnalysisResult` from Quick Observer, read by prefetch engine for family/health/activity signals
 
 3. **Pipeline task reference** — Both QuickObserver and Director receive a `set_pipeline_task(task)` call after pipeline creation. This lets them queue `EndFrame` directly to force call termination, bypassing the normal frame flow.
@@ -152,7 +157,11 @@ Instant regex-based analysis with 268 patterns across 19 categories:
 
 ### Layer 2: Conversation Director (non-blocking, speculative pre-processing)
 
-Primary LLM: **Cerebras** (~3000 tok/s, ~70ms) with Gemini Flash fallback. Runs via `asyncio.create_task()` — never blocks the pipeline.
+Primary LLM: **Groq** (gpt-oss-20b, ~70ms) / **Cerebras** (gpt-oss-120b, ~70ms) — random selection per call. Fallback: **Gemini Flash**. Runs via `asyncio.create_task()` — never blocks the pipeline.
+
+The Director receives the senior's **location (city/state)** and **today's date** in every turn template, enabling specific predictions like `"Austin Texas weather March 2026"` instead of generic `"weather tomorrow"`. This dramatically improves web search prefetch cache hit rates.
+
+**Dynamic news injection**: News context is NOT in the system prompt (saves ~300 tokens/turn). Instead, the Director signals `should_mention_news: true` when contextually appropriate, and the processor injects news into the guidance. One-shot: injected at most once per call.
 
 **Speculative pre-processing** enables same-turn guidance injection:
 
@@ -193,6 +202,8 @@ The Director classifies calls into 5 analytical phases (including "rapport" betw
   "direction": {
     "stay_or_shift": "stay|transition|wrap_up",
     "next_topic": "string or null",
+    "should_mention_news": false,
+    "news_topic": "string or null",
     "pacing_note": "good|too_fast|dragging|time_to_close"
   },
   "reminder": {
@@ -209,6 +220,11 @@ The Director classifies calls into 5 analytical phases (including "rapport" betw
     "use_sonnet": false,
     "max_tokens": 150,
     "reason": "why this token count"
+  },
+  "prefetch": {
+    "memory_queries": ["keyword1", "keyword2"],
+    "web_queries": ["Austin Texas weather March 2026"],
+    "anticipated_tools": ["search_memories", "web_search"]
   }
 }
 ```
@@ -247,12 +263,13 @@ User speaking...
       │   Quick Observer signals (family, health, activity)
       │   → memory.search() → cache
       │
-      └─ 2nd wave (~150ms): Director Gemini analysis
-          next_topic → anticipatory prefetch
+      └─ 2nd wave (~70ms): Director analysis (Groq/Cerebras)
+          next_topic → anticipatory memory prefetch
           which_reminder → reminder context prefetch
           news_topic → personal connection prefetch
           current_topic (2+ turns) → sustained topic prefetch
-          → memory.search() → cache
+          web_queries → web search prefetch (OpenAI, Jaccard 0.4 match)
+          → memory.search() + web_search_query() → cache
 ```
 
 #### Cache Design (PrefetchCache)
@@ -264,16 +281,23 @@ User speaking...
 - **Concurrency**: Max 2 concurrent `memory.search()` calls per wave
 - **Metrics**: Hits/misses/hit rate logged at call end via MetricsLogger
 
-#### Cache-First Tool Handler
+#### Cache-First Tool Handlers
 
-`search_memories` in `flows/tools.py` checks the prefetch cache before making a live database query:
+Both `search_memories` and `web_search` in `flows/tools.py` check prefetch caches before making live calls:
 
 ```
 Claude calls search_memories("gardening")
-  → cache.get("gardening")  (Jaccard fuzzy match)
+  → _prefetch_cache.get("gardening")  (Jaccard fuzzy match, threshold=0.3)
   → HIT: return cached results (~0ms)
   → MISS: fall through to live memory.search() (200-300ms)
+
+Claude calls web_search("Austin Texas weather")
+  → _web_prefetch_cache.get("Austin Texas weather")  (Jaccard match, threshold=0.4)
+  → HIT: return cached results (~0ms)
+  → MISS: fall through to live web_search_query() (4-10s)
 ```
+
+The Director's location/date context makes web prefetch particularly effective — it predicts queries with the same specificity Claude uses (e.g., `"Austin Texas weather March 2026"`), yielding high Jaccard overlap.
 
 #### Director Guidance Hints
 
@@ -509,7 +533,8 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
 | **Voice LLM** | Claude Sonnet 4.5 | AnthropicLLMService (prompt caching enabled) |
-| **Director** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | ~150ms non-blocking analysis |
+| **Director** | Groq (`gpt-oss-20b`) / Cerebras (`gpt-oss-120b`) | ~70ms primary, random selection |
+| **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | ~150ms when Groq/Cerebras unavailable |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
 | **STT** | Deepgram Nova 3 | Real-time, interim results |
 | **TTS** | ElevenLabs | `eleven_turbo_v2_5` |
@@ -579,8 +604,10 @@ COFOUNDER_API_KEY_2=...          # Cofounder auth
 # Scheduler (MUST be false to prevent conflicts)
 SCHEDULER_ENABLED=false
 
-# Director model (optional)
-FAST_OBSERVER_MODEL=gemini-3-flash-preview
+# Director models (optional — Groq/Cerebras are primary when available)
+FAST_OBSERVER_MODEL=gemini-3-flash-preview   # Gemini fallback model
+GROQ_API_KEY=...                             # Groq primary Director
+CEREBRAS_API_KEY=...                         # Cerebras primary Director
 
 # Testing
 RUN_DB_TESTS=1                   # Set to run DB integration tests
@@ -588,4 +615,4 @@ RUN_DB_TESTS=1                   # Set to run DB integration tests
 
 ---
 
-*Last updated: March 2026 — v5.1 with call answer optimization (parallel fetches + snapshot + cached news), Anthropic prompt caching*
+*Last updated: March 2026 — v5.2 with multi-provider Director (Groq/Cerebras), web search prefetch, Director-driven news injection, location/date context*

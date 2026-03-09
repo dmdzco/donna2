@@ -439,6 +439,39 @@ class ConversationDirectorProcessor(FrameProcessor):
 
         await self.push_frame(frame, direction)
 
+    async def _run_and_inject_web_result(self, query: str):
+        """Run web search and inject result into context (from regular analysis path).
+
+        Unlike the gating path (speculative), this runs AFTER the frame has passed.
+        The result will be available for Claude's next LLM call.
+        """
+        start = time.time()
+        try:
+            result = await self._run_web_search(query)
+            elapsed_ms = round((time.time() - start) * 1000)
+            if result:
+                await self._inject_web_result(result)
+                self._web_searches_completed += 1
+                logger.info(
+                    "[Director] Regular-path web search completed: q={q!r} ({ms}ms, {n} chars)",
+                    q=query, ms=elapsed_ms, n=len(result),
+                )
+            else:
+                logger.warning(
+                    "[Director] Regular-path web search returned empty: q={q!r} ({ms}ms)",
+                    q=query, ms=elapsed_ms,
+                )
+            self._web_search_task = None
+            self._web_search_query = ""
+        except Exception as e:
+            elapsed_ms = round((time.time() - start) * 1000)
+            logger.warning(
+                "[Director] Regular-path web search error: q={q!r} ({ms}ms) {err}",
+                q=query, ms=elapsed_ms, err=str(e),
+            )
+            self._web_search_task = None
+            self._web_search_query = ""
+
     async def _inject_web_result(self, result: str):
         """Inject web search result into Claude's context."""
         logger.info("[Director] Web result injected ({n} chars)", n=len(result))
@@ -521,6 +554,32 @@ class ConversationDirectorProcessor(FrameProcessor):
 
             # Second-wave prefetch from analysis result
             asyncio.create_task(self._run_director_prefetch(result))
+
+            # Trigger web search from regular analysis if Director identified web queries
+            # (speculative path often fails to complete in time, so this is the fallback)
+            web_queries = (result.get("prefetch") or {}).get("web_queries") or []
+            if web_queries:
+                logger.info(
+                    "[Director] Analysis extracted web_queries={q}",
+                    q=web_queries[:3],
+                )
+                if self._web_search_task is not None:
+                    logger.info("[Director] Web search already in-flight, skipping")
+                else:
+                    from lib.growthbook import is_on
+                    if not is_on("news_search_enabled", self._session_state):
+                        logger.info("[Director] news_search_enabled flag is OFF, skipping web search")
+                    else:
+                        query = web_queries[0]
+                        if isinstance(query, str) and len(query.strip()) >= 5:
+                            self._web_search_query = query.strip()
+                            self._web_search_task = asyncio.create_task(
+                                self._run_and_inject_web_result(self._web_search_query)
+                            )
+                            logger.info(
+                                "[Director] Web search started from regular analysis: {q!r}",
+                                q=self._web_search_query,
+                            )
         except asyncio.CancelledError:
             pass
         except Exception as e:

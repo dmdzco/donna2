@@ -383,8 +383,8 @@ The opening phase is merged into main — the bot starts directly in main (or re
 When the Twilio client disconnects, `run_post_call()` in `services/post_call.py` executes:
 
 1. **Complete conversation** — Updates DB with duration, status, transcript
-2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions
-2.5. **Caregiver notification** — POST to Node.js API for call_completed + concern_detected alerts
+2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions. Now also includes `mood` (e.g., happy, lonely, anxious) and `caregiver_sms` (a privacy-respecting, mood-aware message for caregivers)
+2.5. **Caregiver notification** — POST to Node.js API for call_completed + concern_detected alerts. The `caregiver_sms` from analysis is sent to caregivers via this pipeline; if the senior seems down, it subtly suggests the caregiver give them a call
 3. **Summary persistence** — Writes analysis summary to `conversations.summary` (enables `get_recent_summaries()` and cross-call context)
 3.5. **Interest discovery** — Extracts new interests from conversation, updates senior profile
 3.6. **Interest scores** — Computes engagement scores per interest topic

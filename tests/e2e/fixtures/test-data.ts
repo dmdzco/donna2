@@ -1,0 +1,231 @@
+// Mock data for all E2E tests
+
+export const mockSeniors = [
+  {
+    id: '11111111-1111-1111-1111-111111111111',
+    name: 'Martha Johnson',
+    phone: '+15551234567',
+    location: 'Austin, TX',
+    interests: ['gardening', 'crosswords', 'jazz'],
+    medicalNotes: 'Takes blood pressure medication',
+    isActive: true,
+    createdAt: '2026-01-15T10:00:00Z',
+  },
+  {
+    id: '22222222-2222-2222-2222-222222222222',
+    name: 'Robert Smith',
+    phone: '+15559876543',
+    location: 'Denver, CO',
+    interests: ['history', 'fishing'],
+    medicalNotes: '',
+    isActive: true,
+    createdAt: '2026-02-01T10:00:00Z',
+  },
+];
+
+export const mockConversations = [
+  {
+    id: 'call-1',
+    seniorId: '11111111-1111-1111-1111-111111111111',
+    seniorName: 'Martha Johnson',
+    startedAt: '2026-03-08T14:00:00Z',
+    endedAt: '2026-03-08T14:10:00Z',
+    durationSeconds: 600,
+    status: 'completed',
+    initiatedBy: 'scheduled',
+    transcript: [
+      { role: 'assistant', content: 'Good morning Martha! How are you today?' },
+      { role: 'user', content: "Oh hi Donna! I'm doing well, just finished my crossword." },
+      { role: 'assistant', content: "That's wonderful! Was it a tricky one today?" },
+    ],
+  },
+  {
+    id: 'call-2',
+    seniorId: '22222222-2222-2222-2222-222222222222',
+    seniorName: 'Robert Smith',
+    startedAt: '2026-03-08T15:00:00Z',
+    endedAt: '2026-03-08T15:08:00Z',
+    durationSeconds: 480,
+    status: 'completed',
+    initiatedBy: 'manual',
+    transcript: [],
+  },
+];
+
+export const mockReminders = [
+  {
+    id: 'rem-1',
+    seniorId: '11111111-1111-1111-1111-111111111111',
+    seniorName: 'Martha Johnson',
+    title: 'Take morning pills',
+    description: 'Blood pressure medication with breakfast',
+    type: 'medication',
+    isRecurring: true,
+    cronExpression: '0 8 * * *',
+    scheduledTime: null,
+    isActive: true,
+    lastDelivered: '2026-03-08T08:00:00Z',
+    createdAt: '2026-01-20T10:00:00Z',
+  },
+  {
+    id: 'rem-2',
+    seniorId: '11111111-1111-1111-1111-111111111111',
+    seniorName: 'Martha Johnson',
+    title: 'Doctor appointment',
+    description: 'Annual checkup at Dr. Wilson',
+    type: 'appointment',
+    isRecurring: false,
+    cronExpression: null,
+    scheduledTime: '2026-03-15T10:00:00Z',
+    isActive: true,
+    lastDelivered: null,
+    createdAt: '2026-03-01T10:00:00Z',
+  },
+];
+
+export const mockDashboardStats = {
+  totalSeniors: 2,
+  callsToday: 3,
+  upcomingReminders: 2,
+  activeCalls: 0,
+  recentCalls: [
+    {
+      id: 'call-1',
+      seniorName: 'Martha Johnson',
+      startedAt: '2026-03-08T14:00:00Z',
+      durationSeconds: 600,
+      status: 'completed',
+    },
+  ],
+  upcomingRemindersList: [
+    {
+      id: 'rem-2',
+      seniorName: 'Martha Johnson',
+      title: 'Doctor appointment',
+      scheduledTime: '2026-03-15T10:00:00Z',
+    },
+  ],
+};
+
+export const mockCallAnalyses = [
+  {
+    id: 'analysis-1',
+    conversationId: 'call-1',
+    seniorName: 'Martha Johnson',
+    createdAt: '2026-03-08T14:15:00Z',
+    engagementScore: 8,
+    summary: 'Martha was in great spirits, discussed her crossword puzzle and gardening plans.',
+    topicsDiscussed: ['crosswords', 'gardening', 'weather'],
+    concerns: [],
+    positiveObservations: ['Good mood', 'Engaged in hobbies'],
+    followUpSuggestions: ['Ask about garden progress next call'],
+  },
+];
+
+export const mockCaregivers = [
+  {
+    id: 'cg-1',
+    clerkUserId: 'user_abc123',
+    seniorId: '11111111-1111-1111-1111-111111111111',
+    seniorName: 'Martha Johnson',
+    role: 'daughter',
+    createdAt: '2026-01-15T10:00:00Z',
+  },
+];
+
+export const mockDailyContext = [
+  {
+    id: 'dc-1',
+    seniorId: '11111111-1111-1111-1111-111111111111',
+    seniorName: 'Martha Johnson',
+    callDate: '2026-03-08',
+    summary: 'Martha discussed crosswords and gardening. Reminded about morning medication.',
+    topicsDiscussed: ['crosswords', 'gardening'],
+    remindersDelivered: ['Take morning pills'],
+    adviceGiven: 'Suggested trying the Sunday NYT crossword',
+  },
+];
+
+// Observability-specific mock data
+export const mockObservabilityCalls = [
+  {
+    id: 'obs-call-1',
+    senior_id: '11111111-1111-1111-1111-111111111111',
+    call_sid: 'CA1234567890',
+    started_at: '2026-03-08T14:00:00Z',
+    ended_at: '2026-03-08T14:10:00Z',
+    duration_seconds: 600,
+    status: 'completed',
+    initiated_by: 'scheduled',
+    senior_name: 'Martha Johnson',
+    senior_phone: '+15551234567',
+    turn_count: 12,
+    summary: 'Discussed crosswords and gardening',
+    concerns: [],
+    call_metrics: {
+      totalTokens: 2847,
+      totalInputTokens: 1200,
+      totalOutputTokens: 1647,
+      avgResponseTime: 324,
+      avgTtfa: 89,
+      estimatedCost: 0.0234,
+      modelsUsed: ['claude-sonnet-4-5-20250514'],
+    },
+  },
+];
+
+export const mockTimeline = {
+  callId: 'obs-call-1',
+  callSid: 'CA1234567890',
+  seniorId: '11111111-1111-1111-1111-111111111111',
+  startedAt: '2026-03-08T14:00:00Z',
+  endedAt: '2026-03-08T14:10:00Z',
+  status: 'completed',
+  timeline: [
+    { type: 'call.initiated', timestamp: '2026-03-08T14:00:00Z', data: { initiatedBy: 'scheduled' } },
+    { type: 'call.connected', timestamp: '2026-03-08T14:00:02Z', data: {} },
+    { type: 'turn.response', timestamp: '2026-03-08T14:00:05Z', data: { content: 'Good morning Martha!' } },
+    { type: 'turn.transcribed', timestamp: '2026-03-08T14:00:15Z', data: { content: 'Hi Donna!' } },
+    { type: 'observer.signal', timestamp: '2026-03-08T14:00:16Z', data: { signal: { engagementLevel: 'high', emotionalState: 'positive', confidenceScore: 92, concerns: [], shouldDeliverReminder: false, shouldEndCall: false } } },
+    { type: 'call.ended', timestamp: '2026-03-08T14:10:00Z', data: { status: 'completed', duration: 600 } },
+  ],
+};
+
+export const mockObserverData = {
+  callId: 'obs-call-1',
+  count: 5,
+  signals: [
+    {
+      turnId: 'turn-1',
+      speaker: 'senior',
+      turnContent: 'Hi Donna, I just finished my crossword puzzle!',
+      timestamp: '2026-03-08T14:00:15Z',
+      signal: { engagementLevel: 'high', emotionalState: 'positive', confidenceScore: 92, concerns: [], shouldDeliverReminder: false, shouldEndCall: false },
+    },
+  ],
+  summary: {
+    averageConfidence: 87,
+    engagementDistribution: { high: 8, medium: 3, low: 1 },
+    emotionalStateDistribution: { positive: 7, neutral: 4, negative: 0, confused: 1, distressed: 0 },
+    totalConcerns: 0,
+    uniqueConcerns: [],
+  },
+};
+
+export const mockMetricsData = {
+  turnMetrics: [
+    { turnIndex: 0, role: 'assistant', model: 'claude-sonnet-4-5-20250514', maxTokens: 1024, inputTokens: 450, outputTokens: 120, ttfa: 85, responseTime: 310, tokenReason: 'normal' },
+    { turnIndex: 1, role: 'assistant', model: 'claude-sonnet-4-5-20250514', maxTokens: 1024, inputTokens: 580, outputTokens: 95, ttfa: 92, responseTime: 340, tokenReason: 'normal' },
+  ],
+  callMetrics: {
+    totalInputTokens: 1200,
+    totalOutputTokens: 1647,
+    totalTokens: 2847,
+    avgResponseTime: 324,
+    avgTtfa: 89,
+    turnCount: 12,
+    estimatedCost: 0.0234,
+    modelsUsed: ['claude-sonnet-4-5-20250514'],
+  },
+  durationSeconds: 600,
+};

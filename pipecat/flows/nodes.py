@@ -26,6 +26,10 @@ from prompts import (
     MAIN_TASK,
     WINDING_DOWN_TASK,
     CLOSING_TASK_TEMPLATE,
+    ONBOARDING_SYSTEM_PROMPT,
+    ONBOARDING_TASK_FIRST_CALL,
+    ONBOARDING_TASK_RETURN_CALLER,
+    ONBOARDING_CLOSING_TASK,
 )
 
 
@@ -182,10 +186,14 @@ def build_reminder_node(
     if reminder_ctx:
         reminder_task += f"\n\n{reminder_ctx}"
 
-    # When this is the initial node, prepend the greeting
+    # When this is the initial node, prepend the greeting with a bridge to reminders
     if with_greeting:
         greeting_task = _build_greeting_task(session_state)
-        reminder_task = greeting_task + "\n\n" + reminder_task
+        reminder_task = (
+            greeting_task
+            + " After they respond to your greeting, move to the reminders promptly."
+            + "\n\n" + reminder_task
+        )
 
     functions: list = []
     if "mark_reminder_acknowledged" in flows_tools:
@@ -343,16 +351,117 @@ def build_closing_node(session_state: dict) -> NodeConfig:
 
 
 # ---------------------------------------------------------------------------
+# Onboarding nodes (unsubscribed callers)
+# ---------------------------------------------------------------------------
+
+def _build_prospect_context(session_state: dict) -> str:
+    """Build context string for onboarding calls from prospect data."""
+    prospect = session_state.get("prospect") or {}
+
+    from services.prospects import build_context_for_prompt
+    return build_context_for_prompt(prospect)
+
+
+def _make_transition_to_onboarding_closing(session_state: dict):
+    """Create transition function: onboarding → closing."""
+
+    async def transition_to_closing(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
+        logger.info("Transitioning: onboarding → closing")
+        return (
+            {"status": "success"},
+            build_onboarding_closing_node(session_state),
+        )
+
+    return transition_to_closing
+
+
+def build_onboarding_node(session_state: dict, flows_tools: dict) -> NodeConfig:
+    """Build the onboarding node for unsubscribed callers.
+
+    Single node covers all 6 conversation stages via prompt instructions.
+    Tools: save_prospect_detail, web_search, transition_to_closing.
+    """
+    prospect = session_state.get("prospect") or {}
+    prospect_ctx = _build_prospect_context(session_state)
+    call_count = prospect.get("call_count", 0)
+
+    # Select task based on whether this is a return caller
+    if call_count > 0:
+        name = prospect.get("learned_name", "there")
+        # Build context reference from what we know
+        ctx_parts = []
+        if prospect.get("loved_one_name"):
+            ctx_parts.append(f"We were talking about {prospect['loved_one_name']}.")
+        elif prospect.get("relationship"):
+            ctx_parts.append(f"You were looking into Donna for a loved one.")
+        context_reference = " ".join(ctx_parts) if ctx_parts else "How have you been?"
+
+        task = ONBOARDING_TASK_RETURN_CALLER.format(
+            name=name,
+            context_reference=context_reference,
+        )
+    else:
+        task = ONBOARDING_TASK_FIRST_CALL
+
+    # Memory context for return callers
+    memory_ctx = session_state.get("memory_context")
+    if memory_ctx:
+        task += f"\n\nPREVIOUS CONVERSATION CONTEXT:\n{memory_ctx}"
+
+    # Tools: all onboarding tools + transition
+    functions: list = list(flows_tools.values())
+    functions.append(FlowsFunctionSchema(
+        name="transition_to_closing",
+        description="Call this when the caller is ready to end the conversation or says goodbye.",
+        properties={},
+        required=[],
+        handler=_make_transition_to_onboarding_closing(session_state),
+    ))
+
+    system_content = ONBOARDING_SYSTEM_PROMPT + "\n\n" + prospect_ctx
+
+    return NodeConfig(
+        name="onboarding",
+        role_messages=[{"role": "system", "content": system_content}],
+        task_messages=[{"role": "user", "content": task}],
+        functions=functions,
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
+        respond_immediately=True,
+    )
+
+
+def build_onboarding_closing_node(session_state: dict) -> NodeConfig:
+    """Build the closing node for onboarding calls."""
+    prospect = session_state.get("prospect") or {}
+    prospect_ctx = _build_prospect_context(session_state)
+    system_content = ONBOARDING_SYSTEM_PROMPT + "\n\n" + prospect_ctx
+
+    return NodeConfig(
+        name="onboarding_closing",
+        role_messages=[{"role": "system", "content": system_content}],
+        task_messages=[{"role": "user", "content": ONBOARDING_CLOSING_TASK}],
+        functions=[],
+        post_actions=[{"type": "end_conversation"}],
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
+        respond_immediately=False,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def build_initial_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     """Build the initial node for a new call.
 
-    Skips the legacy opening phase — starts directly in main (or reminder
-    if pending). The greeting is prepended to the task message.
-    This eliminates the transition_to_main double-LLM-call penalty (~3-5s).
+    Routes to onboarding flow for unsubscribed callers, or the standard
+    subscriber flow (reminder or main) for known seniors.
     """
+    # Onboarding flow for unsubscribed callers
+    if session_state.get("call_type") == "onboarding":
+        logger.info("Initial node: onboarding (unsubscribed caller)")
+        return build_onboarding_node(session_state, flows_tools)
+
     reminder_prompt = session_state.get("reminder_prompt")
     reminders_delivered = session_state.get("reminders_delivered") or set()
 

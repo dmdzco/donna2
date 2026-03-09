@@ -116,6 +116,10 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             session_state["call_settings"] = metadata["call_settings"]
         if "is_outbound" in metadata:
             session_state["is_outbound"] = metadata["is_outbound"]
+        # Populate prospect data for onboarding calls
+        if metadata.get("prospect"):
+            session_state["prospect"] = metadata["prospect"]
+            session_state["prospect_id"] = metadata.get("prospect_id")
 
         # Generate sentiment-aware greeting if none was pre-generated
         if not session_state.get("greeting") and session_state.get("senior"):
@@ -216,6 +220,9 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     llm = AnthropicLLMService(
         api_key=os.getenv("ANTHROPIC_API_KEY", ""),
         model="claude-sonnet-4-5-20250929",
+        params=AnthropicLLMService.InputParams(
+            enable_prompt_caching=True,
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -289,7 +296,11 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     # -------------------------------------------------------------------------
     # Flow Manager (call phase management)
     # -------------------------------------------------------------------------
-    flows_tools = make_flows_tools(session_state)
+    if session_state.get("call_type") == "onboarding":
+        from flows.tools import make_onboarding_flows_tools
+        flows_tools = make_onboarding_flows_tools(session_state)
+    else:
+        flows_tools = make_flows_tools(session_state)
     initial_node = build_initial_node(session_state, flows_tools)
 
     flow_manager = FlowManager(

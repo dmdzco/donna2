@@ -8,6 +8,7 @@ Port of services/context-cache.js (365 lines). Caches:
 - Pre-generated greeting (templated with rotation)
 
 In-memory cache with 24-hour TTL. Called by scheduler hourly + at call connect.
+News is also persisted to seniors.cached_news so calls never need live web search.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from loguru import logger
+from db import execute
 
 # In-memory cache: senior_id -> cached context dict
 _cache: dict[str, dict] = {}
@@ -166,6 +168,18 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
                 )
             except Exception as e:
                 logger.error("Error fetching news for cache: {err}", err=str(e))
+
+            # Persist news to DB so calls never need live web search
+            if news_context_full:
+                try:
+                    await execute(
+                        "UPDATE seniors SET cached_news = $1, cached_news_updated_at = NOW() WHERE id = $2",
+                        news_context_full,
+                        senior_id,
+                    )
+                    logger.info("Persisted cached news for {name}", name=senior.get("name"))
+                except Exception as e:
+                    logger.error("Failed to persist news for {sid}: {err}", sid=senior_id, err=str(e))
 
         # Generate greeting using the greeting rotation service
         greeting_result = get_greeting(

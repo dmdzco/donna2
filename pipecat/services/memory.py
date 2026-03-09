@@ -78,15 +78,25 @@ async def generate_embedding(text: str) -> list[float] | None:
 
 
 async def store(
-    senior_id: str,
+    senior_id: str | None,
     type_: str,
     content: str,
     source: str | None = None,
     importance: int = 50,
     metadata: dict | None = None,
+    prospect_id: str | None = None,
 ) -> dict | None:
-    """Store a memory with deduplication (cosine similarity > 0.9 = duplicate)."""
+    """Store a memory with deduplication (cosine similarity > 0.9 = duplicate).
+
+    Pass senior_id for subscriber memories, prospect_id for onboarding caller memories.
+    """
     from db import query_one, query_many
+
+    owner_col = "senior_id" if senior_id else "prospect_id"
+    owner_id = senior_id or prospect_id
+    if not owner_id:
+        logger.warning("store() called with no senior_id or prospect_id")
+        return None
 
     embedding = await generate_embedding(content)
     if embedding is None:
@@ -97,15 +107,15 @@ async def store(
 
     # Dedup check
     dupes = await query_many(
-        """SELECT id, content, importance,
+        f"""SELECT id, content, importance,
                   1 - (embedding <=> $1::vector) AS similarity
            FROM memories
-           WHERE senior_id = $2
+           WHERE {owner_col} = $2
              AND 1 - (embedding <=> $1::vector) > 0.9
            ORDER BY similarity DESC
            LIMIT 1""",
         emb_str,
-        senior_id,
+        owner_id,
     )
 
     if dupes:
@@ -124,10 +134,10 @@ async def store(
         return None
 
     row = await query_one(
-        """INSERT INTO memories (senior_id, type, content, source, importance, embedding, metadata)
+        f"""INSERT INTO memories ({owner_col}, type, content, source, importance, embedding, metadata)
            VALUES ($1, $2, $3, $4, $5, $6::vector, $7)
            RETURNING *""",
-        senior_id,
+        owner_id,
         type_,
         content,
         source,
@@ -135,15 +145,24 @@ async def store(
         emb_str,
         json.dumps(metadata) if metadata else None,
     )
-    logger.info("Stored memory for {sid}: {c}", sid=senior_id, c=content)
+    logger.info("Stored memory for {col}={sid}: {c}", col=owner_col, sid=owner_id, c=content)
     return row
 
 
 async def search(
-    senior_id: str, query: str, limit: int = 5, min_similarity: float = 0.7
+    senior_id: str | None, query: str, limit: int = 5, min_similarity: float = 0.7,
+    prospect_id: str | None = None,
 ) -> list[dict]:
-    """Semantic search — find memories similar to *query*."""
+    """Semantic search — find memories similar to *query*.
+
+    Pass senior_id for subscriber memories, prospect_id for onboarding caller memories.
+    """
     from db import query_many, execute
+
+    owner_col = "senior_id" if senior_id else "prospect_id"
+    owner_id = senior_id or prospect_id
+    if not owner_id:
+        return []
 
     query_embedding = await generate_embedding(query)
     if query_embedding is None:
@@ -152,15 +171,15 @@ async def search(
     emb_str = json.dumps(query_embedding)
 
     rows = await query_many(
-        """SELECT id, type, content, importance, metadata, created_at,
+        f"""SELECT id, type, content, importance, metadata, created_at,
                   1 - (embedding <=> $1::vector) AS similarity
            FROM memories
-           WHERE senior_id = $2
+           WHERE {owner_col} = $2
              AND 1 - (embedding <=> $1::vector) > $3
            ORDER BY embedding <=> $1::vector
            LIMIT $4""",
         emb_str,
-        senior_id,
+        owner_id,
         min_similarity,
         limit,
     )
@@ -342,11 +361,35 @@ async def refresh_context(senior_id: str, current_topics: list[str]) -> str | No
     return "\n".join(parts) if parts else None
 
 
+async def transfer_to_senior(prospect_id: str, senior_id: str) -> int:
+    """Transfer all prospect memories to a senior (on conversion).
+
+    Returns the number of memories transferred.
+    """
+    from db import execute, query_many
+
+    rows = await query_many(
+        "SELECT id FROM memories WHERE prospect_id = $1", prospect_id
+    )
+    if not rows:
+        return 0
+    await execute(
+        "UPDATE memories SET senior_id = $1, prospect_id = NULL WHERE prospect_id = $2",
+        senior_id,
+        prospect_id,
+    )
+    logger.info("Transferred {n} memories from prospect {pid} to senior {sid}",
+                n=len(rows), pid=prospect_id, sid=senior_id)
+    return len(rows)
+
+
 async def extract_from_conversation(
-    senior_id: str, transcript: str, conversation_id: str
+    senior_id: str | None, transcript: str, conversation_id: str,
+    prospect_id: str | None = None,
 ) -> None:
     """Extract and store memories from a conversation transcript via OpenAI."""
-    logger.info("extract_from_conversation({sid}): transcript_len={n}", sid=str(senior_id)[:8], n=len(transcript) if transcript else 0)
+    owner_id = senior_id or prospect_id
+    logger.info("extract_from_conversation({sid}): transcript_len={n}", sid=str(owner_id)[:8] if owner_id else "none", n=len(transcript) if transcript else 0)
     client = _get_openai()
     if client is None:
         logger.warning("Skipping extraction — OPENAI_API_KEY not set")
@@ -383,6 +426,7 @@ async def extract_from_conversation(
                         content,
                         conversation_id,
                         mem.get("importance", 50),
+                        prospect_id=prospect_id,
                     )
                     stored += 1
                 except Exception as e:

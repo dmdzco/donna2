@@ -67,10 +67,10 @@ REMINDER_TASK = (
 MAIN_TASK = (
     "PHASE: MAIN CONVERSATION\n"
     "Natural, warm dialogue. Weave in any pending reminders when appropriate.\n\n"
-    "TOOLS: search_memories (past calls context), web_search (current events/weather/"
-    "sports/ANY factual question—use it, don't say you can't look things up; brief "
-    "varied filler before calling: \"Let me check\"/\"One moment\"/\"Hmm, let me see\"), "
-    "save_important_detail (life updates).\n\n"
+    "TOOLS: search_memories (past calls context), save_important_detail (life updates).\n\n"
+    "WEB RESULTS: If a [WEB RESULT] message appears in your context, use it naturally to "
+    "answer the senior's question. Don't say 'let me check' or mention searching — the "
+    "senior already heard a filler. Just share the information conversationally.\n\n"
     "ENDING THE CALL: When the senior says goodbye or wants to go, you MUST call "
     "transition_to_winding_down. The call ONLY ends via the tool — saying bye in text "
     "without calling it leaves the call open and the senior hears silence.\n\n"
@@ -122,7 +122,7 @@ CONVERSATION FLOW: Guide the conversation naturally through these stages, but do
 
 SAFETY BOUNDARIES: If the caller requests harmful information, explicit content, or anything inappropriate, decline firmly but warmly. Set the boundary, then redirect to how you can actually help. Do not engage with the inappropriate content.
 
-TOOLS: Use save_prospect_detail whenever you learn the caller's name, their relationship to a senior, the senior's name, interests, concerns, or any other useful detail. Save early and often — this information persists for return calls. Use web_search if the caller asks about current events or factual questions.
+TOOLS: Use save_prospect_detail whenever you learn the caller's name, their relationship to a senior, the senior's name, interests, concerns, or any other useful detail. Save early and often — this information persists for return calls. If a [WEB RESULT] message appears in your context, use it naturally — don't mention searching.
 
 ENDING THE CALL: When the caller is ready to go, offer a natural path forward (website, calling back), mention you'll remember them, reference something personal from the conversation, and call transition_to_closing. No hard sell. No urgency or pressure."""
 
@@ -155,7 +155,7 @@ ONBOARDING_TASK_RETURN_CALLER = (
     "If they're ready to sign up, express genuine excitement and direct them to the website. "
     "If they just want to chat more, lean into it — continue building the relationship.\n\n"
     "TOOLS: Call save_prospect_detail for any new information learned. "
-    "Use web_search if they ask factual questions.\n\n"
+    "If a [WEB RESULT] appears in context, use it naturally.\n\n"
     "ENDING: When wrapping up, call transition_to_closing."
 )
 

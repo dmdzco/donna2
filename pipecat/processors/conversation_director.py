@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     TranscriptionFrame,
+    TTSSpeakFrame,
     LLMMessagesAppendFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessor
@@ -93,6 +94,13 @@ class ConversationDirectorProcessor(FrameProcessor):
         self._speculative_task: asyncio.Task | None = None
         self._latest_interim_text: str = ""
 
+        # Web search gating state
+        self._web_search_task: asyncio.Task | None = None
+        self._web_search_query: str = ""
+        self._web_searches_gated = 0
+        self._web_searches_completed = 0
+        self._web_searches_timed_out = 0
+
         # Metrics
         self._speculative_attempts = 0
         self._speculative_hits = 0
@@ -106,26 +114,28 @@ class ConversationDirectorProcessor(FrameProcessor):
         """Non-blocking: inject guidance, start analysis, pass frame."""
         await super().process_frame(frame, direction)
 
-        # --- End of call: log speculative + prefetch metrics ---
-        if isinstance(frame, EndFrame) and self._speculative_attempts > 0:
-            logger.info(
-                "[Director] Call summary: {turns} turns, "
-                "{hits}/{attempts} speculative hits ({pct}%), "
-                "{cancels} cancels",
-                turns=self._turn_count,
-                hits=self._speculative_hits,
-                attempts=self._speculative_attempts,
-                pct=round(self._speculative_hits / self._speculative_attempts * 100),
-                cancels=self._speculative_cancels,
-            )
+        # --- End of call: log speculative + prefetch + web search metrics ---
         if isinstance(frame, EndFrame):
-            web_cache = self._session_state.get("_web_prefetch_cache")
-            if web_cache:
-                ws = web_cache.stats()
+            if self._speculative_attempts > 0:
                 logger.info(
-                    "[Director] Web prefetch: {h}/{t} hits ({p}%), {e} entries",
-                    h=ws["hits"], t=ws["total"], p=ws["hit_rate_pct"], e=ws["entries"],
+                    "[Director] Call summary: {turns} turns, "
+                    "{hits}/{attempts} speculative hits ({pct}%), "
+                    "{cancels} cancels",
+                    turns=self._turn_count,
+                    hits=self._speculative_hits,
+                    attempts=self._speculative_attempts,
+                    pct=round(self._speculative_hits / self._speculative_attempts * 100),
+                    cancels=self._speculative_cancels,
                 )
+            if self._web_searches_gated > 0:
+                logger.info(
+                    "[Director] Web search: {g} gated, {c} completed, {t} timed out",
+                    g=self._web_searches_gated,
+                    c=self._web_searches_completed,
+                    t=self._web_searches_timed_out,
+                )
+            await self.push_frame(frame, direction)
+            return
 
         # --- Final TranscriptionFrame (after VAD 1.2s silence) ---
         if isinstance(frame, TranscriptionFrame):
@@ -188,6 +198,10 @@ class ConversationDirectorProcessor(FrameProcessor):
                 self._memory_refreshed = True
                 asyncio.create_task(self._refresh_memory())
 
+            # Web search gating: hold frame if web search in-flight
+            await self._handle_web_gating(frame, direction)
+            return
+
         # --- Interim TranscriptionFrame (while user is still speaking) ---
         if isinstance(frame, InterimTranscriptionFrame):
             text = frame.text or ""
@@ -203,6 +217,16 @@ class ConversationDirectorProcessor(FrameProcessor):
                 if not self._speculative_task.done():
                     self._speculative_task.cancel()
                 self._speculative_task = None
+
+            # Cancel web search if interim text diverges significantly
+            if self._web_search_task is not None and not self._web_search_task.done():
+                if self._web_search_query and not self._text_matches(
+                    text, self._web_search_query, threshold=0.4
+                ):
+                    self._web_search_task.cancel()
+                    self._web_search_task = None
+                    self._web_search_query = ""
+                    logger.info("[Director] Web search cancelled: interim text diverged")
 
             # Start new silence timer if text is substantial and Cerebras available
             if len(text) >= self.SPECULATIVE_MIN_LENGTH and fast_provider_available():
@@ -221,7 +245,10 @@ class ConversationDirectorProcessor(FrameProcessor):
                 self._last_interim_text = text
                 asyncio.create_task(self._run_prefetch(text, source="interim"))
 
-        # Always pass frames through immediately
+            await self.push_frame(frame, direction)
+            return
+
+        # All other frames — pass through immediately
         await self.push_frame(frame, direction)
 
     # ------------------------------------------------------------------
@@ -268,6 +295,25 @@ class ConversationDirectorProcessor(FrameProcessor):
             if result:
                 # Fire second-wave prefetch from speculative result
                 asyncio.create_task(self._run_director_prefetch(result))
+
+                # Start web search if Director predicts factual questions
+                web_queries = (result.get("prefetch") or {}).get("web_queries") or []
+                if web_queries:
+                    from lib.growthbook import is_on
+                    if is_on("news_search_enabled", self._session_state):
+                        query = web_queries[0]
+                        if isinstance(query, str) and len(query.strip()) >= 5:
+                            # Cancel any existing web search
+                            if self._web_search_task and not self._web_search_task.done():
+                                self._web_search_task.cancel()
+                            self._web_search_query = query.strip()
+                            self._web_search_task = asyncio.create_task(
+                                self._run_web_search(self._web_search_query)
+                            )
+                            logger.info(
+                                "[Director] Web search started from speculative: {q!r}",
+                                q=self._web_search_query,
+                            )
             return result
         except asyncio.CancelledError:
             return None
@@ -325,6 +371,93 @@ class ConversationDirectorProcessor(FrameProcessor):
         intersection = len(words_i & words_f)
         union = len(words_i | words_f)
         return (intersection / union) >= threshold
+
+    # ------------------------------------------------------------------
+    # Web search gating
+    # ------------------------------------------------------------------
+
+    async def _run_web_search(self, query: str) -> str | None:
+        """Run a web search via OpenAI. Returns result string or None."""
+        try:
+            from services.news import web_search_query
+            result = await asyncio.wait_for(web_search_query(query), timeout=12.0)
+            return result
+        except asyncio.TimeoutError:
+            logger.warning("[Director] Web search timed out for q={q!r}", q=query)
+            return None
+        except asyncio.CancelledError:
+            return None
+        except Exception as e:
+            logger.warning("[Director] Web search error for q={q!r}: {err}", q=query, err=str(e))
+            return None
+
+    async def _handle_web_gating(self, frame: TranscriptionFrame, direction):
+        """Gate the TranscriptionFrame if a web search is in-flight.
+
+        If search is still running: push filler TTS, await result, inject into context.
+        If search is already done: inject result immediately (no filler needed).
+        Always pushes the frame at the end.
+        """
+        if self._web_search_task is not None:
+            if not self._web_search_task.done():
+                # Search still in-flight — push filler and wait
+                self._web_searches_gated += 1
+                logger.info("[Director] Web search gating activated, pushing filler")
+                await self.push_frame(
+                    TTSSpeakFrame(text="Let me check on that for you."),
+                    direction,
+                )
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.shield(self._web_search_task), timeout=10.0
+                    )
+                    if result:
+                        await self._inject_web_result(result)
+                        self._web_searches_completed += 1
+                    else:
+                        self._web_searches_timed_out += 1
+                except asyncio.TimeoutError:
+                    logger.warning("[Director] Web search gating timed out")
+                    self._web_searches_timed_out += 1
+                except Exception as e:
+                    logger.warning("[Director] Web search gating error: {err}", err=str(e))
+                    self._web_searches_timed_out += 1
+            else:
+                # Search already completed — inject result if available
+                try:
+                    result = self._web_search_task.result()
+                    if result:
+                        await self._inject_web_result(result)
+                        self._web_searches_completed += 1
+                        logger.info("[Director] Pre-completed web result injected (no filler needed)")
+                except Exception:
+                    pass
+
+            # Clean up
+            self._web_search_task = None
+            self._web_search_query = ""
+
+        await self.push_frame(frame, direction)
+
+    async def _inject_web_result(self, result: str):
+        """Inject web search result into Claude's context."""
+        logger.info("[Director] Web result injected ({n} chars)", n=len(result))
+        await self.push_frame(
+            LLMMessagesAppendFrame(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            "[WEB RESULT — do not read this tag aloud]\n"
+                            f"{result}\n"
+                            "Use this to answer naturally. Don't say 'let me check' — "
+                            "the senior already heard a filler."
+                        ),
+                    }
+                ],
+                run_llm=False,
+            )
+        )
 
     # ------------------------------------------------------------------
     # Guidance injection
@@ -426,18 +559,18 @@ class ConversationDirectorProcessor(FrameProcessor):
             logger.warning("[Prefetch] Error: {err}", err=str(e))
 
     async def _run_director_prefetch(self, direction: dict):
-        """Second-wave prefetch using Director's analysis output.
+        """Second-wave prefetch using Director's analysis output (memory only).
 
-        Runs memory prefetch and web search prefetch in parallel.
+        Web searches are now handled directly by the Director via _run_web_search,
+        not through the prefetch cache system.
         """
         try:
             from services.prefetch import (
-                PrefetchCache, WebPrefetchCache,
-                extract_director_queries, extract_web_queries,
-                run_prefetch, run_web_prefetch,
+                PrefetchCache,
+                extract_director_queries,
+                run_prefetch,
             )
 
-            # Memory prefetch (existing, enhanced with Groq extraction)
             if "_prefetch_cache" not in self._session_state:
                 self._session_state["_prefetch_cache"] = PrefetchCache()
             cache = self._session_state["_prefetch_cache"]
@@ -445,34 +578,15 @@ class ConversationDirectorProcessor(FrameProcessor):
             queries = extract_director_queries(direction, self._session_state)
             senior_id = self._session_state.get("senior_id")
 
-            tasks = []
-            if queries and senior_id:
-                tasks.append(run_prefetch(senior_id, queries, cache))
-
-            # Web search prefetch (new — Director predicts factual questions)
-            web_queries = extract_web_queries(direction)
-            if web_queries:
-                if "_web_prefetch_cache" not in self._session_state:
-                    self._session_state["_web_prefetch_cache"] = WebPrefetchCache()
-                web_cache = self._session_state["_web_prefetch_cache"]
-                tasks.append(run_web_prefetch(web_queries, web_cache))
-
-            if not tasks:
+            if not queries or not senior_id:
                 return
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            mem_count = results[0] if len(results) > 0 and not isinstance(results[0], Exception) else 0
-            web_count = results[-1] if len(results) > 1 and not isinstance(results[-1], Exception) else 0
-
-            if mem_count or web_count:
+            count = await run_prefetch(senior_id, queries, cache)
+            if count:
                 logger.info(
-                    "[Prefetch] Director 2nd wave: {m} memory, {w} web cached",
-                    m=mem_count, w=web_count,
+                    "[Prefetch] Director 2nd wave: {m} memory cached",
+                    m=count,
                 )
-
-            # Store web prefetch hints for guidance injection
-            if web_queries:
-                direction["_web_prefetch_hints"] = web_queries
 
         except Exception as e:
             logger.warning("[Prefetch] Director prefetch error: {err}", err=str(e))

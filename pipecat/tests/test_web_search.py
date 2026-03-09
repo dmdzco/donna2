@@ -1,7 +1,10 @@
-"""Tests for web_search tool handler and the web_search_query service.
+"""Tests for web_search_query service (used by Director web search gating).
 
 Mocks the OpenAI client to test the full chain:
-  tool handler → web_search_query → OpenAI Responses API → formatted result
+  Director → web_search_query → OpenAI Responses API → formatted result
+
+Note: The web_search LLM tool was removed — the Director now owns web
+searches entirely and injects results into Claude's context directly.
 """
 
 import pytest
@@ -157,93 +160,6 @@ class TestGetNewsForSenior:
         # News asks for "news stories", search asks to "Answer this question"
         assert "news stories" in news_prompt
         assert "Answer this question" in search_prompt
-
-
-# ---------------------------------------------------------------------------
-# Tool handler integration (handle_web_search)
-# ---------------------------------------------------------------------------
-
-
-class TestWebSearchToolHandler:
-    """Test the web_search tool handler called by the LLM."""
-
-    @pytest.fixture(autouse=True)
-    def clear_cache(self):
-        _news_cache.clear()
-        yield
-        _news_cache.clear()
-
-    def _make_handlers(self, **state_overrides):
-        from flows.tools import make_tool_handlers
-        state = {
-            "senior_id": "test-senior-1",
-            "senior": {"name": "Margaret", "interests": ["gardening"]},
-        }
-        state.update(state_overrides)
-        return make_tool_handlers(state), state
-
-    @pytest.mark.asyncio
-    async def test_empty_query_returns_message(self):
-        handlers, _ = self._make_handlers()
-        result = await handlers["web_search"]({"query": ""})
-        assert result["status"] == "success"
-        assert "No query" in result["result"]
-
-    @pytest.mark.asyncio
-    async def test_successful_search(self):
-        mock_response = MagicMock()
-        mock_response.output_text = "The Super Bowl is on Feb 9th."
-
-        mock_client = MagicMock()
-        mock_client.responses.create.return_value = mock_response
-
-        handlers, _ = self._make_handlers()
-        with patch("services.news._get_openai", return_value=mock_client):
-            result = await handlers["web_search"]({"query": "when is the Super Bowl"})
-
-        assert result["status"] == "success"
-        assert "Super Bowl" in result["result"]
-
-    @pytest.mark.asyncio
-    async def test_no_results_returns_friendly_message(self):
-        mock_response = MagicMock()
-        mock_response.output_text = ""
-
-        mock_client = MagicMock()
-        mock_client.responses.create.return_value = mock_response
-
-        handlers, _ = self._make_handlers()
-        with patch("services.news._get_openai", return_value=mock_client):
-            result = await handlers["web_search"]({"query": "xyzzy nonsense"})
-
-        assert result["status"] == "success"
-        assert "couldn't find" in result["result"]
-
-    @pytest.mark.asyncio
-    async def test_api_error_returns_graceful_fallback(self):
-        """Handler's own except branch fires when web_search_query raises."""
-        handlers, _ = self._make_handlers()
-        with patch("services.news.web_search_query", new_callable=AsyncMock, side_effect=Exception("timeout")):
-            result = await handlers["web_search"]({"query": "test query"})
-
-        assert result["status"] == "success"
-        assert "unavailable" in result["result"].lower() or "naturally" in result["result"].lower()
-
-    @pytest.mark.asyncio
-    async def test_uses_web_search_query_not_news(self):
-        """The handler must call web_search_query, not get_news_for_senior."""
-        handlers, _ = self._make_handlers()
-
-        with patch("services.news.web_search_query", new_callable=AsyncMock, return_value="Answer here.") as mock_search:
-            # Patch at the import location inside the handler
-            with patch("flows.tools.web_search_query", mock_search, create=True):
-                # The handler imports web_search_query from services.news inside the closure
-                result = await handlers["web_search"]({"query": "test"})
-
-        # Verify web_search_query was called (not get_news_for_senior)
-        # If the handler correctly imports web_search_query, the mock should be called
-        # Note: due to late import in closure, we patch at the module level
-        assert result["status"] == "success"
 
 
 # ---------------------------------------------------------------------------

@@ -27,19 +27,6 @@ class TestToolHandlerIntegration:
         mock_search.assert_awaited_once_with("senior-test-001", "roses", limit=3)
 
     @pytest.mark.asyncio
-    async def test_web_search_calls_service(self, session_state):
-        """web_search should call services.news.web_search_query."""
-        handlers = make_tool_handlers(session_state)
-
-        with patch("services.news.web_search_query", new_callable=AsyncMock) as mock_search:
-            mock_search.return_value = "Garden show this weekend"
-            result = await handlers["web_search"]({"query": "gardening"})
-
-        assert result["status"] == "success"
-        assert "Garden show" in result["result"]
-        mock_search.assert_awaited_once_with("gardening")
-
-    @pytest.mark.asyncio
     async def test_mark_reminder_updates_session(self, reminder_session_state):
         """mark_reminder_acknowledged should update session and call scheduler."""
         handlers = make_tool_handlers(reminder_session_state)

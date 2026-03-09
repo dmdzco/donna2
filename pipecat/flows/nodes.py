@@ -320,8 +320,6 @@ def build_winding_down_node(session_state: dict, flows_tools: dict) -> NodeConfi
         functions.append(flows_tools["mark_reminder_acknowledged"])
     if "save_important_detail" in flows_tools:
         functions.append(flows_tools["save_important_detail"])
-    if "web_search" in flows_tools:
-        functions.append(flows_tools["web_search"])
     if "check_caregiver_notes" in flows_tools:
         functions.append(flows_tools["check_caregiver_notes"])
 

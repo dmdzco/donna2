@@ -111,7 +111,7 @@ class ConversationDirectorProcessor(FrameProcessor):
 
         # Speculative pre-processing state
         self._silence_timer_task: asyncio.Task | None = None
-        self._speculative_task: asyncio.Task | None = None
+        self._speculative_tasks: list[asyncio.Task] = []  # all in-flight speculatives
         self._latest_interim_text: str = ""
 
         # Web search gating state
@@ -124,7 +124,9 @@ class ConversationDirectorProcessor(FrameProcessor):
         # Metrics
         self._speculative_attempts = 0
         self._speculative_hits = 0
-        self._speculative_cancels = 0
+        self._speculative_misses = 0
+
+    MAX_CONCURRENT_SPECULATIVE = 3  # cap concurrent Groq calls
 
     def set_pipeline_task(self, task):
         """Set pipeline task reference for direct actions (EndFrame, etc.)."""
@@ -140,12 +142,12 @@ class ConversationDirectorProcessor(FrameProcessor):
                 logger.info(
                     "[Director] Call summary: {turns} turns, "
                     "{hits}/{attempts} speculative hits ({pct}%), "
-                    "{cancels} cancels",
+                    "{misses} misses",
                     turns=self._turn_count,
                     hits=self._speculative_hits,
                     attempts=self._speculative_attempts,
                     pct=round(self._speculative_hits / self._speculative_attempts * 100),
-                    cancels=self._speculative_cancels,
+                    misses=self._speculative_misses,
                 )
             if self._web_searches_gated > 0:
                 logger.info(
@@ -257,12 +259,9 @@ class ConversationDirectorProcessor(FrameProcessor):
                     self._web_search_query = ""
                     logger.info("[Director] Web search cancelled: interim text diverged")
 
-            # Start silence timer only if no speculative is already running
-            if (
-                len(text) >= self.SPECULATIVE_MIN_LENGTH
-                and fast_provider_available()
-                and (self._speculative_task is None or self._speculative_task.done())
-            ):
+            # Start silence timer — always, even if a speculative is running.
+            # Each completed speculative builds cached context (memory prefetch).
+            if len(text) >= self.SPECULATIVE_MIN_LENGTH and fast_provider_available():
                 self._silence_timer_task = asyncio.create_task(
                     self._silence_timer(text)
                 )
@@ -302,6 +301,17 @@ class ConversationDirectorProcessor(FrameProcessor):
         """Wait for silence threshold, then start speculative analysis."""
         try:
             await asyncio.sleep(self.SILENCE_ONSET_SECONDS)
+
+            # Clean up completed tasks
+            self._speculative_tasks = [
+                t for t in self._speculative_tasks if not t.done()
+            ]
+
+            # Cap concurrent speculatives
+            if len(self._speculative_tasks) >= self.MAX_CONCURRENT_SPECULATIVE:
+                logger.debug("[Director] Speculative cap reached ({n})", n=len(self._speculative_tasks))
+                return
+
             # Timer fired — silence confirmed
             logger.debug(
                 "[Director] Silence onset ({ms}ms), starting speculative on: {t!r}",
@@ -310,14 +320,11 @@ class ConversationDirectorProcessor(FrameProcessor):
             )
             self._speculative_attempts += 1
 
-            # Cancel any previous speculative task
-            if self._speculative_task is not None and not self._speculative_task.done():
-                self._speculative_task.cancel()
-
             transcript = self._session_state.get("_transcript") or []
-            self._speculative_task = asyncio.create_task(
+            task = asyncio.create_task(
                 self._run_speculative_analysis(interim_text, transcript)
             )
+            self._speculative_tasks.append(task)
         except asyncio.CancelledError:
             pass  # Normal: new interim arrived before timer fired
 
@@ -344,43 +351,43 @@ class ConversationDirectorProcessor(FrameProcessor):
             return None
 
     def _harvest_speculative(self, final_text: str) -> dict | None:
-        """Check if speculative analysis completed with a usable result.
+        """Check all completed speculative analyses for a usable result.
 
-        Returns the speculative result if done and text overlaps with final
-        (using relaxed Jaccard threshold since speculative may have been
-        started on partial text), otherwise returns None and cleans up.
+        Picks the best text-matching completed result. Incomplete tasks
+        keep running — their prefetch results still build the cache.
         """
-        if self._speculative_task is None:
+        if not self._speculative_tasks:
             return None
 
-        if self._speculative_task.done():
-            try:
-                result = self._speculative_task.result()
-            except Exception:
-                result = None
+        best_result = None
+        still_running = 0
 
-            self._speculative_task = None
+        for task in self._speculative_tasks:
+            if task.done():
+                try:
+                    result = task.result()
+                except Exception:
+                    continue
+                if result and self._text_matches(
+                    self._latest_interim_text, final_text, threshold=0.5
+                ):
+                    best_result = result
+            else:
+                still_running += 1
 
-            # Use relaxed threshold (0.5) — speculative was started on partial
-            # interim text, so exact match is unlikely. What matters is that
-            # the core topic/intent overlaps.
-            if result and self._text_matches(self._latest_interim_text, final_text, threshold=0.5):
-                return result
+        # Clear completed tasks, keep running ones (they build cache)
+        self._speculative_tasks = [t for t in self._speculative_tasks if not t.done()]
 
-            # Text diverged — discard
-            if result:
-                logger.info(
-                    "[Director] Speculative discarded: text diverged "
-                    "(interim={i!r}, final={f!r})",
-                    i=self._latest_interim_text[:40],
-                    f=final_text[:40],
-                )
-                self._speculative_cancels += 1
-            return None
+        if best_result:
+            return best_result
 
-        # Still running — don't cancel, let it complete for next turn
-        self._speculative_cancels += 1
-        logger.info("[Director] Speculative incomplete at final transcription (still running)")
+        if still_running:
+            self._speculative_misses += 1
+            logger.info(
+                "[Director] No speculative match at final transcription "
+                "({n} still running, building cache)",
+                n=still_running,
+            )
         return None
 
     @staticmethod

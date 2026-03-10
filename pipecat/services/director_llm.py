@@ -127,16 +127,26 @@ def _extract_and_parse_json(text: str) -> dict | None:
 DIRECTOR_SYSTEM_INSTRUCTION = """\
 Direct Donna, an AI companion calling elderly people. Return JSON guidance.
 
+YOUR PRIMARY JOB: Give Donna specific, actionable conversation guidance for THIS turn.
+- What should she say or ask? Be concrete: "Ask about grandson Jake's baseball season" not "Ask a follow-up question"
+- Should she search memories? Give a specific query: "paddle games last week" not "sports"
+- Should she look something up? Give the web query: "Austin TX weather March 10 2026"
+- Did the senior share something worth saving? Flag it.
+- What tone fits this moment? warm|empathetic|cheerful|gentle|serious
+
+RULES:
 Phases: opening(0-30s) → main(30s-8min) → winding_down(8-9min) → closing(9-10min). Past 30s still opening → "main".
 Reminders: natural pauses + high engagement only. Never during emotions/low engagement. Never repeat delivered.
-Low engagement: suggest personal questions or memories. News: medium+ engagement, topic winding down.
+Low engagement: suggest a specific personal question or memory reference, not generic prompts.
+News: medium+ engagement, topic winding down.
 Onboarding calls (call_type="onboarding"): no reminders, no re-engage signals, focus on discovery.
-PREFETCH — help Donna respond faster by extracting topics for memory search:
-memory_queries: CRITICAL — ALWAYS extract 1-3 keyword phrases from the senior's current message. Extract names, places, topics, activities, hobbies, people they mention. Extract what they're TALKING ABOUT, not generic categories. Examples: "paddle" not "sports", "grandson Jake" not "family", "Torchy's Tacos" not "food". NEVER return empty — if the senior said anything substantive, extract at least one query.
-web_queries: CRITICAL — you are the ONLY way web searches happen. Extract full Google-style queries for ANY factual question. Include city/state and current date for location/time-sensitive queries. Example: "Austin Texas weather March 10 2026". Empty array if no factual question. Be aggressive — if there's any chance the user wants current info, include a query.
-anticipated_tools: from [search_memories, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes]. ALWAYS include search_memories when memory_queries is non-empty.
 
-JSON:{"analysis":{"call_phase":"str","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"str","priority_action":"str","specific_instruction":"str"},"prefetch":{"memory_queries":[],"web_queries":[],"anticipated_tools":[]}}"""
+PREFETCH (secondary — extract for faster retrieval):
+memory_queries: 1-3 keyword phrases from the senior's message. Extract names, places, activities — what they're TALKING ABOUT ("grandson Jake" not "family", "Torchy's Tacos" not "food"). At least one if they said anything substantive.
+web_queries: Google-style queries for factual questions. Include city/state + date for location-sensitive queries. Empty array if none.
+anticipated_tools: from [search_memories, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes].
+
+JSON:{"analysis":{"call_phase":"str","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"warm|empathetic|cheerful|gentle|serious","priority_action":"str","specific_instruction":"str","suggest_search":null,"suggest_web_search":null,"suggest_save":false},"prefetch":{"memory_queries":[],"web_queries":[],"anticipated_tools":[]}}"""
 
 # Dynamic per-turn context — passed as contents
 DIRECTOR_TURN_TEMPLATE = """\
@@ -301,11 +311,11 @@ def format_director_guidance(direction: dict) -> str | None:
         instr = guidance["specific_instruction"]
         # Skip stage-direction-like instructions that the LLM might speak
         if not re.search(
-            r"\b(laugh|pause|sigh|smile|nod|speak|empathy|concern|warmth|gently)\b",
+            r"\b(laugh|pause|sigh|smile|nod)\b",
             instr,
             re.I,
         ):
-            parts.append(instr[:60])
+            parts.append(instr[:120])
 
     dir_section = direction.get("direction", {})
     if dir_section.get("should_mention_news") and dir_section.get("news_topic"):
@@ -314,6 +324,16 @@ def format_director_guidance(direction: dict) -> str | None:
     emotional_tone = analysis.get("emotional_tone")
     if emotional_tone in ("sad", "concerned"):
         parts.append(f"({emotional_tone})")
+
+    # Tool recommendations from Director
+    suggest_search = guidance.get("suggest_search")
+    if suggest_search:
+        parts.append(f"SEARCH memories: {suggest_search}")
+    suggest_web = guidance.get("suggest_web_search")
+    if suggest_web:
+        parts.append(f"LOOK UP: {suggest_web}")
+    if guidance.get("suggest_save"):
+        parts.append("SAVE this detail")
 
     # Prefetch hints — let Claude know memories are pre-loaded
     prefetch_hints = direction.get("_prefetch_hints")

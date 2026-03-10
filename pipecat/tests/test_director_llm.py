@@ -217,7 +217,7 @@ class TestFormatDirectorGuidance:
 
     def test_instruction_truncation(self):
         from services.director_llm import format_director_guidance
-        long_instr = "A" * 100
+        long_instr = "A" * 200
         d = {
             "analysis": {"call_phase": "main", "engagement_level": "medium", "emotional_tone": "neutral"},
             "guidance": {"tone": "warm", "specific_instruction": long_instr},
@@ -226,18 +226,29 @@ class TestFormatDirectorGuidance:
         }
         result = format_director_guidance(d)
         parts = result.split(" | ")
-        assert len(parts[-1]) <= 60
+        assert len(parts[-1]) <= 120
 
     def test_filters_stage_directions(self):
         from services.director_llm import format_director_guidance
         d = {
             "analysis": {"call_phase": "main", "engagement_level": "medium", "emotional_tone": "neutral"},
-            "guidance": {"tone": "warm", "specific_instruction": "Laugh warmly and show empathy"},
+            "guidance": {"tone": "warm", "specific_instruction": "Laugh warmly and nod along"},
             "reminder": {"should_deliver": False},
             "direction": {"stay_or_shift": "stay"},
         }
         result = format_director_guidance(d)
         assert "Laugh" not in (result or "")
+
+    def test_passes_through_emotional_guidance(self):
+        from services.director_llm import format_director_guidance
+        d = {
+            "analysis": {"call_phase": "main", "engagement_level": "medium", "emotional_tone": "neutral"},
+            "guidance": {"tone": "warm", "specific_instruction": "Show warmth and empathy about their loss"},
+            "reminder": {"should_deliver": False},
+            "direction": {"stay_or_shift": "stay"},
+        }
+        result = format_director_guidance(d)
+        assert "warmth and empathy" in (result or "")
 
 
 class TestGroqAvailable:

@@ -35,6 +35,50 @@ from prompts import (
 )
 
 
+_EMPATHY_KEYWORDS = {"pain", "hurt", "ache", "sore", "discomfort", "bothering", "bother",
+                      "tired", "exhausted", "dizzy", "fell", "fall", "swollen", "stiff"}
+
+
+def _format_analysis_insights(analysis: dict) -> str | None:
+    """Format follow-ups, positive observations, and empathy-relevant concerns
+    from the last call analysis into a prompt section."""
+    lines: list[str] = []
+
+    # Follow-up suggestions — highest signal for personalization
+    follow_ups = analysis.get("follow_up_suggestions") or []
+    if follow_ups:
+        lines.append("From last call, follow up on:")
+        for fu in follow_ups[:4]:
+            lines.append(f"- {fu}")
+
+    # Positive observations — what lit them up
+    positives = analysis.get("positive_observations") or []
+    if positives:
+        lines.append("What went well last time:")
+        for po in positives[:3]:
+            lines.append(f"- {po}")
+
+    # Concerns — only emotional or pain/discomfort (empathetic, not clinical)
+    concerns = analysis.get("concerns") or []
+    empathy_concerns: list[str] = []
+    for c in concerns:
+        if not isinstance(c, dict):
+            continue
+        ctype = (c.get("type") or "").lower()
+        desc = c.get("description") or ""
+        desc_lower = desc.lower()
+        if ctype == "emotional":
+            empathy_concerns.append(desc)
+        elif ctype == "health" and any(kw in desc_lower for kw in _EMPATHY_KEYWORDS):
+            empathy_concerns.append(desc)
+    if empathy_concerns:
+        lines.append("They shared something that might still be on their mind:")
+        for ec in empathy_concerns[:2]:
+            lines.append(f"- {ec}")
+
+    return "\n".join(lines) if lines else None
+
+
 def _build_senior_context(session_state: dict) -> str:
     """Build the senior-specific context sections of the system prompt."""
     parts: list[str] = []
@@ -69,6 +113,12 @@ def _build_senior_context(session_state: dict) -> str:
         logger.info("System prompt includes memory context ({n} chars)", n=len(memory_ctx))
     else:
         logger.warning("No memory context in session_state for system prompt")
+
+    # --- Insights from last call analysis ---
+    analysis = session_state.get("last_call_analysis") or {}
+    analysis_parts = _format_analysis_insights(analysis)
+    if analysis_parts:
+        parts.append(f"\n{analysis_parts}")
 
     # News is NOT in system prompt — injected dynamically by Director
     # when should_mention_news is true (saves ~300 tokens per turn)

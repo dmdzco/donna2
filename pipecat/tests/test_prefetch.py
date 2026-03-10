@@ -184,6 +184,41 @@ class TestGetBestMatches:
         results = get_best_matches(cache, "yeah okay thanks bye")
         assert results == []
 
+    def test_reverse_lookup_matches_cached_query_in_long_utterance(self):
+        """Strategy 3: cached short query found in long user utterance."""
+        cache = PrefetchCache()
+        cache.put("niseko skiing", [{"content": "Went skiing in Niseko last January"}])
+        # Full user utterance contains the cached query words
+        results = get_best_matches(cache, "Where did I go skiing in Niseko?")
+        assert len(results) == 1
+        assert "Niseko" in results[0]["content"]
+
+    def test_reverse_lookup_skipped_when_earlier_strategies_match(self):
+        """Strategy 3 only runs when strategies 1+2 produce no results."""
+        cache = PrefetchCache()
+        cache.put("gardening", [{"content": "Loves growing roses"}])
+        cache.put("cooking dinner", [{"content": "Makes great soup"}])
+        # "gardening" matches via Strategy 2 (extract_prefetch_queries)
+        results = get_best_matches(cache, "I was doing some gardening today")
+        assert len(results) == 1
+        assert "roses" in results[0]["content"]
+
+    def test_reverse_lookup_requires_50pct_overlap(self):
+        """Strategy 3 needs >=50% of cached query words in user text."""
+        cache = PrefetchCache()
+        cache.put("cold plunge backyard", [{"content": "Built a cold plunge"}])
+        # Only 1 of 3 cached words present (33%) — below 50% threshold
+        results = get_best_matches(cache, "The cold weather today was brutal")
+        assert results == []
+
+    def test_reverse_lookup_partial_word_match(self):
+        """Strategy 3: 2 of 3 cached words present (67%) — above threshold."""
+        cache = PrefetchCache()
+        cache.put("trip to niseko", [{"content": "Ski trip to Niseko in January"}])
+        # "trip" and "niseko" present (2/3 = 67%)
+        results = get_best_matches(cache, "Tell me about my trip to niseko")
+        assert len(results) == 1
+
 
 # ===========================================================================
 # extract_prefetch_queries

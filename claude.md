@@ -12,6 +12,10 @@
 
 Do NOT confuse the Node.js `services/` with `pipecat/services/` — they are separate implementations sharing the same database.
 
+### Git Email
+
+**Always use the GitHub noreply email for commits:** `30447530+dmdzco@users.noreply.github.com`. GitHub blocks pushes with the personal email due to email privacy settings.
+
 ---
 
 ## Project Goal

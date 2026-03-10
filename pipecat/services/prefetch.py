@@ -441,6 +441,18 @@ def get_best_matches(
         if len(results) >= max_results:
             return results[:max_results]
 
+    # Strategy 3: Check all recent cache entries against the full utterance
+    # (reverse lookup — does any cached query fuzzy-match the user text?)
+    if not results:
+        user_words = set(user_text.lower().split())
+        for cached_query in cache.get_recent_queries():
+            cached_words = set(cached_query.lower().split())
+            # Check if cached query words are mostly contained in user text
+            if cached_words and len(cached_words & user_words) / len(cached_words) >= 0.5:
+                _add_results(cache.get(cached_query))
+                if len(results) >= max_results:
+                    return results[:max_results]
+
     return results[:max_results]
 
 

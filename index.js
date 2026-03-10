@@ -114,7 +114,9 @@ server.listen(PORT, async () => {
   await initGrowthBook();
 
   // Start the reminder scheduler (check every minute)
-  startScheduler(BASE_URL, 60000);
+  // Twilio webhooks must hit Pipecat (voice pipeline), not this Node.js server
+  const pipecatUrl = process.env.PIPECAT_BASE_URL || BASE_URL;
+  startScheduler(pipecatUrl, 60000);
 });
 
 // Graceful shutdown

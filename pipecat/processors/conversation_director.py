@@ -34,6 +34,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameProcessor
 
+import re
+
 from services.director_llm import (
     analyze_turn,
     analyze_turn_speculative,
@@ -41,6 +43,24 @@ from services.director_llm import (
     format_director_guidance,
     get_default_direction,
     warmup_fast_providers,
+)
+
+# Social/conversational questions that do NOT need a web search.
+# Blocklist approach: any "?" triggers a search UNLESS it matches here.
+# Better to search unnecessarily than to miss a real factual question.
+_SOCIAL_Q_PATTERN = re.compile(
+    r"(?:how are you|how have you been|how(?:'s| is) it going|what(?:'s| is) up"
+    r"|how do you feel|how(?:'s| is) your|how(?:'s| is) everything"
+    r"|what do you think|what(?:'s| is) your (?:name|opinion|favorite)"
+    r"|could you say|can you hear|can you tell me about yourself"
+    r"|do you remember|did I tell you|what was I saying|what did I say"
+    r"|are you there|are you listening|you know what I mean"
+    r"|isn't that (?:right|something|nice|funny|great|wonderful|terrible)"
+    r"|right\?$|okay\?$|yeah\?$|huh\?$|really\?$|no\?$"
+    r"|don't you think|wouldn't you say|shall we|should we"
+    r"|can you (?:help|remind|call)|will you (?:remember|call)"
+    r"|what(?:'s| is) (?:wrong|the matter)|why are you)",
+    re.I,
 )
 
 
@@ -176,6 +196,10 @@ class ConversationDirectorProcessor(FrameProcessor):
                 await self._inject_guidance(self._last_result)
                 await self._take_actions(self._last_result)
 
+            # Inject any prefetched memories into Claude's context proactively
+            # (so Claude doesn't need to call search_memories tool)
+            await self._inject_prefetched_memories(frame.text)
+
             # Start regular analysis (only if speculative wasn't used)
             if not speculative_result:
                 if self._pending_analysis and not self._pending_analysis.done():
@@ -187,6 +211,12 @@ class ConversationDirectorProcessor(FrameProcessor):
 
             # Start speculative prefetch (non-blocking)
             asyncio.create_task(self._run_prefetch(frame.text))
+
+            # Question-mark triggered web search: if Deepgram transcribed a
+            # factual question (has ? and matches factual patterns), start
+            # a web search immediately — no need to wait for Director LLM.
+            if "?" in frame.text and not self._session_state.get("_goodbye_in_progress"):
+                self._maybe_start_question_web_search(frame.text)
 
             # Trigger mid-call memory refresh at 5 minutes
             call_start = self._session_state.get("_call_start_time") or time.time()
@@ -212,11 +242,10 @@ class ConversationDirectorProcessor(FrameProcessor):
             # Cancel silence timer (user is still speaking)
             self._cancel_silence_timer()
 
-            # Cancel any running speculative task (new speech invalidates it)
-            if self._speculative_task is not None:
-                if not self._speculative_task.done():
-                    self._speculative_task.cancel()
-                self._speculative_task = None
+            # DON'T cancel running speculative — let it complete (fire-and-forget).
+            # Deepgram sends interim refinements even after the user stops speaking,
+            # which would repeatedly cancel speculative and leave no time window.
+            # Instead, we let the first speculative run and check text overlap at harvest.
 
             # Cancel web search if interim text diverges significantly
             if self._web_search_task is not None and not self._web_search_task.done():
@@ -228,11 +257,19 @@ class ConversationDirectorProcessor(FrameProcessor):
                     self._web_search_query = ""
                     logger.info("[Director] Web search cancelled: interim text diverged")
 
-            # Start new silence timer if text is substantial and Cerebras available
-            if len(text) >= self.SPECULATIVE_MIN_LENGTH and fast_provider_available():
+            # Start silence timer only if no speculative is already running
+            if (
+                len(text) >= self.SPECULATIVE_MIN_LENGTH
+                and fast_provider_available()
+                and (self._speculative_task is None or self._speculative_task.done())
+            ):
                 self._silence_timer_task = asyncio.create_task(
                     self._silence_timer(text)
                 )
+
+            # Question-mark in interim: start web search early
+            if "?" in text and not self._session_state.get("_goodbye_in_progress"):
+                self._maybe_start_question_web_search(text)
 
             # Existing debounced prefetch (unchanged)
             now = time.time()
@@ -296,24 +333,9 @@ class ConversationDirectorProcessor(FrameProcessor):
                 # Fire second-wave prefetch from speculative result
                 asyncio.create_task(self._run_director_prefetch(result))
 
-                # Start web search if Director predicts factual questions
-                web_queries = (result.get("prefetch") or {}).get("web_queries") or []
-                if web_queries:
-                    from lib.growthbook import is_on
-                    if is_on("news_search_enabled", self._session_state):
-                        query = web_queries[0]
-                        if isinstance(query, str) and len(query.strip()) >= 5:
-                            # Cancel any existing web search
-                            if self._web_search_task and not self._web_search_task.done():
-                                self._web_search_task.cancel()
-                            self._web_search_query = query.strip()
-                            self._web_search_task = asyncio.create_task(
-                                self._run_web_search(self._web_search_query)
-                            )
-                            logger.info(
-                                "[Director] Web search started from speculative: {q!r}",
-                                q=self._web_search_query,
-                            )
+                # Web search is NOT triggered from Director analysis.
+                # The question-mark trigger on interim frames fires earlier
+                # than any Director analysis could complete.
             return result
         except asyncio.CancelledError:
             return None
@@ -324,8 +346,9 @@ class ConversationDirectorProcessor(FrameProcessor):
     def _harvest_speculative(self, final_text: str) -> dict | None:
         """Check if speculative analysis completed with a usable result.
 
-        Returns the speculative result if done and text matches final,
-        otherwise returns None and cleans up.
+        Returns the speculative result if done and text overlaps with final
+        (using relaxed Jaccard threshold since speculative may have been
+        started on partial text), otherwise returns None and cleans up.
         """
         if self._speculative_task is None:
             return None
@@ -338,7 +361,10 @@ class ConversationDirectorProcessor(FrameProcessor):
 
             self._speculative_task = None
 
-            if result and self._text_matches(self._latest_interim_text, final_text):
+            # Use relaxed threshold (0.5) — speculative was started on partial
+            # interim text, so exact match is unlikely. What matters is that
+            # the core topic/intent overlaps.
+            if result and self._text_matches(self._latest_interim_text, final_text, threshold=0.5):
                 return result
 
             # Text diverged — discard
@@ -352,11 +378,9 @@ class ConversationDirectorProcessor(FrameProcessor):
                 self._speculative_cancels += 1
             return None
 
-        # Still running — cancel it
-        self._speculative_task.cancel()
-        self._speculative_task = None
+        # Still running — don't cancel, let it complete for next turn
         self._speculative_cancels += 1
-        logger.info("[Director] Speculative incomplete at final transcription")
+        logger.info("[Director] Speculative incomplete at final transcription (still running)")
         return None
 
     @staticmethod
@@ -371,6 +395,44 @@ class ConversationDirectorProcessor(FrameProcessor):
         intersection = len(words_i & words_f)
         union = len(words_i | words_f)
         return (intersection / union) >= threshold
+
+    # ------------------------------------------------------------------
+    # Question-triggered web search
+    # ------------------------------------------------------------------
+
+    def _maybe_start_question_web_search(self, text: str):
+        """Start a web search if text contains a question mark.
+
+        Blocklist approach: any "?" triggers a search UNLESS the text
+        matches known social/conversational patterns. Better to search
+        unnecessarily than to miss a real factual question.
+        """
+        # Skip if web search already in-flight
+        if self._web_search_task is not None and not self._web_search_task.done():
+            return
+
+        # Skip social/rhetorical questions
+        if _SOCIAL_Q_PATTERN.search(text):
+            return
+
+        # Check feature flag
+        from lib.growthbook import is_on
+        if not is_on("news_search_enabled", self._session_state):
+            return
+
+        # Use the full text as the search query
+        query = text.strip()
+        if len(query) < 10:
+            return
+
+        self._web_search_query = query
+        self._web_search_task = asyncio.create_task(
+            self._run_web_search(query)
+        )
+        logger.info(
+            "[Director] Question-triggered web search: {q!r}",
+            q=query[:80],
+        )
 
     # ------------------------------------------------------------------
     # Web search gating
@@ -539,6 +601,54 @@ class ConversationDirectorProcessor(FrameProcessor):
         )
 
     # ------------------------------------------------------------------
+    # Proactive memory injection
+    # ------------------------------------------------------------------
+
+    async def _inject_prefetched_memories(self, user_text: str):
+        """Inject cached prefetch results into Claude's context proactively.
+
+        Checks the prefetch cache for memories relevant to the current user
+        speech and injects them as context — Claude doesn't need to call
+        search_memories for these.
+        """
+        cache = self._session_state.get("_prefetch_cache")
+        if not cache:
+            return
+
+        cached = cache.get(user_text, threshold=0.3)
+        if not cached:
+            return
+
+        # Format memories for injection
+        memory_lines = [r["content"] for r in cached if r.get("content")]
+        if not memory_lines:
+            return
+
+        memory_text = "\n".join(f"- {line}" for line in memory_lines)
+        logger.info(
+            "[Director] Proactive memory injection: {n} memories for {t!r}",
+            n=len(memory_lines), t=user_text[:50],
+        )
+
+        await self.push_frame(
+            LLMMessagesAppendFrame(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            "[MEMORY CONTEXT — do not read this tag aloud]\n"
+                            "You remember from past conversations:\n"
+                            f"{memory_text}\n"
+                            "Weave these naturally if relevant. Say \"I remember you telling me...\" "
+                            "not \"My records show...\". Don't force it if it doesn't fit."
+                        ),
+                    }
+                ],
+                run_llm=False,
+            )
+        )
+
+    # ------------------------------------------------------------------
     # Regular analysis + prefetch (unchanged from original)
     # ------------------------------------------------------------------
 
@@ -555,31 +665,10 @@ class ConversationDirectorProcessor(FrameProcessor):
             # Second-wave prefetch from analysis result
             asyncio.create_task(self._run_director_prefetch(result))
 
-            # Trigger web search from regular analysis if Director identified web queries
-            # (speculative path often fails to complete in time, so this is the fallback)
-            web_queries = (result.get("prefetch") or {}).get("web_queries") or []
-            if web_queries:
-                logger.info(
-                    "[Director] Analysis extracted web_queries={q}",
-                    q=web_queries[:3],
-                )
-                if self._web_search_task is not None:
-                    logger.info("[Director] Web search already in-flight, skipping")
-                else:
-                    from lib.growthbook import is_on
-                    if not is_on("news_search_enabled", self._session_state):
-                        logger.info("[Director] news_search_enabled flag is OFF, skipping web search")
-                    else:
-                        query = web_queries[0]
-                        if isinstance(query, str) and len(query.strip()) >= 5:
-                            self._web_search_query = query.strip()
-                            self._web_search_task = asyncio.create_task(
-                                self._run_and_inject_web_result(self._web_search_query)
-                            )
-                            logger.info(
-                                "[Director] Web search started from regular analysis: {q!r}",
-                                q=self._web_search_query,
-                            )
+            # Web search is NOT triggered here (regular analysis path).
+            # By the time regular analysis completes, the question-mark trigger
+            # (on interims) or speculative analysis (on 250ms silence) already
+            # started the search. This path fires too late to add value.
         except asyncio.CancelledError:
             pass
         except Exception as e:

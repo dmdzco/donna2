@@ -440,6 +440,29 @@ npx playwright install chromium
 | Update admin API client | `apps/admin-v2/src/lib/api.ts` |
 | Add/modify frontend E2E tests | `tests/e2e/` — see [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) |
 
+### Commit Messages & PR Titles
+
+Write commit messages and PR squash titles that are **specific and descriptive** — someone scanning `git log` should understand what changed and why without opening the PR.
+
+**Rules:**
+- Lead with what was actually changed, not vague category labels
+- Include the **why** or **effect**, not just the what
+- PR squash titles are the permanent record — make them count (individual commit messages get squashed away)
+
+**Bad:**
+```
+feat: analysis insights in prompt + memory limit 20
+feat: update memory system
+fix: improve conversation quality
+```
+
+**Good:**
+```
+feat: surface follow-up suggestions & empathy concerns from call analysis in system prompt
+feat: reduce memory context to 20 items (recent turns already cover last 3 calls)
+fix: lower memory similarity threshold 0.7→0.45 (was filtering all results)
+```
+
 ### Documentation Updates
 
 After each commit that adds features or changes architecture, update:

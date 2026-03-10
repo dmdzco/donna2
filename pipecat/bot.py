@@ -43,6 +43,7 @@ from processors.conversation_director import ConversationDirectorProcessor
 from processors.conversation_tracker import ConversationTrackerProcessor
 from processors.guidance_stripper import GuidanceStripperProcessor
 from processors.metrics_logger import MetricsLoggerProcessor
+from processors.emotion_tts import EmotionTTSProcessor
 from processors.quick_observer import QuickObserverProcessor
 from services.post_call import run_post_call
 
@@ -63,7 +64,7 @@ def create_tts_service(session_state: dict):
             voice_id=os.getenv("CARTESIA_VOICE_ID", "f786b574-daa5-4673-aa0c-cbe3e8534c02"),
             model="sonic-3",
             params=CartesiaTTSService.InputParams(
-                generation_config=GenerationConfig(speed=1.0, volume=1.2, emotion="friendly"),
+                generation_config=GenerationConfig(speed=1.0, volume=1.2, emotion="happy"),
             ),
         )
 
@@ -292,6 +293,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     conversation_director = ConversationDirectorProcessor(session_state=session_state)
     conversation_tracker = ConversationTrackerProcessor(session_state=session_state)
     guidance_stripper = GuidanceStripperProcessor()
+    emotion_tts = EmotionTTSProcessor(session_state=session_state, tts=tts)
     metrics_logger = MetricsLoggerProcessor(session_state=session_state)
 
     # Record call start time for Director's phase timing
@@ -322,6 +324,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             pipeline_llm,
             conversation_tracker,
             guidance_stripper,
+            emotion_tts,
             tts,
             transport.output(),
             context_aggregator.assistant(),

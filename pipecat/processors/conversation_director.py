@@ -465,6 +465,11 @@ class ConversationDirectorProcessor(FrameProcessor):
 
     async def _inject_guidance(self, result: dict):
         """Inject Director guidance into Claude's context."""
+        # Persist emotional_tone for EmotionTTSProcessor
+        emotional_tone = (result.get("analysis") or {}).get("emotional_tone")
+        if emotional_tone:
+            self._session_state["_director_emotional_tone"] = emotional_tone
+
         guidance_text = format_director_guidance(result)
         if not guidance_text:
             return

@@ -79,6 +79,33 @@ async def mark_call_ended_without_acknowledgment(delivery_id: str) -> None:
         logger.error("Failed to update delivery status: {err}", err=str(e))
 
 
+async def get_reminder_by_call_sid(call_sid: str) -> dict | None:
+    """Look up an active reminder delivery by Twilio call_sid.
+
+    Used when Pipecat receives an outbound call from the Node.js scheduler.
+    The scheduler writes call_sid to reminder_deliveries, so Pipecat can
+    detect reminder calls without cross-process shared state.
+
+    Returns dict with reminder + delivery info, or None if not a reminder call.
+    """
+    if not call_sid:
+        return None
+
+    row = await query_one(
+        """SELECT rd.id AS delivery_id, rd.reminder_id, rd.scheduled_for,
+                  rd.status AS delivery_status, rd.attempt_count,
+                  r.title, r.description, r.type AS reminder_type
+           FROM reminder_deliveries rd
+           JOIN reminders r ON rd.reminder_id = r.id
+           WHERE rd.call_sid = $1
+           LIMIT 1""",
+        call_sid,
+    )
+    if row:
+        logger.info("Found reminder for call {cs}: {title}", cs=call_sid, title=row.get("title"))
+    return row
+
+
 def format_reminder_prompt(reminder: dict) -> str:
     """Format a reminder for injection into system prompt."""
     lines = ["\n\nIMPORTANT REMINDER TO DELIVER:"]

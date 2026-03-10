@@ -792,6 +792,7 @@ dependencies = [
     { name = "bcrypt" },
     { name = "fastapi" },
     { name = "google-genai" },
+    { name = "growthbook" },
     { name = "httpx" },
     { name = "loguru" },
     { name = "openai" },
@@ -830,6 +831,7 @@ requires-dist = [
     { name = "bcrypt", specifier = ">=4.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "google-genai", specifier = ">=1.0.0" },
+    { name = "growthbook", specifier = ">=1.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "loguru", specifier = ">=0.7.0" },
     { name = "openai", specifier = ">=1.50.0" },
@@ -1335,6 +1337,21 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f3/fd/d05a4b7acd0154ed758797f0a43b4c0962a843bedfe980115e842c5b2d08/greenlet-3.3.2-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:1fb39a11ee2e4d94be9a76671482be9398560955c9e568550de0224e41104727", size = 1618857, upload-time = "2026-02-20T20:49:37.309Z" },
     { url = "https://files.pythonhosted.org/packages/6f/e1/50ee92a5db521de8f35075b5eff060dd43d39ebd46c2181a2042f7070385/greenlet-3.3.2-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:20154044d9085151bc309e7689d6f7ba10027f8f5a8c0676ad398b951913d89e", size = 1680010, upload-time = "2026-02-20T20:21:13.427Z" },
     { url = "https://files.pythonhosted.org/packages/29/4b/45d90626aef8e65336bed690106d1382f7a43665e2249017e9527df8823b/greenlet-3.3.2-cp314-cp314t-win_amd64.whl", hash = "sha256:c04c5e06ec3e022cbfe2cd4a846e1d4e50087444f875ff6d2c2ad8445495cf1a", size = 237086, upload-time = "2026-02-20T20:20:45.786Z" },
+]
+
+[[package]]
+name = "growthbook"
+version = "2.1.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "cryptography" },
+    { name = "typing-extensions" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2a/96/159e983e1c316e2b30a90ded895b976d0d78afed440a6083f9fe52af7f9e/growthbook-2.1.5.tar.gz", hash = "sha256:92542b1f54c22e90cb3ea34da529ff333a8a4e66ccda6dbc6d6da73978ed3a8e", size = 69867, upload-time = "2026-03-06T16:30:44.627Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f3/fa/e63c8abda6668bee6aa374988b3fbbd4f533e57dc813881893443bae7f5b/growthbook-2.1.5-py2.py3-none-any.whl", hash = "sha256:a1d7646a81276c6e9c0fd03483025d8bb270afe12d6b6f4262b6e6a6c8c194bc", size = 45510, upload-time = "2026-03-06T16:30:43.784Z" },
 ]
 
 [[package]]

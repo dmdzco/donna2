@@ -1,14 +1,11 @@
 """LLM tool definitions for Donna's voice pipeline.
 
-Defines four tools available during calls:
+Defines five tools available during calls:
 - search_memories: Semantic search over senior's memory bank
+- web_search: Real-time web search for factual questions
 - mark_reminder_acknowledged: Track reminder delivery status
 - save_important_detail: Store new memories from conversation
 - check_caregiver_notes: Check family messages for the senior
-
-Web search is handled by the Conversation Director (not Claude).
-The Director runs web searches during speculative analysis and injects
-results directly into Claude's context via [WEB RESULT] messages.
 
 Uses closure pattern over session_state to give tool handlers access
 to senior context without Pipecat's non-existent set_function_call_context().
@@ -17,6 +14,7 @@ to senior context without Pipecat's non-existent set_function_call_context().
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 
 from loguru import logger
 from pipecat_flows import FlowsFunctionSchema
@@ -37,6 +35,33 @@ SEARCH_MEMORIES_SCHEMA = {
     },
     "required": ["query"],
 }
+
+
+def _web_search_schema() -> dict:
+    today = date.today().strftime("%B %d, %Y")
+    return {
+        "name": "web_search",
+        "description": (
+            f"Search the web for current information. Today is {today}. "
+            "Use this whenever the senior asks about news, weather, sports, facts, "
+            "or anything you're unsure about. Always include the current year in "
+            "queries about recent events, scores, or elections. "
+            "IMPORTANT: Before calling this tool, always say a brief natural filler "
+            "like 'Let me look that up for you', 'One moment while I check on that', "
+            "or 'Hmm, let me find out'. This gives the senior something to hear while "
+            "the search runs. Vary the phrasing each time."
+        ),
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": f"What to search for (include {date.today().year} for recent events)",
+            },
+        },
+        "required": ["query"],
+    }
+
+
+WEB_SEARCH_SCHEMA = _web_search_schema()
 
 MARK_REMINDER_SCHEMA = {
     "name": "mark_reminder_acknowledged",
@@ -152,6 +177,39 @@ def make_tool_handlers(session_state: dict) -> dict:
             logger.error("search_memories error: {err}", err=str(e))
             return {"status": "success", "result": "Memory search is temporarily unavailable. Continue the conversation naturally — don't mention any technical issues."}
 
+    async def handle_web_search(args: dict) -> dict:
+        import time as _time
+        from lib.growthbook import is_on
+        if not is_on("news_search_enabled", session_state):
+            logger.info("Tool: web_search BLOCKED by news_search_enabled flag")
+            return {"status": "success", "result": "Search unavailable. Continue naturally."}
+
+        query = args.get("query", "")
+        logger.info("Tool: web_search CALLED query={q}", q=query)
+
+        if not query:
+            return {"status": "success", "result": "No query provided."}
+
+        start = _time.time()
+        try:
+            from services.news import web_search_query
+            result = await asyncio.wait_for(web_search_query(query), timeout=15.0)
+            elapsed_ms = round((_time.time() - start) * 1000)
+            if not result:
+                logger.info("Tool: web_search empty result ({ms}ms) query={q}", ms=elapsed_ms, q=query)
+                return {"status": "success", "result": f"I couldn't find information about {query}."}
+            logger.info("Tool: web_search SUCCESS ({ms}ms, {n} chars) query={q}", ms=elapsed_ms, n=len(result), q=query)
+            return {"status": "success", "result": f"[NEWS] {result}"}
+        except asyncio.TimeoutError:
+            elapsed_ms = round((_time.time() - start) * 1000)
+            logger.warning("Tool: web_search TIMEOUT ({ms}ms) query={q}", ms=elapsed_ms, q=query)
+            return {"status": "success", "result": "Search took too long. Continue naturally."}
+        except Exception as e:
+            import traceback
+            elapsed_ms = round((_time.time() - start) * 1000)
+            logger.error("Tool: web_search ERROR ({ms}ms) query={q}: {err}\n{tb}", ms=elapsed_ms, q=query, err=str(e), tb=traceback.format_exc())
+            return {"status": "success", "result": "Search unavailable. Continue naturally."}
+
     async def handle_mark_reminder(args: dict) -> dict:
         reminder_id = args.get("reminder_id", "")
         status = args.get("status", "acknowledged")
@@ -223,6 +281,7 @@ def make_tool_handlers(session_state: dict) -> dict:
 
     handlers = {
         "search_memories": handle_search_memories,
+        "web_search": handle_web_search,
         "mark_reminder_acknowledged": handle_mark_reminder,
         "save_important_detail": handle_save_detail,
         "check_caregiver_notes": handle_check_caregiver_notes,
@@ -249,7 +308,7 @@ def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
     handlers = make_tool_handlers(session_state)
 
     schemas = {}
-    for schema_def in [SEARCH_MEMORIES_SCHEMA, MARK_REMINDER_SCHEMA, SAVE_DETAIL_SCHEMA, CHECK_CAREGIVER_NOTES_SCHEMA]:
+    for schema_def in [SEARCH_MEMORIES_SCHEMA, WEB_SEARCH_SCHEMA, MARK_REMINDER_SCHEMA, SAVE_DETAIL_SCHEMA, CHECK_CAREGIVER_NOTES_SCHEMA]:
         name = schema_def["name"]
         schemas[name] = FlowsFunctionSchema(
             name=name,

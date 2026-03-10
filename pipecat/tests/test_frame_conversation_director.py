@@ -203,19 +203,26 @@ class TestDirectorSpeculativeAnalysis:
         assert processor._speculative_cancels == 1
 
     @pytest.mark.asyncio
-    async def test_harvest_speculative_cancels_running_task(self, session_state):
-        """harvest_speculative cancels task that hasn't finished yet."""
+    async def test_harvest_speculative_leaves_running_task(self, session_state):
+        """harvest_speculative does NOT cancel a still-running task (fire-and-forget)."""
         processor = ConversationDirectorProcessor(session_state=session_state)
 
         long_task = asyncio.create_task(asyncio.sleep(10))
         processor._speculative_task = long_task
 
         result = processor._harvest_speculative("Hello there")
-        await asyncio.sleep(0)  # Let event loop process cancellation
+        await asyncio.sleep(0)
 
         assert result is None
-        assert long_task.cancelled()
+        # Task should still be running — NOT cancelled (fire-and-forget)
+        assert not long_task.cancelled()
         assert processor._speculative_cancels == 1
+        # Clean up
+        long_task.cancel()
+        try:
+            await long_task
+        except asyncio.CancelledError:
+            pass
 
     def test_no_speculative_without_cerebras(self, session_state):
         """No silence timer starts when Cerebras is not configured.

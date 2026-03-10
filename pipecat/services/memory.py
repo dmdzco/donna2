@@ -282,57 +282,43 @@ async def build_context(
     senior: dict | None = None,
     is_first_turn: bool = True,
 ) -> str:
-    """Build tiered context string for conversation.
+    """Build context string for conversation from ALL memories.
 
-    Tier 1 (Critical): always included
-    Tier 2 (Contextual): when topic provided
-    Tier 3 (Background): first turn only
+    Claude has 200K context — no need to be stingy. Load everything
+    the senior has so the conversation feels personal from turn 1.
     """
+    from db import query_many
+
     parts: list[str] = []
-    included_ids: set[str] = set()
 
-    # Tier 1: Critical
-    critical = await get_critical(senior_id, 3)
-    logger.info("build_context({sid}): tier1_critical={n}", sid=str(senior_id)[:8], n=len(critical))
-    if critical:
-        parts.append("Critical to know:")
-        for m in critical:
-            parts.append(f"- {m['content']}")
-            included_ids.add(m["id"])
+    # Load all memories for this senior (ordered by importance, then recency)
+    all_memories = await query_many(
+        """SELECT id, type, content, importance, metadata, created_at
+           FROM memories
+           WHERE senior_id = $1
+           ORDER BY importance DESC, created_at DESC
+           LIMIT 50""",
+        senior_id,
+    )
 
-    # Tier 2: Contextual
-    logger.info("build_context({sid}): tier2 topic={t}", sid=str(senior_id)[:8], t=current_topic or "none")
-    if current_topic:
-        relevant = await search(senior_id, current_topic, 3, 0.45)
-        new_relevant = [m for m in relevant if m["id"] not in included_ids]
-        if new_relevant:
-            parts.append("\nRelevant:")
-            for m in new_relevant:
-                parts.append(f"- {m['content']}")
-                included_ids.add(m["id"])
+    logger.info(
+        "build_context({sid}): loaded {n} memories",
+        sid=str(senior_id)[:8], n=len(all_memories),
+    )
 
-    # Tier 3: Background (first turn only)
-    logger.info("build_context({sid}): tier3 is_first_turn={ft}", sid=str(senior_id)[:8], ft=is_first_turn)
-    if is_first_turn:
-        background = []
-        important = await get_important(senior_id, 5)
-        for m in important:
-            if m["id"] not in included_ids:
-                background.append(m)
-                included_ids.add(m["id"])
+    if not all_memories:
+        return ""
 
-        recent = await get_recent(senior_id, 5)
-        for m in recent:
-            if m["id"] not in included_ids:
-                background.append(m)
-
-        if background:
-            groups = group_by_type(background)
-            formatted = format_grouped_memories(groups)
-            parts.append(f"\nBackground:\n{formatted}")
+    # Group by type for readable presentation
+    groups = group_by_type(all_memories)
+    formatted = format_grouped_memories(groups)
+    parts.append(f"What you know about them:\n{formatted}")
 
     result = "\n".join(parts)
-    logger.info("build_context({sid}): total={n} chars, {m} memories included", sid=str(senior_id)[:8], n=len(result), m=len(included_ids))
+    logger.info(
+        "build_context({sid}): total={n} chars, {m} memories",
+        sid=str(senior_id)[:8], n=len(result), m=len(all_memories),
+    )
     return result
 
 

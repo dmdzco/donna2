@@ -23,8 +23,6 @@ import { initGrowthBook, closeGrowthBook } from './lib/growthbook.js';
 
 // Security middleware
 import { securityHeaders, requestId } from './middleware/security.js';
-import { webhookLimiter } from './middleware/rate-limit.js';
-import { validateTwilioWebhook } from './middleware/twilio.js';
 import { requireApiKey } from './middleware/api-auth.js';
 import { errorHandler } from './middleware/error-handler.js';
 
@@ -59,19 +57,17 @@ app.use(express.json({ limit: '1mb' }));
 // Security: API key auth + rate limiting for /api/* routes
 app.use('/api', requireApiKey, apiLimiter);
 
-// Security: Twilio webhook validation + rate limiting for /voice/* routes
-app.use('/voice', webhookLimiter, validateTwilioWebhook);
-
 // Clerk authentication middleware (initializes auth state)
 app.use(clerkMiddleware());
 
 const PORT = process.env.PORT || 3001;
-const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN
-  ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-  : `http://localhost:${PORT}`;
-const WS_URL = process.env.RAILWAY_PUBLIC_DOMAIN
-  ? `wss://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-  : `ws://localhost:${PORT}`;
+
+// Pipecat handles all voice calls — webhook URLs must point there
+const PIPECAT_BASE_URL = process.env.PIPECAT_BASE_URL || (
+  process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : `http://localhost:7860`
+);
 
 // Initialize Twilio client for outbound calls
 const twilioClient = twilio(
@@ -79,16 +75,9 @@ const twilioClient = twilio(
   process.env.TWILIO_AUTH_TOKEN
 );
 
-// Store active sessions and call metadata (shared across routes and websockets)
-const sessions = new Map();
-const callMetadata = new Map();
-
 // Make shared state available to route handlers via app.get()
-app.set('sessions', sessions);
-app.set('callMetadata', callMetadata);
 app.set('twilioClient', twilioClient);
-app.set('baseUrl', BASE_URL);
-app.set('wsUrl', WS_URL);
+app.set('baseUrl', PIPECAT_BASE_URL);
 
 // Mount all routes
 mountRoutes(app);
@@ -106,17 +95,15 @@ const server = createServer(app);
 
 server.listen(PORT, async () => {
   console.log(`Donna v4.0 listening on port ${PORT}`);
-  console.log(`Voice webhook: ${BASE_URL}/voice/answer`);
-  console.log(`Pipeline: Pipecat voice + 2-layer observer + Gemini Director`);
+  console.log(`Pipecat webhook: ${PIPECAT_BASE_URL}/voice/answer`);
   console.log(`Features: Admin APIs, Reminder scheduler, Call initiation`);
 
   // Initialize GrowthBook feature flags
   await initGrowthBook();
 
   // Start the reminder scheduler (check every minute)
-  // Twilio webhooks must hit Pipecat (voice pipeline), not this Node.js server
-  const pipecatUrl = process.env.PIPECAT_BASE_URL || BASE_URL;
-  startScheduler(pipecatUrl, 60000);
+  // Passes Pipecat URL so outbound calls point to the voice pipeline
+  startScheduler(PIPECAT_BASE_URL, 60000);
 });
 
 // Graceful shutdown

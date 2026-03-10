@@ -4,7 +4,6 @@ import pytest
 
 from flows.tools import (
     SEARCH_MEMORIES_SCHEMA,
-    WEB_SEARCH_SCHEMA,
     MARK_REMINDER_SCHEMA,
     SAVE_DETAIL_SCHEMA,
     make_tool_handlers,
@@ -17,14 +16,6 @@ class TestToolSchemas:
         assert SEARCH_MEMORIES_SCHEMA["name"] == "search_memories"
         assert "query" in SEARCH_MEMORIES_SCHEMA["properties"]
         assert "query" in SEARCH_MEMORIES_SCHEMA["required"]
-
-    def test_web_search_schema_valid(self):
-        assert WEB_SEARCH_SCHEMA["name"] == "web_search"
-        assert "query" in WEB_SEARCH_SCHEMA["properties"]
-        assert "query" in WEB_SEARCH_SCHEMA["required"]
-
-    def test_web_search_description_mentions_current_info(self):
-        assert "current information" in WEB_SEARCH_SCHEMA["description"].lower()
 
     def test_mark_reminder_schema_valid(self):
         assert MARK_REMINDER_SCHEMA["name"] == "mark_reminder_acknowledged"
@@ -43,9 +34,9 @@ class TestToolHandlerFactory:
         session_state = {"senior_id": "test-123", "senior": {"name": "Test"}}
         handlers = make_tool_handlers(session_state)
         assert "search_memories" in handlers
-        assert "web_search" in handlers
         assert "mark_reminder_acknowledged" in handlers
         assert "save_important_detail" in handlers
+        assert "check_caregiver_notes" in handlers
 
     def test_handlers_are_async_callables(self):
         session_state = {"senior_id": "test-123"}
@@ -176,7 +167,6 @@ class TestFlowsTools:
         assert len(tools) == 5
         assert "search_memories" in tools
         assert "web_search" in tools
-        assert "get_news" not in tools
         assert "mark_reminder_acknowledged" in tools
         assert "save_important_detail" in tools
         assert "check_caregiver_notes" in tools

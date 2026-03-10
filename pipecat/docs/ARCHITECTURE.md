@@ -63,11 +63,12 @@ Twilio Audio ──► FastAPIWebsocketTransport
               │    Director signals  │     │  Also handles:            │
               │ 3. Passes frame      │     │  • Predictive prefetch    │
               │    immediately       │     │    (2 waves + interim)    │
-              │ 4. Fires background  │     │  • Web search prefetch    │
-              │    analysis ────────►│     │  • Mid-call memory refresh│
-              │                      │     │    (after 5+ min)         │
-              │                      │     │  • Force winding-down 9min│
-              │                      │     │  • Force call end 12min   │
+              │ 4. Fires background  │     │  • Director-owned web     │
+              │    analysis ────────►│     │    search (filler + gate) │
+              │ 5. Web search gate:  │     │  • Mid-call memory refresh│
+              │    holds frame if    │     │    (after 5+ min)         │
+              │    search in-flight, │     │  • Force winding-down 9min│
+              │    pushes filler TTS │     │                           │
               └─────────┬───────────┘     └──────────────────────────┘
                         │ (no delay)
                         ▼
@@ -78,8 +79,8 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         │
                         ▼
               ┌─────────────────────┐
-              │   Anthropic LLM      │  Claude Sonnet 4.6 (streaming)
-              │   + Flow Manager     │  5 tools, 3-phase state machine
+              │   Anthropic LLM      │  Claude Sonnet 4.5 (streaming)
+              │   + Flow Manager     │  4 tools, 3-phase state machine
               └─────────┬───────────┘
                         │ TextFrame
                         ▼
@@ -123,7 +124,6 @@ The pipeline processors don't call each other directly. They communicate through
    - `_call_start_time` — Set in bot.py, read by Director for time-based fallbacks
    - `_conversation_tracker` — Reference to the ConversationTracker processor, read by Flow nodes to build tracking summaries
    - `_prefetch_cache` — `PrefetchCache` instance, written by Director prefetch, read by `search_memories` tool handler
-   - `_web_prefetch_cache` — `WebPrefetchCache` instance, written by Director web prefetch, read by `web_search` tool handler
    - `_news_injected` — Boolean flag, set by Director after injecting news context (one-shot per call)
    - `news_context` — Pre-fetched news string, read by Director for dynamic injection when `should_mention_news` is true
    - `_last_quick_analysis` — `AnalysisResult` from Quick Observer, read by prefetch engine for family/health/activity signals
@@ -224,7 +224,7 @@ The Director classifies calls into 5 analytical phases (including "rapport" betw
   "prefetch": {
     "memory_queries": ["keyword1", "keyword2"],
     "web_queries": ["Austin Texas weather March 2026"],
-    "anticipated_tools": ["search_memories", "web_search"]
+    "anticipated_tools": ["search_memories", "save_important_detail"]
   }
 }
 ```
@@ -283,21 +283,37 @@ User speaking...
 
 #### Cache-First Tool Handlers
 
-Both `search_memories` and `web_search` in `flows/tools.py` check prefetch caches before making live calls:
+The `search_memories` tool in `flows/tools.py` checks the prefetch cache before making live calls:
 
 ```
 Claude calls search_memories("gardening")
   → _prefetch_cache.get("gardening")  (Jaccard fuzzy match, threshold=0.3)
   → HIT: return cached results (~0ms)
   → MISS: fall through to live memory.search() (200-300ms)
-
-Claude calls web_search("Austin Texas weather")
-  → _web_prefetch_cache.get("Austin Texas weather")  (Jaccard match, threshold=0.4)
-  → HIT: return cached results (~0ms)
-  → MISS: fall through to live web_search_query() (4-10s)
 ```
 
-The Director's location/date context makes web prefetch particularly effective — it predicts queries with the same specificity Claude uses (e.g., `"Austin Texas weather March 2026"`), yielding high Jaccard overlap.
+#### Director-Owned Web Search (Gating)
+
+Web search is handled entirely by the Conversation Director, not Claude. The Director runs web searches during speculative analysis and gates the TranscriptionFrame until results are ready:
+
+```
+User speaks → 250ms silence → Groq speculative starts
+                               ↓ (~500-800ms)
+                          Groq returns with web_queries
+                          → web search starts immediately
+                               ↓
+VAD fires (1.2s) → TranscriptionFrame arrives at Director
+                               ↓
+Director checks: web search in-flight?
+  YES → push TTSSpeakFrame("Let me check on that for you.")
+        hold TranscriptionFrame
+        await web search (max 10s)
+        inject [WEB RESULT] into context
+        release TranscriptionFrame → Claude responds with data
+  NO  → push TranscriptionFrame normally
+```
+
+The Director's location/date context enables specific queries like `"Austin Texas weather March 2026"` instead of generic `"weather tomorrow"`.
 
 #### Director Guidance Hints
 
@@ -354,9 +370,11 @@ The opening phase is merged into main — the bot starts directly in main (or re
 | Phase | Tools |
 |-------|-------|
 | **Reminder** *(conditional)* | `mark_reminder_acknowledged`, `save_important_detail`, `transition_to_main` |
-| **Main** | `search_memories`, `web_search`, `save_important_detail`, `mark_reminder_acknowledged`, `check_caregiver_notes`, `transition_to_winding_down` |
-| **Winding Down** | `mark_reminder_acknowledged`, `save_important_detail`, `web_search`, `check_caregiver_notes`, `transition_to_closing` |
+| **Main** | `search_memories`, `save_important_detail`, `mark_reminder_acknowledged`, `check_caregiver_notes`, `transition_to_winding_down` |
+| **Winding Down** | `mark_reminder_acknowledged`, `save_important_detail`, `check_caregiver_notes`, `transition_to_closing` |
 | **Closing** | *(none — post_action ends call)* |
+
+*Note: Web search is handled by the Conversation Director, not Claude. The Director runs web searches during speculative analysis and injects results as `[WEB RESULT]` messages into Claude's context.*
 
 ### Context Strategies Per Phase
 
@@ -373,7 +391,6 @@ The opening phase is merged into main — the bot starts directly in main (or re
 | Tool | Purpose |
 |------|---------|
 | `search_memories` | Semantic search of senior's memory bank (pgvector + HNSW) |
-| `web_search` | Web search for current events via OpenAI (cache-first: prefetch → live fallback via `asyncio.to_thread`) |
 | `save_important_detail` | Store new memories (health, family, preference, life_event, emotional, activity) |
 | `mark_reminder_acknowledged` | Track reminder delivery with acknowledgment status |
 | `check_caregiver_notes` | Retrieve and deliver pending notes from caregivers |
@@ -418,7 +435,7 @@ pipecat/
 │
 ├── flows/
 │   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts
-│   └── tools.py                     ← LLM tool schemas + async handlers (5 tools)
+│   └── tools.py                     ← LLM tool schemas + async handlers (4 tools)
 │
 ├── processors/
 │   ├── patterns.py                  ← 268 regex patterns, 19 categories (data only)
@@ -532,7 +549,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
-| **Voice LLM** | Claude Sonnet 4.6 (`claude-sonnet-4-6`) | AnthropicLLMService (prompt caching enabled) |
+| **Voice LLM** | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Groq (`gpt-oss-20b`) / Cerebras (`gpt-oss-120b`) | ~70ms primary, random selection |
 | **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | ~150ms when Groq/Cerebras unavailable |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |

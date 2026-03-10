@@ -1,7 +1,7 @@
 """Conversation Director — Layer 2 LLM analysis.
 
-Primary: Cerebras (~3000 tok/s, OpenAI-compatible) for ultra-fast analysis.
-Fallback: Gemini Flash (~150ms) when Cerebras is unavailable.
+Primary: Groq (OpenAI-compatible) for ultra-fast analysis.
+Fallback: Gemini Flash when Groq is unavailable.
 
 Results are cached and injected into the LLM context by
 ConversationDirectorProcessor. Speculative analysis during silence gaps
@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import random
 import re
 import time
 from datetime import date
@@ -31,17 +30,11 @@ from lib.circuit_breaker import CircuitBreaker
 _gemini_breaker = CircuitBreaker(
     "gemini_director", failure_threshold=3, recovery_timeout=60.0, call_timeout=10.0
 )
-_cerebras_breaker = CircuitBreaker(
-    "cerebras_director", failure_threshold=3, recovery_timeout=60.0, call_timeout=5.0
-)
-_cerebras_speculative_breaker = CircuitBreaker(
-    "cerebras_speculative", failure_threshold=2, recovery_timeout=30.0, call_timeout=3.0
-)
 _groq_breaker = CircuitBreaker(
-    "groq_director", failure_threshold=3, recovery_timeout=60.0, call_timeout=5.0
+    "groq_director", failure_threshold=5, recovery_timeout=60.0, call_timeout=8.0
 )
 _groq_speculative_breaker = CircuitBreaker(
-    "groq_speculative", failure_threshold=2, recovery_timeout=30.0, call_timeout=3.0
+    "groq_speculative", failure_threshold=3, recovery_timeout=30.0, call_timeout=5.0
 )
 
 # ---------------------------------------------------------------------------
@@ -49,13 +42,10 @@ _groq_speculative_breaker = CircuitBreaker(
 # ---------------------------------------------------------------------------
 
 _genai_client = None
-_cerebras_client = None
 _groq_client = None
 
 DIRECTOR_MODEL = os.environ.get("FAST_OBSERVER_MODEL", "gemini-3-flash-preview")
-CEREBRAS_MODEL = os.environ.get("CEREBRAS_DIRECTOR_MODEL", "gpt-oss-120b")
 GROQ_MODEL = os.environ.get("GROQ_DIRECTOR_MODEL", "openai/gpt-oss-20b")
-CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 
@@ -72,18 +62,6 @@ def _get_gemini_client():
     return _genai_client
 
 
-def _get_cerebras_client():
-    global _cerebras_client
-    if _cerebras_client is None:
-        api_key = os.environ.get("CEREBRAS_API_KEY")
-        if not api_key:
-            return None
-        from openai import AsyncOpenAI
-
-        _cerebras_client = AsyncOpenAI(api_key=api_key, base_url=CEREBRAS_BASE_URL)
-    return _cerebras_client
-
-
 def _get_groq_client():
     global _groq_client
     if _groq_client is None:
@@ -96,11 +74,6 @@ def _get_groq_client():
     return _groq_client
 
 
-def cerebras_available() -> bool:
-    """Check if Cerebras is configured (has API key)."""
-    return bool(os.environ.get("CEREBRAS_API_KEY"))
-
-
 def groq_available() -> bool:
     """Check if Groq is configured (has API key)."""
     return bool(os.environ.get("GROQ_API_KEY"))
@@ -108,19 +81,7 @@ def groq_available() -> bool:
 
 def fast_provider_available() -> bool:
     """Check if any fast inference provider is configured."""
-    return cerebras_available() or groq_available()
-
-
-def _pick_fast_provider() -> str | None:
-    """Randomly pick between available fast providers for A/B testing."""
-    available = []
-    if cerebras_available():
-        available.append("cerebras")
-    if groq_available():
-        available.append("groq")
-    if not available:
-        return None
-    return random.choice(available)
+    return groq_available()
 
 
 # ---------------------------------------------------------------------------
@@ -170,9 +131,10 @@ Phases: opening(0-30s) → main(30s-8min) → winding_down(8-9min) → closing(9
 Reminders: natural pauses + high engagement only. Never during emotions/low engagement. Never repeat delivered.
 Low engagement: suggest personal questions or memories. News: medium+ engagement, topic winding down.
 Onboarding calls (call_type="onboarding"): no reminders, no re-engage signals, focus on discovery.
-memory_queries: 1-3 keywords from current message (names, places, topics). Extract what they're TALKING ABOUT.
-web_queries: Full Google query for factual questions. Include city/state and date. Example: "Austin Texas weather March 10 2026". Empty array if none.
-anticipated_tools: from [search_memories, web_search, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes].
+PREFETCH — help Donna respond faster by extracting topics for memory search:
+memory_queries: CRITICAL — ALWAYS extract 1-3 keyword phrases from the senior's current message. Extract names, places, topics, activities, hobbies, people they mention. Extract what they're TALKING ABOUT, not generic categories. Examples: "paddle" not "sports", "grandson Jake" not "family", "Torchy's Tacos" not "food". NEVER return empty — if the senior said anything substantive, extract at least one query.
+web_queries: CRITICAL — you are the ONLY way web searches happen. Extract full Google-style queries for ANY factual question. Include city/state and current date for location/time-sensitive queries. Example: "Austin Texas weather March 10 2026". Empty array if no factual question. Be aggressive — if there's any chance the user wants current info, include a query.
+anticipated_tools: from [search_memories, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes]. ALWAYS include search_memories when memory_queries is non-empty.
 
 JSON:{"analysis":{"call_phase":"str","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"str","priority_action":"str","specific_instruction":"str"},"prefetch":{"memory_queries":[],"web_queries":[],"anticipated_tools":[]}}"""
 
@@ -358,11 +320,6 @@ def format_director_guidance(direction: dict) -> str | None:
     if prefetch_hints:
         parts.append(f"CONTEXT AVAILABLE: Memories about {', '.join(prefetch_hints[:2])}")
 
-    # Web prefetch hints — let Claude know web results are ready (skip filler speech)
-    web_prefetch_hints = direction.get("_web_prefetch_hints")
-    if web_prefetch_hints:
-        parts.append(f"WEB CONTEXT READY: {', '.join(web_prefetch_hints[:1])}")
-
     return " | ".join(parts) if parts else None
 
 
@@ -401,13 +358,6 @@ async def _groq_analyze(turn_content: str, breaker: CircuitBreaker) -> dict | No
     """Run analysis via Groq. Returns parsed dict or None."""
     return await _openai_compatible_analyze(
         _get_groq_client(), GROQ_MODEL, turn_content, breaker
-    )
-
-
-async def _cerebras_analyze(turn_content: str, breaker: CircuitBreaker) -> dict | None:
-    """Run analysis via Cerebras. Returns parsed dict or None."""
-    return await _openai_compatible_analyze(
-        _get_cerebras_client(), CEREBRAS_MODEL, turn_content, breaker
     )
 
 
@@ -452,7 +402,7 @@ async def analyze_turn(
     session_state: dict,
     conversation_history: list[dict] | None = None,
 ) -> dict:
-    """Run Director analysis. Cerebras primary, Gemini fallback.
+    """Run Director analysis. Groq primary, Gemini fallback.
 
     Non-blocking caller should ``await`` this in a background task.
     Returns structured direction dict, or default on failure.
@@ -460,7 +410,7 @@ async def analyze_turn(
     start = time.time()
     turn_content = _build_turn_content(user_message, session_state, conversation_history)
 
-    # Try Groq first (primary), then Cerebras, then Gemini
+    # Groq primary, Gemini fallback
     direction = None
     source = "gemini"
 
@@ -471,14 +421,6 @@ async def analyze_turn(
                 source = "groq"
         except Exception as e:
             logger.warning("[Director] Groq failed: {err}", err=str(e))
-
-    if direction is None and cerebras_available():
-        try:
-            direction = await _cerebras_analyze(turn_content, _cerebras_breaker)
-            if direction:
-                source = "cerebras"
-        except Exception as e:
-            logger.warning("[Director] Cerebras failed: {err}", err=str(e))
 
     # Gemini fallback
     if direction is None:
@@ -533,7 +475,6 @@ async def analyze_turn_speculative(
     direction = None
     source = None
 
-    # Try Groq first for speculative (lower TTFT)
     if groq_available():
         try:
             direction = await _groq_analyze(turn_content, _groq_speculative_breaker)
@@ -541,15 +482,6 @@ async def analyze_turn_speculative(
                 source = "groq"
         except Exception as e:
             logger.debug("[Director] Speculative Groq failed: {err}", err=str(e))
-
-    # Cerebras fallback for speculative
-    if direction is None and cerebras_available():
-        try:
-            direction = await _cerebras_analyze(turn_content, _cerebras_speculative_breaker)
-            if direction:
-                source = "cerebras"
-        except Exception as e:
-            logger.debug("[Director] Speculative Cerebras failed: {err}", err=str(e))
 
     if direction is None:
         return None
@@ -598,8 +530,6 @@ async def warmup_fast_providers() -> None:
     tasks = []
     if groq_available():
         tasks.append(_warmup_one("Groq", _get_groq_client(), GROQ_MODEL))
-    if cerebras_available():
-        tasks.append(_warmup_one("Cerebras", _get_cerebras_client(), CEREBRAS_MODEL))
 
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)

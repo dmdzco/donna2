@@ -150,7 +150,7 @@ async def store(
 
 
 async def search(
-    senior_id: str | None, query: str, limit: int = 5, min_similarity: float = 0.7,
+    senior_id: str | None, query: str, limit: int = 5, min_similarity: float = 0.45,
     prospect_id: str | None = None,
 ) -> list[dict]:
     """Semantic search — find memories similar to *query*.
@@ -303,7 +303,7 @@ async def build_context(
     # Tier 2: Contextual
     logger.info("build_context({sid}): tier2 topic={t}", sid=str(senior_id)[:8], t=current_topic or "none")
     if current_topic:
-        relevant = await search(senior_id, current_topic, 3, 0.7)
+        relevant = await search(senior_id, current_topic, 3, 0.45)
         new_relevant = [m for m in relevant if m["id"] not in included_ids]
         if new_relevant:
             parts.append("\nRelevant:")
@@ -346,7 +346,7 @@ async def refresh_context(senior_id: str, current_topics: list[str]) -> str | No
 
     # Topic-relevant memories first
     for topic in current_topics[:3]:
-        relevant = await search(senior_id, topic, 3, 0.7)
+        relevant = await search(senior_id, topic, 3, 0.45)
         for m in relevant:
             if m["id"] not in included_ids:
                 parts.append(f"- {m['content']}")
@@ -399,12 +399,23 @@ async def extract_from_conversation(
         return
 
     prompt = (
-        "Analyze this conversation and extract important facts, preferences, "
-        "events, or concerns about the person. Return a JSON array of memories.\n\n"
+        "Analyze this conversation between Donna (AI companion) and an elderly person. "
+        "Extract important memories that will help personalize future calls.\n\n"
         f"Conversation:\n{transcript}\n\n"
-        'Return format:\n[\n  {"type": "fact|preference|event|concern|relationship", '
-        '"content": "...", "importance": 50-100}\n]\n\n'
-        "Only include genuinely important or memorable information. Be concise."
+        'Return format:\n{{"memories": [\n  {{"type": "fact|preference|event|concern|relationship", '
+        '"content": "...", "importance": 50-100}}\n]}}\n\n'
+        "CRITICAL — write RICH, DETAILED content strings that will match semantic search:\n"
+        "- BAD: \"User may enjoy playing padel\" (too vague, won't match searches)\n"
+        "- GOOD: \"Enjoys playing padel (paddle tennis) regularly as a sport and hobby\"\n"
+        "- BAD: \"User is working on a project\" (useless)\n"
+        "- GOOD: \"Building an AI companion called Donna that makes phone calls to elderly people\"\n\n"
+        "Each memory should:\n"
+        "- Include specific names, places, activities, and context\n"
+        "- Use synonyms and related terms (helps semantic matching)\n"
+        "- Be a complete sentence that stands alone without conversation context\n"
+        "- Reference the person naturally (e.g., \"Has a grandson named Jake who plays baseball\")\n\n"
+        "Extract 5-15 memories per conversation. Include both big life facts and "
+        "small personal details that show you were really listening."
     )
 
     try:

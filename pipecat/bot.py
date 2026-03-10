@@ -29,6 +29,7 @@ from pipecat.runner.utils import parse_telephony_websocket
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketTransport,
@@ -44,6 +45,35 @@ from processors.guidance_stripper import GuidanceStripperProcessor
 from processors.metrics_logger import MetricsLoggerProcessor
 from processors.quick_observer import QuickObserverProcessor
 from services.post_call import run_post_call
+
+
+def create_tts_service(session_state: dict):
+    """Select TTS provider based on feature flag.
+
+    Uses session_state["_flags"]["tts_provider"] to pick Cartesia or ElevenLabs.
+    Falls back to ElevenLabs if Cartesia key is missing or flag is unset.
+    """
+    flags = session_state.get("_flags", {})
+    provider = flags.get("tts_provider", "cartesia")
+
+    if provider == "cartesia" and os.getenv("CARTESIA_API_KEY"):
+        logger.info("TTS provider: Cartesia Sonic 3")
+        return CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY", ""),
+            voice_id=os.getenv("CARTESIA_VOICE_ID", "f786b574-daa5-4673-aa0c-cbe3e8534c02"),
+            model="sonic-3",
+            params=CartesiaTTSService.InputParams(
+                generation_config=GenerationConfig(speed=1.0, volume=1.2, emotion="friendly"),
+            ),
+        )
+
+    logger.info("TTS provider: ElevenLabs")
+    return ElevenLabsTTSService(
+        api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+        voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
+        model="eleven_turbo_v2_5",
+        params=ElevenLabsTTSService.InputParams(speed=0.9),
+    )
 
 
 async def _safe_post_call(session_state: dict, conversation_tracker, elapsed: int, call_sid: str):
@@ -228,7 +258,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         # Real LLM needed for create_context_aggregator(); mock replaces it in pipeline
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY", "fake-key-load-test"),
-            model="claude-sonnet-4-6",
+            model="claude-sonnet-4-5-20250929",
         )
     else:
         stt = DeepgramSTTService(
@@ -247,18 +277,13 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
 
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-            model="claude-sonnet-4-6",
+            model="claude-sonnet-4-5-20250929",
             params=AnthropicLLMService.InputParams(
                 enable_prompt_caching=True,
             ),
         )
 
-        tts = ElevenLabsTTSService(
-            api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
-            model="eleven_turbo_v2_5",
-            params=ElevenLabsTTSService.InputParams(speed=0.9),
-        )
+        tts = create_tts_service(session_state)
 
     # -------------------------------------------------------------------------
     # Custom processors
@@ -347,6 +372,9 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     @transport.event_handler("on_client_connected")
     async def on_connected(transport_ref, websocket_ref):
         logger.info("[{cs}] Client connected, initializing flow", cs=call_sid)
+        # Warm up Groq/Cerebras TCP+TLS immediately — before greeting plays
+        from services.director_llm import warmup_fast_providers
+        asyncio.create_task(warmup_fast_providers())
         await flow_manager.initialize(initial_node)
 
     @transport.event_handler("on_client_disconnected")

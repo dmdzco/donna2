@@ -13,7 +13,7 @@
 | Service | Usage per Call | Unit Price | Cost per Call |
 |---------|---------------|------------|---------------|
 | **Deepgram STT** (Nova 3) | 10 min audio | ~$0.0043/min | ~$0.043 |
-| **Anthropic Claude Sonnet 4.6** | ~15K input + ~3K output tokens | $3/$15 per 1M tokens | ~$0.090 |
+| **Anthropic Claude Sonnet 4.5** | ~15K input + ~3K output tokens | $3/$15 per 1M tokens | ~$0.090 |
 | **ElevenLabs TTS** (turbo v2.5) | ~2,000 characters | ~$0.18/1K chars | ~$0.360 |
 | **Gemini Flash** (Director) | ~20 calls × ~500 tokens each | ~$0.075/$0.30 per 1M | ~$0.005 |
 | **Gemini Flash** (Post-call analysis) | 1 call × ~5K tokens | ~$0.075/$0.30 per 1M | ~$0.002 |

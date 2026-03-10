@@ -1,10 +1,11 @@
 """LLM tool definitions for Donna's voice pipeline.
 
-Defines four tools available during calls:
+Defines five tools available during calls:
 - search_memories: Semantic search over senior's memory bank
-- web_search: General web search with spoken filler UX
+- web_search: Real-time web search for factual questions
 - mark_reminder_acknowledged: Track reminder delivery status
 - save_important_detail: Store new memories from conversation
+- check_caregiver_notes: Check family messages for the senior
 
 Uses closure pattern over session_state to give tool handlers access
 to senior context without Pipecat's non-existent set_function_call_context().
@@ -35,6 +36,7 @@ SEARCH_MEMORIES_SCHEMA = {
     "required": ["query"],
 }
 
+
 def _web_search_schema() -> dict:
     today = date.today().strftime("%B %d, %Y")
     return {
@@ -59,7 +61,6 @@ def _web_search_schema() -> dict:
     }
 
 
-# Static reference for iteration in make_flows_tools
 WEB_SEARCH_SCHEMA = _web_search_schema()
 
 MARK_REMINDER_SCHEMA = {
@@ -177,44 +178,36 @@ def make_tool_handlers(session_state: dict) -> dict:
             return {"status": "success", "result": "Memory search is temporarily unavailable. Continue the conversation naturally — don't mention any technical issues."}
 
     async def handle_web_search(args: dict) -> dict:
+        import time as _time
         from lib.growthbook import is_on
         if not is_on("news_search_enabled", session_state):
+            logger.info("Tool: web_search BLOCKED by news_search_enabled flag")
             return {"status": "success", "result": "Search unavailable. Continue naturally."}
 
         query = args.get("query", "")
-        logger.info("Tool: web_search query={q}", q=query)
+        logger.info("Tool: web_search CALLED query={q}", q=query)
 
         if not query:
             return {"status": "success", "result": "No query provided."}
 
-        # Check web prefetch cache (with brief wait for in-flight prefetch)
-        web_cache = session_state.get("_web_prefetch_cache")
-        if web_cache:
-            cached = web_cache.get(query)
-            if cached:
-                logger.info("Tool: web_search WEB PREFETCH HIT (instant) query={q}", q=query)
-                return {"status": "success", "result": f"[NEWS] {cached}"}
-
-            # Groq prefetch may be in-flight — wait up to 400ms (still faster than 4-10s cold search)
-            for _ in range(8):
-                await asyncio.sleep(0.05)
-                cached = web_cache.get(query)
-                if cached:
-                    logger.info("Tool: web_search WEB PREFETCH HIT (after wait) query={q}", q=query)
-                    return {"status": "success", "result": f"[NEWS] {cached}"}
-
+        start = _time.time()
         try:
             from services.news import web_search_query
             result = await asyncio.wait_for(web_search_query(query), timeout=15.0)
+            elapsed_ms = round((_time.time() - start) * 1000)
             if not result:
+                logger.info("Tool: web_search empty result ({ms}ms) query={q}", ms=elapsed_ms, q=query)
                 return {"status": "success", "result": f"I couldn't find information about {query}."}
+            logger.info("Tool: web_search SUCCESS ({ms}ms, {n} chars) query={q}", ms=elapsed_ms, n=len(result), q=query)
             return {"status": "success", "result": f"[NEWS] {result}"}
         except asyncio.TimeoutError:
-            logger.warning("web_search timed out after 15s for query={q}", q=query)
+            elapsed_ms = round((_time.time() - start) * 1000)
+            logger.warning("Tool: web_search TIMEOUT ({ms}ms) query={q}", ms=elapsed_ms, q=query)
             return {"status": "success", "result": "Search took too long. Continue naturally."}
         except Exception as e:
             import traceback
-            logger.error("web_search error: {err}\n{tb}", err=str(e), tb=traceback.format_exc())
+            elapsed_ms = round((_time.time() - start) * 1000)
+            logger.error("Tool: web_search ERROR ({ms}ms) query={q}: {err}\n{tb}", ms=elapsed_ms, q=query, err=str(e), tb=traceback.format_exc())
             return {"status": "success", "result": "Search unavailable. Continue naturally."}
 
     async def handle_mark_reminder(args: dict) -> dict:
@@ -422,10 +415,8 @@ def _make_onboarding_tool_handlers(session_state: dict) -> dict:
 def make_onboarding_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
     """Create FlowsFunctionSchema instances for onboarding calls.
 
-    Returns: save_prospect_detail + web_search (reused from subscriber tools).
+    Returns: save_prospect_detail only. Web search is handled by the Director.
     """
-    # Reuse web_search handler from standard tools
-    standard_handlers = make_tool_handlers(session_state)
     onboarding_handlers = _make_onboarding_tool_handlers(session_state)
 
     schemas = {}
@@ -437,15 +428,6 @@ def make_onboarding_flows_tools(session_state: dict) -> dict[str, FlowsFunctionS
         properties=SAVE_PROSPECT_DETAIL_SCHEMA["properties"],
         required=SAVE_PROSPECT_DETAIL_SCHEMA["required"],
         handler=onboarding_handlers["save_prospect_detail"],
-    )
-
-    # web_search (reused)
-    schemas["web_search"] = FlowsFunctionSchema(
-        name=WEB_SEARCH_SCHEMA["name"],
-        description=WEB_SEARCH_SCHEMA["description"],
-        properties=WEB_SEARCH_SCHEMA["properties"],
-        required=WEB_SEARCH_SCHEMA["required"],
-        handler=standard_handlers["web_search"],
     )
 
     return schemas

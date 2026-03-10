@@ -39,8 +39,11 @@ class Settings:
     deepgram_api_key: str = ""
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
+    cartesia_api_key: str = ""
+    cartesia_voice_id: str = "f786b574-daa5-4673-aa0c-cbe3e8534c02"
     google_api_key: str = ""
     openai_api_key: str = ""
+    tavily_api_key: str = ""
     cerebras_api_key: str = ""
     groq_api_key: str = ""
 
@@ -49,7 +52,7 @@ class Settings:
     cerebras_director_model: str = "gpt-oss-120b"
     groq_director_model: str = "openai/gpt-oss-20b"
     call_analysis_model: str = "gemini-3-flash-preview"
-    anthropic_model: str = "claude-sonnet-4-6"
+    anthropic_model: str = "claude-sonnet-4-5-20250929"
 
     # ---- Auth ----
     jwt_secret: str = "donna-admin-secret-change-me"
@@ -104,8 +107,11 @@ def _load_settings() -> Settings:
         deepgram_api_key=_env("DEEPGRAM_API_KEY"),
         elevenlabs_api_key=_env("ELEVENLABS_API_KEY"),
         elevenlabs_voice_id=_env("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
+        cartesia_api_key=_env("CARTESIA_API_KEY"),
+        cartesia_voice_id=_env("CARTESIA_VOICE_ID", "f786b574-daa5-4673-aa0c-cbe3e8534c02"),
         google_api_key=_env("GOOGLE_API_KEY"),
         openai_api_key=_env("OPENAI_API_KEY"),
+        tavily_api_key=_env("TAVILY_API_KEY"),
         cerebras_api_key=_env("CEREBRAS_API_KEY"),
         groq_api_key=_env("GROQ_API_KEY"),
         # Model Selection
@@ -113,7 +119,7 @@ def _load_settings() -> Settings:
         cerebras_director_model=_env("CEREBRAS_DIRECTOR_MODEL", "gpt-oss-120b"),
         groq_director_model=_env("GROQ_DIRECTOR_MODEL", "openai/gpt-oss-20b"),
         call_analysis_model=_env("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview"),
-        anthropic_model=_env("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+        anthropic_model=_env("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"),
         # Auth
         jwt_secret=_env("JWT_SECRET", "donna-admin-secret-change-me"),
         donna_api_key=_env("DONNA_API_KEY"),

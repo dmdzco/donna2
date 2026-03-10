@@ -5,7 +5,6 @@
  */
 
 import healthRoutes from './health.js';
-import voiceRoutes from './voice.js';
 import callRoutes from './calls.js';
 import seniorRoutes from './seniors.js';
 import memoryRoutes from './memories.js';
@@ -22,7 +21,6 @@ import notificationRoutes from './notifications.js';
 
 export function mountRoutes(app) {
   app.use(healthRoutes);
-  app.use(voiceRoutes);
   app.use(callRoutes);
   app.use(seniorRoutes);
   app.use(memoryRoutes);

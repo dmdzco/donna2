@@ -63,7 +63,12 @@ class TestLLMSimulationV2:
 
     @pytest.mark.asyncio
     async def test_web_search(self):
-        """Web search: Margaret asks about weather, Donna uses web_search tool."""
+        """Web search: Margaret asks about weather, Donna uses [WEB RESULT] from Director.
+
+        Note: web_search tool was removed from Claude. The Director now owns web
+        searches and injects results via [WEB RESULT] messages. This test verifies
+        the conversation still flows naturally when weather is asked about.
+        """
         runner = ConversationRunner(WEB_SEARCH_SCENARIO)
         result = await runner.run()
         _print_result(result)
@@ -75,12 +80,6 @@ class TestLLMSimulationV2:
             f"Scores: {result.evaluation.scores}. "
             f"Reasoning: {result.evaluation.reasoning}"
         )
-        # Soft check — LLM tool usage is non-deterministic
-        if result.tool_call_counts.get("web_search_query", 0) < 1:
-            warnings.warn(
-                f"web_search_query was not called (tool counts: {result.tool_call_counts}). "
-                "Donna should use web search when asked about weather."
-            )
 
     @pytest.mark.asyncio
     async def test_memory_recall(self):

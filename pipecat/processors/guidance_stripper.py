@@ -21,9 +21,11 @@ _COMPLETE_TAG = re.compile(r"<guidance>[\s\S]*?</guidance>", re.IGNORECASE)
 _PARTIAL_OPEN = re.compile(r"<guidance>[\s\S]*$", re.IGNORECASE)
 _ORPHAN_CLOSE = re.compile(r"</guidance>", re.IGNORECASE)
 _BRACKETED = re.compile(r"\[[A-Z][A-Z _]+\]")
+# [WEB RESULT ...] tags — Claude may hallucinate these; strip content through closing ]
+_WEB_RESULT_TAG = re.compile(r"\[WEB RESULT[^\]]*\]", re.IGNORECASE)
 _MULTI_SPACE = re.compile(r"\s{2,}")
 # Quick check: does text contain anything worth stripping?
-_NEEDS_STRIP = re.compile(r"</?guidance>|\[[A-Z][A-Z _]+\]", re.IGNORECASE)
+_NEEDS_STRIP = re.compile(r"</?guidance>|\[[A-Z][A-Z _]+\]|\[WEB RESULT", re.IGNORECASE)
 
 # If buffer grows beyond this, the closing tag isn't coming — force flush.
 _MAX_BUFFER_CHARS = 500
@@ -35,6 +37,7 @@ def strip_guidance(text: str) -> str:
     cleaned = _PARTIAL_OPEN.sub("", cleaned)
     cleaned = _ORPHAN_CLOSE.sub("", cleaned)
     cleaned = _BRACKETED.sub("", cleaned)
+    cleaned = _WEB_RESULT_TAG.sub("", cleaned)
     cleaned = _MULTI_SPACE.sub(" ", cleaned).strip()
     return cleaned
 

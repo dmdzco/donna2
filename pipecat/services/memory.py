@@ -282,22 +282,23 @@ async def build_context(
     senior: dict | None = None,
     is_first_turn: bool = True,
 ) -> str:
-    """Build context string for conversation from ALL memories.
+    """Build memory context for the system prompt.
 
-    Claude has 200K context — no need to be stingy. Load everything
-    the senior has so the conversation feels personal from turn 1.
+    Loads top 20 memories by importance — enough to feel personal without
+    duplicating recent turns/summaries that are already in the prompt.
+    Speculative prefetch fills in the rest mid-conversation.
     """
     from db import query_many
 
     parts: list[str] = []
 
-    # Load all memories for this senior (ordered by importance, then recency)
+    # Top memories by importance + recency (prefetch supplements mid-call)
     all_memories = await query_many(
         """SELECT id, type, content, importance, metadata, created_at
            FROM memories
            WHERE senior_id = $1
            ORDER BY importance DESC, created_at DESC
-           LIMIT 50""",
+           LIMIT 20""",
         senior_id,
     )
 

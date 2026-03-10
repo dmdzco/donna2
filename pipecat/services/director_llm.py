@@ -335,10 +335,10 @@ def format_director_guidance(direction: dict) -> str | None:
     if guidance.get("suggest_save"):
         parts.append("SAVE this detail")
 
-    # Prefetch hints — let Claude know memories are pre-loaded
+    # Prefetch hints — confirm memories are in context
     prefetch_hints = direction.get("_prefetch_hints")
     if prefetch_hints:
-        parts.append(f"CONTEXT AVAILABLE: Memories about {', '.join(prefetch_hints[:2])}")
+        parts.append(f"MEMORIES IN CONTEXT: {', '.join(prefetch_hints[:2])}")
 
     return " | ".join(parts) if parts else None
 

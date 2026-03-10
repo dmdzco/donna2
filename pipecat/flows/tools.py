@@ -28,7 +28,7 @@ from pipecat_flows import FlowsFunctionSchema
 
 SEARCH_MEMORIES_SCHEMA = {
     "name": "search_memories",
-    "description": "Search the senior's memory bank for relevant past conversations, preferences, or details. Use when they mention something you might have discussed before, or when you need context about their life.",
+    "description": "Backup memory search. Memories are usually provided automatically as [MEMORY CONTEXT] — only call this if you need a SPECIFIC memory not already in context (e.g., a particular name, date, or detail).",
     "properties": {
         "query": {
             "type": "string",

@@ -12,6 +12,7 @@ from services.prefetch import (
     extract_prefetch_queries,
     extract_director_queries,
     extract_web_queries,
+    get_best_matches,
     run_prefetch,
     run_web_prefetch,
 )
@@ -135,6 +136,53 @@ class TestPrefetchCache:
         cache.put("gardening", [{"content": "test"}])
         assert cache.get("") is None
         assert cache.get("   ") is None
+
+
+# ===========================================================================
+# get_best_matches
+# ===========================================================================
+
+
+class TestGetBestMatches:
+    def test_direct_text_match(self):
+        cache = PrefetchCache()
+        cache.put("grandson Jake", [{"content": "Jake plays little league"}])
+        results = get_best_matches(cache, "grandson Jake")
+        assert len(results) == 1
+        assert results[0]["content"] == "Jake plays little league"
+
+    def test_extracted_query_match(self):
+        cache = PrefetchCache()
+        cache.put("gardening", [{"content": "Loves growing roses"}])
+        results = get_best_matches(cache, "I was doing some gardening today")
+        assert len(results) == 1
+        assert "roses" in results[0]["content"]
+
+    def test_deduplication_across_strategies(self):
+        cache = PrefetchCache()
+        memory = {"content": "Loves growing roses"}
+        cache.put("gardening roses", [memory])
+        cache.put("gardening", [memory])
+        results = get_best_matches(cache, "gardening roses")
+        assert len(results) == 1
+
+    def test_empty_cache_returns_empty(self):
+        cache = PrefetchCache()
+        results = get_best_matches(cache, "anything at all")
+        assert results == []
+
+    def test_max_results_capped(self):
+        cache = PrefetchCache()
+        many_results = [{"content": f"Memory {i}"} for i in range(10)]
+        cache.put("big topic", many_results)
+        results = get_best_matches(cache, "big topic", max_results=3)
+        assert len(results) == 3
+
+    def test_no_match_returns_empty(self):
+        cache = PrefetchCache()
+        cache.put("gardening roses", [{"content": "Roses"}])
+        results = get_best_matches(cache, "yeah okay thanks bye")
+        assert results == []
 
 
 # ===========================================================================

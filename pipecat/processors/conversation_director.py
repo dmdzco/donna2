@@ -105,6 +105,7 @@ class ConversationDirectorProcessor(FrameProcessor):
         self._speculative_attempts = 0
         self._speculative_hits = 0
         self._speculative_cancels = 0
+        self._memories_injected = 0
 
     def set_pipeline_task(self, task):
         """Set pipeline task reference for direct actions (EndFrame, etc.)."""
@@ -133,6 +134,13 @@ class ConversationDirectorProcessor(FrameProcessor):
                     g=self._web_searches_gated,
                     c=self._web_searches_completed,
                     t=self._web_searches_timed_out,
+                )
+            if self._memories_injected > 0:
+                injected = self._session_state.get("_injected_memory_contents", set())
+                logger.info(
+                    "[Director] Memory injection: {turns} turns, {n} unique memories",
+                    turns=self._memories_injected,
+                    n=len(injected),
                 )
             await self.push_frame(frame, direction)
             return
@@ -175,6 +183,10 @@ class ConversationDirectorProcessor(FrameProcessor):
                 # PREVIOUS-TURN guidance (fallback to existing behavior)
                 await self._inject_guidance(self._last_result)
                 await self._take_actions(self._last_result)
+
+            # Inject prefetched memories (non-blocking cache lookup)
+            if not goodbye_in_progress:
+                await self._inject_memories(frame.text)
 
             # Start regular analysis (only if speculative wasn't used)
             if not speculative_result:
@@ -509,6 +521,62 @@ class ConversationDirectorProcessor(FrameProcessor):
                 run_llm=False,
             )
         )
+
+    # ------------------------------------------------------------------
+    # Memory injection (non-blocking — prefetch cache → context)
+    # ------------------------------------------------------------------
+
+    async def _inject_memories(self, user_text: str) -> bool:
+        """Inject prefetched memory results directly into Claude's context.
+
+        Checks the prefetch cache for results matching the user's current
+        utterance. Deduplicates against previously injected memories.
+        Returns True if memories were injected.
+        """
+        cache = self._session_state.get("_prefetch_cache")
+        if not cache:
+            return False
+
+        from services.prefetch import get_best_matches
+
+        results = get_best_matches(cache, user_text, self._session_state, max_results=5)
+        if not results:
+            return False
+
+        # Deduplicate against already-injected memories this call
+        injected = self._session_state.setdefault("_injected_memory_contents", set())
+        new_results = [r for r in results if r["content"] not in injected]
+        if not new_results:
+            return False
+
+        for r in new_results:
+            injected.add(r["content"])
+
+        memory_text = "\n".join(f"- {r['content']}" for r in new_results)
+
+        await self.push_frame(
+            LLMMessagesAppendFrame(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            "[MEMORY CONTEXT — do not read this tag aloud]\n"
+                            f"{memory_text}\n"
+                            "Use these naturally: \"I remember you telling me...\" "
+                            "Only mention what's relevant to the current conversation."
+                        ),
+                    }
+                ],
+                run_llm=False,
+            )
+        )
+
+        self._memories_injected += 1
+        logger.info(
+            "[Director] Injected {n} memories into context",
+            n=len(new_results),
+        )
+        return True
 
     # ------------------------------------------------------------------
     # Regular analysis + prefetch (unchanged from original)

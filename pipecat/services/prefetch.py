@@ -402,6 +402,48 @@ def extract_director_queries(
 _MAX_CONCURRENT_SEARCHES = 2
 
 
+def get_best_matches(
+    cache: PrefetchCache,
+    user_text: str,
+    session_state: dict | None = None,
+    max_results: int = 5,
+) -> list[dict]:
+    """Get the best memory matches from cache for a user utterance.
+
+    Tries multiple lookup strategies:
+    1. Direct fuzzy match on the full utterance
+    2. Extracted topic/entity queries from the utterance
+
+    Returns deduplicated list of memory results, capped at max_results.
+    """
+    seen_contents: set[str] = set()
+    results: list[dict] = []
+
+    def _add_results(cache_results: list[dict] | None):
+        if not cache_results:
+            return
+        for r in cache_results:
+            content = r.get("content", "")
+            if content and content not in seen_contents:
+                seen_contents.add(content)
+                results.append(r)
+
+    # Strategy 1: Direct match on full text
+    _add_results(cache.get(user_text))
+
+    if len(results) >= max_results:
+        return results[:max_results]
+
+    # Strategy 2: Extracted queries from the utterance
+    queries = extract_prefetch_queries(user_text, session_state)
+    for q in queries:
+        _add_results(cache.get(q))
+        if len(results) >= max_results:
+            return results[:max_results]
+
+    return results[:max_results]
+
+
 async def run_prefetch(
     senior_id: str,
     queries: list[str],

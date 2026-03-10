@@ -22,9 +22,9 @@ ANALYSIS_MODEL = os.environ.get("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview")
 # Static instructions — passed as system_instruction
 ANALYSIS_SYSTEM_INSTRUCTION = """You analyze completed phone calls between Donna (an AI companion) and elderly individuals.
 
-Analyze the call and return JSON with: summary (2-3 sentences), topics_discussed, reminders_delivered, engagement_score (1-10), concerns (health/cognitive/emotional/safety with severity low/medium/high, description, evidence, recommended_action), positive_observations, follow_up_suggestions, call_quality (rapport: strong/moderate/weak, goals_achieved: bool, duration_appropriate: bool).
+Analyze the call and return JSON with: summary (2-3 sentences), topics_discussed, reminders_delivered, engagement_score (1-10), mood (one or two words: cheerful, calm, content, a bit quiet, tired, etc.), caregiver_sms (a warm, privacy-respecting message for the senior's caregiver — keep it high-level, never expose vulnerability or repeat sensitive details; if mood seems low, subtly suggest the caregiver give them a call; include call duration naturally; max 280 chars), concerns (health/cognitive/emotional/safety with severity low/medium/high, description, evidence, recommended_action), positive_observations, follow_up_suggestions, call_quality (rapport: strong/moderate/weak, goals_achieved: bool, duration_appropriate: bool).
 
-Output ONLY valid JSON: {"summary":"str","topics_discussed":["str"],"reminders_delivered":["str"],"engagement_score":0,"concerns":[{"type":"health|cognitive|emotional|safety","severity":"low|medium|high","description":"str","evidence":"str","recommended_action":"str"}],"positive_observations":["str"],"follow_up_suggestions":["str"],"call_quality":{"rapport":"strong|moderate|weak","goals_achieved":true,"duration_appropriate":true}}"""
+Output ONLY valid JSON: {"summary":"str","topics_discussed":["str"],"reminders_delivered":["str"],"engagement_score":0,"mood":"str","caregiver_sms":"str","concerns":[{"type":"health|cognitive|emotional|safety","severity":"low|medium|high","description":"str","evidence":"str","recommended_action":"str"}],"positive_observations":["str"],"follow_up_suggestions":["str"],"call_quality":{"rapport":"strong|moderate|weak","goals_achieved":true,"duration_appropriate":true}}"""
 
 # Dynamic per-call content — passed as contents
 ANALYSIS_TURN_TEMPLATE = """Senior: {{SENIOR_NAME}}
@@ -72,6 +72,8 @@ def _get_default_analysis() -> dict:
         "topics_discussed": [],
         "reminders_delivered": [],
         "engagement_score": 5,
+        "mood": "unknown",
+        "caregiver_sms": "",
         "concerns": [],
         "positive_observations": [],
         "follow_up_suggestions": [],

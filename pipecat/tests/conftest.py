@@ -274,6 +274,7 @@ def mock_call_analysis_service():
          patch("services.call_analysis.save_call_analysis", new_callable=AsyncMock) as mock_save:
         mock_analyze.return_value = {
             "mood": "positive",
+            "caregiver_sms": "Donna just chatted with Margaret. She was in great spirits — talked about gardening and family.",
             "key_topics": ["gardening", "family"],
             "concerns": [],
             "summary": "Margaret is doing well.",

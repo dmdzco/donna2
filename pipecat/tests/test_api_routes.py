@@ -68,8 +68,9 @@ class TestVoiceAnswerEndpoint:
 
     @patch("services.scheduler.get_reminder_context", return_value=None)
     @patch("services.scheduler.get_prefetched_context", return_value=None)
+    @patch("services.reminder_delivery.get_reminder_by_call_sid", new_callable=AsyncMock, return_value=None)
     @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
-    def test_voice_answer_includes_params(self, mock_find, mock_prefetch, mock_reminder, client):
+    def test_voice_answer_includes_params(self, mock_find, mock_reminder_db, mock_prefetch, mock_reminder, client):
         """Test that TwiML includes stream parameters."""
         response = client.post(
             "/voice/answer",

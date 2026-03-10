@@ -40,6 +40,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
     - Speculative pre-processing: Detects 250ms silence onset via interim gaps → starts Cerebras analysis → same-turn guidance when ready
     - Metrics: Logs speculative hit rate per call
   - Post-Call: Analysis, memory extraction, daily context, snapshot rebuild (Gemini Flash)
+- **Caregiver Mood Summary SMS** — Post-call Gemini analysis generates a privacy-respecting, mood-aware SMS for caregivers. If the senior seems down, subtly suggests the caregiver give them a call.
 - **Predictive Context Engine** — Speculative memory prefetch eliminates tool-call latency
   - 1st wave: Regex entity/topic extraction on final transcriptions → background `memory.search()`
   - 2nd wave: Director Gemini analysis (next_topic, reminders, news) → anticipatory prefetch

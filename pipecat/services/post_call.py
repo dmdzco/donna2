@@ -359,7 +359,7 @@ async def _trigger_caregiver_notification(
     import httpx
 
     node_url = os.environ.get(
-        "NODE_API_URL", "https://donna-production.up.railway.app"
+        "NODE_API_URL", "https://donna-api-production-2450.up.railway.app"
     )
     api_key = os.environ.get("DONNA_API_KEY", "")
 
@@ -381,6 +381,8 @@ async def _trigger_caregiver_notification(
                         "call_sid": call_sid,
                         "duration_seconds": duration,
                         "summary": analysis.get("summary"),
+                        "mood": analysis.get("mood"),
+                        "caregiver_sms": analysis.get("caregiver_sms"),
                         "topics": analysis.get("topics_discussed", []),
                         "engagement_score": analysis.get("engagement_score"),
                         "concerns": analysis.get("concerns", []),

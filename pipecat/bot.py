@@ -54,7 +54,7 @@ def create_tts_service(session_state: dict):
     Falls back to ElevenLabs if Cartesia key is missing or flag is unset.
     """
     flags = session_state.get("_flags", {})
-    provider = flags.get("tts_provider", "cartesia")
+    provider = flags.get("tts_provider", "elevenlabs")
 
     if provider == "cartesia" and os.getenv("CARTESIA_API_KEY"):
         logger.info("TTS provider: Cartesia Sonic 3")

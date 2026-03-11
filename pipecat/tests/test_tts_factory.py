@@ -51,14 +51,14 @@ def test_falls_back_to_elevenlabs_when_no_cartesia_key(cartesia_env):
         assert isinstance(tts, ElevenLabsTTSService)
 
 
-def test_defaults_to_cartesia_when_no_flags(cartesia_env):
-    """No flags resolved defaults to Cartesia (default provider)."""
+def test_defaults_to_elevenlabs_when_no_flags(cartesia_env):
+    """No flags resolved defaults to ElevenLabs (default provider)."""
     from bot import create_tts_service
-    from pipecat.services.cartesia.tts import CartesiaTTSService
+    from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 
     session_state = {}  # No _flags key
     tts = create_tts_service(session_state)
-    assert isinstance(tts, CartesiaTTSService)
+    assert isinstance(tts, ElevenLabsTTSService)
 
 
 def test_cartesia_uses_default_encoding(cartesia_env):

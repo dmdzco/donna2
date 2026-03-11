@@ -1,13 +1,11 @@
 """LLM tool definitions for Donna's voice pipeline.
 
 Active tools available to Claude during calls:
-- web_search: Real-time web search for factual questions
+- search_memories: Semantic search over senior's memory bank
+- web_search: Real-time web search with spoken filler UX
+- save_important_detail: Store new memories from conversation
 - mark_reminder_acknowledged: Track reminder delivery status (fire-and-forget)
-
-Removed tools (moved to Director/post-call for latency elimination):
-- search_memories → Director injects memories as ephemeral context
-- save_important_detail → Post-call extract_from_conversation handles it
-- check_caregiver_notes → Pre-fetched at call start, injected into system prompt
+- check_caregiver_notes: Check for family messages
 
 Uses closure pattern over session_state to give tool handlers access
 to senior context without Pipecat's non-existent set_function_call_context().
@@ -25,6 +23,18 @@ from pipecat_flows import FlowsFunctionSchema
 # ---------------------------------------------------------------------------
 # Tool schemas (reusable across nodes)
 # ---------------------------------------------------------------------------
+
+SEARCH_MEMORIES_SCHEMA = {
+    "name": "search_memories",
+    "description": "Search the senior's memory bank for relevant past conversations, preferences, or details. Use when they mention something you might have discussed before, or when you need context about their life.",
+    "properties": {
+        "query": {
+            "type": "string",
+            "description": "What to search for (e.g., 'gardening', 'grandson birthday', 'medication')",
+        },
+    },
+    "required": ["query"],
+}
 
 def _web_search_schema() -> dict:
     today = date.today().strftime("%B %d, %Y")
@@ -73,6 +83,35 @@ MARK_REMINDER_SCHEMA = {
     "required": ["reminder_id", "status"],
 }
 
+SAVE_DETAIL_SCHEMA = {
+    "name": "save_important_detail",
+    "description": "Save an important detail the senior mentioned that should be remembered for future calls. Use for significant life events, health changes, new interests, family updates, or emotional state changes.",
+    "properties": {
+        "detail": {
+            "type": "string",
+            "description": "The detail to remember (e.g., 'Grandson Jake graduated from college')",
+        },
+        "category": {
+            "type": "string",
+            "enum": ["health", "family", "preference", "life_event", "emotional", "activity"],
+            "description": "Category of the detail",
+        },
+    },
+    "required": ["detail", "category"],
+}
+
+CHECK_CAREGIVER_NOTES_SCHEMA = {
+    "name": "check_caregiver_notes",
+    "description": (
+        "Check if any family members or caregivers have left messages or questions "
+        "for the senior. Use this naturally in conversation, e.g., 'Oh, by the way, "
+        "your daughter wanted me to ask about...'"
+    ),
+    "properties": {},
+    "required": [],
+}
+
+
 # ---------------------------------------------------------------------------
 # Tool handler factory (closure over session_state)
 # ---------------------------------------------------------------------------
@@ -89,6 +128,38 @@ def make_tool_handlers(session_state: dict) -> dict:
     Returns:
         Dict mapping tool name → async handler function.
     """
+
+    async def handle_search_memories(args: dict) -> dict:
+        senior_id = session_state.get("senior_id")
+        if not senior_id:
+            return {"status": "success", "result": "No memories available right now. Continue naturally."}
+
+        query = args.get("query", "")
+        logger.info("Tool: search_memories query={q} senior={sid}", q=query, sid=senior_id)
+
+        # Check prefetch cache first (instant return on hit)
+        cache = session_state.get("_prefetch_cache")
+        if cache:
+            cached = cache.get(query)
+            if cached:
+                logger.info("Tool: search_memories CACHE HIT query={q}", q=query)
+                formatted = "[MEMORY] " + "\n[MEMORY] ".join(
+                    r["content"] for r in cached if r.get("content")
+                )
+                return {"status": "success", "result": formatted}
+
+        try:
+            from services.memory import search
+            results = await search(senior_id, query, limit=3)
+            if not results:
+                return {"status": "success", "result": "No matching memories found."}
+            formatted = "[MEMORY] " + "\n[MEMORY] ".join(
+                r["content"] for r in results if r.get("content")
+            )
+            return {"status": "success", "result": formatted}
+        except Exception as e:
+            logger.error("search_memories error: {err}", err=str(e))
+            return {"status": "success", "result": "Memory search unavailable. Continue naturally."}
 
     async def handle_web_search(args: dict) -> dict:
         import time as _time
@@ -151,9 +222,75 @@ def make_tool_handlers(session_state: dict) -> dict:
         asyncio.create_task(_background_ack())
         return {"status": "success", "result": f"Reminder marked as {status}."}
 
+    async def handle_save_detail(args: dict) -> dict:
+        detail = args.get("detail", "")
+        category = args.get("category", "life_event")
+        senior_id = session_state.get("senior_id")
+        logger.info("Tool: save_important_detail cat={c} detail={d}", c=category, d=detail[:50])
+
+        if not detail or not senior_id:
+            return {"status": "success", "result": "Detail noted."}
+
+        # Fire-and-forget: save in background
+        async def _background_save():
+            try:
+                from services.memory import store
+                category_to_type = {
+                    "health": "health",
+                    "family": "relationship",
+                    "preference": "preference",
+                    "life_event": "fact",
+                    "emotional": "concern",
+                    "activity": "preference",
+                }
+                await store(
+                    senior_id=senior_id,
+                    type_=category_to_type.get(category, "fact"),
+                    content=detail,
+                    source="conversation",
+                    importance=70,
+                )
+                logger.info("Background save_detail completed: {d}", d=detail[:50])
+            except Exception as e:
+                logger.error("Background save_detail failed: {err}", err=str(e))
+
+        asyncio.create_task(_background_save())
+        return {"status": "success", "result": f"I'll remember that: {detail[:50]}"}
+
+    async def handle_check_caregiver_notes(args: dict) -> dict:
+        logger.info("Tool: check_caregiver_notes")
+
+        # Check pre-fetched notes first (from call start)
+        notes = session_state.get("_caregiver_notes_content") or []
+        if notes:
+            formatted = "\n".join(
+                f"- {n.get('content', '') if isinstance(n, dict) else str(n)}"
+                for n in notes if (n.get("content") if isinstance(n, dict) else n)
+            )
+            return {"status": "success", "result": f"[CAREGIVER NOTES]\n{formatted}"}
+
+        # Fallback: check DB
+        senior_id = session_state.get("senior_id")
+        if not senior_id:
+            return {"status": "success", "result": "No caregiver notes at this time."}
+
+        try:
+            from services.caregivers import get_pending_notes
+            notes_db = await get_pending_notes(senior_id)
+            if not notes_db:
+                return {"status": "success", "result": "No caregiver notes at this time."}
+            formatted = "\n".join(f"- {n.get('content', '')}" for n in notes_db)
+            return {"status": "success", "result": f"[CAREGIVER NOTES]\n{formatted}"}
+        except Exception as e:
+            logger.error("check_caregiver_notes error: {err}", err=str(e))
+            return {"status": "success", "result": "No caregiver notes at this time."}
+
     handlers = {
+        "search_memories": handle_search_memories,
         "web_search": handle_web_search,
         "mark_reminder_acknowledged": handle_mark_reminder,
+        "save_important_detail": handle_save_detail,
+        "check_caregiver_notes": handle_check_caregiver_notes,
     }
 
     # Wrap each handler to track tools_used in session_state for metrics
@@ -176,8 +313,16 @@ def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
     """
     handlers = make_tool_handlers(session_state)
 
+    all_schemas = [
+        SEARCH_MEMORIES_SCHEMA,
+        WEB_SEARCH_SCHEMA,
+        MARK_REMINDER_SCHEMA,
+        SAVE_DETAIL_SCHEMA,
+        CHECK_CAREGIVER_NOTES_SCHEMA,
+    ]
+
     schemas = {}
-    for schema_def in [WEB_SEARCH_SCHEMA, MARK_REMINDER_SCHEMA]:
+    for schema_def in all_schemas:
         name = schema_def["name"]
         schemas[name] = FlowsFunctionSchema(
             name=name,
@@ -246,7 +391,6 @@ def _make_onboarding_tool_handlers(session_state: dict) -> dict:
                     "loved_one_name": "loved_one_name",
                 }
                 await update_after_call(prospect_id, {field_map[detail_type]: value})
-                # Also update in-memory prospect for current call
                 prospect[field_map[detail_type]] = value
             except Exception as e:
                 logger.error("save_prospect_detail DB error: {err}", err=str(e))
@@ -284,9 +428,10 @@ def _make_onboarding_tool_handlers(session_state: dict) -> dict:
 def make_onboarding_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
     """Create FlowsFunctionSchema instances for onboarding calls.
 
-    Returns: save_prospect_detail only. Web search is handled by the Director.
+    Returns: save_prospect_detail + web_search.
     """
     onboarding_handlers = _make_onboarding_tool_handlers(session_state)
+    subscriber_handlers = make_tool_handlers(session_state)
 
     schemas = {}
 
@@ -297,6 +442,15 @@ def make_onboarding_flows_tools(session_state: dict) -> dict[str, FlowsFunctionS
         properties=SAVE_PROSPECT_DETAIL_SCHEMA["properties"],
         required=SAVE_PROSPECT_DETAIL_SCHEMA["required"],
         handler=onboarding_handlers["save_prospect_detail"],
+    )
+
+    # web_search (for onboarding too)
+    schemas["web_search"] = FlowsFunctionSchema(
+        name=WEB_SEARCH_SCHEMA["name"],
+        description=WEB_SEARCH_SCHEMA["description"],
+        properties=WEB_SEARCH_SCHEMA["properties"],
+        required=WEB_SEARCH_SCHEMA["required"],
+        handler=subscriber_handlers["web_search"],
     )
 
     return schemas

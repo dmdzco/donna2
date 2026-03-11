@@ -137,14 +137,13 @@ Onboarding calls (call_type="onboarding"): no reminders, no re-engage signals, f
 
 JSON:{"analysis":{"call_phase":"str","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"str","priority_action":"str","specific_instruction":"str"}}"""
 
-# Query Director — fast, focused extraction of search queries
+# Query Director — fast, focused extraction of memory search queries
 QUERY_SYSTEM_INSTRUCTION = """\
-Extract search queries from the senior's speech for a companion AI calling elderly people.
+Extract memory search queries from the senior's speech for a companion AI calling elderly people.
 
 memory_queries: 1-3 keyword phrases from what the senior is TALKING ABOUT. Names, places, hobbies, people. "grandson Jake" not "family", "Torchy's Tacos" not "food". NEVER empty if substantive speech.
-web_queries: Google-style queries for factual questions. Include location + current date for time-sensitive. Example: "Austin Texas weather March 11 2026". Empty array if no factual question.
 
-JSON:{"memory_queries":[],"web_queries":[]}"""
+JSON:{"memory_queries":[]}"""
 
 QUERY_TURN_TEMPLATE = """\
 Location: {location} | Today: {today_date}

@@ -314,8 +314,8 @@ class TestRegressionLongCallTimeout:
         schedules _delayed_end() when FORCE_END_MINUTES is exceeded.
         """
         session_state = LONG_CALL_TIMEOUT_SCENARIO.to_session_state()
-        # Backdate call start to exceed FORCE_END_MINUTES (12 min)
-        session_state["_call_start_time"] = time.time() - (13 * 60)
+        # Backdate call start to exceed FORCE_END_MINUTES (35 min)
+        session_state["_call_start_time"] = time.time() - (36 * 60)
 
         with patch(
             "processors.conversation_director.analyze_turn_speculative",
@@ -333,7 +333,7 @@ class TestRegressionLongCallTimeout:
                 default_llm_response="Tell me more!",
             )
             # Override the already-set _call_start_time from build_test_pipeline
-            components.session_state["_call_start_time"] = time.time() - (13 * 60)
+            components.session_state["_call_start_time"] = time.time() - (36 * 60)
             # Pre-set guidance so _take_actions() fires on turn processing
             components.conversation_director._last_result = get_default_direction()
             components.quick_observer.GOODBYE_DELAY_SECONDS = 0.3

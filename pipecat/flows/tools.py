@@ -163,7 +163,15 @@ def make_tool_handlers(session_state: dict) -> dict:
         async def tracked(args):
             if name not in tools_used:
                 tools_used.append(name)
-            return await fn(args)
+            logger.info("Tool CALL: {name}({args})", name=name, args=args)
+            result = await fn(args)
+            # Log truncated result to avoid flooding logs
+            result_str = str(result.get("result", ""))
+            if len(result_str) > 200:
+                result_str = result_str[:200] + "..."
+            logger.info("Tool RESULT: {name} → {status} | {result}",
+                        name=name, status=result.get("status", "?"), result=result_str)
+            return result
         return tracked
 
     return {name: _wrap(name, fn) for name, fn in handlers.items()}

@@ -126,6 +126,12 @@ def _build_senior_context(session_state: dict) -> str:
     else:
         logger.warning("No memory context in session_state for system prompt")
 
+    # --- Pre-cached news (fetched daily based on interests) ---
+    news_ctx = session_state.get("news_context")
+    if news_ctx:
+        parts.append(f"\n{news_ctx}")
+        logger.info("System prompt includes news context ({n} chars)", n=len(news_ctx))
+
     # --- Insights from last call analysis ---
     analysis = session_state.get("last_call_analysis") or {}
     analysis_parts = _format_analysis_insights(analysis)

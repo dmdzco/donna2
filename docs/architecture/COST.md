@@ -1,148 +1,222 @@
 # Cost Analysis
 
-> Per-call cost breakdown and optimization strategies for the Donna voice system.
+> Per-call cost breakdown and scaling projections for the Donna voice system.
 
-*Prices are estimates based on published API pricing as of March 2026. Actual costs vary with usage patterns.*
+*Prices based on published API pricing as of March 2026. Actual costs vary with usage patterns.*
 
 ---
 
-## Per-Call Cost Breakdown (10-Minute Call)
+## Current Stack
+
+| Service | Provider | Model/Tier | Pricing |
+|---------|----------|------------|---------|
+| Voice LLM | Anthropic | Claude Sonnet 4.5 | $3/M in, $15/M out, cache read $0.30/M |
+| STT | Deepgram | Nova 3 General | $0.0043/min |
+| TTS | Cartesia | Sonic 3 | ~$0.08/1K chars |
+| Director LLM | Groq | gpt-oss-20b | $0.10/M in, $0.20/M out |
+| Director fallback | Google | Gemini 3 Flash Preview | ~$0.01/M in (free tier available) |
+| Embeddings | OpenAI | text-embedding-3-small | $0.02/M tokens |
+| Memory extraction | OpenAI | gpt-4o-mini | $0.15/M in, $0.60/M out |
+| Web search | Tavily | Basic | ~$0.001/search |
+| Daily news | OpenAI | gpt-4o-mini + web_search_preview | ~$0.03/search |
+| Voice carrier | Twilio | Programmable Voice + Media Streams | $0.022/min |
+| Hosting | Railway | 2 services × 2 envs (dev + prod) | ~$25-35/mo |
+| Database | Neon | PostgreSQL + pgvector | Free tier (current) |
+| Feature flags | GrowthBook | Cloud free tier | $0 |
+| Error monitoring | Sentry | Free tier | $0 |
+| VAD | Silero | Local (open source) | $0 |
+
+---
+
+## Per-Call Cost Breakdown (Average 10-Minute Call, 20 Turns)
 
 ### AI Services
 
-| Service | Usage per Call | Unit Price | Cost per Call |
-|---------|---------------|------------|---------------|
-| **Deepgram STT** (Nova 3) | 10 min audio | ~$0.0043/min | ~$0.043 |
-| **Anthropic Claude Sonnet 4.5** | ~15K input + ~3K output tokens | $3/$15 per 1M tokens | ~$0.090 |
-| **ElevenLabs TTS** (turbo v2.5) | ~2,000 characters | ~$0.18/1K chars | ~$0.360 |
-| **Gemini Flash** (Director) | ~20 calls × ~500 tokens each | ~$0.075/$0.30 per 1M | ~$0.005 |
-| **Gemini Flash** (Post-call analysis) | 1 call × ~5K tokens | ~$0.075/$0.30 per 1M | ~$0.002 |
-| **OpenAI Embeddings** (text-embedding-3-small) | ~10 calls × ~200 tokens | $0.02/1M tokens | ~$0.001 |
-| **OpenAI Web Search** (news) | ~1 call | ~$0.03/search | ~$0.030 |
+| Service | Usage per Call | Cost per Call |
+|---------|---------------|---------------|
+| **Cartesia TTS** (Sonic 3) | ~2,000 chars | **$0.160** |
+| **Deepgram STT** (Nova 3) | 10 min continuous stream | **$0.043** |
+| **Anthropic Claude** (Sonnet 4.5, prompt cached) | ~70K input (55K cached read + 15K write), 1.5K output | **$0.070** |
+| **Groq** (gpt-oss-20b, Director) | ~35K input, 8K output (30-50 calls/call) | **$0.005** |
+| **Gemini Flash** (post-call analysis) | ~6K input, 800 output | **~$0.001** |
+| **OpenAI Embeddings** (memory search + store) | 40 calls × 30 tokens | **~$0.001** |
+| **OpenAI gpt-4o-mini** (post-call memory extraction) | ~6K input, 600 output | **$0.001** |
+| **Tavily** (web search, 0-2 per call) | ~1 search avg | **$0.001** |
 
-**AI Services Total: ~$0.53 per call**
+**AI Services Total: ~$0.28 per call**
 
 ### Infrastructure
 
-| Service | Usage per Call | Unit Price | Cost per Call |
-|---------|---------------|------------|---------------|
-| **Twilio** (voice minutes) | 10 min | $0.013/min (inbound) | ~$0.130 |
-| **Railway** (compute) | ~10 min of 1 vCPU | ~$0.000005/sec | ~$0.003 |
-| **Neon** (database) | ~50 queries | Included in plan | ~$0.001 |
+| Service | Usage per Call | Cost per Call |
+|---------|---------------|---------------|
+| **Twilio** (voice + media stream) | 10 min | **$0.220** |
+| **Railway** (compute) | ~10 min of pipeline | **$0.003** |
+| **Neon** (database, ~50 queries) | Included in plan | **$0.001** |
 
-**Infrastructure Total: ~$0.13 per call**
+**Infrastructure Total: ~$0.22 per call**
 
 ### Total Cost per Call
 
 | Component | Cost |
 |-----------|------|
-| AI Services | ~$0.53 |
-| Infrastructure | ~$0.13 |
-| **Total per 10-min call** | **~$0.66** |
+| AI Services | ~$0.28 |
+| Infrastructure | ~$0.22 |
+| **Total per 10-min call** | **~$0.50** |
+| **Per minute** | **~$0.05** |
 
 ---
 
-## Cost at Scale
+## Cost at Current Volume (~60 calls/week, 150 min/week)
 
-| Scale | Daily Calls | Monthly Cost | Notes |
-|-------|-------------|-------------|-------|
-| 50 users (current) | 50 | ~$1,000 | Current operating scale |
-| 500 users | 500 | ~$10,000 | First rollout cohort |
-| 2,000 users | 2,000 | ~$40,000 | Mid-rollout |
-| 8,000 users | 8,000 | ~$160,000 | Full capacity target |
+| Service | Monthly |
+|---------|---------|
+| Cartesia (TTS) | $38 |
+| Twilio (voice) | $13 |
+| Anthropic (Claude) | $7 |
+| Deepgram (STT) | $3 |
+| Railway (hosting) | $25-35 |
+| Groq (Director) | $1 |
+| Tavily + OpenAI | $1 |
+| **Total** | **~$90-100** |
 
-*Monthly = daily calls × 30 days × $0.66/call*
+---
 
-### Cost Distribution
+## Cost at Scale: 1,000 Users
 
-At full scale (8,000 calls/day):
+**Assumptions**: 1,000 users, 130 min/week each = 520,000 min/month, ~52,000 calls/month.
 
-| Category | Monthly | % of Total |
-|----------|---------|-----------|
-| ElevenLabs TTS | ~$86,400 | 54% |
-| Twilio Voice | ~$31,200 | 20% |
-| Anthropic Claude | ~$21,600 | 14% |
-| Deepgram STT | ~$10,320 | 6% |
-| OpenAI (news + embeddings) | ~$7,440 | 5% |
-| Gemini Flash | ~$1,680 | 1% |
-| Railway + Neon | ~$960 | <1% |
+### With Current Stack (Twilio)
 
-**TTS is the largest cost driver at 54% of total spend.**
+| Service | Monthly | % |
+|---------|---------|---|
+| **Twilio** (voice) | $11,440 | 45% |
+| **Cartesia** (TTS) | $8,320 | 33% |
+| **Deepgram** (STT) | $2,236 | 9% |
+| **Anthropic** (Claude) | $2,080 | 8% |
+| **Neon** (Scale tier) | $300-500 | 2% |
+| **Railway** (scaled) | $200-400 | 2% |
+| **Groq** (Director) | $260 | 1% |
+| **Tavily + OpenAI** | $156 | <1% |
+| **Gemini** | ~$0 | <1% |
+| **Total** | **~$25,000/mo** |
+| **Per user** | **~$25/mo** |
+
+### With Telnyx (voice carrier switch)
+
+| Service | Monthly | % |
+|---------|---------|---|
+| **Cartesia** (TTS) | $8,320 | 57% |
+| **Deepgram** (STT) | $2,236 | 15% |
+| **Anthropic** (Claude) | $2,080 | 14% |
+| **Telnyx** (voice) | $1,040 | 7% |
+| **Neon** (Scale tier) | $300-500 | 3% |
+| **Railway** (scaled) | $200-400 | 3% |
+| **Groq** (Director) | $260 | 2% |
+| **Total** | **~$14,600/mo** |
+| **Per user** | **~$14.60/mo** |
+
+### With Telnyx + Cheaper TTS (Deepgram Aura at ~$0.005/min)
+
+| Service | Monthly | % |
+|---------|---------|---|
+| **Deepgram** (STT + TTS) | $4,836 | 44% |
+| **Anthropic** (Claude) | $2,080 | 19% |
+| **Telnyx** (voice) | $1,040 | 10% |
+| **Neon** (Scale tier) | $300-500 | 4% |
+| **Railway** (scaled) | $200-400 | 4% |
+| **Groq** (Director) | $260 | 2% |
+| **Total** | **~$8,800/mo** |
+| **Per user** | **~$8.80/mo** |
+
+---
+
+## Cost Distribution (Top 3 at Each Scale)
+
+| Rank | Current (~$100/mo) | 1K Users Twilio (~$25K) | 1K Users Optimized (~$9K) |
+|------|-------------------|------------------------|--------------------------|
+| 1 | Cartesia TTS (38%) | Twilio voice (45%) | Deepgram STT+TTS (44%) |
+| 2 | Railway hosting (30%) | Cartesia TTS (33%) | Anthropic Claude (19%) |
+| 3 | Twilio voice (13%) | Deepgram STT (9%) | Telnyx voice (10%) |
+
+**Key insight**: TTS is the silent killer. At scale, voice carrier + TTS = 78% of costs. Optimizing these two (Telnyx + cheaper TTS) cuts the bill in half.
 
 ---
 
 ## Implemented Optimizations
 
-### 1. Predictive Context Prefetch (`services/prefetch.py`)
+### 1. Anthropic Prompt Caching (enabled)
+- System prompt + senior context (~1,500 tokens) cached across all turns in a call
+- Cache read at $0.30/M vs $3/M normal input = 90% savings on static context
+- Estimated savings: ~$1,500/mo at 1K users
+
+### 2. Predictive Context Prefetch (`services/prefetch.py`)
 - 2-wave speculative memory search starts while user is still speaking
-- Cache hit rate reduces `search_memories` tool calls from ~200ms to ~0ms
-- Saves ~4-8 embedding API calls per call (Jaccard fuzzy matching prevents duplicate searches)
+- Cache hit returns instantly (~0ms vs 200-300ms cold search)
+- Saves ~20-40 embedding API calls per call via Jaccard fuzzy dedup
 
-### 2. Context Pre-Caching (`services/context_cache.py`)
-- Senior context (memories, summaries, daily context) cached at 5 AM local time
-- Eliminates per-call startup queries during peak morning hours
-- Batch process runs once daily, not 8,000 times
+### 3. Context Pre-Caching (`services/context_cache.py`)
+- Senior context (memories, summaries, news) cached at 5 AM local time
+- News persisted to `seniors.cached_news` — eliminates per-call web search
+- Batch process runs once daily per senior
 
-### 3. HNSW Vector Index
-- Memory search drops from O(n) sequential scan to O(log n) approximate nearest neighbor
-- At 100K memories: query time drops from ~500ms to ~5ms
-- Less database compute time = lower Neon costs
+### 4. HNSW Vector Index
+- Memory search: O(log n) approximate nearest neighbor vs O(n) sequential scan
+- At 100K memories: ~5ms vs ~500ms query time
 
-### 4. Non-Blocking Director
-- Gemini Flash analysis runs in background (`asyncio.create_task`)
-- No pipeline stall = no wasted compute while waiting for analysis
-- Director results cached per-turn, reused if analysis is slow
+### 5. Director on Groq (not Gemini)
+- Groq gpt-oss-20b: $0.10/M in vs Gemini's higher per-token cost
+- ~70ms latency vs Gemini's ~500ms — enables speculative same-turn guidance
+- Gemini kept as fallback only (fires when Groq circuit breaker opens)
 
-### 5. Parallel Post-Call Processing
-- Steps 2, 3, 5, 6 run concurrently via `asyncio.gather`
-- Processing time: ~20s → ~7-10s per call
-- 50% reduction in Railway compute per post-call
+### 6. save_important_detail Removed from In-Call Tools
+- Memory extraction moved to post-call analysis (single Gemini call)
+- Eliminates 2-5 tool call interruptions per call (~500-1000ms each)
+- No loss: post-call analysis has full transcript context for better extraction
 
-### 6. News Cache
-- OpenAI web search results cached for 1 hour
-- Multiple calls to the same senior within the hour reuse cached news
-- Saves ~$0.03 per duplicate search avoided
+### 7. Confidence-Gated Web Search
+- Web search only fires when Quick Observer confirms factual question (23 regex patterns)
+- Low-confidence predictions cached for tool fallback instead of gating the frame
+- Eliminates wasted web searches on social/rhetorical questions
+
+### 8. asyncpg JSON Codecs
+- Registered json/jsonb decoders on the connection pool
+- All JSON columns auto-parse — eliminates scattered `json.loads()` calls and crash risk
 
 ---
 
 ## Future Optimizations
 
-### Telnyx Migration (65% Voice Cost Savings)
-- Telnyx voice: ~$0.005/min vs Twilio $0.013/min
-- At 8,000 users: saves ~$19,200/month on voice minutes
-- On the roadmap; requires SIP trunk reconfiguration
+### Telnyx Migration (~$10K/mo savings at 1K users)
+- Telnyx voice: ~$0.002/min vs Twilio $0.022/min
+- Pipecat has built-in `TelnyxFrameSerializer`
+- Requires: new number, webhook migration, call control API
+- **Estimated savings at 1K users: $10,400/month**
 
-### Anthropic Prompt Caching
-- System prompt + context are similar across turns within a call
-- Cache hit reduces input token cost by ~90% for subsequent turns
-- Estimated savings: ~$15,000/month at full scale
-
-### ElevenLabs Optimization
-- Investigate lower-cost TTS alternatives (e.g., Google Cloud TTS, Azure)
-- Shorter responses = fewer TTS characters
-- Director could optimize response length guidance
+### TTS Provider Comparison
+- Cartesia Sonic 3: ~$0.016/min (current)
+- Deepgram Aura: ~$0.005/min (3x cheaper)
+- Self-hosted Piper/Coqui: ~$0.001/min (requires GPU)
+- **Estimated savings at 1K users: $3,500-5,700/month**
 
 ### Batch Embedding Generation
-- Generate embeddings in batch during post-call instead of inline
-- OpenAI batch API: 50% cost reduction on embeddings
+- Post-call memory extraction could use OpenAI batch API (50% cheaper)
+- Minor savings (~$25/mo at 1K users) but easy to implement
+
+### Neon Scaling Strategy
+- Current: Free tier (0.25 CU, 0.5 GB)
+- 100 users: Launch tier ($50-100/mo, 1-4 CU, 10-50 GB)
+- 1K users: Scale tier ($200-500/mo, 4-8 CU, 50-100 GB)
+- Monitor: pgvector HNSW index RAM usage as memories grow past 100K
 
 ---
 
 ## Cost Monitoring
 
-Current health endpoint exposes metrics for cost correlation:
-
-```json
-{
-  "active_calls": 12,
-  "peak_calls": 47,
-  "uptime_seconds": 86400,
-  "pool": { "size": 15, "idle": 8 }
-}
-```
-
-Track daily:
-- Total calls completed (from `conversations` table)
-- Average call duration
+Track daily from the `conversations` table:
+- Total calls completed + average duration
 - API error rates (failed calls still incur partial costs)
-- Circuit breaker open events (skipped API calls = cost savings)
+- Circuit breaker open events (Groq failures = Gemini fallback at higher latency)
+- Prefetch cache hit rate (higher = fewer embedding calls)
+- Web search trigger rate (should be <10% of turns)
+
+*Last updated: March 2026 — v5.3*

@@ -226,7 +226,8 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         await run_bot(websocket, session_state)
     except Exception as e:
-        logger.error("Pipeline error: {err}", err=str(e))
+        import traceback as _tb
+        logger.error("Pipeline error: {err}\n{tb}", err=str(e), tb=_tb.format_exc())
         try:
             import sentry_sdk as _sentry
             _sentry.capture_exception(e)

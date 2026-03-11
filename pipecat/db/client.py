@@ -6,6 +6,7 @@ against the shared Neon PostgreSQL database.
 
 from __future__ import annotations
 
+import json
 import os
 import time
 
@@ -17,6 +18,16 @@ _pool: asyncpg.Pool | None = None
 _SLOW_QUERY_THRESHOLD_MS = 100
 
 
+async def _init_connection(conn):
+    """Register JSON codecs so json/jsonb columns return Python dicts/lists."""
+    await conn.set_type_codec(
+        'json', encoder=json.dumps, decoder=json.loads, schema='pg_catalog',
+    )
+    await conn.set_type_codec(
+        'jsonb', encoder=json.dumps, decoder=json.loads, schema='pg_catalog',
+    )
+
+
 async def get_pool() -> asyncpg.Pool:
     """Get or create the database connection pool."""
     global _pool
@@ -25,6 +36,7 @@ async def get_pool() -> asyncpg.Pool:
             os.environ["DATABASE_URL"],
             min_size=int(os.getenv("DB_POOL_MIN", "5")),
             max_size=int(os.getenv("DB_POOL_MAX", "50")),
+            init=_init_connection,
         )
         logger.info(
             "Database pool created (min={min}, max={max})",

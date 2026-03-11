@@ -389,7 +389,7 @@ async def extract_from_conversation(
         "Analyze this conversation between Donna (AI companion) and an elderly person. "
         "Extract important memories that will help personalize future calls.\n\n"
         f"Conversation:\n{transcript}\n\n"
-        'Return format:\n{{"memories": [\n  {{"type": "fact|preference|event|concern|relationship", '
+        'Respond with a json object in this format:\n{{"memories": [\n  {{"type": "fact|preference|event|concern|relationship", '
         '"content": "...", "importance": 50-100}}\n]}}\n\n'
         "CRITICAL — write RICH, DETAILED content strings that will match semantic search:\n"
         "- BAD: \"User may enjoy playing padel\" (too vague, won't match searches)\n"

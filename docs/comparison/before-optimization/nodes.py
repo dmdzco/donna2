@@ -10,8 +10,6 @@ Prompt text lives in prompts.py — edit prompts there, edit flow logic here.
 
 from __future__ import annotations
 
-import time
-
 from loguru import logger
 from pipecat_flows import (
     FlowsFunctionSchema,
@@ -35,73 +33,13 @@ from prompts import (
 )
 
 
-_EMPATHY_KEYWORDS = {"pain", "hurt", "ache", "sore", "discomfort", "bothering", "bother",
-                      "tired", "exhausted", "dizzy", "fell", "fall", "swollen", "stiff"}
-
-
-def _format_analysis_insights(analysis: dict) -> str | None:
-    """Format follow-ups, positive observations, and empathy-relevant concerns
-    from the last call analysis into a prompt section."""
-    lines: list[str] = []
-
-    # Follow-up suggestions — highest signal for personalization
-    follow_ups = analysis.get("follow_up_suggestions") or []
-    if follow_ups:
-        lines.append("From last call, follow up on:")
-        for fu in follow_ups[:4]:
-            lines.append(f"- {fu}")
-
-    # Positive observations — what lit them up
-    positives = analysis.get("positive_observations") or []
-    if positives:
-        lines.append("What went well last time:")
-        for po in positives[:3]:
-            lines.append(f"- {po}")
-
-    # Concerns — only emotional or pain/discomfort (empathetic, not clinical)
-    concerns = analysis.get("concerns") or []
-    empathy_concerns: list[str] = []
-    for c in concerns:
-        if not isinstance(c, dict):
-            continue
-        ctype = (c.get("type") or "").lower()
-        desc = c.get("description") or ""
-        desc_lower = desc.lower()
-        if ctype == "emotional":
-            empathy_concerns.append(desc)
-        elif ctype == "health" and any(kw in desc_lower for kw in _EMPATHY_KEYWORDS):
-            empathy_concerns.append(desc)
-    if empathy_concerns:
-        lines.append("They shared something that might still be on their mind:")
-        for ec in empathy_concerns[:2]:
-            lines.append(f"- {ec}")
-
-    return "\n".join(lines) if lines else None
-
-
 def _build_senior_context(session_state: dict) -> str:
     """Build the senior-specific context sections of the system prompt."""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
     parts: list[str] = []
     senior = session_state.get("senior") or {}
 
-    # Inject current local time so the LLM knows morning/afternoon/evening
-    tz_name = senior.get("timezone") or "America/New_York"
-    try:
-        tz = ZoneInfo(tz_name)
-    except Exception:
-        tz = ZoneInfo("America/New_York")
-    local_now = datetime.now(tz)
-    parts.append(f"Current time: {local_now.strftime('%A, %B %d, %Y at %I:%M %p')}.")
-
     first_name = (senior.get("name") or "").split(" ")[0] or "there"
-    city = senior.get("city") or ""
-    state = senior.get("state") or ""
-    location = f"{city}, {state}" if city and state else city or state or ""
-    location_note = f" They live in {location}." if location else ""
-    parts.append(f"You are speaking with {first_name}.{location_note}")
+    parts.append(f"You are speaking with {first_name}.")
 
     interests = senior.get("interests") or []
     if interests:
@@ -126,30 +64,9 @@ def _build_senior_context(session_state: dict) -> str:
     else:
         logger.warning("No memory context in session_state for system prompt")
 
-    # --- Pre-cached news (fetched daily based on interests) ---
     news_ctx = session_state.get("news_context")
     if news_ctx:
         parts.append(f"\n{news_ctx}")
-        logger.info("System prompt includes news context ({n} chars)", n=len(news_ctx))
-
-    # --- Insights from last call analysis ---
-    analysis = session_state.get("last_call_analysis") or {}
-    analysis_parts = _format_analysis_insights(analysis)
-    if analysis_parts:
-        parts.append(f"\n{analysis_parts}")
-
-    # Caregiver notes: pre-fetched at call start, injected into system prompt
-    notes = session_state.get("_caregiver_notes_content") or []
-    if notes:
-        parts.append("\nFamily messages to share during this call:")
-        for note in notes:
-            content = note.get("content", "") if isinstance(note, dict) else str(note)
-            if content:
-                parts.append(f"- {content}")
-        parts.append("Share naturally: \"Oh, your daughter wanted me to mention...\" Don't force it if the moment isn't right.")
-
-    # News is NOT in system prompt — injected dynamically by Director
-    # when should_mention_news is true (saves ~300 tokens per turn)
 
     return "\n".join(parts)
 
@@ -182,18 +99,6 @@ def _build_tracking_context(session_state: dict) -> str:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _record_phase_transition(session_state: dict, new_phase: str) -> None:
-    """Record phase timing: compute duration of previous phase, start new one."""
-    now = time.time()
-    durations = session_state.setdefault("_phase_durations", {})
-    prev_phase = session_state.get("_current_phase")
-    phase_start = session_state.get("_phase_start_time")
-    if prev_phase and phase_start:
-        durations[prev_phase] = round(now - phase_start)
-    session_state["_current_phase"] = new_phase
-    session_state["_phase_start_time"] = now
-
-
 def _update_tracking_context(session_state: dict) -> None:
     """Pull current tracking summary from ConversationTracker into session_state."""
     tracker = session_state.get("_conversation_tracker")
@@ -224,7 +129,6 @@ def _make_transition_reminder_to_main(session_state: dict, flows_tools: dict):
 
     async def transition_to_main(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
         logger.info("Transitioning: reminder → main")
-        _record_phase_transition(session_state, "main")
         _update_tracking_context(session_state)
         return (
             {"status": "success"},
@@ -239,7 +143,6 @@ def _make_transition_to_winding_down(session_state: dict, flows_tools: dict):
 
     async def transition_to_winding_down(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
         logger.info("Transitioning: main → winding_down")
-        _record_phase_transition(session_state, "winding_down")
         _update_tracking_context(session_state)
         return (
             {"status": "success"},
@@ -254,7 +157,6 @@ def _make_transition_to_closing(session_state: dict):
 
     async def transition_to_closing(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
         logger.info("Transitioning → closing")
-        _record_phase_transition(session_state, "closing")
         return (
             {"status": "success"},
             build_closing_node(session_state),
@@ -296,6 +198,8 @@ def build_reminder_node(
     functions: list = []
     if "mark_reminder_acknowledged" in flows_tools:
         functions.append(flows_tools["mark_reminder_acknowledged"])
+    if "save_important_detail" in flows_tools:
+        functions.append(flows_tools["save_important_detail"])
 
     functions.append(FlowsFunctionSchema(
         name="transition_to_main",
@@ -348,7 +252,7 @@ def build_main_node(
     if tracking_ctx:
         main_task += f"\n\n{tracking_ctx}"
 
-    # Active tools: web_search + mark_reminder (others moved to Director/post-call)
+    # All tools for main phase (includes check_caregiver_notes)
     functions: list = list(flows_tools.values())
 
     # Transition tool
@@ -394,6 +298,12 @@ def build_winding_down_node(session_state: dict, flows_tools: dict) -> NodeConfi
     functions: list = []
     if "mark_reminder_acknowledged" in flows_tools:
         functions.append(flows_tools["mark_reminder_acknowledged"])
+    if "save_important_detail" in flows_tools:
+        functions.append(flows_tools["save_important_detail"])
+    if "web_search" in flows_tools:
+        functions.append(flows_tools["web_search"])
+    if "check_caregiver_notes" in flows_tools:
+        functions.append(flows_tools["check_caregiver_notes"])
 
     functions.append(FlowsFunctionSchema(
         name="transition_to_closing",
@@ -457,7 +367,6 @@ def _make_transition_to_onboarding_closing(session_state: dict):
 
     async def transition_to_closing(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
         logger.info("Transitioning: onboarding → closing")
-        _record_phase_transition(session_state, "closing")
         return (
             {"status": "success"},
             build_onboarding_closing_node(session_state),
@@ -551,7 +460,6 @@ def build_initial_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     # Onboarding flow for unsubscribed callers
     if session_state.get("call_type") == "onboarding":
         logger.info("Initial node: onboarding (unsubscribed caller)")
-        _record_phase_transition(session_state, "onboarding")
         return build_onboarding_node(session_state, flows_tools)
 
     reminder_prompt = session_state.get("reminder_prompt")
@@ -559,9 +467,7 @@ def build_initial_node(session_state: dict, flows_tools: dict) -> NodeConfig:
 
     if reminder_prompt and not reminders_delivered:
         logger.info("Initial node: reminder (pending reminders)")
-        _record_phase_transition(session_state, "reminder")
         return build_reminder_node(session_state, flows_tools, with_greeting=True)
 
     logger.info("Initial node: main (no pending reminders)")
-    _record_phase_transition(session_state, "main")
     return build_main_node(session_state, flows_tools, with_greeting=True)

@@ -29,7 +29,7 @@
 ## Conversation
 
 ### Natural Dialogue
-- Claude Sonnet 4.6 powers the conversation (streaming responses)
+- Claude Sonnet 4.5 powers the conversation (streaming responses)
 - Full in-call context retention (APPEND strategy, no truncation)
 - Warm, grandchild-like tone tuned for elderly users
 - Barge-in support via Silero VAD (interrupt detection)
@@ -248,7 +248,7 @@ Starts Director analysis before the user finishes speaking:
 - Trimmed system instruction: 429 → 144 tokens
 
 ### Anthropic Prompt Caching
-- Enabled on Claude Sonnet 4.6 for the voice LLM
+- Enabled on Claude Sonnet 4.5 for the voice LLM
 - System prompt and senior context cached across turns within a call
 - Reduces per-turn input token costs
 

@@ -90,11 +90,11 @@ class TestSeniorContext:
         ctx = _build_senior_context(state)
         assert "arthritis" in ctx
 
-    def test_news_not_in_system_prompt(self):
-        """News is no longer in system prompt — injected dynamically by Director."""
+    def test_news_in_system_prompt(self):
+        """News is pre-cached daily and included in system prompt."""
         state = _make_session_state(news_context="Here are some recent news items about gardening...")
         ctx = _build_senior_context(state)
-        assert "recent news" not in ctx
+        assert "recent news" in ctx
 
 
 
@@ -122,11 +122,12 @@ class TestMainNode:
         tools = make_flows_tools(state)
         node = build_main_node(state, tools)
         func_names = _get_func_names(node)
-        assert "search_memories" in func_names
         assert "web_search" in func_names
         assert "mark_reminder_acknowledged" in func_names
-        assert "save_important_detail" in func_names
         assert "transition_to_winding_down" in func_names
+        # Removed tools (moved to Director/post-call)
+        assert "search_memories" not in func_names
+        assert "save_important_detail" not in func_names
 
     def test_node_does_not_have_get_news(self):
         state = _make_session_state()
@@ -233,16 +234,16 @@ class TestReminderNode:
         node = build_reminder_node(state, tools)
         func_names = _get_func_names(node)
         assert "mark_reminder_acknowledged" in func_names
-        assert "save_important_detail" in func_names
         assert "transition_to_main" in func_names
 
-    def test_does_not_have_conversation_tools(self):
+    def test_does_not_have_removed_tools(self):
         state = _make_session_state()
         tools = make_flows_tools(state)
         node = build_reminder_node(state, tools)
         func_names = _get_func_names(node)
         assert "web_search" not in func_names
         assert "search_memories" not in func_names
+        assert "save_important_detail" not in func_names
 
     def test_includes_reminder_context(self):
         state = _make_session_state()

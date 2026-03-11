@@ -35,18 +35,26 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 ### Working Features (Pipecat)
 - **2-Layer Observer Architecture + Post-Call**
   - Layer 1: Quick Observer (0ms) - 268 regex patterns + programmatic goodbye (2s EndFrame)
-  - Layer 2: Conversation Director — Non-blocking per-turn analysis + speculative pre-processing + mid-call memory refresh
-    - Primary: Cerebras (~3000 tok/s, ~70ms) with Gemini Flash fallback
-    - Speculative pre-processing: Detects 250ms silence onset via interim gaps → starts Cerebras analysis → same-turn guidance when ready
+  - Layer 2: Split Conversation Director — Two specialized Groq calls:
+    - Query Director (~200ms): Extracts `memory_queries` + `web_queries` continuously on interims
+    - Guidance Director (~400ms): Conversation guidance on 250ms silence (speculative)
+    - Ephemeral context: All injections tagged `[EPHEMERAL:`, stripped each turn
     - Metrics: Logs speculative hit rate per call
   - Post-Call: Analysis, memory extraction, daily context, snapshot rebuild (Gemini Flash)
+- **Caregiver Mood Summary SMS** — Post-call Gemini analysis generates a privacy-respecting, mood-aware SMS for caregivers. If the senior seems down, subtly suggests the caregiver give them a call.
+- **Director-First Architecture** — Eliminated ~14s of Claude tool-call latency per call:
+  - `search_memories` → Director injects memories as ephemeral context (500ms gate)
+  - `save_important_detail` → Removed; post-call `extract_from_conversation` handles it
+  - `check_caregiver_notes` → Pre-fetched at call start, injected into system prompt
+  - `mark_reminder_acknowledged` → Fire-and-forget (handler returns instantly, DB write in background)
 - **Predictive Context Engine** — Speculative memory prefetch eliminates tool-call latency
   - 1st wave: Regex entity/topic extraction on final transcriptions → background `memory.search()`
-  - 2nd wave: Director Gemini analysis (next_topic, reminders, news) → anticipatory prefetch
+  - 2nd wave: Query Director extracts `memory_queries` → anticipatory prefetch
   - Interim transcriptions: Debounced prefetch while user is still speaking (1s gap, 15+ chars)
-  - Cache-first tool handlers: `search_memories` returns instantly on cache hit (~0ms vs 200-300ms)
+  - 500ms memory gate: Waits for prefetch cache before passing frame to Claude
 - **Pipecat Flows** - 4-phase call state machine (opening → main → winding_down → closing)
-- **5 LLM Tools** - search_memories, web_search, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
+- **2 LLM Tools** - web_search (Claude fallback), mark_reminder_acknowledged (fire-and-forget)
+- **Director-Owned Web Search** — Query Director extracts `web_queries` mid-speech, Director runs web search and gates TranscriptionFrame (filler TTS + [WEB RESULT] injection into Claude's context)
 - **Programmatic Call Ending** - Quick Observer detects goodbye → EndFrame after 2s delay (bypasses LLM)
 - **Director Fallback Actions** - Force winding-down at 9min, force end at 12min (configurable per-senior)
 - **Full In-Call Context Retention** - APPEND strategy keeps complete conversation history (no summary truncation)
@@ -63,7 +71,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Context Pre-caching** - Senior context + news cached at 5 AM local time, news persisted to `seniors.cached_news`
 - Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3 via Pipecat)
-- LLM responses (Claude Sonnet 4.6 via Pipecat AnthropicLLMService, prompt caching enabled)
+- LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - TTS (ElevenLabs via Pipecat)
 - VAD (Silero — confidence=0.6, stop_secs=1.2, min_volume=0.5)
 - News via OpenAI web search (1hr cache)
@@ -116,20 +124,20 @@ Twilio Audio ──► FastAPIWebsocketTransport
               │    → inject SAME or  │     │                           │
               │    PREVIOUS turn's   │     │  Speculative: on 250ms    │
               │    guidance          │     │  silence onset, starts    │
-              │ 2. Passes frame      │     │  Cerebras analysis early  │
-              │    immediately       │     │                           │
-              │ 3. Fires background  │     │  Also: mid-call memory   │
-              │    analysis ────────►│     │  refresh after 5+ min     │
-              │                      │     │  Predictive prefetch      │
-              │                      │     │  (1st + 2nd wave)         │
-              │                      │     │  Fallback: force end      │
-              │                      │     │  at 9min / 12min          │
+              │ 2. Web search gate:  │     │  Cerebras analysis early  │
+              │    if search in-     │     │                           │
+              │    flight, hold frame│     │  Also: Director-owned web │
+              │    + push filler TTS │     │  search (filler + gate),  │
+              │    + inject result   │     │  mid-call memory refresh, │
+              │ 3. Fires background  │     │  predictive prefetch      │
+              │    analysis ────────►│     │  (1st + 2nd wave),        │
+              │                      │     │  force end at 9min/12min  │
               └─────────┬───────────┘     └──────────────────────────┘
                         │ (no delay)
                         ▼
               Context Aggregator (user) ← builds LLM context from transcriptions
                         ▼
-              Claude Sonnet 4.6 + FlowManager (4-phase state machine)
+              Claude Sonnet 4.5 + FlowManager (4-phase state machine)
                         │ TextFrame
                         ▼
               Conversation Tracker (topics, questions, advice + shared transcript)
@@ -145,15 +153,16 @@ Twilio Audio ──► FastAPIWebsocketTransport
 
 **Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. Quick Observer's guidance is for the **current** turn (instant regex). Director's guidance can be **same-turn** (when speculative Cerebras analysis completes before the final transcription) or **previous-turn** (fallback). Both appear as user-role messages in Claude's context before the next LLM call.
 
-**Predictive Context Engine**: The Director also runs speculative memory prefetch in the background. On each transcription, regex extracts topics/entities and pre-fetches memories. After Gemini analysis completes (~150ms), a second wave prefetches based on `next_topic`, upcoming reminders, and news topics. Results are cached in `session_state["_prefetch_cache"]` (TTL=30s, Jaccard fuzzy match). When Claude calls `search_memories`, the tool handler checks the cache first — cache hit returns instantly (~0ms vs 200-300ms). Interim transcriptions also trigger debounced prefetch while the user is still speaking.
+**Predictive Context Engine**: The Director also runs speculative memory prefetch in the background. On each transcription, regex extracts topics/entities and pre-fetches memories. After Groq analysis completes (~70ms), a second wave prefetches based on `next_topic`, upcoming reminders, and news topics. Results are cached in `session_state["_prefetch_cache"]` (TTL=30s, Jaccard fuzzy match). When Claude calls `search_memories`, the tool handler checks the cache first — cache hit returns instantly (~0ms vs 200-300ms). Interim transcriptions also trigger debounced prefetch while the user is still speaking.
+
+**Director-Owned Web Search**: When the Groq speculative analysis returns `web_queries`, the Director starts a web search immediately. When the final TranscriptionFrame arrives, if a web search is in-flight, the Director gates the frame: pushes a `TTSSpeakFrame` filler ("Let me check on that for you"), awaits the search result (max 10s), injects it as a `[WEB RESULT]` message into Claude's context, then releases the frame. Claude never calls `web_search` — it just uses the injected result naturally.
 
 ### Call Phase State Machine (Pipecat Flows)
 
 | Phase | Tools | Context Strategy |
 |-------|-------|-----------------|
-| **Opening** | search_memories, save_important_detail, check_caregiver_notes, transition_to_main | APPEND, respond_immediately |
-| **Main** | search_memories, web_search, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes, transition_to_winding_down | APPEND |
-| **Winding Down** | mark_reminder_acknowledged, save_important_detail, transition_to_closing | APPEND |
+| **Main** | web_search, mark_reminder_acknowledged, transition_to_winding_down | APPEND, ephemeral injections |
+| **Winding Down** | mark_reminder_acknowledged, transition_to_closing | APPEND |
 | **Closing** | *(none — post_action: end_conversation)* | APPEND |
 
 ### Post-Call Processing
@@ -173,12 +182,12 @@ pipecat/
 │
 ├── flows/
 │   ├── nodes.py                     ← 4 call phase NodeConfigs (imports prompts.py) (319 LOC)
-│   └── tools.py                     ← 5 LLM tool schemas + closure-based handlers (269 LOC)
+│   └── tools.py                     ← 2 LLM tool schemas (web_search, mark_reminder) + handlers (303 LOC)
 │
 ├── processors/
 │   ├── patterns.py                  ← Pattern data: 268 regex patterns, 19 categories (503 LOC)
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame (386 LOC)
-│   ├── conversation_director.py     ← Layer 2: Gemini Flash non-blocking + prefetch orchestration + mid-call memory refresh (275 LOC)
+│   ├── conversation_director.py     ← Layer 2: Split Director (Query+Guidance) + web search gating + ephemeral context (850 LOC)
 │   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (246 LOC)
 │   ├── metrics_logger.py            ← Call metrics + prefetch stats logging (110 LOC)
 │   ├── goodbye_gate.py              ← False-goodbye grace period — NOT in active pipeline (135 LOC)
@@ -189,7 +198,7 @@ pipecat/
 │   ├── reminder_delivery.py         ← Delivery CRUD + prompt formatting (95 LOC)
 │   ├── post_call.py                 ← Post-call: analysis, memory, cleanup, snapshot rebuild (338 LOC)
 │   ├── prefetch.py                  ← Predictive Context Engine: cache + query extraction + runner (250 LOC)
-│   ├── director_llm.py              ← Gemini Flash analysis for Director + prefetch hints (350 LOC)
+│   ├── director_llm.py              ← Split Director LLM: Query Director + Guidance Director (580 LOC)
 │   ├── call_analysis.py             ← Post-call analysis + call quality scoring (246 LOC)
 │   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (392 LOC)
 │   ├── interest_discovery.py        ← Interest extraction from conversations (183 LOC)
@@ -436,15 +445,39 @@ npx playwright install chromium
 | Update admin API client | `apps/admin-v2/src/lib/api.ts` |
 | Add/modify frontend E2E tests | `tests/e2e/` — see [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) |
 
+### Commit Messages & PR Titles
+
+Write commit messages and PR squash titles that are **specific and descriptive** — someone scanning `git log` should understand what changed and why without opening the PR.
+
+**Rules:**
+- Lead with what was actually changed, not vague category labels
+- Include the **why** or **effect**, not just the what
+- PR squash titles are the permanent record — make them count (individual commit messages get squashed away)
+
+**Bad:**
+```
+feat: analysis insights in prompt + memory limit 20
+feat: update memory system
+fix: improve conversation quality
+```
+
+**Good:**
+```
+feat: surface follow-up suggestions & empathy concerns from call analysis in system prompt
+feat: reduce memory context to 20 items (recent turns already cover last 3 calls)
+fix: lower memory similarity threshold 0.7→0.45 (was filtering all results)
+```
+
 ### Documentation Updates
 
 After each commit that adds features or changes architecture, update:
 
 1. **`DIRECTORY.md`** - Directory map and wayfinding (agents read this FIRST)
 2. **`pipecat/docs/ARCHITECTURE.md`** - Pipeline diagrams, file structure, tech stack
-3. **`CLAUDE.md`** (this file) - Working features, key files, AI assistant reference
-4. **`README.md`** - Features, quick start, project structure
-5. **`docs/architecture/`** - Architecture suite (OVERVIEW, ARCHITECTURE, SECURITY, SCALABILITY, COST, TESTING, PERFORMANCE)
+3. **`pipecat/docs/LEARNINGS.md`** - Engineering learnings from production debugging
+4. **`CLAUDE.md`** (this file) - Working features, key files, AI assistant reference
+5. **`README.md`** - Features, quick start, project structure
+6. **`docs/architecture/`** - Architecture suite (OVERVIEW, ARCHITECTURE, SECURITY, SCALABILITY, COST, TESTING, PERFORMANCE)
 
 ### Deployment
 
@@ -555,4 +588,4 @@ Consult these for product direction, decisions, and priorities.
 
 ---
 
-*Last updated: March 2026 — v5.2 with multi-provider Director, web search prefetch, Claude Sonnet 4.6, GrowthBook feature flags, observability & reliability*
+*Last updated: March 2026 — v5.2 with multi-provider Director, web search prefetch, Claude Sonnet 4.5, GrowthBook feature flags, observability & reliability*

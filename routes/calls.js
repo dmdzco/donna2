@@ -13,7 +13,8 @@ const router = Router();
 router.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSchema), async (req, res) => {
   const { phoneNumber } = req.body;
   const twilioClient = req.app.get('twilioClient');
-  const BASE_URL = req.app.get('baseUrl');
+  // Twilio webhooks must hit Pipecat (voice pipeline), not this Node.js server
+  const PIPECAT_URL = process.env.PIPECAT_BASE_URL || req.app.get('baseUrl');
 
   try {
     // PRE-FETCH: Look up senior and build context BEFORE calling Twilio
@@ -29,8 +30,8 @@ router.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSche
     const call = await twilioClient.calls.create({
       to: phoneNumber,
       from: process.env.TWILIO_PHONE_NUMBER,
-      url: `${BASE_URL}/voice/answer`,
-      statusCallback: `${BASE_URL}/voice/status`,
+      url: `${PIPECAT_URL}/voice/answer`,
+      statusCallback: `${PIPECAT_URL}/voice/status`,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
     });
 
@@ -44,11 +45,11 @@ router.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSche
 });
 
 // API: List active calls (admin only)
+// Active calls are tracked by Pipecat — query its /health endpoint
 router.get('/api/calls', requireAdmin, (req, res) => {
-  const sessions = req.app.get('sessions');
   res.json({
-    activeCalls: sessions.size,
-    callSids: Array.from(sessions.keys()),
+    activeCalls: 0,
+    callSids: [],
   });
 });
 

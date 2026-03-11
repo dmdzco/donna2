@@ -150,7 +150,7 @@ async def store(
 
 
 async def search(
-    senior_id: str | None, query: str, limit: int = 5, min_similarity: float = 0.45,
+    senior_id: str | None, query: str, limit: int = 5, min_similarity: float = 0.7,
     prospect_id: str | None = None,
 ) -> list[dict]:
     """Semantic search — find memories similar to *query*.
@@ -201,8 +201,7 @@ async def get_recent(senior_id: str, limit: int = 10) -> list[dict]:
     from db import query_many
 
     return await query_many(
-        """SELECT id, type, content, importance, metadata, created_at, last_accessed_at
-           FROM memories WHERE senior_id = $1 ORDER BY created_at DESC LIMIT $2""",
+        "SELECT * FROM memories WHERE senior_id = $1 ORDER BY created_at DESC LIMIT $2",
         senior_id,
         limit,
     )
@@ -213,8 +212,7 @@ async def get_important(senior_id: str, limit: int = 5) -> list[dict]:
     from db import query_many
 
     rows = await query_many(
-        """SELECT id, type, content, importance, metadata, created_at, last_accessed_at
-           FROM memories
+        """SELECT * FROM memories
            WHERE senior_id = $1 AND importance >= 50
            ORDER BY importance DESC
            LIMIT $2""",
@@ -239,8 +237,7 @@ async def get_critical(senior_id: str, limit: int = 3) -> list[dict]:
     from db import query_many
 
     return await query_many(
-        """SELECT id, type, content, importance, metadata, created_at, last_accessed_at
-           FROM memories
+        """SELECT * FROM memories
            WHERE senior_id = $1
              AND (type = 'concern' OR importance >= 80)
            ORDER BY importance DESC
@@ -282,44 +279,57 @@ async def build_context(
     senior: dict | None = None,
     is_first_turn: bool = True,
 ) -> str:
-    """Build memory context for the system prompt.
+    """Build tiered context string for conversation.
 
-    Loads top 20 memories by importance — enough to feel personal without
-    duplicating recent turns/summaries that are already in the prompt.
-    Speculative prefetch fills in the rest mid-conversation.
+    Tier 1 (Critical): always included
+    Tier 2 (Contextual): when topic provided
+    Tier 3 (Background): first turn only
     """
-    from db import query_many
-
     parts: list[str] = []
+    included_ids: set[str] = set()
 
-    # Top memories by importance + recency (prefetch supplements mid-call)
-    all_memories = await query_many(
-        """SELECT id, type, content, importance, metadata, created_at
-           FROM memories
-           WHERE senior_id = $1
-           ORDER BY importance DESC, created_at DESC
-           LIMIT 20""",
-        senior_id,
-    )
+    # Tier 1: Critical
+    critical = await get_critical(senior_id, 3)
+    logger.info("build_context({sid}): tier1_critical={n}", sid=str(senior_id)[:8], n=len(critical))
+    if critical:
+        parts.append("Critical to know:")
+        for m in critical:
+            parts.append(f"- {m['content']}")
+            included_ids.add(m["id"])
 
-    logger.info(
-        "build_context({sid}): loaded {n} memories",
-        sid=str(senior_id)[:8], n=len(all_memories),
-    )
+    # Tier 2: Contextual
+    logger.info("build_context({sid}): tier2 topic={t}", sid=str(senior_id)[:8], t=current_topic or "none")
+    if current_topic:
+        relevant = await search(senior_id, current_topic, 3, 0.7)
+        new_relevant = [m for m in relevant if m["id"] not in included_ids]
+        if new_relevant:
+            parts.append("\nRelevant:")
+            for m in new_relevant:
+                parts.append(f"- {m['content']}")
+                included_ids.add(m["id"])
 
-    if not all_memories:
-        return ""
+    # Tier 3: Background (first turn only)
+    logger.info("build_context({sid}): tier3 is_first_turn={ft}", sid=str(senior_id)[:8], ft=is_first_turn)
+    if is_first_turn:
+        background = []
+        important = await get_important(senior_id, 5)
+        for m in important:
+            if m["id"] not in included_ids:
+                background.append(m)
+                included_ids.add(m["id"])
 
-    # Group by type for readable presentation
-    groups = group_by_type(all_memories)
-    formatted = format_grouped_memories(groups)
-    parts.append(f"What you know about them:\n{formatted}")
+        recent = await get_recent(senior_id, 5)
+        for m in recent:
+            if m["id"] not in included_ids:
+                background.append(m)
+
+        if background:
+            groups = group_by_type(background)
+            formatted = format_grouped_memories(groups)
+            parts.append(f"\nBackground:\n{formatted}")
 
     result = "\n".join(parts)
-    logger.info(
-        "build_context({sid}): total={n} chars, {m} memories",
-        sid=str(senior_id)[:8], n=len(result), m=len(all_memories),
-    )
+    logger.info("build_context({sid}): total={n} chars, {m} memories included", sid=str(senior_id)[:8], n=len(result), m=len(included_ids))
     return result
 
 
@@ -333,7 +343,7 @@ async def refresh_context(senior_id: str, current_topics: list[str]) -> str | No
 
     # Topic-relevant memories first
     for topic in current_topics[:3]:
-        relevant = await search(senior_id, topic, 3, 0.45)
+        relevant = await search(senior_id, topic, 3, 0.7)
         for m in relevant:
             if m["id"] not in included_ids:
                 parts.append(f"- {m['content']}")
@@ -386,23 +396,12 @@ async def extract_from_conversation(
         return
 
     prompt = (
-        "Analyze this conversation between Donna (AI companion) and an elderly person. "
-        "Extract important memories that will help personalize future calls.\n\n"
+        "Analyze this conversation and extract important facts, preferences, "
+        "events, or concerns about the person. Return a JSON array of memories.\n\n"
         f"Conversation:\n{transcript}\n\n"
-        'Return format:\n{{"memories": [\n  {{"type": "fact|preference|event|concern|relationship", '
-        '"content": "...", "importance": 50-100}}\n]}}\n\n'
-        "CRITICAL — write RICH, DETAILED content strings that will match semantic search:\n"
-        "- BAD: \"User may enjoy playing padel\" (too vague, won't match searches)\n"
-        "- GOOD: \"Enjoys playing padel (paddle tennis) regularly as a sport and hobby\"\n"
-        "- BAD: \"User is working on a project\" (useless)\n"
-        "- GOOD: \"Building an AI companion called Donna that makes phone calls to elderly people\"\n\n"
-        "Each memory should:\n"
-        "- Include specific names, places, activities, and context\n"
-        "- Use synonyms and related terms (helps semantic matching)\n"
-        "- Be a complete sentence that stands alone without conversation context\n"
-        "- Reference the person naturally (e.g., \"Has a grandson named Jake who plays baseball\")\n\n"
-        "Extract 5-15 memories per conversation. Include both big life facts and "
-        "small personal details that show you were really listening."
+        'Return format:\n[\n  {"type": "fact|preference|event|concern|relationship", '
+        '"content": "...", "importance": 50-100}\n]\n\n'
+        "Only include genuinely important or memorable information. Be concise."
     )
 
     try:

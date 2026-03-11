@@ -1,77 +1,49 @@
 """Tests for LLM tool schemas and handler factory."""
 
+import asyncio
+
 import pytest
 
 from flows.tools import (
-    SEARCH_MEMORIES_SCHEMA,
-    WEB_SEARCH_SCHEMA,
     MARK_REMINDER_SCHEMA,
-    SAVE_DETAIL_SCHEMA,
+    WEB_SEARCH_SCHEMA,
     make_tool_handlers,
     make_flows_tools,
 )
 
 
 class TestToolSchemas:
-    def test_search_memories_schema_valid(self):
-        assert SEARCH_MEMORIES_SCHEMA["name"] == "search_memories"
-        assert "query" in SEARCH_MEMORIES_SCHEMA["properties"]
-        assert "query" in SEARCH_MEMORIES_SCHEMA["required"]
-
     def test_web_search_schema_valid(self):
         assert WEB_SEARCH_SCHEMA["name"] == "web_search"
         assert "query" in WEB_SEARCH_SCHEMA["properties"]
         assert "query" in WEB_SEARCH_SCHEMA["required"]
-
-    def test_web_search_description_mentions_current_info(self):
-        assert "current information" in WEB_SEARCH_SCHEMA["description"].lower()
 
     def test_mark_reminder_schema_valid(self):
         assert MARK_REMINDER_SCHEMA["name"] == "mark_reminder_acknowledged"
         assert "reminder_id" in MARK_REMINDER_SCHEMA["properties"]
         assert "status" in MARK_REMINDER_SCHEMA["properties"]
 
-    def test_save_detail_schema_valid(self):
-        assert SAVE_DETAIL_SCHEMA["name"] == "save_important_detail"
-        assert "detail" in SAVE_DETAIL_SCHEMA["properties"]
-        assert "category" in SAVE_DETAIL_SCHEMA["properties"]
-        assert "detail" in SAVE_DETAIL_SCHEMA["required"]
-
 
 class TestToolHandlerFactory:
-    def test_make_tool_handlers_returns_all_handlers(self):
+    def test_make_tool_handlers_returns_active_handlers(self):
         session_state = {"senior_id": "test-123", "senior": {"name": "Test"}}
         handlers = make_tool_handlers(session_state)
-        assert "search_memories" in handlers
         assert "web_search" in handlers
         assert "mark_reminder_acknowledged" in handlers
-        assert "save_important_detail" in handlers
+        # Removed tools should NOT be present
+        assert "search_memories" not in handlers
+        assert "save_important_detail" not in handlers
+        assert "check_caregiver_notes" not in handlers
 
     def test_handlers_are_async_callables(self):
         session_state = {"senior_id": "test-123"}
         handlers = make_tool_handlers(session_state)
-        import asyncio
         for name, handler in handlers.items():
             assert asyncio.iscoroutinefunction(handler), f"{name} is not async"
 
     @pytest.mark.asyncio
-    async def test_search_memories_no_senior(self):
-        session_state = {"senior_id": None}
-        handlers = make_tool_handlers(session_state)
-        result = await handlers["search_memories"]({"query": "gardening"})
-        # Handlers return success with friendly message (not error) to avoid confusing voice LLM
-        assert result["status"] == "success"
-        assert "No memories" in result["result"]
-
-    @pytest.mark.asyncio
-    async def test_save_detail_no_senior(self):
-        session_state = {"senior_id": None}
-        handlers = make_tool_handlers(session_state)
-        result = await handlers["save_important_detail"]({"detail": "test", "category": "fact"})
-        assert result["status"] == "success"
-
-    @pytest.mark.asyncio
-    async def test_mark_reminder_no_delivery(self):
+    async def test_mark_reminder_fire_and_forget(self):
+        """mark_reminder returns immediately with local tracking; DB write is background."""
         session_state = {"senior_id": "test", "reminder_delivery": None}
         handlers = make_tool_handlers(session_state)
         result = await handlers["mark_reminder_acknowledged"]({
@@ -82,104 +54,13 @@ class TestToolHandlerFactory:
         assert "rem-1" in session_state.get("reminders_delivered", set())
 
 
-class TestSearchMemoriesCacheLookup:
-    """Tests for prefetch cache integration in search_memories handler."""
-
-    @pytest.mark.asyncio
-    async def test_cache_hit_returns_cached_results(self):
-        from services.prefetch import PrefetchCache
-
-        cache = PrefetchCache()
-        cache.put("gardening", [
-            {"content": "Margaret loves her rose garden"},
-            {"content": "She planted tulips last spring"},
-        ])
-
-        session_state = {
-            "senior_id": "test-123",
-            "_prefetch_cache": cache,
-        }
-        handlers = make_tool_handlers(session_state)
-        result = await handlers["search_memories"]({"query": "gardening"})
-
-        assert result["status"] == "success"
-        assert "rose garden" in result["result"]
-        assert "tulips" in result["result"]
-        assert "[MEMORY]" in result["result"]
-
-    @pytest.mark.asyncio
-    async def test_cache_miss_falls_through_to_live_search(self):
-        from services.prefetch import PrefetchCache
-        from unittest.mock import AsyncMock, patch
-
-        cache = PrefetchCache()
-        # Cache has "gardening" but we'll query "cooking"
-        cache.put("gardening", [{"content": "Roses"}])
-
-        session_state = {
-            "senior_id": "test-123",
-            "_prefetch_cache": cache,
-        }
-        handlers = make_tool_handlers(session_state)
-
-        with patch("services.memory.search", new_callable=AsyncMock) as mock_search:
-            mock_search.return_value = [{"content": "She bakes apple pie"}]
-            result = await handlers["search_memories"]({"query": "cooking"})
-
-        assert result["status"] == "success"
-        assert "apple pie" in result["result"]
-        mock_search.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_no_cache_falls_through_gracefully(self):
-        """When no prefetch cache exists, falls through to live search."""
-        from unittest.mock import AsyncMock, patch
-
-        session_state = {
-            "senior_id": "test-123",
-            # No _prefetch_cache key
-        }
-        handlers = make_tool_handlers(session_state)
-
-        with patch("services.memory.search", new_callable=AsyncMock) as mock_search:
-            mock_search.return_value = [{"content": "Some memory"}]
-            result = await handlers["search_memories"]({"query": "anything"})
-
-        assert result["status"] == "success"
-        mock_search.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_cache_fuzzy_match(self):
-        from services.prefetch import PrefetchCache
-
-        cache = PrefetchCache()
-        cache.put("grandson Jake baseball", [
-            {"content": "Jake plays little league baseball"},
-        ])
-
-        session_state = {
-            "senior_id": "test-123",
-            "_prefetch_cache": cache,
-        }
-        handlers = make_tool_handlers(session_state)
-        # Fuzzy match — partial word overlap
-        result = await handlers["search_memories"]({"query": "Jake grandson"})
-
-        assert result["status"] == "success"
-        assert "little league" in result["result"]
-
-
 class TestFlowsTools:
-    def test_make_flows_tools_returns_schemas(self):
+    def test_make_flows_tools_returns_active_schemas(self):
         session_state = {"senior_id": "test-123"}
         tools = make_flows_tools(session_state)
-        assert len(tools) == 5
-        assert "search_memories" in tools
+        assert len(tools) == 2
         assert "web_search" in tools
-        assert "get_news" not in tools
         assert "mark_reminder_acknowledged" in tools
-        assert "save_important_detail" in tools
-        assert "check_caregiver_notes" in tools
 
     def test_flows_tools_have_handlers(self):
         session_state = {"senior_id": "test-123"}

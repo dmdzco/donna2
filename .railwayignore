@@ -1,0 +1,30 @@
+# Python Pipecat service (deployed separately via cd pipecat && railway up)
+pipecat/
+
+# Frontend apps (deployed to Vercel)
+apps/
+
+# Documentation
+docs/
+
+# Tests (not needed at runtime)
+tests/
+playwright.config.ts
+playwright.integration.config.ts
+vitest.config.js
+vitest.setup.js
+
+# CI/CD
+.github/
+
+# Dev tooling
+scripts/
+Makefile
+.nvmrc
+.claude/
+
+# Docs
+CLAUDE.md
+DIRECTORY.md
+README.md
+vercel.json

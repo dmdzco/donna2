@@ -240,29 +240,29 @@ class TestFormatDirectorGuidance:
         assert "Laugh" not in (result or "")
 
 
-class TestCerebrasAvailable:
+class TestGroqAvailable:
     def test_returns_false_without_key(self):
-        from services.director_llm import cerebras_available
+        from services.director_llm import groq_available
         with patch.dict("os.environ", {}, clear=True):
-            assert cerebras_available() is False
+            assert groq_available() is False
 
     def test_returns_true_with_key(self):
-        from services.director_llm import cerebras_available
-        with patch.dict("os.environ", {"CEREBRAS_API_KEY": "test-key"}):
-            assert cerebras_available() is True
+        from services.director_llm import groq_available
+        with patch.dict("os.environ", {"GROQ_API_KEY": "test-key"}):
+            assert groq_available() is True
 
 
-class TestCerebrasAnalyze:
+class TestGroqAnalyze:
     @pytest.mark.asyncio
     async def test_returns_none_without_client(self):
-        from services.director_llm import _cerebras_analyze, _cerebras_breaker
-        with patch("services.director_llm._get_cerebras_client", return_value=None):
-            result = await _cerebras_analyze("test content", _cerebras_breaker)
+        from services.director_llm import _groq_analyze, _groq_breaker
+        with patch("services.director_llm._get_groq_client", return_value=None):
+            result = await _groq_analyze("test content", _groq_breaker)
             assert result is None
 
     @pytest.mark.asyncio
     async def test_parses_valid_json_response(self):
-        from services.director_llm import _cerebras_analyze, _cerebras_breaker
+        from services.director_llm import _groq_analyze, _groq_breaker
         direction = {
             "analysis": {"call_phase": "main", "engagement_level": "high"},
             "direction": {},
@@ -278,8 +278,8 @@ class TestCerebrasAnalyze:
         mock_client = MagicMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        with patch("services.director_llm._get_cerebras_client", return_value=mock_client):
-            result = await _cerebras_analyze("test", _cerebras_breaker)
+        with patch("services.director_llm._get_groq_client", return_value=mock_client):
+            result = await _groq_analyze("test", _groq_breaker)
             assert result["analysis"]["call_phase"] == "main"
 
 
@@ -287,13 +287,13 @@ class TestAnalyzeTurn:
     @pytest.mark.asyncio
     async def test_returns_default_without_any_provider(self):
         from services.director_llm import analyze_turn, get_default_direction
-        with patch("services.director_llm.cerebras_available", return_value=False), \
+        with patch("services.director_llm.groq_available", return_value=False), \
              patch("services.director_llm._gemini_analyze", new_callable=AsyncMock, return_value=None):
             result = await analyze_turn("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
             assert result == get_default_direction()
 
     @pytest.mark.asyncio
-    async def test_cerebras_primary_gemini_fallback(self):
+    async def test_groq_primary_gemini_fallback(self):
         from services.director_llm import analyze_turn
         gemini_direction = {
             "analysis": {"call_phase": "main", "engagement_level": "medium", "emotional_tone": "neutral"},
@@ -301,30 +301,30 @@ class TestAnalyzeTurn:
             "reminder": {},
             "guidance": {},
         }
-        with patch("services.director_llm.cerebras_available", return_value=True), \
-             patch("services.director_llm._cerebras_analyze", new_callable=AsyncMock, return_value=None), \
+        with patch("services.director_llm.groq_available", return_value=True), \
+             patch("services.director_llm._groq_analyze", new_callable=AsyncMock, return_value=None), \
              patch("services.director_llm._gemini_analyze", new_callable=AsyncMock, return_value=gemini_direction):
             result = await analyze_turn("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
             assert result["analysis"]["engagement_level"] == "medium"
 
     @pytest.mark.asyncio
-    async def test_cerebras_used_when_available(self):
+    async def test_groq_used_when_available(self):
         from services.director_llm import analyze_turn
-        cerebras_direction = {
+        groq_direction = {
             "analysis": {"call_phase": "main", "engagement_level": "high", "emotional_tone": "positive"},
             "direction": {},
             "reminder": {},
             "guidance": {},
         }
-        with patch("services.director_llm.cerebras_available", return_value=True), \
-             patch("services.director_llm._cerebras_analyze", new_callable=AsyncMock, return_value=cerebras_direction), \
+        with patch("services.director_llm.groq_available", return_value=True), \
+             patch("services.director_llm._groq_analyze", new_callable=AsyncMock, return_value=groq_direction), \
              patch("services.director_llm._gemini_analyze", new_callable=AsyncMock) as mock_gemini:
             result = await analyze_turn("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
             assert result["analysis"]["engagement_level"] == "high"
             mock_gemini.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_gemini_only_without_cerebras(self):
+    async def test_gemini_only_without_groq(self):
         from services.director_llm import analyze_turn
         gemini_direction = {
             "analysis": {"call_phase": "opening", "engagement_level": "medium", "emotional_tone": "neutral"},
@@ -332,7 +332,7 @@ class TestAnalyzeTurn:
             "reminder": {},
             "guidance": {},
         }
-        with patch("services.director_llm.cerebras_available", return_value=False), \
+        with patch("services.director_llm.groq_available", return_value=False), \
              patch("services.director_llm._gemini_analyze", new_callable=AsyncMock, return_value=gemini_direction):
             result = await analyze_turn("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
             assert result["analysis"]["call_phase"] == "opening"
@@ -340,14 +340,14 @@ class TestAnalyzeTurn:
 
 class TestAnalyzeTurnSpeculative:
     @pytest.mark.asyncio
-    async def test_returns_none_without_cerebras(self):
+    async def test_returns_none_without_groq(self):
         from services.director_llm import analyze_turn_speculative
-        with patch("services.director_llm.cerebras_available", return_value=False):
+        with patch("services.director_llm.groq_available", return_value=False):
             result = await analyze_turn_speculative("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
             assert result is None
 
     @pytest.mark.asyncio
-    async def test_returns_result_with_cerebras(self):
+    async def test_returns_result_with_groq(self):
         from services.director_llm import analyze_turn_speculative
         direction = {
             "analysis": {"call_phase": "main", "engagement_level": "high"},
@@ -355,15 +355,15 @@ class TestAnalyzeTurnSpeculative:
             "reminder": {},
             "guidance": {},
         }
-        with patch("services.director_llm.cerebras_available", return_value=True), \
-             patch("services.director_llm._cerebras_analyze", new_callable=AsyncMock, return_value=direction):
+        with patch("services.director_llm.groq_available", return_value=True), \
+             patch("services.director_llm._groq_analyze", new_callable=AsyncMock, return_value=direction):
             result = await analyze_turn_speculative("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
             assert result["analysis"]["engagement_level"] == "high"
 
     @pytest.mark.asyncio
     async def test_returns_none_on_failure(self):
         from services.director_llm import analyze_turn_speculative
-        with patch("services.director_llm.cerebras_available", return_value=True), \
-             patch("services.director_llm._cerebras_analyze", new_callable=AsyncMock, side_effect=Exception("fail")):
+        with patch("services.director_llm.groq_available", return_value=True), \
+             patch("services.director_llm._groq_analyze", new_callable=AsyncMock, side_effect=Exception("fail")):
             result = await analyze_turn_speculative("hello", {"senior": {"name": "Test"}, "_call_start_time": time.time()})
             assert result is None

@@ -117,7 +117,26 @@ class TestPostCallProcessing:
             {"role": "user", "content": "I'm doing well"},
         ]
 
-        tracker = _make_tracker(session_state, topics=["greeting"], advice=[])
+        tracker = ConversationTrackerProcessor(session_state=session_state)
+        tracker.state.topics_discussed = ["greeting"]
+        tracker.state.advice_given = []
+
+        with patch("services.conversations.complete", new_callable=AsyncMock) as mock_complete, \
+             patch("services.call_analysis.analyze_completed_call", new_callable=AsyncMock) as mock_analyze, \
+             patch("services.call_analysis.save_call_analysis", new_callable=AsyncMock) as mock_save_analysis, \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock) as mock_extract, \
+             patch("services.interest_discovery.discover_new_interests", return_value=[]) as mock_discover, \
+             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={"gardening": 5.0}) as mock_scores, \
+             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock) as mock_update_scores, \
+             patch("services.daily_context.save_call_context", new_callable=AsyncMock) as mock_daily, \
+             patch("services.context_cache.clear_cache") as mock_cache_clear, \
+             patch("services.scheduler.clear_reminder_context") as mock_sched_clear:
+
+            mock_analyze.return_value = {
+                    "mood": "positive",
+                    "caregiver_sms": "Donna just chatted with Margaret for 2 minutes. She was in great spirits today!",
+                    "summary": "Good call",
+                }
 
         with _base_patches() as mocks:
             from services.post_call import run_post_call
@@ -153,8 +172,11 @@ class TestPostCallProcessing:
 
         tracker = _make_tracker(reminder_session_state)
 
-        with _base_patches() as mocks:
-            mocks["analyze"].return_value = {"mood": "neutral", "summary": "Short call"}
+            mock_analyze.return_value = {
+                    "mood": "neutral",
+                    "caregiver_sms": "Donna spoke with Margaret briefly today.",
+                    "summary": "Short call",
+                }
 
             from services.post_call import run_post_call
             await run_post_call(reminder_session_state, tracker, duration_seconds=30)

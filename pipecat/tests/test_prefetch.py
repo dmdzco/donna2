@@ -143,26 +143,25 @@ class TestPrefetchCache:
 
 
 class TestExtractQueries:
-    def test_topic_patterns_from_tracker(self):
+    def test_returns_raw_text(self):
+        """Now returns the raw utterance for vector similarity search."""
         queries = extract_prefetch_queries("I was doing some gardening today")
-        assert "gardening" in queries
+        assert len(queries) == 1
+        assert "gardening" in queries[0]
 
-    def test_multiple_topics(self):
+    def test_substantial_text(self):
         queries = extract_prefetch_queries("I went to church and then did some cooking")
-        assert "faith" in queries
-        assert "cooking" in queries
+        assert len(queries) == 1
+        assert queries[0] == "I went to church and then did some cooking"
 
-    def test_possessive_entity_patterns(self):
+    def test_any_utterance_searched(self):
+        """Any substantial utterance should be searched — no regex gatekeeping."""
         queries = extract_prefetch_queries("My grandson came to visit me yesterday")
-        assert "grandchild" in queries or "grandchildren" in queries
+        assert len(queries) == 1
 
-    def test_named_entity_after_relation(self):
-        queries = extract_prefetch_queries("My grandson Jake came to visit")
-        assert any("jake" in q.lower() for q in queries)
-
-    def test_activity_patterns(self):
-        queries = extract_prefetch_queries("I went to the park with my friend yesterday")
-        assert "park" in queries or "social" in queries
+    def test_natural_speech_searched(self):
+        queries = extract_prefetch_queries("I just finished playing paddle and it was great")
+        assert len(queries) == 1
 
     def test_skip_vague_utterances(self):
         assert extract_prefetch_queries("yeah") == []
@@ -176,19 +175,21 @@ class TestExtractQueries:
         assert extract_prefetch_queries("good") == []
         assert extract_prefetch_queries("") == []
 
-    def test_max_3_queries(self):
-        # Long sentence with many topics
+    def test_interim_needs_longer_text(self):
+        # Interim under 25 chars should be skipped
+        assert extract_prefetch_queries("I was doing some", source="interim") == []
+        # Interim over 25 chars should work
+        queries = extract_prefetch_queries("I was doing some gardening today okay", source="interim")
+        assert len(queries) == 1
+
+    def test_single_query_returned(self):
+        """Returns exactly one query (the raw text)."""
         text = "I was gardening, then cooking dinner, reading my book, and walking the dog"
         queries = extract_prefetch_queries(text)
-        assert len(queries) <= 3
+        assert len(queries) == 1
 
-    def test_dedup_queries(self):
-        # "family" should only appear once even if matched by multiple patterns
-        queries = extract_prefetch_queries("My family came over, my son and daughter visited")
-        family_count = sum(1 for q in queries if q == "family")
-        assert family_count <= 1
-
-    def test_quick_observer_signals(self):
+    def test_quick_observer_signals_ignored(self):
+        """Session state signals no longer affect extraction."""
         analysis = MagicMock()
         analysis.family_signals = [{"signal": "family_visit"}]
         analysis.health_signals = []
@@ -198,24 +199,27 @@ class TestExtractQueries:
         queries = extract_prefetch_queries(
             "They came over for dinner last night", session_state
         )
-        assert "family" in queries
+        # Raw text returned regardless of Quick Observer signals
+        assert len(queries) == 1
+        assert queries[0] == "They came over for dinner last night"
 
-    def test_interim_source_stricter(self):
-        # Interim only uses topic patterns, no entity extraction
+    def test_interim_source_length_filter(self):
+        # Short interim skipped
         queries = extract_prefetch_queries(
             "My grandson Jake visited", source="interim"
         )
-        # Should get "grandchildren" (topic pattern) but not "jake" (entity)
-        assert not any("jake" in q.lower() for q in queries)
-        assert len(queries) <= 2
+        # Under 25 chars → skipped for interim
+        assert len(queries) == 0
 
     def test_medical_topic(self):
         queries = extract_prefetch_queries("I have a doctor appointment tomorrow")
-        assert "medical" in queries
+        assert len(queries) == 1
+        assert "doctor" in queries[0]
 
     def test_health_concern_topic(self):
         queries = extract_prefetch_queries("My back has been hurting lately, quite sore")
-        assert "health concerns" in queries
+        assert len(queries) == 1
+        assert "back" in queries[0]
 
 
 # ===========================================================================

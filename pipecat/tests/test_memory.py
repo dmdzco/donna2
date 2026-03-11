@@ -182,58 +182,45 @@ class TestSearch:
 
 class TestBuildContext:
     @pytest.mark.asyncio
-    async def test_includes_critical_always(self):
-        critical = [{"id": "m1", "content": "Health concern", "type": "concern"}]
-        with patch("services.memory.get_critical", new_callable=AsyncMock, return_value=critical), \
-             patch("services.memory.search", new_callable=AsyncMock, return_value=[]), \
-             patch("services.memory.get_important", new_callable=AsyncMock, return_value=[]), \
-             patch("services.memory.get_recent", new_callable=AsyncMock, return_value=[]):
+    async def test_returns_empty_when_no_memories(self):
+        with patch("db.query_many", new_callable=AsyncMock, return_value=[]):
             from services.memory import build_context
-            result = await build_context("s1", is_first_turn=False)
+            result = await build_context("s1")
+            assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_includes_all_memory_types(self):
+        memories = [
+            {"id": "m1", "type": "concern", "content": "Health concern", "importance": 90, "metadata": None, "created_at": datetime.now(timezone.utc)},
+            {"id": "m2", "type": "fact", "content": "Likes roses", "importance": 60, "metadata": None, "created_at": datetime.now(timezone.utc)},
+            {"id": "m3", "type": "relationship", "content": "Son named Jake", "importance": 70, "metadata": None, "created_at": datetime.now(timezone.utc)},
+        ]
+        with patch("db.query_many", new_callable=AsyncMock, return_value=memories):
+            from services.memory import build_context
+            result = await build_context("s1")
             assert "Health concern" in result
+            assert "Likes roses" in result
+            assert "Son named Jake" in result
 
     @pytest.mark.asyncio
-    async def test_tier2_only_with_topic(self):
-        with patch("services.memory.get_critical", new_callable=AsyncMock, return_value=[]), \
-             patch("services.memory.search", new_callable=AsyncMock, return_value=[{"id": "m2", "content": "Rose garden"}]) as mock_search, \
-             patch("services.memory.get_important", new_callable=AsyncMock, return_value=[]), \
-             patch("services.memory.get_recent", new_callable=AsyncMock, return_value=[]):
+    async def test_formats_with_type_labels(self):
+        memories = [
+            {"id": "m1", "type": "concern", "content": "Knee pain", "importance": 80, "metadata": None, "created_at": datetime.now(timezone.utc)},
+            {"id": "m2", "type": "relationship", "content": "Daughter Mary", "importance": 70, "metadata": None, "created_at": datetime.now(timezone.utc)},
+        ]
+        with patch("db.query_many", new_callable=AsyncMock, return_value=memories):
             from services.memory import build_context
-            result = await build_context("s1", current_topic="gardening", is_first_turn=False)
-            assert "Rose garden" in result
-            mock_search.assert_called_once()
+            result = await build_context("s1")
+            assert "Concerns" in result
+            assert "Family/Friends" in result
 
     @pytest.mark.asyncio
-    async def test_tier2_skipped_without_topic(self):
-        with patch("services.memory.get_critical", new_callable=AsyncMock, return_value=[]), \
-             patch("services.memory.search", new_callable=AsyncMock) as mock_search, \
-             patch("services.memory.get_important", new_callable=AsyncMock, return_value=[]), \
-             patch("services.memory.get_recent", new_callable=AsyncMock, return_value=[]):
+    async def test_queries_with_senior_id(self):
+        with patch("db.query_many", new_callable=AsyncMock, return_value=[]) as mock_q:
             from services.memory import build_context
-            await build_context("s1", current_topic=None, is_first_turn=False)
-            mock_search.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_tier3_only_on_first_turn(self):
-        with patch("services.memory.get_critical", new_callable=AsyncMock, return_value=[]), \
-             patch("services.memory.search", new_callable=AsyncMock, return_value=[]), \
-             patch("services.memory.get_important", new_callable=AsyncMock, return_value=[{"id": "m3", "content": "Background info", "importance": 70, "created_at": datetime.now(timezone.utc), "last_accessed_at": None, "effective_importance": 70}]) as mock_imp, \
-             patch("services.memory.get_recent", new_callable=AsyncMock, return_value=[]):
-            from services.memory import build_context
-            result = await build_context("s1", is_first_turn=True)
-            assert mock_imp.called
-            assert "Background" in result
-
-    @pytest.mark.asyncio
-    async def test_tier3_skipped_on_subsequent_turns(self):
-        with patch("services.memory.get_critical", new_callable=AsyncMock, return_value=[]), \
-             patch("services.memory.search", new_callable=AsyncMock, return_value=[]), \
-             patch("services.memory.get_important", new_callable=AsyncMock) as mock_imp, \
-             patch("services.memory.get_recent", new_callable=AsyncMock) as mock_rec:
-            from services.memory import build_context
-            await build_context("s1", is_first_turn=False)
-            mock_imp.assert_not_called()
-            mock_rec.assert_not_called()
+            await build_context("senior-123")
+            mock_q.assert_called_once()
+            assert mock_q.call_args[0][1] == "senior-123"
 
 
 class TestExtractFromConversation:

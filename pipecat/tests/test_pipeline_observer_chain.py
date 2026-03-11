@@ -30,7 +30,7 @@ class TestObserverChain:
         # Pre-cache a Director result so it injects on this turn
         director._last_result = get_default_direction()
 
-        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock_analyze, \
+        with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock_analyze, \
              patch("processors.conversation_director.format_director_guidance") as mock_format:
             mock_analyze.return_value = get_default_direction()
             mock_format.return_value = "main/medium/warm"
@@ -67,7 +67,7 @@ class TestObserverChainGoodbye:
         director._last_result = get_default_direction()
         capture = frame_capture
 
-        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock_analyze, \
+        with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock_analyze, \
              patch("processors.conversation_director.format_director_guidance") as mock_format:
             mock_analyze.return_value = get_default_direction()
             mock_format.return_value = "main/medium/warm"

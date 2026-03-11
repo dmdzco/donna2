@@ -31,10 +31,12 @@ class TestHappyPathCall:
         """Normal check-in call should complete with EndFrame and tracked topics."""
         session_state = HAPPY_PATH_SCENARIO.to_session_state()
 
-        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock_analyze, \
+        with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock_spec, \
+             patch("processors.conversation_director.analyze_queries", new_callable=AsyncMock) as mock_queries, \
              patch("processors.conversation_director.format_director_guidance") as mock_format:
             from services.director_llm import get_default_direction
-            mock_analyze.return_value = get_default_direction()
+            mock_spec.return_value = get_default_direction()
+            mock_queries.return_value = {"memory_queries": [], "web_queries": []}
             mock_format.return_value = "main/medium/warm"
 
             components = build_test_pipeline(
@@ -82,10 +84,12 @@ class TestGoodbyeScenarios:
         """A strong goodbye should end the call via EndFrame."""
         session_state = STRONG_GOODBYE_SCENARIO.to_session_state()
 
-        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock_analyze, \
+        with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock_spec, \
+             patch("processors.conversation_director.analyze_queries", new_callable=AsyncMock) as mock_queries, \
              patch("processors.conversation_director.format_director_guidance") as mock_format:
             from services.director_llm import get_default_direction
-            mock_analyze.return_value = get_default_direction()
+            mock_spec.return_value = get_default_direction()
+            mock_queries.return_value = {"memory_queries": [], "web_queries": []}
             mock_format.return_value = "main/medium/warm"
 
             components = build_test_pipeline(

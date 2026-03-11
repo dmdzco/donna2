@@ -96,10 +96,11 @@ async def voice_answer(request: Request):
     last_call_analysis = None
     call_settings = None
     has_caregiver_notes = False
+    caregiver_notes_content = []
     previous_calls_summary = None
     todays_context = None
 
-    # 1. Check for reminder call (pre-fetched context)
+    # 1. Check for reminder call (in-memory first, then DB fallback)
     from services.scheduler import get_reminder_context, get_prefetched_context
     reminder_context = get_reminder_context(call_sid)
     prefetched = get_prefetched_context(target_phone)
@@ -109,14 +110,53 @@ async def voice_answer(request: Request):
         memory_context = reminder_context.get("memory_context")
         reminder_prompt = reminder_context.get("reminder_prompt")
         call_type = "reminder"
-        logger.info("[{cs}] Reminder call: {title}", cs=call_sid, title=reminder_context["reminder"].get("title"))
-    elif prefetched:
-        senior = prefetched.get("senior")
-        memory_context = prefetched.get("memory_context")
-        pre_generated_greeting = prefetched.get("pre_generated_greeting")
-        news_context = prefetched.get("news_context")
-        recent_turns = prefetched.get("recent_turns")
-        logger.info("[{cs}] Manual outbound with pre-fetched context", cs=call_sid)
+        logger.info("[{cs}] Reminder call (in-memory): {title}", cs=call_sid, title=reminder_context["reminder"].get("title"))
+    elif is_outbound:
+        # Outbound call — check DB for reminder delivery (Node.js scheduler)
+        from services.reminder_delivery import get_reminder_by_call_sid, format_reminder_prompt as fmt_prompt
+        from services.seniors import find_by_phone
+        reminder_row = await get_reminder_by_call_sid(call_sid)
+        if reminder_row:
+            reminder_prompt = fmt_prompt({
+                "title": reminder_row.get("title"),
+                "description": reminder_row.get("description"),
+                "type": reminder_row.get("reminder_type"),
+            })
+            call_type = "reminder"
+            senior = await find_by_phone(target_phone)
+            if senior:
+                try:
+                    from services.memory import build_context
+                    memory_context = await build_context(senior["id"], None, senior)
+                except Exception as e:
+                    logger.error("[{cs}] Memory fetch for reminder failed: {err}", cs=call_sid, err=str(e))
+            # Build reminder_context for downstream delivery tracking
+            reminder_context = {
+                "senior": senior,
+                "reminder_prompt": reminder_prompt,
+                "reminder": {
+                    "title": reminder_row.get("title"),
+                    "description": reminder_row.get("description"),
+                    "type": reminder_row.get("reminder_type"),
+                },
+                "delivery": {
+                    "id": reminder_row.get("delivery_id"),
+                    "reminder_id": reminder_row.get("reminder_id"),
+                    "status": reminder_row.get("delivery_status"),
+                    "attempt_count": reminder_row.get("attempt_count"),
+                },
+            }
+            logger.info("[{cs}] Reminder call (DB lookup): {title}", cs=call_sid, title=reminder_row.get("title"))
+        elif prefetched:
+            senior = prefetched.get("senior")
+            memory_context = prefetched.get("memory_context")
+            pre_generated_greeting = prefetched.get("pre_generated_greeting")
+            news_context = prefetched.get("news_context")
+            recent_turns = prefetched.get("recent_turns")
+            logger.info("[{cs}] Manual outbound with pre-fetched context", cs=call_sid)
+        else:
+            senior = await find_by_phone(target_phone)
+            logger.info("[{cs}] Generic outbound call", cs=call_sid)
     else:
         # Inbound — look up senior by phone
         from services.seniors import find_by_phone
@@ -148,6 +188,7 @@ async def voice_answer(request: Request):
                 logger.error("[{cs}] Caregiver notes fetch failed: {err}", cs=call_sid, err=notes_result)
 
             has_caregiver_notes = bool(caregiver_notes)
+            caregiver_notes_content = caregiver_notes if caregiver_notes else []
 
             # --- News: read from DB (pre-cached daily at 5 AM, never fetched live) ---
             import json as _json
@@ -201,11 +242,30 @@ async def voice_answer(request: Request):
                     raw_settings = {}
             call_settings = {**DEFAULT_CALL_SETTINGS, **raw_settings}
 
-            # --- Inbound greeting ---
+            # --- Inbound greeting (with news/interest/context followups) ---
             from services.greetings import get_inbound_greeting
+            import json as _json2
+            analysis_data = last_call_analysis or {}
+            if isinstance(analysis_data, str):
+                try:
+                    analysis_data = _json2.loads(analysis_data)
+                except Exception:
+                    analysis_data = {}
+            call_quality = analysis_data.get("call_quality")
+            if isinstance(call_quality, str):
+                try:
+                    call_quality = _json2.loads(call_quality)
+                except Exception:
+                    call_quality = {}
             greeting_result = get_inbound_greeting(
                 senior_name=senior.get("name", ""),
                 senior_id=senior.get("id"),
+                interests=senior.get("interests"),
+                news_context=news_context,
+                last_call_summary=analysis_data.get("summary"),
+                interest_scores=senior.get("interest_scores"),
+                last_call_sentiment=(call_quality or {}).get("rapport"),
+                last_call_engagement=analysis_data.get("engagement_score"),
             )
             pre_generated_greeting = greeting_result.get("greeting", "")
         else:
@@ -274,6 +334,7 @@ async def voice_answer(request: Request):
             from services.caregivers import get_pending_notes as _get_notes
             caregiver_notes = await _get_notes(senior["id"])
             has_caregiver_notes = bool(caregiver_notes)
+            caregiver_notes_content = caregiver_notes if caregiver_notes else []
         except Exception as e:
             logger.error("[{cs}] Error fetching caregiver notes: {err}", cs=call_sid, err=str(e))
 
@@ -325,6 +386,7 @@ async def voice_answer(request: Request):
             "target_phone": target_phone,
             "last_call_analysis": last_call_analysis,
             "has_caregiver_notes": has_caregiver_notes,
+            "caregiver_notes_content": caregiver_notes_content if senior and not prospect else [],
             "call_settings": call_settings,
         }
 

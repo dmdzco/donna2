@@ -457,7 +457,7 @@ class TestDirectorTimeLimits:
     @pytest.mark.asyncio
     async def test_force_end_after_hard_limit(self, session_state, frame_capture):
         # Set call start 13 minutes ago
-        session_state["_call_start_time"] = time.time() - (13 * 60)
+        session_state["_call_start_time"] = time.time() - (36 * 60)
         processor = ConversationDirectorProcessor(session_state=session_state)
         # Pre-cache a result so _take_actions runs
         processor._last_result = get_default_direction()

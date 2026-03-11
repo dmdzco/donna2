@@ -84,7 +84,7 @@ async def get_news_for_senior(interests: list[str], limit: int = 3) -> str | Non
                 model="gpt-4o-mini",
                 tools=[{"type": "web_search_preview"}],
                 input=(
-                    f"Find 7-8 brief, positive news stories from today about: {interest_list}.\n"
+                    f"Find 8-10 brief, positive news stories from today about: {interest_list}.\n"
                     "These are for an elderly person, so:\n"
                     "- Choose uplifting or interesting stories (avoid distressing news)\n"
                     "- Keep each summary to 1-2 sentences\n"

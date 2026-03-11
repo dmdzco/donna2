@@ -146,42 +146,39 @@ class TestDirectorSpeculativeAnalysis:
         assert not ConversationDirectorProcessor._text_matches("hello", "")
 
     @pytest.mark.asyncio
-    async def test_speculative_cancelled_on_new_interim(self, session_state):
-        """Speculative analysis is cancelled when new speech arrives.
+    async def test_speculative_keeps_running_on_new_interim(self, session_state):
+        """Speculative analysis keeps running when new speech arrives (fire-and-forget).
 
-        Tests the cancellation logic directly rather than through process_frame
-        (which requires a started pipeline).
+        Each speculative builds cache context, so we never cancel them.
         """
         processor = ConversationDirectorProcessor(session_state=session_state)
 
         # Simulate a running speculative task
         long_task = asyncio.create_task(asyncio.sleep(10))
-        processor._speculative_task = long_task
+        processor._speculative_tasks.append(long_task)
 
-        # Simulate what process_frame does on InterimTranscriptionFrame:
-        # cancel speculative task
-        if processor._speculative_task is not None:
-            if not processor._speculative_task.done():
-                processor._speculative_task.cancel()
-            processor._speculative_task = None
+        # New interim arrives — speculative should NOT be cancelled
+        assert not long_task.cancelled()
+        assert len(processor._speculative_tasks) == 1
 
-        # Let event loop process the cancellation
-        await asyncio.sleep(0)
-
-        assert long_task.cancelled()
-        assert processor._speculative_task is None
+        # Clean up
+        long_task.cancel()
+        try:
+            await long_task
+        except asyncio.CancelledError:
+            pass
 
     @pytest.mark.asyncio
-    async def test_harvest_speculative_returns_result_when_done(self, session_state):
-        """harvest_speculative returns result when task is done and text matches."""
+    async def test_harvest_speculative_returns_best_match(self, session_state):
+        """harvest_speculative returns best matching result from completed tasks."""
         processor = ConversationDirectorProcessor(session_state=session_state)
         processor._latest_interim_text = "I went to the doctor yesterday and they told me"
 
-        # Create a completed task
         async def fake_result():
             return {"analysis": {"call_phase": "main", "engagement_level": "high"}}
-        processor._speculative_task = asyncio.create_task(fake_result())
-        await asyncio.sleep(0.01)  # Let task complete
+        task = asyncio.create_task(fake_result())
+        processor._speculative_tasks.append(task)
+        await asyncio.sleep(0.01)
 
         result = processor._harvest_speculative("I went to the doctor yesterday and they told me everything is fine")
         assert result is not None
@@ -195,29 +192,29 @@ class TestDirectorSpeculativeAnalysis:
 
         async def fake_result():
             return {"analysis": {"call_phase": "main"}}
-        processor._speculative_task = asyncio.create_task(fake_result())
+        task = asyncio.create_task(fake_result())
+        processor._speculative_tasks.append(task)
         await asyncio.sleep(0.01)
 
         result = processor._harvest_speculative("Tell me about the weather today please")
         assert result is None
-        assert processor._speculative_cancels == 1
 
     @pytest.mark.asyncio
-    async def test_harvest_speculative_leaves_running_task(self, session_state):
-        """harvest_speculative does NOT cancel a still-running task (fire-and-forget)."""
+    async def test_harvest_speculative_keeps_running_tasks(self, session_state):
+        """harvest_speculative keeps running tasks alive (they build cache)."""
         processor = ConversationDirectorProcessor(session_state=session_state)
 
         long_task = asyncio.create_task(asyncio.sleep(10))
-        processor._speculative_task = long_task
+        processor._speculative_tasks.append(long_task)
 
         result = processor._harvest_speculative("Hello there")
         await asyncio.sleep(0)
 
         assert result is None
-        # Task should still be running — NOT cancelled (fire-and-forget)
         assert not long_task.cancelled()
-        assert processor._speculative_cancels == 1
-        # Clean up
+        assert len(processor._speculative_tasks) == 1  # still tracked
+        assert processor._speculative_misses == 1
+
         long_task.cancel()
         try:
             await long_task
@@ -291,9 +288,9 @@ class TestDirectorWebSearchGating:
 
         web_result_frames = capture.get_frames_of_type(LLMMessagesAppendFrame)
         assert len(web_result_frames) >= 1
-        # Verify [WEB RESULT] tag is in the injected message
+        # Verify WEB RESULT tag is in the injected ephemeral message
         msg_content = web_result_frames[0].messages[0]["content"]
-        assert "[WEB RESULT" in msg_content
+        assert "WEB RESULT" in msg_content
         assert "72F" in msg_content
 
         assert processor._web_searches_gated == 1
@@ -424,7 +421,7 @@ class TestDirectorWebSearchGating:
         assert len(tts_frames) == 0
 
         web_result_frames = capture.get_frames_of_type(LLMMessagesAppendFrame)
-        assert any("[WEB RESULT" in f.messages[0]["content"] for f in web_result_frames)
+        assert any("WEB RESULT" in f.messages[0]["content"] for f in web_result_frames)
         assert processor._web_searches_completed == 1
 
     @pytest.mark.asyncio

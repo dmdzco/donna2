@@ -143,26 +143,19 @@ class TestPrefetchCache:
 
 
 class TestExtractQueries:
-    def test_topic_patterns_from_tracker(self):
+    def test_returns_raw_utterance(self):
         queries = extract_prefetch_queries("I was doing some gardening today")
-        assert "gardening" in queries
+        assert queries == ["I was doing some gardening today"]
 
-    def test_multiple_topics(self):
-        queries = extract_prefetch_queries("I went to church and then did some cooking")
-        assert "faith" in queries
-        assert "cooking" in queries
+    def test_any_utterance_searched(self):
+        queries = extract_prefetch_queries("My grandson Jake came to visit me yesterday")
+        assert len(queries) == 1
+        assert "grandson Jake" in queries[0]
 
-    def test_possessive_entity_patterns(self):
-        queries = extract_prefetch_queries("My grandson came to visit me yesterday")
-        assert "grandchild" in queries or "grandchildren" in queries
-
-    def test_named_entity_after_relation(self):
-        queries = extract_prefetch_queries("My grandson Jake came to visit")
-        assert any("jake" in q.lower() for q in queries)
-
-    def test_activity_patterns(self):
-        queries = extract_prefetch_queries("I went to the park with my friend yesterday")
-        assert "park" in queries or "social" in queries
+    def test_single_query_returned(self):
+        text = "I went to church and then did some cooking"
+        queries = extract_prefetch_queries(text)
+        assert queries == [text]
 
     def test_skip_vague_utterances(self):
         assert extract_prefetch_queries("yeah") == []
@@ -176,46 +169,17 @@ class TestExtractQueries:
         assert extract_prefetch_queries("good") == []
         assert extract_prefetch_queries("") == []
 
-    def test_max_3_queries(self):
-        # Long sentence with many topics
-        text = "I was gardening, then cooking dinner, reading my book, and walking the dog"
-        queries = extract_prefetch_queries(text)
-        assert len(queries) <= 3
+    def test_interim_needs_longer_text(self):
+        # Short interim skipped (< 25 chars)
+        assert extract_prefetch_queries("My grandson Jake", source="interim") == []
+        # Longer interim passes
+        queries = extract_prefetch_queries("My grandson Jake came to visit me", source="interim")
+        assert len(queries) == 1
 
-    def test_dedup_queries(self):
-        # "family" should only appear once even if matched by multiple patterns
-        queries = extract_prefetch_queries("My family came over, my son and daughter visited")
-        family_count = sum(1 for q in queries if q == "family")
-        assert family_count <= 1
-
-    def test_quick_observer_signals(self):
-        analysis = MagicMock()
-        analysis.family_signals = [{"signal": "family_visit"}]
-        analysis.health_signals = []
-        analysis.activity_signals = []
-
-        session_state = {"_last_quick_analysis": analysis}
-        queries = extract_prefetch_queries(
-            "They came over for dinner last night", session_state
-        )
-        assert "family" in queries
-
-    def test_interim_source_stricter(self):
-        # Interim only uses topic patterns, no entity extraction
-        queries = extract_prefetch_queries(
-            "My grandson Jake visited", source="interim"
-        )
-        # Should get "grandchildren" (topic pattern) but not "jake" (entity)
-        assert not any("jake" in q.lower() for q in queries)
-        assert len(queries) <= 2
-
-    def test_medical_topic(self):
-        queries = extract_prefetch_queries("I have a doctor appointment tomorrow")
-        assert "medical" in queries
-
-    def test_health_concern_topic(self):
-        queries = extract_prefetch_queries("My back has been hurting lately, quite sore")
-        assert "health concerns" in queries
+    def test_natural_speech_searched(self):
+        queries = extract_prefetch_queries("I just finished walking my dogs and I'm about to work on a project")
+        assert len(queries) == 1
+        assert "walking my dogs" in queries[0]
 
 
 # ===========================================================================

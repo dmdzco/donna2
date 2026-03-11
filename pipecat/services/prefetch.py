@@ -274,15 +274,16 @@ def extract_prefetch_queries(
     session_state: dict | None = None,
     source: str = "final",
 ) -> list[str]:
-    """Extract likely memory-search queries from user speech.
+    """Extract memory-search queries from user speech.
 
-    Uses _TOPIC_PATTERNS from conversation_tracker + entity patterns.
-    Returns max 3 query strings. Skips vague utterances.
+    Uses the raw utterance as the search query — let pgvector similarity
+    do the filtering instead of regex gatekeeping. Skips only vague
+    utterances ("yeah", "okay", "mhm").
 
     Args:
         text: User transcription text.
-        session_state: Pipeline session state (for Quick Observer signals).
-        source: "final" or "interim" — interim uses stricter rules.
+        session_state: Pipeline session state (unused, kept for API compat).
+        source: "final" or "interim" — interim requires longer text.
     """
     if not text or len(text.strip()) < 10:
         return []
@@ -293,53 +294,13 @@ def extract_prefetch_queries(
     if _SKIP_PATTERNS.match(text):
         return []
 
-    queries: list[str] = []
-    seen: set[str] = set()
+    # Interims need more text to be worth searching (avoid noise)
+    if source == "interim" and len(text) < 25:
+        return []
 
-    def _add(q: str) -> None:
-        q = q.strip().lower()
-        if q and q not in seen and len(q) >= 3:
-            seen.add(q)
-            queries.append(q)
-
-    # 1. Topic patterns from conversation_tracker
-    for pattern, label in _TOPIC_PATTERNS:
-        if pattern.search(text):
-            _add(label)
-
-    # For interim transcriptions, only use topic patterns (stricter)
-    if source == "interim":
-        return queries[:min(2, _MAX_QUERIES)]
-
-    # 2. Possessive entity patterns ("my grandson", "my doctor")
-    for pattern, label in _POSSESSIVE_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            _add(label)
-
-    # 3. Named entities after relations ("my grandson Jake")
-    for match in _NAME_AFTER_RELATION.finditer(text):
-        name = match.group(1)
-        _add(name)
-
-    # 4. Activity patterns ("went to church", "played bingo")
-    for pattern, _ in _ACTIVITY_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            _add(match.group(1).lower())
-
-    # 5. Quick Observer signals (family, health, activity)
-    if session_state:
-        quick_analysis = session_state.get("_last_quick_analysis")
-        if quick_analysis:
-            if getattr(quick_analysis, "family_signals", None):
-                _add("family")
-            if getattr(quick_analysis, "health_signals", None):
-                _add("health")
-            if getattr(quick_analysis, "activity_signals", None):
-                _add("activities")
-
-    return queries[:_MAX_QUERIES]
+    # Use the raw utterance as the search query — vector similarity
+    # will find relevant memories without regex pre-filtering.
+    return [text]
 
 
 # ---------------------------------------------------------------------------

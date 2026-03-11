@@ -60,10 +60,10 @@ def create_tts_service(session_state: dict):
         logger.info("TTS provider: Cartesia Sonic 3")
         return CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY", ""),
-            voice_id=os.getenv("CARTESIA_VOICE_ID", "f786b574-daa5-4673-aa0c-cbe3e8534c02"),
+            voice_id=os.getenv("CARTESIA_VOICE_ID", "a33f7a4c-100f-41cf-a1fd-5822e8fc253f"),
             model="sonic-3",
             params=CartesiaTTSService.InputParams(
-                generation_config=GenerationConfig(speed=1.0, volume=1.2, emotion="friendly"),
+                generation_config=GenerationConfig(speed=1.05, volume=1.2, emotion="enthusiastic"),
             ),
         )
 
@@ -244,7 +244,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(
                     confidence=0.6,
-                    stop_secs=1.2,
+                    stop_secs=0.9,
                     min_volume=0.5,
                 ),
             ),

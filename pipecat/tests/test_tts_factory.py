@@ -89,4 +89,4 @@ def test_cartesia_speed_configured(cartesia_env):
     tts = create_tts_service(session_state)
     gen_config = tts._settings.get("generation_config")
     assert gen_config is not None
-    assert gen_config.speed == 1.0
+    assert gen_config.speed == 1.05

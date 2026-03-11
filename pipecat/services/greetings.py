@@ -88,12 +88,12 @@ GENTLE_FOLLOWUPS = [
 
 # ── Inbound call templates (short, receptive) ────────────────────
 INBOUND_TEMPLATES = [
-    "Hello, {name}! So nice to hear from you. What's on your mind?",
-    "Hi {name}! I'm so glad you called. How can I help?",
-    "{name}! What a nice surprise. How are you doing?",
+    "Hey {name}! How are you doing today?",
+    "Hi {name}! Good to hear from you. What's going on?",
+    "{name}! How's your day going?",
     "Hey {name}, it's so good to hear your voice! What's going on?",
-    "Hi there, {name}! I was hoping I'd hear from you. What's up?",
-    "Oh, {name}! How wonderful that you called. Tell me, what's new?",
+    "Hi {name}! What's on your mind today?",
+    "Hey there, {name}! How have you been?",
 ]
 
 

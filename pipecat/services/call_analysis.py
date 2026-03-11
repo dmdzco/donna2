@@ -91,13 +91,13 @@ async def analyze_completed_call(
     """Analyze a completed call using Gemini Flash."""
     turn_content = (
         ANALYSIS_TURN_TEMPLATE
-        .replace("{{SENIOR_NAME}}", (senior_context or {}).get("name", "Unknown"))
-        .replace("{{HEALTH_CONDITIONS}}", (senior_context or {}).get("medical_notes", "None known"))
+        .replace("{{SENIOR_NAME}}", (senior_context or {}).get("name") or "Unknown")
+        .replace("{{HEALTH_CONDITIONS}}", (senior_context or {}).get("medical_notes") or "None known")
         .replace(
             "{{FAMILY_MEMBERS}}",
-            ", ".join((senior_context or {}).get("family", [])) if (senior_context or {}).get("family") else "Unknown",
+            ", ".join((senior_context or {}).get("family") or []) or "Unknown",
         )
-        .replace("{{TRANSCRIPT}}", _format_transcript(transcript))
+        .replace("{{TRANSCRIPT}}", _format_transcript(transcript) or "")
     )
 
     try:

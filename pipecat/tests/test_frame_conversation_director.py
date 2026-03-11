@@ -288,9 +288,9 @@ class TestDirectorWebSearchGating:
 
         web_result_frames = capture.get_frames_of_type(LLMMessagesAppendFrame)
         assert len(web_result_frames) >= 1
-        # Verify [WEB RESULT] tag is in the injected message
+        # Verify WEB RESULT tag is in the injected ephemeral message
         msg_content = web_result_frames[0].messages[0]["content"]
-        assert "[WEB RESULT" in msg_content
+        assert "WEB RESULT" in msg_content
         assert "72F" in msg_content
 
         assert processor._web_searches_gated == 1
@@ -421,7 +421,7 @@ class TestDirectorWebSearchGating:
         assert len(tts_frames) == 0
 
         web_result_frames = capture.get_frames_of_type(LLMMessagesAppendFrame)
-        assert any("[WEB RESULT" in f.messages[0]["content"] for f in web_result_frames)
+        assert any("WEB RESULT" in f.messages[0]["content"] for f in web_result_frames)
         assert processor._web_searches_completed == 1
 
     @pytest.mark.asyncio

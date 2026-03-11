@@ -120,6 +120,16 @@ def _build_senior_context(session_state: dict) -> str:
     if analysis_parts:
         parts.append(f"\n{analysis_parts}")
 
+    # Caregiver notes: pre-fetched at call start, injected into system prompt
+    notes = session_state.get("_caregiver_notes_content") or []
+    if notes:
+        parts.append("\nFamily messages to share during this call:")
+        for note in notes:
+            content = note.get("content", "") if isinstance(note, dict) else str(note)
+            if content:
+                parts.append(f"- {content}")
+        parts.append("Share naturally: \"Oh, your daughter wanted me to mention...\" Don't force it if the moment isn't right.")
+
     # News is NOT in system prompt — injected dynamically by Director
     # when should_mention_news is true (saves ~300 tokens per turn)
 
@@ -268,8 +278,6 @@ def build_reminder_node(
     functions: list = []
     if "mark_reminder_acknowledged" in flows_tools:
         functions.append(flows_tools["mark_reminder_acknowledged"])
-    if "save_important_detail" in flows_tools:
-        functions.append(flows_tools["save_important_detail"])
 
     functions.append(FlowsFunctionSchema(
         name="transition_to_main",
@@ -322,7 +330,7 @@ def build_main_node(
     if tracking_ctx:
         main_task += f"\n\n{tracking_ctx}"
 
-    # All tools for main phase (includes check_caregiver_notes)
+    # Active tools: web_search + mark_reminder (others moved to Director/post-call)
     functions: list = list(flows_tools.values())
 
     # Transition tool
@@ -368,10 +376,6 @@ def build_winding_down_node(session_state: dict, flows_tools: dict) -> NodeConfi
     functions: list = []
     if "mark_reminder_acknowledged" in flows_tools:
         functions.append(flows_tools["mark_reminder_acknowledged"])
-    if "save_important_detail" in flows_tools:
-        functions.append(flows_tools["save_important_detail"])
-    if "check_caregiver_notes" in flows_tools:
-        functions.append(flows_tools["check_caregiver_notes"])
 
     functions.append(FlowsFunctionSchema(
         name="transition_to_closing",

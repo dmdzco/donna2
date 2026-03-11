@@ -84,6 +84,21 @@ async def _safe_post_call(session_state: dict, conversation_tracker, elapsed: in
         logger.error("[{cs}] Background post-call failed: {err}", cs=call_sid, err=str(e))
 
 
+async def _mark_caregiver_notes_delivered(session_state: dict, call_sid: str):
+    """Fire-and-forget: mark pre-fetched caregiver notes as delivered."""
+    try:
+        from services.caregivers import mark_note_delivered
+        notes = session_state.get("_caregiver_notes_content") or []
+        for note in notes:
+            note_id = note.get("id") if isinstance(note, dict) else None
+            if note_id:
+                await mark_note_delivered(note_id, call_sid)
+        if notes:
+            logger.info("[{cs}] Marked {n} caregiver notes as delivered", cs=call_sid, n=len(notes))
+    except Exception as e:
+        logger.error("[{cs}] Error marking caregiver notes delivered: {err}", cs=call_sid, err=str(e))
+
+
 async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     """Run the Donna voice pipeline for a single call.
 
@@ -142,6 +157,9 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         session_state["last_call_analysis"] = session_state.get("last_call_analysis") or metadata.get("last_call_analysis")
         if metadata.get("has_caregiver_notes"):
             session_state["_has_caregiver_notes"] = True
+        # Store actual caregiver note content for system prompt injection
+        if metadata.get("caregiver_notes_content"):
+            session_state["_caregiver_notes_content"] = metadata["caregiver_notes_content"]
         if metadata.get("call_settings"):
             session_state["call_settings"] = metadata["call_settings"]
         if "is_outbound" in metadata:
@@ -306,6 +324,9 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     context = OpenAILLMContext()
     context_aggregator = llm.create_context_aggregator(context)
 
+    # Expose context for Director's ephemeral message stripping
+    session_state["_llm_context"] = context
+
     # -------------------------------------------------------------------------
     # Pipeline assembly
     # -------------------------------------------------------------------------
@@ -375,6 +396,9 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         # Warm up Groq/Cerebras TCP+TLS immediately — before greeting plays
         from services.director_llm import warmup_fast_providers
         asyncio.create_task(warmup_fast_providers())
+        # Fire-and-forget: mark pre-fetched caregiver notes as delivered
+        if session_state.get("_caregiver_notes_content"):
+            asyncio.create_task(_mark_caregiver_notes_delivered(session_state, call_sid))
         await flow_manager.initialize(initial_node)
 
     @transport.event_handler("on_client_disconnected")

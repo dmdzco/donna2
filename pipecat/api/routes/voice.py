@@ -96,6 +96,7 @@ async def voice_answer(request: Request):
     last_call_analysis = None
     call_settings = None
     has_caregiver_notes = False
+    caregiver_notes_content = []
     previous_calls_summary = None
     todays_context = None
 
@@ -148,6 +149,7 @@ async def voice_answer(request: Request):
                 logger.error("[{cs}] Caregiver notes fetch failed: {err}", cs=call_sid, err=notes_result)
 
             has_caregiver_notes = bool(caregiver_notes)
+            caregiver_notes_content = caregiver_notes if caregiver_notes else []
 
             # --- News: read from DB (pre-cached daily at 5 AM, never fetched live) ---
             import json as _json
@@ -274,6 +276,7 @@ async def voice_answer(request: Request):
             from services.caregivers import get_pending_notes as _get_notes
             caregiver_notes = await _get_notes(senior["id"])
             has_caregiver_notes = bool(caregiver_notes)
+            caregiver_notes_content = caregiver_notes if caregiver_notes else []
         except Exception as e:
             logger.error("[{cs}] Error fetching caregiver notes: {err}", cs=call_sid, err=str(e))
 
@@ -325,6 +328,7 @@ async def voice_answer(request: Request):
             "target_phone": target_phone,
             "last_call_analysis": last_call_analysis,
             "has_caregiver_notes": has_caregiver_notes,
+            "caregiver_notes_content": caregiver_notes_content if senior and not prospect else [],
             "call_settings": call_settings,
         }
 

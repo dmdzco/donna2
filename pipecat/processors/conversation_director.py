@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameProcessor
 
 import re
+from typing import Any
 
 from services.director_llm import (
     analyze_turn,
@@ -62,6 +63,26 @@ _SOCIAL_Q_PATTERN = re.compile(
     r"|what(?:'s| is) (?:wrong|the matter)|why are you)",
     re.I,
 )
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral context helpers
+# ---------------------------------------------------------------------------
+
+_EPHEMERAL_PREFIX = "[EPHEMERAL"
+
+
+def _is_ephemeral(msg: Any) -> bool:
+    """Check if a message was injected as ephemeral (per-turn) context."""
+    content = msg.get("content", "") if isinstance(msg, dict) else ""
+    if isinstance(content, str):
+        return content.startswith(_EPHEMERAL_PREFIX)
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and isinstance(block.get("text", ""), str):
+                if block["text"].startswith(_EPHEMERAL_PREFIX):
+                    return True
+    return False
 
 
 class ConversationDirectorProcessor(FrameProcessor):
@@ -163,6 +184,9 @@ class ConversationDirectorProcessor(FrameProcessor):
         if isinstance(frame, TranscriptionFrame):
             self._turn_count += 1
             self._session_state["_last_user_speech_time"] = time.time()
+
+            # Strip previous turn's ephemeral context (guidance, memories, web results)
+            self._strip_ephemeral_messages()
 
             # Feature flag: skip Director analysis when disabled
             from lib.growthbook import is_on
@@ -541,6 +565,23 @@ class ConversationDirectorProcessor(FrameProcessor):
             self._web_search_task = None
             self._web_search_query = ""
 
+    def _strip_ephemeral_messages(self):
+        """Remove previous turn's ephemeral injections from LLM context.
+
+        Called at the start of each new turn so only fresh, relevant
+        context is present. The senior's conversation stays permanent;
+        Director guidance, memories, and web results are ephemeral.
+        """
+        ctx = self._session_state.get("_llm_context")
+        if not ctx:
+            return
+        messages = ctx.get_messages()
+        filtered = [m for m in messages if not _is_ephemeral(m)]
+        n_stripped = len(messages) - len(filtered)
+        if n_stripped > 0:
+            ctx.set_messages(filtered)
+            logger.debug("[Director] Stripped {n} ephemeral messages", n=n_stripped)
+
     async def _inject_web_result(self, result: str):
         """Inject web search result into Claude's context."""
         logger.info("[Director] Web result injected ({n} chars)", n=len(result))
@@ -550,7 +591,7 @@ class ConversationDirectorProcessor(FrameProcessor):
                     {
                         "role": "user",
                         "content": (
-                            "[WEB RESULT — do not read this tag aloud]\n"
+                            "[EPHEMERAL: WEB RESULT — do not read this tag aloud]\n"
                             f"{result}\n"
                             "Use this to answer naturally. Don't say 'let me check' — "
                             "the senior already heard a filler."
@@ -598,7 +639,7 @@ class ConversationDirectorProcessor(FrameProcessor):
                     {
                         "role": "user",
                         "content": (
-                            "[Director guidance — do not read aloud]\n"
+                            "[EPHEMERAL: Director guidance — do not read aloud]\n"
                             + guidance_text
                         ),
                     }
@@ -615,14 +656,31 @@ class ConversationDirectorProcessor(FrameProcessor):
         """Inject cached prefetch results into Claude's context proactively.
 
         Checks the prefetch cache for memories relevant to the current user
-        speech and injects them as context — Claude doesn't need to call
-        search_memories for these.
+        speech and injects them as context — eliminates ~4.3s tool call latency.
+
+        300ms gate: If no cache hit yet, waits up to 300ms for in-flight
+        prefetch to complete. Prefetch starts on interim transcriptions while
+        the user is still speaking, so most queries are cached before the final
+        arrives. The 300ms is a worst-case backstop.
         """
         cache = self._session_state.get("_prefetch_cache")
         if not cache:
             return
 
         cached = cache.get(user_text, threshold=0.3)
+
+        # Brief gate: wait for in-flight prefetch (500ms max)
+        # Prefetch starts on interims while user speaks, so cache is usually
+        # already populated (0ms). The gate catches late-arriving prefetches
+        # and still saves ~4.3s vs a full tool call round-trip.
+        if not cached:
+            for _ in range(10):  # 10 * 50ms = 500ms
+                await asyncio.sleep(0.05)
+                cached = cache.get(user_text, threshold=0.3)
+                if cached:
+                    logger.info("[Director] Memory gate hit after wait")
+                    break
+
         if not cached:
             return
 
@@ -643,11 +701,11 @@ class ConversationDirectorProcessor(FrameProcessor):
                     {
                         "role": "user",
                         "content": (
-                            "[MEMORY CONTEXT — do not read this tag aloud]\n"
+                            "[EPHEMERAL: MEMORY CONTEXT — do not read this tag aloud]\n"
                             "You remember from past conversations:\n"
                             f"{memory_text}\n"
-                            "Weave these naturally if relevant. Say \"I remember you telling me...\" "
-                            "not \"My records show...\". Don't force it if it doesn't fit."
+                            "Use naturally: \"I remember you mentioning...\" "
+                            "Don't force it if it doesn't fit."
                         ),
                     }
                 ],

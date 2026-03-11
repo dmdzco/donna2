@@ -72,11 +72,12 @@ CONTEXT_FOLLOWUPS = [
 
 # ── News-based followups ──────────────────────────────────────────
 NEWS_FOLLOWUPS = [
-    "I saw something interesting about {topic} today - have you heard?",
+    "I just saw some news about {topic} - have you heard?",
     "There's some neat news about {topic} - want to hear about it?",
     "I came across something about {topic} I think you'd enjoy hearing about.",
-    "Did you happen to catch any news about {topic} today?",
+    "Did you happen to catch any news about {topic}?",
     "I read something about {topic} that made me think of you.",
+    "I just saw this news about {topic} and thought of you!",
 ]
 
 # ── Gentle followups (for concerned/sad last-call sentiment) ──────
@@ -88,12 +89,12 @@ GENTLE_FOLLOWUPS = [
 
 # ── Inbound call templates (short, receptive) ────────────────────
 INBOUND_TEMPLATES = [
-    "Hey {name}! How are you doing today?",
-    "Hi {name}! Good to hear from you. What's going on?",
+    "Hello, {name}! How's it going?",
+    "Hey {name}! How are you doing?",
+    "Hi {name}! Good to hear from you.",
     "{name}! How's your day going?",
-    "Hey {name}, it's so good to hear your voice! What's going on?",
-    "Hi {name}! What's on your mind today?",
-    "Hey there, {name}! How have you been?",
+    "Hey {name}, so good to hear your voice!",
+    "Hi {name}! How have you been?",
 ]
 
 

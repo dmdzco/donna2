@@ -84,6 +84,8 @@ def build_context_for_prompt(prospect: dict) -> str:
     relationship = prospect.get("relationship")
     loved_one = prospect.get("loved_one_name")
     ctx = prospect.get("caller_context") or {}
+    if isinstance(ctx, str):
+        ctx = {}  # Guard against string values in DB
 
     if call_count > 0 and name:
         parts.append(f"RETURN CALLER: You have spoken with {name} before ({call_count} previous call{'s' if call_count != 1 else ''}).")

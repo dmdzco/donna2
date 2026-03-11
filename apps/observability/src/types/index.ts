@@ -73,6 +73,13 @@ export interface ObserverSummary {
     totalConcerns: number;
     uniqueConcerns: string[];
   };
+  analysis?: {
+    engagementScore: number;
+    rapport: string | null;
+    goalsAchieved: boolean | null;
+    positiveObservations: string[];
+    topics: string[];
+  };
 }
 
 export interface Continuity {

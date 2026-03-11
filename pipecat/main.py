@@ -214,6 +214,7 @@ async def websocket_endpoint(websocket: WebSocket):
         "todays_context": None,
         "_transcript": [],
         "_call_metadata": call_metadata,
+        "_register_task": register_call_task,
     }
 
     try:

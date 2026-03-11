@@ -20,6 +20,27 @@ db.update(conversations)
   })
   .catch(err => console.error('[Observability] Cleanup error:', err.message));
 
+// Claude Sonnet 4.6 pricing (per million tokens)
+const CLAUDE_PRICING = {
+  input: 3.0,      // $3/M input tokens
+  output: 15.0,    // $15/M output tokens
+  cache_read: 0.30, // $0.30/M cache-read tokens
+};
+
+function estimateCost(tokenUsage) {
+  if (!tokenUsage) return null;
+  const prompt = tokenUsage.prompt_tokens || 0;
+  const completion = tokenUsage.completion_tokens || 0;
+  const cacheRead = tokenUsage.cache_read_tokens || 0;
+  // Subtract cache_read from prompt since cache_read tokens are charged at the lower rate
+  const nonCachedInput = Math.max(0, prompt - cacheRead);
+  const cost =
+    (nonCachedInput / 1_000_000) * CLAUDE_PRICING.input +
+    (completion / 1_000_000) * CLAUDE_PRICING.output +
+    (cacheRead / 1_000_000) * CLAUDE_PRICING.cache_read;
+  return Math.round(cost * 10000) / 10000; // 4 decimal places
+}
+
 // Get recent calls for observability dashboard
 router.get('/api/observability/calls', requireAdmin, async (req, res) => {
   try {
@@ -37,7 +58,6 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
       summary: conversations.summary,
       sentiment: conversations.sentiment,
       concerns: conversations.concerns,
-      callMetrics: conversations.callMetrics,
       transcript: conversations.transcript,
     })
     .from(conversations)
@@ -45,23 +65,69 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
     .orderBy(desc(conversations.startedAt))
     .limit(limit);
 
+    // Batch-fetch call_metrics for all call_sids in this page
+    const callSids = calls.map(c => c.callSid).filter(Boolean);
+    let metricsMap = {};
+    if (callSids.length > 0) {
+      const metricsRows = await db.execute(sql`
+        SELECT call_sid, turn_count, token_usage, latency
+        FROM call_metrics
+        WHERE call_sid IN (${sql.join(callSids.map(s => sql`${s}`), sql`, `)})
+      `);
+      for (const row of metricsRows.rows) {
+        metricsMap[row.call_sid] = row;
+      }
+    }
+
     // Transform to match dashboard expected format
-    const formattedCalls = calls.map(call => ({
-      id: call.id,
-      call_sid: call.callSid,
-      senior_id: call.seniorId,
-      senior_name: call.seniorName,
-      senior_phone: call.seniorPhone,
-      started_at: call.startedAt,
-      ended_at: call.endedAt,
-      duration_seconds: call.durationSeconds,
-      status: call.status || 'completed',
-      summary: call.summary,
-      sentiment: call.sentiment,
-      concerns: call.concerns,
-      call_metrics: call.callMetrics || null,
-      turn_count: Array.isArray(call.transcript) ? call.transcript.length : 0,
-    }));
+    const formattedCalls = calls.map(call => {
+      const m = metricsMap[call.callSid] || null;
+      const tokenUsage = m?.token_usage
+        ? (typeof m.token_usage === 'string' ? JSON.parse(m.token_usage) : m.token_usage)
+        : null;
+      const latency = m?.latency
+        ? (typeof m.latency === 'string' ? JSON.parse(m.latency) : m.latency)
+        : null;
+
+      // Turn count: prefer call_metrics, fallback to assistant-only transcript entries
+      let turnCount = 0;
+      if (m?.turn_count != null) {
+        turnCount = m.turn_count;
+      } else if (Array.isArray(call.transcript)) {
+        turnCount = call.transcript.filter(t => t.role === 'assistant').length;
+      }
+
+      // Build CallMetrics object matching frontend CallMetrics interface
+      const promptTokens = tokenUsage?.prompt_tokens || 0;
+      const completionTokens = tokenUsage?.completion_tokens || 0;
+      const totalTokens = promptTokens + completionTokens;
+
+      return {
+        id: call.id,
+        call_sid: call.callSid,
+        senior_id: call.seniorId,
+        senior_name: call.seniorName,
+        senior_phone: call.seniorPhone,
+        started_at: call.startedAt,
+        ended_at: call.endedAt,
+        duration_seconds: call.durationSeconds,
+        status: call.status || 'completed',
+        summary: call.summary,
+        sentiment: call.sentiment,
+        concerns: call.concerns,
+        call_metrics: totalTokens > 0 ? {
+          totalInputTokens: promptTokens,
+          totalOutputTokens: completionTokens,
+          totalTokens,
+          avgResponseTime: latency?.turn_avg_ms || null,
+          avgTtfa: latency?.llm_ttfb_avg_ms || null,
+          turnCount,
+          estimatedCost: estimateCost(tokenUsage),
+          modelsUsed: ['claude-sonnet-4-6'],
+        } : null,
+        turn_count: turnCount,
+      };
+    });
 
     res.json({ calls: formattedCalls });
   } catch (error) {
@@ -168,14 +234,6 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
             data: { content: turn.content, turnIndex: index },
           });
         }
-        // Add observer signals if present
-        if (turn.observer) {
-          timeline.push({
-            type: 'observer.signal',
-            timestamp: turn.timestamp || call.startedAt,
-            data: turn.observer,
-          });
-        }
       });
     }
 
@@ -234,7 +292,8 @@ router.get('/api/observability/calls/:id/turns', requireAdmin, async (req, res) 
 router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, res) => {
   try {
     const [call] = await db.select({
-      transcript: conversations.transcript,
+      id: conversations.id,
+      callSid: conversations.callSid,
       concerns: conversations.concerns,
       sentiment: conversations.sentiment,
     })
@@ -245,56 +304,100 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
       return res.status(404).json({ error: 'Call not found' });
     }
 
-    // Extract observer signals from transcript
+    // Query call_analyses for post-call analysis data
+    // Build lookup values: always include conversation UUID, optionally call_sid
+    const lookupValues = [sql`${call.id}`];
+    if (call.callSid) lookupValues.push(sql`${call.callSid}`);
+
+    const analysisRows = await db.execute(sql`
+      SELECT engagement_score, concerns, positive_observations,
+             call_quality, summary
+      FROM call_analyses
+      WHERE conversation_id IN (${sql.join(lookupValues, sql`, `)})
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+
     const signals = [];
     const engagementDistribution = {};
     const emotionalStateDistribution = {};
     const allConcerns = [];
-    let totalConfidence = 0;
 
-    if (call.transcript && Array.isArray(call.transcript)) {
-      call.transcript.forEach((turn, index) => {
-        if (turn.observer) {
-          const engagementLevel = turn.observer.engagement_level || turn.observer.engagementLevel || 'medium';
-          const emotionalState = turn.observer.emotional_state || turn.observer.emotionalState || 'neutral';
-          const confidenceScore = turn.observer.confidence_score || turn.observer.confidenceScore || 0.5;
-          const concerns = turn.observer.concerns || [];
+    if (analysisRows.rows.length > 0) {
+      const analysis = analysisRows.rows[0];
 
-          signals.push({
-            turnId: String(index),
-            speaker: turn.role === 'user' ? 'Senior' : 'Donna',
-            turnContent: turn.content || '',
-            timestamp: turn.timestamp,
-            signal: {
-              engagementLevel,
-              emotionalState,
-              confidenceScore,
-              concerns,
-              shouldDeliverReminder: turn.observer.should_deliver_reminder || turn.observer.shouldDeliverReminder || false,
-              shouldEndCall: turn.observer.should_end_call || turn.observer.shouldEndCall || false,
-            },
-          });
+      // Parse JSONB fields — usually objects already, but safety-parse if string
+      const concerns = typeof analysis.concerns === 'string'
+        ? JSON.parse(analysis.concerns) : (analysis.concerns || []);
+      const callQuality = typeof analysis.call_quality === 'string'
+        ? JSON.parse(analysis.call_quality) : (analysis.call_quality || {});
 
-          engagementDistribution[engagementLevel] = (engagementDistribution[engagementLevel] || 0) + 1;
-          emotionalStateDistribution[emotionalState] = (emotionalStateDistribution[emotionalState] || 0) + 1;
-          totalConfidence += confidenceScore;
-          allConcerns.push(...concerns);
-        }
+      // Map engagement_score (1-10) to engagement level
+      const score = analysis.engagement_score || 5;
+      const engagementLevel = score >= 7 ? 'high' : score >= 4 ? 'medium' : 'low';
+
+      // Map call_quality.rapport to emotional state
+      const rapport = callQuality.rapport || 'moderate';
+      const emotionalStateMap = { strong: 'positive', moderate: 'neutral', weak: 'negative' };
+      const emotionalState = emotionalStateMap[rapport] || 'neutral';
+
+      // Confidence based on engagement score normalized to 0-1
+      const confidenceScore = Math.min(1, Math.max(0, score / 10));
+
+      // Extract concern descriptions
+      const concernDescriptions = Array.isArray(concerns)
+        ? concerns.map(c => c.description || (typeof c === 'string' ? c : JSON.stringify(c)))
+        : [];
+
+      // Create a single call-level signal from the analysis
+      signals.push({
+        turnId: 'call-analysis',
+        speaker: 'System',
+        turnContent: analysis.summary || '',
+        timestamp: null,
+        signal: {
+          engagementLevel,
+          emotionalState,
+          confidenceScore,
+          concerns: concernDescriptions,
+          shouldDeliverReminder: false,
+          shouldEndCall: false,
+        },
       });
+
+      engagementDistribution[engagementLevel] = 1;
+      emotionalStateDistribution[emotionalState] = 1;
+      allConcerns.push(...concernDescriptions);
     }
 
-    const uniqueConcerns = [...new Set([...allConcerns, ...(call.concerns || [])])];
+    // Merge in conversation-level concerns from conversations table
+    const conversationConcerns = call.concerns || [];
+    const uniqueConcerns = [...new Set([...allConcerns, ...conversationConcerns])];
+
+    // Build analysis object for frontend (from call_analyses data)
+    const analysisData = analysisRows.rows.length > 0 ? (() => {
+      const a = analysisRows.rows[0];
+      const cq = typeof a.call_quality === 'string' ? JSON.parse(a.call_quality) : (a.call_quality || {});
+      return {
+        engagementScore: a.engagement_score || null,
+        rapport: cq.rapport || null,
+        goalsAchieved: cq.goals_achieved ?? null,
+        positiveObservations: a.positive_observations || [],
+        topics: a.topics || [],
+      };
+    })() : null;
 
     res.json({
       signals,
       count: signals.length,
       summary: {
-        averageConfidence: signals.length > 0 ? totalConfidence / signals.length : 0,
+        averageConfidence: signals.length > 0 ? signals[0].signal.confidenceScore : 0,
         engagementDistribution,
         emotionalStateDistribution,
         totalConcerns: uniqueConcerns.length,
         uniqueConcerns,
       },
+      analysis: analysisData,
     });
   } catch (error) {
     console.error('Error fetching observer data:', error);
@@ -306,8 +409,7 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
 router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res) => {
   try {
     const [call] = await db.select({
-      transcript: conversations.transcript,
-      callMetrics: conversations.callMetrics,
+      callSid: conversations.callSid,
       durationSeconds: conversations.durationSeconds,
     })
     .from(conversations)
@@ -317,23 +419,43 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
       return res.status(404).json({ error: 'Call not found' });
     }
 
-    // Extract per-turn metrics from transcript
-    const turnMetrics = [];
-    if (call.transcript && Array.isArray(call.transcript)) {
-      call.transcript.forEach((turn, index) => {
-        if (turn.metrics) {
-          turnMetrics.push({
-            turnIndex: index,
-            role: turn.role,
-            ...turn.metrics,
-          });
-        }
-      });
+    // Fetch real metrics from call_metrics table
+    let callMetrics = null;
+    if (call.callSid) {
+      const metricsRows = await db.execute(sql`
+        SELECT turn_count, token_usage, latency, phase_durations,
+               breaker_states, tools_used, error_count, end_reason
+        FROM call_metrics
+        WHERE call_sid = ${call.callSid}
+        LIMIT 1
+      `);
+      if (metricsRows.rows.length > 0) {
+        const m = metricsRows.rows[0];
+        const tokenUsage = typeof m.token_usage === 'string' ? JSON.parse(m.token_usage) : m.token_usage;
+        const latency = typeof m.latency === 'string' ? JSON.parse(m.latency) : m.latency;
+        const phaseDurations = typeof m.phase_durations === 'string' ? JSON.parse(m.phase_durations) : m.phase_durations;
+        const breakerStates = typeof m.breaker_states === 'string' ? JSON.parse(m.breaker_states) : m.breaker_states;
+
+        const promptTokens = tokenUsage?.prompt_tokens || 0;
+        const completionTokens = tokenUsage?.completion_tokens || 0;
+        const totalTokens = promptTokens + completionTokens;
+
+        callMetrics = {
+          totalInputTokens: promptTokens,
+          totalOutputTokens: completionTokens,
+          totalTokens,
+          avgResponseTime: latency?.turn_avg_ms || null,
+          avgTtfa: latency?.llm_ttfb_avg_ms || null,
+          turnCount: m.turn_count || 0,
+          estimatedCost: estimateCost(tokenUsage),
+          modelsUsed: ['claude-sonnet-4-6'],
+        };
+      }
     }
 
     res.json({
-      turnMetrics,
-      callMetrics: call.callMetrics || null,
+      turnMetrics: [], // Per-turn metrics not captured yet
+      callMetrics,
       durationSeconds: call.durationSeconds,
     });
   } catch (error) {

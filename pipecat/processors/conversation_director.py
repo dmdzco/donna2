@@ -164,8 +164,8 @@ class ConversationDirectorProcessor(FrameProcessor):
     """
 
     # Default time limits (overridden by call_settings in session_state)
-    FORCE_WINDING_DOWN_MINUTES = 9.0
-    FORCE_END_MINUTES = 12.0
+    FORCE_WINDING_DOWN_MINUTES = 30.0
+    FORCE_END_MINUTES = 35.0
 
     # Interim transcription debounce settings (for prefetch)
     INTERIM_DEBOUNCE_SECONDS = 1.0

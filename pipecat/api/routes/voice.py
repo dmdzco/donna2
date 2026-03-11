@@ -260,12 +260,6 @@ async def voice_answer(request: Request):
             greeting_result = get_inbound_greeting(
                 senior_name=senior.get("name", ""),
                 senior_id=senior.get("id"),
-                interests=senior.get("interests"),
-                news_context=news_context,
-                last_call_summary=analysis_data.get("summary"),
-                interest_scores=senior.get("interest_scores"),
-                last_call_sentiment=(call_quality or {}).get("rapport"),
-                last_call_engagement=analysis_data.get("engagement_score"),
             )
             pre_generated_greeting = greeting_result.get("greeting", "")
         else:

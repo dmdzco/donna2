@@ -242,11 +242,30 @@ async def voice_answer(request: Request):
                     raw_settings = {}
             call_settings = {**DEFAULT_CALL_SETTINGS, **raw_settings}
 
-            # --- Inbound greeting ---
+            # --- Inbound greeting (with news/interest/context followups) ---
             from services.greetings import get_inbound_greeting
+            import json as _json2
+            analysis_data = last_call_analysis or {}
+            if isinstance(analysis_data, str):
+                try:
+                    analysis_data = _json2.loads(analysis_data)
+                except Exception:
+                    analysis_data = {}
+            call_quality = analysis_data.get("call_quality")
+            if isinstance(call_quality, str):
+                try:
+                    call_quality = _json2.loads(call_quality)
+                except Exception:
+                    call_quality = {}
             greeting_result = get_inbound_greeting(
                 senior_name=senior.get("name", ""),
                 senior_id=senior.get("id"),
+                interests=senior.get("interests"),
+                news_context=news_context,
+                last_call_summary=analysis_data.get("summary"),
+                interest_scores=senior.get("interest_scores"),
+                last_call_sentiment=(call_quality or {}).get("rapport"),
+                last_call_engagement=analysis_data.get("engagement_score"),
             )
             pre_generated_greeting = greeting_result.get("greeting", "")
         else:

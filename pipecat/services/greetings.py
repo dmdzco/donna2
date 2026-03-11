@@ -306,10 +306,19 @@ def get_inbound_greeting(
     *,
     senior_name: str,
     senior_id: str | None = None,
+    interests: list[str] | None = None,
+    news_context: str | None = None,
+    last_call_summary: str | None = None,
+    interest_scores: dict[str, float] | None = None,
+    last_call_sentiment: str | None = None,
+    last_call_engagement: int | None = None,
+    recent_memories: list[dict] | None = None,
+    followup_chance: float = 0.7,
 ) -> dict:
-    """Generate a short, receptive greeting for when the senior calls Donna.
+    """Generate a context-rich, non-time-aware greeting for inbound calls.
 
-    Returns dict with keys: greeting, template_index.
+    Appends a followup about news, interests, or last-call context when available.
+    Returns dict with keys: greeting, template_index, selected_interest.
     """
     first_name = (senior_name or "there").split(" ")[0]
 
@@ -320,7 +329,41 @@ def get_inbound_greeting(
 
     greeting = INBOUND_TEMPLATES[template_index].replace("{name}", first_name)
 
-    return {
-        "greeting": greeting,
-        "template_index": template_index,
-    }
+    add_followup = random.random() < followup_chance
+
+    # Gentle followup for concerned/sad seniors
+    if last_call_sentiment in ("concerned", "sad"):
+        followup = random.choice(GENTLE_FOLLOWUPS)
+        greeting += " " + followup
+        return {"greeting": greeting, "template_index": template_index, "selected_interest": None}
+
+    # Low engagement — skip followup
+    if last_call_engagement is not None and last_call_engagement <= 3:
+        add_followup = False
+
+    # Last-call context followup
+    if add_followup and last_call_summary:
+        ctx_phrase = _extract_context_phrase(last_call_summary)
+        if ctx_phrase:
+            followup = random.choice(CONTEXT_FOLLOWUPS).replace("{context}", ctx_phrase)
+            greeting += " " + followup
+            return {"greeting": greeting, "template_index": template_index, "selected_interest": None}
+
+    # News followup — 40% chance when available
+    if add_followup and news_context and interests:
+        if random.random() < 0.4:
+            topic = _extract_news_topic(news_context, interests)
+            if topic:
+                followup = random.choice(NEWS_FOLLOWUPS).replace("{topic}", topic)
+                greeting += " " + followup
+                return {"greeting": greeting, "template_index": template_index, "selected_interest": None}
+
+    # Interest followup
+    if add_followup and interests:
+        selected = select_interest(interests, recent_memories, interest_scores)
+        if selected:
+            followup = random.choice(INTEREST_FOLLOWUPS).replace("{interest}", selected)
+            greeting += " " + followup
+            return {"greeting": greeting, "template_index": template_index, "selected_interest": selected}
+
+    return {"greeting": greeting, "template_index": template_index, "selected_interest": None}

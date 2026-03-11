@@ -34,6 +34,6 @@ class TestToolHandlerIntegration:
         assert result["status"] == "success"
 
     def test_only_active_tools_returned(self, session_state):
-        """Only web_search and mark_reminder_acknowledged should be in handlers."""
+        """All 5 tools should be in handlers."""
         handlers = make_tool_handlers(session_state)
-        assert set(handlers.keys()) == {"web_search", "mark_reminder_acknowledged"}
+        assert set(handlers.keys()) == {"web_search", "mark_reminder_acknowledged", "search_memories", "save_important_detail", "check_caregiver_notes"}

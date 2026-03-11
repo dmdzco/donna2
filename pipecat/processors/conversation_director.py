@@ -29,7 +29,6 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     TranscriptionFrame,
-    TTSSpeakFrame,
     LLMMessagesAppendFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessor
@@ -123,9 +122,6 @@ def query_similarity(q1: str, q2: str) -> float:
     return min(1.0, score)
 
 
-_WEB_CACHE_THRESHOLD = 0.55
-_WEB_CACHE_TTL_SECONDS = 60.0  # cache entries expire after 60s
-
 # ---------------------------------------------------------------------------
 # Ephemeral context helpers
 # ---------------------------------------------------------------------------
@@ -208,14 +204,6 @@ class ConversationDirectorProcessor(FrameProcessor):
         # Query Director tasks (separate from guidance speculative tasks)
         self._prefetch_tasks: list[asyncio.Task] = []
 
-
-        # Web search gating state
-        self._web_search_task: asyncio.Task | None = None
-        self._web_search_query: str = ""
-        self._web_searches_gated = 0
-        self._web_searches_completed = 0
-        self._web_searches_timed_out = 0
-
         # Metrics
         self._speculative_attempts = 0
         self._speculative_hits = 0
@@ -244,13 +232,6 @@ class ConversationDirectorProcessor(FrameProcessor):
                     attempts=self._speculative_attempts,
                     pct=round(self._speculative_hits / self._speculative_attempts * 100),
                     misses=self._speculative_misses,
-                )
-            if self._web_searches_gated > 0:
-                logger.info(
-                    "[Director] Web search: {g} gated, {c} completed, {t} timed out",
-                    g=self._web_searches_gated,
-                    c=self._web_searches_completed,
-                    t=self._web_searches_timed_out,
                 )
             await self.push_frame(frame, direction)
             return
@@ -322,8 +303,7 @@ class ConversationDirectorProcessor(FrameProcessor):
                 self._memory_refreshed = True
                 asyncio.create_task(self._refresh_memory())
 
-            # Web search gating: hold frame if web search in-flight
-            await self._handle_web_gating(frame, direction)
+            await self.push_frame(frame, direction)
             return
 
         # --- Interim TranscriptionFrame (while user is still speaking) ---
@@ -340,16 +320,6 @@ class ConversationDirectorProcessor(FrameProcessor):
             # Deepgram sends interim refinements even after the user stops speaking,
             # which would repeatedly cancel speculative and leave no time window.
             # Instead, we let the first speculative run and check text overlap at harvest.
-
-            # Cancel web search if interim text diverges significantly
-            if self._web_search_task is not None and not self._web_search_task.done():
-                if self._web_search_query and not self._text_matches(
-                    text, self._web_search_query, threshold=0.4
-                ):
-                    self._web_search_task.cancel()
-                    self._web_search_task = None
-                    self._web_search_query = ""
-                    logger.info("[Director] Web search cancelled: interim text diverged")
 
             # Start silence timer — fires speculative after 250ms pause.
             if len(text) >= self.SPECULATIVE_MIN_LENGTH and fast_provider_available():
@@ -482,7 +452,6 @@ class ConversationDirectorProcessor(FrameProcessor):
             if result:
                 direction_like = {"prefetch": result}
                 asyncio.create_task(self._run_director_prefetch(direction_like))
-                self._maybe_start_director_web_search(direction_like)
             return result
         except asyncio.CancelledError:
             return None
@@ -558,117 +527,6 @@ class ConversationDirectorProcessor(FrameProcessor):
         union = len(words_i | words_f)
         return (intersection / union) >= threshold
 
-    # ------------------------------------------------------------------
-    # Director-triggered web search (from Groq analysis)
-    # ------------------------------------------------------------------
-
-    def _maybe_start_director_web_search(self, result: dict):
-        """Start web search if Groq analysis extracted web_queries.
-
-        Groq understands conversational context and only returns web_queries
-        for genuine factual questions — no false triggers on "Remember?" or
-        "How much? I'm about to".
-        """
-        # Skip if web search already in-flight
-        if self._web_search_task is not None and not self._web_search_task.done():
-            return
-
-        # Skip during goodbye
-        if self._session_state.get("_goodbye_in_progress"):
-            return
-
-        # Check feature flag
-        from lib.growthbook import is_on
-        if not is_on("news_search_enabled", self._session_state):
-            return
-
-        # Extract web_queries from Groq's prefetch section
-        prefetch = result.get("prefetch", {})
-        web_queries = prefetch.get("web_queries", [])
-        if not web_queries:
-            return
-
-        # Use first query (Groq already formats it as a search query)
-        query = web_queries[0].strip() if isinstance(web_queries[0], str) else ""
-        if len(query) < 5:
-            return
-
-        self._web_search_query = query
-        self._web_search_task = asyncio.create_task(
-            self._run_web_search(query)
-        )
-        logger.info(
-            "[Director] Query-triggered web search: {q!r}",
-            q=query[:80],
-        )
-
-    # ------------------------------------------------------------------
-    # Web search gating
-    # ------------------------------------------------------------------
-
-    async def _run_web_search(self, query: str) -> str | None:
-        """Run a web search via Tavily/OpenAI."""
-        try:
-            from services.news import web_search_query
-            result = await asyncio.wait_for(web_search_query(query), timeout=12.0)
-            return result
-        except asyncio.TimeoutError:
-            logger.warning("[Director] Web search timed out for q={q!r}", q=query)
-            return None
-        except asyncio.CancelledError:
-            return None
-        except Exception as e:
-            logger.warning("[Director] Web search error for q={q!r}: {err}", q=query, err=str(e))
-            return None
-
-    async def _handle_web_gating(self, frame: TranscriptionFrame, direction):
-        """Gate the TranscriptionFrame if a web search is in-flight.
-
-        If search is still running: push filler TTS, await result, inject into context.
-        If search is already done: inject result immediately (no filler needed).
-        Always pushes the frame at the end.
-        """
-        if self._web_search_task is not None:
-            if not self._web_search_task.done():
-                # Search still in-flight — push filler and wait
-                self._web_searches_gated += 1
-                logger.info("[Director] Web search gating activated, pushing filler")
-                await self.push_frame(
-                    TTSSpeakFrame(text="Let me check on that for you."),
-                    direction,
-                )
-                try:
-                    result = await asyncio.wait_for(
-                        asyncio.shield(self._web_search_task), timeout=10.0
-                    )
-                    if result:
-                        await self._inject_web_result(result)
-                        self._web_searches_completed += 1
-                    else:
-                        self._web_searches_timed_out += 1
-                except asyncio.TimeoutError:
-                    logger.warning("[Director] Web search gating timed out")
-                    self._web_searches_timed_out += 1
-                except Exception as e:
-                    logger.warning("[Director] Web search gating error: {err}", err=str(e))
-                    self._web_searches_timed_out += 1
-            else:
-                # Search already completed — inject result if available
-                try:
-                    result = self._web_search_task.result()
-                    if result:
-                        await self._inject_web_result(result)
-                        self._web_searches_completed += 1
-                        logger.info("[Director] Pre-completed web result injected (no filler needed)")
-                except Exception:
-                    pass
-
-            # Clean up
-            self._web_search_task = None
-            self._web_search_query = ""
-
-        await self.push_frame(frame, direction)
-
     def _strip_ephemeral_messages(self):
         """Remove previous turn's ephemeral injections from LLM context.
 
@@ -686,25 +544,6 @@ class ConversationDirectorProcessor(FrameProcessor):
             ctx.set_messages(filtered)
             logger.debug("[Director] Stripped {n} ephemeral messages", n=n_stripped)
 
-    async def _inject_web_result(self, result: str):
-        """Inject web search result into Claude's context."""
-        logger.info("[Director] Web result injected ({n} chars)", n=len(result))
-        await self.push_frame(
-            LLMMessagesAppendFrame(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": (
-                            "[EPHEMERAL: WEB RESULT — do not read this tag aloud]\n"
-                            f"{result}\n"
-                            "Use this to answer naturally. Don't say 'let me check' — "
-                            "the senior already heard a filler."
-                        ),
-                    }
-                ],
-                run_llm=False,
-            )
-        )
 
     # ------------------------------------------------------------------
     # Guidance injection

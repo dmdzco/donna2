@@ -30,10 +30,9 @@ class TestToolHandlerFactory:
         handlers = make_tool_handlers(session_state)
         assert "web_search" in handlers
         assert "mark_reminder_acknowledged" in handlers
-        # Removed tools should NOT be present
-        assert "search_memories" not in handlers
-        assert "save_important_detail" not in handlers
-        assert "check_caregiver_notes" not in handlers
+        assert "search_memories" in handlers
+        assert "save_important_detail" in handlers
+        assert "check_caregiver_notes" in handlers
 
     def test_handlers_are_async_callables(self):
         session_state = {"senior_id": "test-123"}
@@ -58,9 +57,12 @@ class TestFlowsTools:
     def test_make_flows_tools_returns_active_schemas(self):
         session_state = {"senior_id": "test-123"}
         tools = make_flows_tools(session_state)
-        assert len(tools) == 2
+        assert len(tools) == 5
         assert "web_search" in tools
         assert "mark_reminder_acknowledged" in tools
+        assert "search_memories" in tools
+        assert "save_important_detail" in tools
+        assert "check_caregiver_notes" in tools
 
     def test_flows_tools_have_handlers(self):
         session_state = {"senior_id": "test-123"}

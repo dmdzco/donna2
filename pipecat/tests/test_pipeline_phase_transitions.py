@@ -53,9 +53,9 @@ class TestPhaseNodeConfigs:
         assert "web_search" in func_names
         assert "mark_reminder_acknowledged" in func_names
         assert "transition_to_winding_down" in func_names
-        # Removed tools should not be present
-        assert "search_memories" not in func_names
-        assert "save_important_detail" not in func_names
+        assert "search_memories" in func_names
+        assert "save_important_detail" in func_names
+        assert "check_caregiver_notes" in func_names
 
     def test_winding_down_node_limited_tools(self, session_state):
         flows_tools = make_flows_tools(session_state)

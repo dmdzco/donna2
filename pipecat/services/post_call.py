@@ -376,7 +376,7 @@ async def _trigger_caregiver_notification(
                 f"{node_url}/api/notifications/trigger",
                 json={
                     "event_type": "call_completed",
-                    "senior_id": senior_id,
+                    "senior_id": str(senior_id),
                     "data": {
                         "call_sid": call_sid,
                         "duration_seconds": duration,

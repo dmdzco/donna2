@@ -24,7 +24,7 @@
 | Change per-senior call settings | `pipecat/services/seniors.py` (`get_call_settings()`) |
 | Change caregiver notes delivery | `pipecat/services/caregivers.py` + `pipecat/flows/tools.py` |
 | Change circuit breaker behavior | `pipecat/lib/circuit_breaker.py` |
-| Change feature flags | `pipecat/lib/feature_flags.py` + `feature_flags` DB table |
+| Change feature flags | `pipecat/lib/growthbook.py` (GrowthBook Cloud SDK) |
 | Check all environment variables | `pipecat/config.py` |
 | Add Pipecat API routes | `pipecat/api/routes/` |
 | Change Pipecat auth/middleware | `pipecat/api/middleware/` |
@@ -86,12 +86,12 @@ pipecat/
 ├── flows/               Call state machine (Pipecat Flows)
 │   ├── nodes.py         3 phases: [reminder] → main → winding_down → closing (370 LOC)
 │   │                    Imports prompts from prompts.py
-│   └── tools.py         5 LLM tool schemas + closure-based handlers (269 LOC)
+│   └── tools.py         2 LLM tool schemas (web_search, mark_reminder) + handlers (190 LOC)
 │
 ├── processors/          Frame processors in the audio pipeline
 │   ├── patterns.py             Pattern data: 268 regex patterns, 19 categories (503 LOC)
 │   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (386 LOC)
-│   ├── conversation_director.py Layer 2: Gemini Flash guidance + prefetch orchestration + mid-call memory refresh (275 LOC)
+│   ├── conversation_director.py Layer 2: Split Director (Query + Guidance) + web search gating + prefetch + ephemeral context (750 LOC)
 │   ├── conversation_tracker.py  Tracks topics/questions/advice per call (246 LOC)
 │   ├── metrics_logger.py        Call metrics + prefetch stats logging (110 LOC)
 │   ├── goodbye_gate.py          False-goodbye grace period — NOT in active pipeline (135 LOC)
@@ -103,7 +103,7 @@ pipecat/
 │   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup, snapshot rebuild (338 LOC)
 │   ├── memory.py            Semantic memory: pgvector, HNSW, decay, dedup, circuit breaker (392 LOC)
 │   ├── prefetch.py          Predictive Context Engine: cache, extraction, runner (250 LOC)
-│   ├── director_llm.py      Gemini Flash analysis prompts + prefetch hints (350 LOC)
+│   ├── director_llm.py      Split Director LLM: Query Director (~200ms) + Guidance Director (~400ms) (580 LOC)
 │   ├── call_snapshot.py     Pre-computed call context snapshot for seniors (53 LOC)
 │   ├── context_cache.py     Pre-cache senior context + news at 5 AM (304 LOC)
 │   ├── call_analysis.py     Post-call analysis via Gemini + call quality (246 LOC)
@@ -117,7 +117,7 @@ pipecat/
 │
 ├── lib/                 Shared utilities
 │   ├── circuit_breaker.py   Async circuit breaker for external services (84 LOC)
-│   ├── feature_flags.py     DB-backed feature flags with 5-min cache (41 LOC)
+│   ├── growthbook.py        GrowthBook Cloud SDK feature flags (99 LOC)
 │   └── sanitize.py          PII masking for logs (38 LOC)
 │
 ├── api/                 HTTP layer
@@ -131,6 +131,7 @@ pipecat/
 │   └── migrations/          SQL migrations (HNSW index, feature_flags, call_context_snapshot)
 ├── tests/               61 test files + helpers/mocks/scenarios
 ├── docs/ARCHITECTURE.md Full architecture docs
+├── docs/LEARNINGS.md    Engineering learnings from production debugging
 ├── pyproject.toml       Python 3.12, dependencies
 └── Dockerfile           python:3.12-slim + uv
 ```
@@ -268,6 +269,7 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 ```
 docs/
 ├── architecture/                 Architecture suite (current, authoritative)
+│   (see also: pipecat/docs/LEARNINGS.md for engineering learnings)
 │   ├── OVERVIEW.md               v5.2 high-level architecture
 │   ├── ARCHITECTURE.md           System architecture reference
 │   ├── FEATURES.md               Complete product feature inventory

@@ -29,7 +29,7 @@ class TestDirectorFramePassthrough:
         processor = ConversationDirectorProcessor(session_state=session_state)
         capture = frame_capture
 
-        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock:
+        with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock:
             mock.return_value = get_default_direction()
 
             pipeline = Pipeline([processor, capture])
@@ -58,8 +58,10 @@ class TestDirectorCachedGuidance:
         capture = frame_capture
 
         direction = get_default_direction()
+        # Pre-set cached guidance (simulates previous speculative completing)
+        processor._last_result = direction
 
-        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock_analyze, \
+        with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock_analyze, \
              patch("processors.conversation_director.format_director_guidance") as mock_format:
             mock_analyze.return_value = direction
             mock_format.return_value = "main/medium/warm | Continue naturally"
@@ -70,11 +72,11 @@ class TestDirectorCachedGuidance:
             runner = PipelineRunner(handle_sigint=False)
 
             async def inject():
-                # Turn 1: no cached guidance yet
+                # Turn 1: has cached guidance from _last_result
                 await task.queue_frame(make_transcription("Hello"))
-                await asyncio.sleep(0.3)  # Wait for background analysis to complete
+                await asyncio.sleep(0.3)
 
-                # Turn 2: should inject Turn 1's cached guidance
+                # Turn 2: should inject cached guidance
                 await task.queue_frame(make_transcription("I'm doing well"))
                 await asyncio.sleep(0.1)
                 await task.queue_frame(EndFrame())
@@ -82,7 +84,7 @@ class TestDirectorCachedGuidance:
             asyncio.create_task(inject())
             await asyncio.wait_for(runner.run(task), timeout=5.0)
 
-        # Turn 2 should have produced an LLMMessagesAppendFrame
+        # Should have produced guidance frames from cached _last_result
         guidance_frames = capture.get_frames_of_type(LLMMessagesAppendFrame)
         assert len(guidance_frames) >= 1
 
@@ -98,7 +100,7 @@ class TestDirectorGoodbyeSuppression:
         processor._last_result = get_default_direction()
         capture = frame_capture
 
-        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock_analyze, \
+        with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock_analyze, \
              patch("processors.conversation_director.format_director_guidance") as mock_format:
             mock_analyze.return_value = get_default_direction()
             mock_format.return_value = "closing/medium/warm"
@@ -263,7 +265,7 @@ class TestDirectorWebSearchGating:
         processor._web_search_task = asyncio.create_task(slow_search())
         processor._web_search_query = "Austin Texas weather"
 
-        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock_analyze, \
+        with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock_analyze, \
              patch("processors.conversation_director.format_director_guidance") as mock_format:
             mock_analyze.return_value = get_default_direction()
             mock_format.return_value = None  # No guidance to inject
@@ -304,7 +306,7 @@ class TestDirectorWebSearchGating:
         processor = ConversationDirectorProcessor(session_state=session_state)
         capture = frame_capture
 
-        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock_analyze, \
+        with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock_analyze, \
              patch("processors.conversation_director.format_director_guidance") as mock_format:
             mock_analyze.return_value = get_default_direction()
             mock_format.return_value = None
@@ -341,7 +343,7 @@ class TestDirectorWebSearchGating:
         processor._web_search_task = asyncio.create_task(very_slow_search())
         processor._web_search_query = "something"
 
-        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock_analyze, \
+        with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock_analyze, \
              patch("processors.conversation_director.format_director_guidance") as mock_format:
             mock_analyze.return_value = get_default_direction()
             mock_format.return_value = None
@@ -398,7 +400,7 @@ class TestDirectorWebSearchGating:
         processor._web_search_task = task_done
         processor._web_search_query = "game score"
 
-        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock_analyze, \
+        with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock_analyze, \
              patch("processors.conversation_director.format_director_guidance") as mock_format:
             mock_analyze.return_value = get_default_direction()
             mock_format.return_value = None
@@ -461,7 +463,7 @@ class TestDirectorTimeLimits:
         processor._last_result = get_default_direction()
         capture = frame_capture
 
-        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock_analyze, \
+        with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock_analyze, \
              patch("processors.conversation_director.format_director_guidance") as mock_format:
             mock_analyze.return_value = get_default_direction()
             mock_format.return_value = "main/medium/warm"

@@ -100,7 +100,7 @@ async def voice_answer(request: Request):
     previous_calls_summary = None
     todays_context = None
 
-    # 1. Check for reminder call (pre-fetched context)
+    # 1. Check for reminder call (in-memory first, then DB fallback)
     from services.scheduler import get_reminder_context, get_prefetched_context
     reminder_context = get_reminder_context(call_sid)
     prefetched = get_prefetched_context(target_phone)
@@ -110,14 +110,53 @@ async def voice_answer(request: Request):
         memory_context = reminder_context.get("memory_context")
         reminder_prompt = reminder_context.get("reminder_prompt")
         call_type = "reminder"
-        logger.info("[{cs}] Reminder call: {title}", cs=call_sid, title=reminder_context["reminder"].get("title"))
-    elif prefetched:
-        senior = prefetched.get("senior")
-        memory_context = prefetched.get("memory_context")
-        pre_generated_greeting = prefetched.get("pre_generated_greeting")
-        news_context = prefetched.get("news_context")
-        recent_turns = prefetched.get("recent_turns")
-        logger.info("[{cs}] Manual outbound with pre-fetched context", cs=call_sid)
+        logger.info("[{cs}] Reminder call (in-memory): {title}", cs=call_sid, title=reminder_context["reminder"].get("title"))
+    elif is_outbound:
+        # Outbound call — check DB for reminder delivery (Node.js scheduler)
+        from services.reminder_delivery import get_reminder_by_call_sid, format_reminder_prompt as fmt_prompt
+        from services.seniors import find_by_phone
+        reminder_row = await get_reminder_by_call_sid(call_sid)
+        if reminder_row:
+            reminder_prompt = fmt_prompt({
+                "title": reminder_row.get("title"),
+                "description": reminder_row.get("description"),
+                "type": reminder_row.get("reminder_type"),
+            })
+            call_type = "reminder"
+            senior = await find_by_phone(target_phone)
+            if senior:
+                try:
+                    from services.memory import build_context
+                    memory_context = await build_context(senior["id"], None, senior)
+                except Exception as e:
+                    logger.error("[{cs}] Memory fetch for reminder failed: {err}", cs=call_sid, err=str(e))
+            # Build reminder_context for downstream delivery tracking
+            reminder_context = {
+                "senior": senior,
+                "reminder_prompt": reminder_prompt,
+                "reminder": {
+                    "title": reminder_row.get("title"),
+                    "description": reminder_row.get("description"),
+                    "type": reminder_row.get("reminder_type"),
+                },
+                "delivery": {
+                    "id": reminder_row.get("delivery_id"),
+                    "reminder_id": reminder_row.get("reminder_id"),
+                    "status": reminder_row.get("delivery_status"),
+                    "attempt_count": reminder_row.get("attempt_count"),
+                },
+            }
+            logger.info("[{cs}] Reminder call (DB lookup): {title}", cs=call_sid, title=reminder_row.get("title"))
+        elif prefetched:
+            senior = prefetched.get("senior")
+            memory_context = prefetched.get("memory_context")
+            pre_generated_greeting = prefetched.get("pre_generated_greeting")
+            news_context = prefetched.get("news_context")
+            recent_turns = prefetched.get("recent_turns")
+            logger.info("[{cs}] Manual outbound with pre-fetched context", cs=call_sid)
+        else:
+            senior = await find_by_phone(target_phone)
+            logger.info("[{cs}] Generic outbound call", cs=call_sid)
     else:
         # Inbound — look up senior by phone
         from services.seniors import find_by_phone

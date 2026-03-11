@@ -164,8 +164,10 @@ export const notificationService = {
     const senior = await this._getSenior(seniorId);
     const seniorName = senior?.name || 'your loved one';
 
-    const summary = data.summary || 'Call completed successfully.';
-    const content = `Donna just finished a call with ${seniorName}. ${summary}`;
+    // Prefer the AI-generated caregiver SMS (mood-aware, privacy-respecting)
+    // Fall back to generic summary format if not available
+    const content = data.caregiver_sms
+      || `Donna just finished a call with ${seniorName}. ${data.summary || 'Call completed successfully.'}`;
 
     for (const cg of caregiverList) {
       await this._sendIfAllowed(cg.id, cg.clerkUserId, seniorId, 'call_completed', content, data);

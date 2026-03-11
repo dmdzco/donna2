@@ -10,7 +10,8 @@ AI-powered companion that provides elderly individuals with friendly phone conve
   - Layer 2: Conversation Director — Multi-provider non-blocking call guidance (Groq/Cerebras primary, Gemini fallback)
   - Post-Call Analysis — Summary, concerns, engagement score (Gemini Flash)
 - **Pipecat Flows** — 4-phase call state machine (opening → main → winding_down → closing)
-- **5 LLM Tools** — search_memories, web_search, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
+- **2 LLM Tools** — web_search (fallback, Director handles most searches), mark_reminder_acknowledged (fire-and-forget)
+- **Director-First Architecture** — Memory search, caregiver notes, and web search moved from Claude tool calls to Director injection (saves ~14s/call)
 - **Programmatic Call Ending** — Goodbye detection → EndFrame after 2s delay (bypasses unreliable LLM tool calls)
 - **Director Fallback Actions** — Force winding-down at 9min, force call end at 12min
 - **Predictive Context Engine** — Speculative prefetch with 2-wave pipeline:
@@ -41,7 +42,8 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Context + news pre-caching at 5 AM local time
 - Caregiver notes delivery (family can leave notes read during calls)
 - Per-senior call settings (configurable time limits, greeting style, memory decay)
-- 5 LLM tools: search_memories, web_search, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes
+- 2 LLM tools: web_search (Claude fallback), mark_reminder_acknowledged (fire-and-forget)
+- Ephemeral context model (Director injections stripped each turn, prevents prompt bloat)
 
 ### Infrastructure & Reliability
 - Circuit breakers for external services (Groq, Cerebras, Gemini, OpenAI embeddings, news)
@@ -128,21 +130,25 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                                        │
                                        ▼
                              ┌─────────────────────┐   ┌───────────────────────┐
-                             │   Conversation       │──►│ Background Analysis    │
-                             │   Director           │   │ Groq/Cerebras primary │
-                             │   (PASS-THROUGH)     │   │ Gemini Flash fallback  │
-                             │                      │   │ Result cached → next   │
-                             │ Injects guidance +   │   │ turn (or same-turn     │
-                             │ dynamic news context │   │ via speculative)       │
+                             │   Conversation       │──►│ Two Background Paths:  │
+                             │   Director           │   │                        │
+                             │   (PASS-THROUGH)     │   │ 1. Query Director      │
+                             │                      │   │    (~200ms, continuous) │
+                             │ • Strips ephemeral   │   │    memory + web queries│
+                             │   context each turn  │   │                        │
+                             │ • Injects guidance   │   │ 2. Guidance Director   │
+                             │ • Injects memories   │   │    (~400ms, on silence)│
+                             │ • Web search gating  │   │    same-turn guidance  │
+                             │   (filler + inject)  │   │                        │
                              │                      │   │ + Predictive prefetch  │
-                             │                      │   │ + Web search prefetch  │
+                             │                      │   │ + Web search gating    │
                              │                      │   └───────────────────────┘
                              └─────────┬───────────┘
                                        │ (no delay)
                                        ▼
                              Context Aggregator (user)
                                        ▼
-                             Claude Sonnet 4.5 + Pipecat Flows (5 tools)
+                             Claude Sonnet 4.5 + Pipecat Flows (2 tools)
                                        │ TextFrame
                                        ▼
                              Conversation Tracker → Guidance Stripper
@@ -153,23 +159,28 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                              Post-Call: Analysis + Memory + Daily Context
 ```
 
-### Conversation Director
+### Split Director Architecture
 
-The Director runs non-blocking per turn via `asyncio.create_task()`. Multi-provider: Groq (~70ms) / Cerebras (~70ms) primary, Gemini Flash fallback. Speculative analysis during silence gaps enables same-turn guidance.
+The Director is split into two specialized Groq calls for optimal latency:
+
+| Director | Latency | Fires | Purpose |
+|----------|---------|-------|---------|
+| **Query Director** | ~200ms | Continuously on interims (45 chars first, 60+25 re-fire) | Extract `memory_queries` + `web_queries` |
+| **Guidance Director** | ~400ms | On 250ms silence (speculative) | Phase, engagement, reminders, guidance |
+
+Both run non-blocking via `asyncio.create_task()`. The Query Director enables web search gating: it detects factual questions mid-speech, starts the search before the user finishes, and injects the result into Claude's context with filler TTS.
 
 | Feature | Description |
 |---------|-------------|
-| **Call Phase Tracking** | opening → main → winding_down → closing |
-| **Topic Management** | When to stay, transition, or wrap up |
-| **Reminder Delivery** | Natural moments to deliver reminders |
-| **Engagement Monitoring** | Detect low engagement, suggest re-engagement |
-| **Emotional Detection** | Adjust tone for sad/concerned seniors |
-| **Goodbye Suppression** | Skips guidance when Quick Observer detects goodbye |
+| **Ephemeral Context** | All injections tagged `[EPHEMERAL:`, stripped each turn (prevents prompt bloat) |
+| **Web Search Gating** | Query Director → Tavily search → filler TTS → inject result (saves ~4.3s vs tool call) |
+| **Memory Injection** | Prefetched memories injected as ephemeral context (500ms gate) |
+| **Same-Turn Guidance** | Silence-based speculative enables guidance before Claude responds |
+| **Goodbye Suppression** | `_goodbye_in_progress` flag skips all Director injection during goodbye |
 | **Time-Based Fallbacks** | Force winding-down at 9min, force end at 12min |
-| **Predictive Prefetch** | 2-wave speculative prefetch (regex + Director analysis) |
-| **Web Search Prefetch** | Director predicts questions with location/date → pre-fetched via OpenAI |
-| **Dynamic News Injection** | News injected into context only when Director signals relevance |
-| **Location/Date Context** | Senior's city/state + today's date passed to Director for specific predictions |
+| **Predictive Prefetch** | Regex first-wave + Query Director second-wave memory prefetch |
+
+See [`pipecat/docs/LEARNINGS.md`](pipecat/docs/LEARNINGS.md) for engineering learnings and debugging insights.
 
 ## Architecture Decision: Two Backends
 

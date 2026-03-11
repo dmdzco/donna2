@@ -38,7 +38,7 @@ import re
 from typing import Any
 
 from services.director_llm import (
-    analyze_turn,
+    analyze_queries,
     analyze_turn_speculative,
     fast_provider_available,
     format_director_guidance,
@@ -46,24 +46,85 @@ from services.director_llm import (
     warmup_fast_providers,
 )
 
-# Social/conversational questions that do NOT need a web search.
-# Blocklist approach: any "?" triggers a search UNLESS it matches here.
-# Better to search unnecessarily than to miss a real factual question.
-_SOCIAL_Q_PATTERN = re.compile(
-    r"(?:how are you|how have you been|how(?:'s| is) it going|what(?:'s| is) up"
-    r"|how do you feel|how(?:'s| is) your|how(?:'s| is) everything"
-    r"|what do you think|what(?:'s| is) your (?:name|opinion|favorite)"
-    r"|could you say|can you hear|can you tell me about yourself"
-    r"|do you remember|did I tell you|what was I saying|what did I say"
-    r"|are you there|are you listening|you know what I mean"
-    r"|isn't that (?:right|something|nice|funny|great|wonderful|terrible)"
-    r"|right\?$|okay\?$|yeah\?$|huh\?$|really\?$|no\?$"
-    r"|don't you think|wouldn't you say|shall we|should we"
-    r"|can you (?:help|remind|call)|will you (?:remember|call)"
-    r"|what(?:'s| is) (?:wrong|the matter)|why are you)",
-    re.I,
-)
 
+# ---------------------------------------------------------------------------
+# Query similarity (web search cache dedup)
+# ---------------------------------------------------------------------------
+
+_NOISE_WORDS = frozenset({
+    '2024', '2025', '2026', '2027', 'today', 'tomorrow', 'yesterday',
+    'latest', 'recent', 'current', 'now', 'tonight', 'morning',
+    'the', 'a', 'an', 'this', 'that', 'these', 'those',
+    'who', 'what', 'when', 'where', 'how', 'why', 'which',
+    'is', 'are', 'was', 'were', 'did', 'does', 'do', 'will',
+    'has', 'have', 'had', 'be', 'been', 'being',
+    'in', 'on', 'at', 'for', 'to', 'of', 'by', 'from', 'with',
+})
+
+_LEMMA_MAP = {
+    'won': 'win', 'wins': 'win', 'winner': 'win', 'winning': 'win',
+    'scores': 'score', 'scored': 'score', 'scoring': 'score',
+    'result': 'score', 'results': 'score',
+    'games': 'game', 'match': 'game', 'matches': 'game',
+    'forecast': 'weather', 'forecasts': 'weather',
+    'temperature': 'weather', 'temps': 'weather',
+    'played': 'play', 'plays': 'play', 'playing': 'play',
+    'players': 'play', 'player': 'play',
+}
+
+_SUFFIXES = ('ing', 'tion', 'ner', 'er', 'ed', 'ly', 'es', "'s")
+
+
+def _normalize_query(query: str) -> tuple[list[str], set[str]]:
+    """Tokenize, remove noise, lemmatize. Returns (token_list, token_set)."""
+    words = query.lower().split()
+    tokens = []
+    for w in words:
+        if w in _NOISE_WORDS:
+            continue
+        lemma = _LEMMA_MAP.get(w, w)
+        if lemma == w:
+            for suffix in _SUFFIXES:
+                if w.endswith(suffix) and len(w) - len(suffix) >= 2:
+                    lemma = w[:-len(suffix)]
+                    break
+            if lemma == w and w.endswith('s') and not w.endswith('ss') and len(w) >= 3:
+                lemma = w[:-1]
+        tokens.append(lemma)
+    if not tokens:
+        tokens = [w.lower() for w in query.split()]
+    return tokens, set(tokens)
+
+
+def query_similarity(q1: str, q2: str) -> float:
+    """Compute similarity between two search queries (<0.1ms).
+
+    Uses noise removal + lemmatization + containment/Jaccard hybrid
+    + bigram bonus for multi-word entities like "Orlando Magic".
+    """
+    tokens1, set1 = _normalize_query(q1)
+    tokens2, set2 = _normalize_query(q2)
+    if not set1 or not set2:
+        return 0.0
+    if set1 == set2:
+        return 1.0
+    intersection = set1 & set2
+    if not intersection:
+        return 0.0
+    containment = len(intersection) / min(len(set1), len(set2))
+    jaccard = len(intersection) / len(set1 | set2)
+    score = 0.6 * containment + 0.4 * jaccard
+    bi1 = {f"{tokens1[i]}_{tokens1[i+1]}" for i in range(len(tokens1) - 1)}
+    bi2 = {f"{tokens2[i]}_{tokens2[i+1]}" for i in range(len(tokens2) - 1)}
+    if bi1 and bi2:
+        bi_overlap = bi1 & bi2
+        if bi_overlap:
+            score += 0.15 * len(bi_overlap) / max(len(bi1), len(bi2))
+    return min(1.0, score)
+
+
+_WEB_CACHE_THRESHOLD = 0.55
+_WEB_CACHE_TTL_SECONDS = 60.0  # cache entries expire after 60s
 
 # ---------------------------------------------------------------------------
 # Ephemeral context helpers
@@ -114,12 +175,17 @@ class ConversationDirectorProcessor(FrameProcessor):
     SILENCE_ONSET_SECONDS = 0.250  # 250ms gap triggers speculative analysis
     SPECULATIVE_MIN_LENGTH = 15    # min chars in interim to trigger speculative
 
+    # Continuous speculative: fire Groq while user is still speaking
+    CONTINUOUS_SPECULATIVE_FIRST_FIRE = 45   # ~8-9 words, first fire threshold
+    CONTINUOUS_SPECULATIVE_REFIRE_MIN = 60   # subsequent fires need 60+ total chars
+    CONTINUOUS_SPECULATIVE_REFIRE_WINDOW = 25 # 25 new chars needed to re-fire
+    CONTINUOUS_SPECULATIVE_INTERVAL = 0.5    # min seconds between fires
+
     def __init__(self, session_state: dict, **kwargs):
         super().__init__(**kwargs)
         self._session_state = session_state
         self._pipeline_task = None
         self._last_result: dict | None = None
-        self._pending_analysis: asyncio.Task | None = None
         self._delayed_end_task: asyncio.Task | None = None
         self._turn_count = 0
         self._end_scheduled = False
@@ -135,6 +201,14 @@ class ConversationDirectorProcessor(FrameProcessor):
         self._speculative_tasks: list[asyncio.Task] = []  # all in-flight speculatives
         self._latest_interim_text: str = ""
 
+        # Continuous speculative state (fires while user is still speaking)
+        self._last_continuous_speculative_time: float = 0.0
+        self._last_continuous_speculative_text: str = ""
+
+        # Query Director tasks (separate from guidance speculative tasks)
+        self._prefetch_tasks: list[asyncio.Task] = []
+
+
         # Web search gating state
         self._web_search_task: asyncio.Task | None = None
         self._web_search_query: str = ""
@@ -147,7 +221,8 @@ class ConversationDirectorProcessor(FrameProcessor):
         self._speculative_hits = 0
         self._speculative_misses = 0
 
-    MAX_CONCURRENT_SPECULATIVE = 3  # cap concurrent Groq calls
+    MAX_CONCURRENT_SPECULATIVE = 3  # cap concurrent guidance analysis calls
+    MAX_CONCURRENT_PREFETCH = 3     # cap concurrent query-only analysis calls
 
     def set_pipeline_task(self, task):
         """Set pipeline task reference for direct actions (EndFrame, etc.)."""
@@ -199,8 +274,10 @@ class ConversationDirectorProcessor(FrameProcessor):
                 self._warmup_done = True
                 asyncio.create_task(warmup_fast_providers())
 
-            # Cancel silence timer (final transcription arrived)
+            # Cancel silence timer and reset continuous speculative state
             self._cancel_silence_timer()
+            self._last_continuous_speculative_time = 0.0
+            self._last_continuous_speculative_text = ""
 
             # Check speculative result
             speculative_result = self._harvest_speculative(frame.text)
@@ -226,23 +303,14 @@ class ConversationDirectorProcessor(FrameProcessor):
             # (so Claude doesn't need to call search_memories tool)
             await self._inject_prefetched_memories(frame.text)
 
-            # Start regular analysis (only if speculative wasn't used)
-            if not speculative_result:
-                if self._pending_analysis and not self._pending_analysis.done():
-                    self._pending_analysis.cancel()
-                transcript = self._session_state.get("_transcript") or []
-                self._pending_analysis = asyncio.create_task(
-                    self._run_analysis(frame.text, transcript)
-                )
+            # No regular analysis on final — silence-based speculative already
+            # provides guidance. Query Director handles queries continuously.
 
-            # Start speculative prefetch (non-blocking)
+            # Start speculative prefetch (non-blocking, regex first-wave)
             asyncio.create_task(self._run_prefetch(frame.text))
 
-            # Question-mark triggered web search: if Deepgram transcribed a
-            # factual question (has ? and matches factual patterns), start
-            # a web search immediately — no need to wait for Director LLM.
-            if "?" in frame.text and not self._session_state.get("_goodbye_in_progress"):
-                self._maybe_start_question_web_search(frame.text)
+            # Clean up completed query tasks
+            self._prefetch_tasks = [t for t in self._prefetch_tasks if not t.done()]
 
             # Trigger mid-call memory refresh at 5 minutes
             call_start = self._session_state.get("_call_start_time") or time.time()
@@ -283,16 +351,17 @@ class ConversationDirectorProcessor(FrameProcessor):
                     self._web_search_query = ""
                     logger.info("[Director] Web search cancelled: interim text diverged")
 
-            # Start silence timer — always, even if a speculative is running.
-            # Each completed speculative builds cached context (memory prefetch).
+            # Start silence timer — fires speculative after 250ms pause.
             if len(text) >= self.SPECULATIVE_MIN_LENGTH and fast_provider_available():
                 self._silence_timer_task = asyncio.create_task(
                     self._silence_timer(text)
                 )
 
-            # Question-mark in interim: start web search early
-            if "?" in text and not self._session_state.get("_goodbye_in_progress"):
-                self._maybe_start_question_web_search(text)
+            # Continuous speculative: fire Groq while user is still speaking.
+            # Don't wait for silence — if we have enough text and enough time
+            # has passed since the last fire, start analysis now. This lets
+            # Groq detect web_queries mid-speech for faster web search gating.
+            self._maybe_fire_continuous_speculative(text)
 
             # Existing debounced prefetch (unchanged)
             now = time.time()
@@ -352,21 +421,83 @@ class ConversationDirectorProcessor(FrameProcessor):
         except asyncio.CancelledError:
             pass  # Normal: new interim arrived before timer fired
 
+    def _maybe_fire_continuous_speculative(self, text: str):
+        """Fire query-only analysis on interims without waiting for silence.
+
+        First fire at 45 chars (~8-9 words) to catch questions early.
+        Subsequent fires require 60+ total chars AND 25 new chars since last fire,
+        so we don't waste Groq calls on slightly extended text.
+        """
+        is_first = not self._last_continuous_speculative_text
+
+        if is_first:
+            if len(text) < self.CONTINUOUS_SPECULATIVE_FIRST_FIRE:
+                return
+        else:
+            if len(text) < self.CONTINUOUS_SPECULATIVE_REFIRE_MIN:
+                return
+            new_chars = len(text) - len(self._last_continuous_speculative_text)
+            if new_chars < self.CONTINUOUS_SPECULATIVE_REFIRE_WINDOW:
+                return
+
+        if not fast_provider_available():
+            return
+
+        now = time.time()
+        if now - self._last_continuous_speculative_time < self.CONTINUOUS_SPECULATIVE_INTERVAL:
+            return
+
+        # Clean up completed tasks
+        self._prefetch_tasks = [
+            t for t in self._prefetch_tasks if not t.done()
+        ]
+        if len(self._prefetch_tasks) >= self.MAX_CONCURRENT_PREFETCH:
+            return
+
+        self._last_continuous_speculative_time = now
+        self._last_continuous_speculative_text = text
+
+        transcript = self._session_state.get("_transcript") or []
+        task = asyncio.create_task(
+            self._run_query_analysis(text, transcript)
+        )
+        self._prefetch_tasks.append(task)
+        logger.debug(
+            "[Director] Continuous query on: {t!r}",
+            t=text[:60],
+        )
+
+    async def _run_query_analysis(self, user_message: str, transcript: list[dict]):
+        """Run query-only analysis (memory_queries + web_queries extraction).
+
+        Fast (~200ms). Feeds memory prefetch and web search gating.
+        Does NOT produce guidance — cannot be harvested for same-turn injection.
+        """
+        try:
+            result = await analyze_queries(
+                user_message,
+                self._session_state,
+                conversation_history=transcript,
+            )
+            if result:
+                direction_like = {"prefetch": result}
+                asyncio.create_task(self._run_director_prefetch(direction_like))
+                self._maybe_start_director_web_search(direction_like)
+            return result
+        except asyncio.CancelledError:
+            return None
+        except Exception as e:
+            logger.debug("[Director] Query analysis error: {err}", err=str(e))
+            return None
+
     async def _run_speculative_analysis(self, user_message: str, transcript: list[dict]):
-        """Run speculative Cerebras analysis. Result retrieved via _harvest_speculative()."""
+        """Run full guidance analysis. Result retrieved via _harvest_speculative()."""
         try:
             result = await analyze_turn_speculative(
                 user_message,
                 self._session_state,
                 conversation_history=transcript,
             )
-            if result:
-                # Fire second-wave prefetch from speculative result
-                asyncio.create_task(self._run_director_prefetch(result))
-
-                # Web search is NOT triggered from Director analysis.
-                # The question-mark trigger on interim frames fires earlier
-                # than any Director analysis could complete.
             return result
         except asyncio.CancelledError:
             return None
@@ -428,22 +559,22 @@ class ConversationDirectorProcessor(FrameProcessor):
         return (intersection / union) >= threshold
 
     # ------------------------------------------------------------------
-    # Question-triggered web search
+    # Director-triggered web search (from Groq analysis)
     # ------------------------------------------------------------------
 
-    def _maybe_start_question_web_search(self, text: str):
-        """Start a web search if text contains a question mark.
+    def _maybe_start_director_web_search(self, result: dict):
+        """Start web search if Groq analysis extracted web_queries.
 
-        Blocklist approach: any "?" triggers a search UNLESS the text
-        matches known social/conversational patterns. Better to search
-        unnecessarily than to miss a real factual question.
+        Groq understands conversational context and only returns web_queries
+        for genuine factual questions — no false triggers on "Remember?" or
+        "How much? I'm about to".
         """
         # Skip if web search already in-flight
         if self._web_search_task is not None and not self._web_search_task.done():
             return
 
-        # Skip social/rhetorical questions
-        if _SOCIAL_Q_PATTERN.search(text):
+        # Skip during goodbye
+        if self._session_state.get("_goodbye_in_progress"):
             return
 
         # Check feature flag
@@ -451,9 +582,15 @@ class ConversationDirectorProcessor(FrameProcessor):
         if not is_on("news_search_enabled", self._session_state):
             return
 
-        # Use the full text as the search query
-        query = text.strip()
-        if len(query) < 10:
+        # Extract web_queries from Groq's prefetch section
+        prefetch = result.get("prefetch", {})
+        web_queries = prefetch.get("web_queries", [])
+        if not web_queries:
+            return
+
+        # Use first query (Groq already formats it as a search query)
+        query = web_queries[0].strip() if isinstance(web_queries[0], str) else ""
+        if len(query) < 5:
             return
 
         self._web_search_query = query
@@ -461,7 +598,7 @@ class ConversationDirectorProcessor(FrameProcessor):
             self._run_web_search(query)
         )
         logger.info(
-            "[Director] Question-triggered web search: {q!r}",
+            "[Director] Query-triggered web search: {q!r}",
             q=query[:80],
         )
 
@@ -470,7 +607,7 @@ class ConversationDirectorProcessor(FrameProcessor):
     # ------------------------------------------------------------------
 
     async def _run_web_search(self, query: str) -> str | None:
-        """Run a web search via OpenAI. Returns result string or None."""
+        """Run a web search via Tavily/OpenAI."""
         try:
             from services.news import web_search_query
             result = await asyncio.wait_for(web_search_query(query), timeout=12.0)
@@ -531,39 +668,6 @@ class ConversationDirectorProcessor(FrameProcessor):
             self._web_search_query = ""
 
         await self.push_frame(frame, direction)
-
-    async def _run_and_inject_web_result(self, query: str):
-        """Run web search and inject result into context (from regular analysis path).
-
-        Unlike the gating path (speculative), this runs AFTER the frame has passed.
-        The result will be available for Claude's next LLM call.
-        """
-        start = time.time()
-        try:
-            result = await self._run_web_search(query)
-            elapsed_ms = round((time.time() - start) * 1000)
-            if result:
-                await self._inject_web_result(result)
-                self._web_searches_completed += 1
-                logger.info(
-                    "[Director] Regular-path web search completed: q={q!r} ({ms}ms, {n} chars)",
-                    q=query, ms=elapsed_ms, n=len(result),
-                )
-            else:
-                logger.warning(
-                    "[Director] Regular-path web search returned empty: q={q!r} ({ms}ms)",
-                    q=query, ms=elapsed_ms,
-                )
-            self._web_search_task = None
-            self._web_search_query = ""
-        except Exception as e:
-            elapsed_ms = round((time.time() - start) * 1000)
-            logger.warning(
-                "[Director] Regular-path web search error: q={q!r} ({ms}ms) {err}",
-                q=query, ms=elapsed_ms, err=str(e),
-            )
-            self._web_search_task = None
-            self._web_search_query = ""
 
     def _strip_ephemeral_messages(self):
         """Remove previous turn's ephemeral injections from LLM context.
@@ -717,28 +821,6 @@ class ConversationDirectorProcessor(FrameProcessor):
     # Regular analysis + prefetch (unchanged from original)
     # ------------------------------------------------------------------
 
-    async def _run_analysis(self, user_message: str, transcript: list[dict]):
-        """Run Director analysis in background. Caches result for next turn."""
-        try:
-            result = await analyze_turn(
-                user_message,
-                self._session_state,
-                conversation_history=transcript,
-            )
-            self._last_result = result
-
-            # Second-wave prefetch from analysis result
-            asyncio.create_task(self._run_director_prefetch(result))
-
-            # Web search is NOT triggered here (regular analysis path).
-            # By the time regular analysis completes, the question-mark trigger
-            # (on interims) or speculative analysis (on 250ms silence) already
-            # started the search. This path fires too late to add value.
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error("[Director] Background analysis error: {err}", err=str(e))
-            self._last_result = get_default_direction()
 
     async def _run_prefetch(self, text: str, source: str = "final"):
         """Speculatively prefetch memories based on user speech (non-blocking)."""
@@ -774,8 +856,7 @@ class ConversationDirectorProcessor(FrameProcessor):
     async def _run_director_prefetch(self, direction: dict):
         """Second-wave prefetch using Director's analysis output (memory only).
 
-        Web searches are now handled directly by the Director via _run_web_search,
-        not through the prefetch cache system.
+        Web searches are handled separately via _maybe_start_director_web_search.
         """
         try:
             from services.prefetch import (

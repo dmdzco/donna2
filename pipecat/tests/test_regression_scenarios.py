@@ -74,7 +74,7 @@ def _build_with_mocked_director(scenario, llm_responses, default_response="That 
     session_state = scenario.to_session_state()
 
     mock_analyze_patcher = patch(
-        "processors.conversation_director.analyze_turn",
+        "processors.conversation_director.analyze_turn_speculative",
         new_callable=AsyncMock,
     )
     mock_format_patcher = patch(
@@ -318,7 +318,7 @@ class TestRegressionLongCallTimeout:
         session_state["_call_start_time"] = time.time() - (13 * 60)
 
         with patch(
-            "processors.conversation_director.analyze_turn",
+            "processors.conversation_director.analyze_turn_speculative",
             new_callable=AsyncMock,
         ) as mock_analyze, patch(
             "processors.conversation_director.format_director_guidance",
@@ -334,6 +334,8 @@ class TestRegressionLongCallTimeout:
             )
             # Override the already-set _call_start_time from build_test_pipeline
             components.session_state["_call_start_time"] = time.time() - (13 * 60)
+            # Pre-set guidance so _take_actions() fires on turn processing
+            components.conversation_director._last_result = get_default_direction()
             components.quick_observer.GOODBYE_DELAY_SECONDS = 0.3
 
             # Shorten Director's delayed_end delay for faster test

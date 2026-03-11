@@ -243,9 +243,9 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(
-                    confidence=0.6,
+                    confidence=0.7,
                     stop_secs=1.2,
-                    min_volume=0.5,
+                    min_volume=0.6,
                 ),
             ),
             serializer=TwilioFrameSerializer(

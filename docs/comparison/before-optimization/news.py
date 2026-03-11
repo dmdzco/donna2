@@ -15,10 +15,8 @@ from loguru import logger
 from lib.circuit_breaker import CircuitBreaker
 
 _breaker = CircuitBreaker("openai_news", failure_threshold=3, recovery_timeout=60.0, call_timeout=10.0)
-_tavily_breaker = CircuitBreaker("tavily_search", failure_threshold=3, recovery_timeout=60.0, call_timeout=8.0)
 
 _openai_client = None
-_tavily_client = None
 _news_cache: dict[str, dict] = {}
 CACHE_TTL = 3600  # 1 hour in seconds
 _MAX_CACHE_ENTRIES = 50
@@ -33,17 +31,6 @@ def _get_openai():
         from openai import OpenAI
         _openai_client = OpenAI(api_key=api_key)
     return _openai_client
-
-
-def _get_tavily():
-    global _tavily_client
-    if _tavily_client is None:
-        api_key = os.environ.get("TAVILY_API_KEY")
-        if not api_key:
-            return None
-        from tavily import AsyncTavilyClient
-        _tavily_client = AsyncTavilyClient(api_key=api_key)
-    return _tavily_client
 
 
 def _evict_expired():
@@ -84,7 +71,7 @@ async def get_news_for_senior(interests: list[str], limit: int = 3) -> str | Non
                 model="gpt-4o-mini",
                 tools=[{"type": "web_search_preview"}],
                 input=(
-                    f"Find 8-10 brief, positive news stories from today about: {interest_list}.\n"
+                    f"Find 7-8 brief, positive news stories from today about: {interest_list}.\n"
                     "These are for an elderly person, so:\n"
                     "- Choose uplifting or interesting stories (avoid distressing news)\n"
                     "- Keep each summary to 1-2 sentences\n"
@@ -125,64 +112,18 @@ def format_news_context(raw_news: str) -> str:
     )
 
 
-async def _tavily_search(query: str) -> str | None:
-    """Search via Tavily (fast, 1-3s typical)."""
-    client = _get_tavily()
-    if client is None:
-        return None
-
-    async def _call():
-        return await client.search(
-            query=query,
-            search_depth="basic",
-            max_results=3,
-            include_answer=True,
-        )
-
-    result = await _tavily_breaker.call(_call(), fallback=None)
-    if result is None:
-        return None
-
-    # Tavily returns a pre-generated answer + individual results
-    answer = result.get("answer", "").strip()
-    if answer:
-        return answer
-
-    # Fallback: summarize from individual results
-    results = result.get("results", [])
-    if results:
-        snippets = [r.get("content", "")[:200] for r in results[:3]]
-        return " ".join(snippets).strip()
-
-    return None
-
-
-async def _openai_search(query: str) -> str | None:
-    """Search via OpenAI web search (slower fallback, 6-10s)."""
-    client = _get_openai()
-    if client is None:
-        return None
-
-    response = await asyncio.to_thread(
-        client.responses.create,
-        model="gpt-4o-mini",
-        tools=[{"type": "web_search_preview"}],
-        input=(
-            f"Answer this question concisely: {query}\n\n"
-            "Keep the answer to 2-3 sentences max. "
-            "Use simple, clear language suitable for an elderly person. "
-            "If the question is about current events, include today's date context."
-        ),
-    )
-    return (response.output_text or "").strip() or None
-
-
 async def web_search_query(query: str) -> str | None:
     """General-purpose web search for answering a senior's question.
 
-    Tries Tavily first (fast, ~1-3s), falls back to OpenAI web search.
+    Unlike get_news_for_senior (which finds curated news), this answers
+    any question the senior might ask during a call.
     """
     if not query:
+        return None
+
+    client = _get_openai()
+    if client is None:
+        logger.info("OpenAI not configured, skipping web search")
         return None
 
     # Check cache (short TTL for general queries)
@@ -195,17 +136,18 @@ async def web_search_query(query: str) -> str | None:
     try:
         logger.info("Web search query: {q}", q=query)
 
-        # Try Tavily first (fast)
-        content = await _tavily_search(query)
-        if content:
-            logger.info("Web search completed via Tavily")
-        else:
-            # Fallback to OpenAI
-            logger.info("Tavily unavailable, falling back to OpenAI web search")
-            content = await _openai_search(query)
-            if content:
-                logger.info("Web search completed via OpenAI")
+        response = client.responses.create(
+            model="gpt-4o-mini",
+            tools=[{"type": "web_search_preview"}],
+            input=(
+                f"Answer this question concisely: {query}\n\n"
+                "Keep the answer to 2-3 sentences max. "
+                "Use simple, clear language suitable for an elderly person. "
+                "If the question is about current events, include today's date context."
+            ),
+        )
 
+        content = (response.output_text or "").strip()
         if not content:
             logger.info("No web search content returned")
             return None
@@ -213,6 +155,7 @@ async def web_search_query(query: str) -> str | None:
         if len(_news_cache) >= _MAX_CACHE_ENTRIES:
             _evict_expired()
         _news_cache[key] = {"news": content, "timestamp": time.time()}
+        logger.info("Web search completed successfully")
         return content
 
     except Exception as e:

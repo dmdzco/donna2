@@ -81,20 +81,8 @@ def _format_analysis_insights(analysis: dict) -> str | None:
 
 def _build_senior_context(session_state: dict) -> str:
     """Build the senior-specific context sections of the system prompt."""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
     parts: list[str] = []
     senior = session_state.get("senior") or {}
-
-    # Inject current local time so the LLM knows morning/afternoon/evening
-    tz_name = senior.get("timezone") or "America/New_York"
-    try:
-        tz = ZoneInfo(tz_name)
-    except Exception:
-        tz = ZoneInfo("America/New_York")
-    local_now = datetime.now(tz)
-    parts.append(f"Current time: {local_now.strftime('%A, %B %d, %Y at %I:%M %p')}.")
 
     first_name = (senior.get("name") or "").split(" ")[0] or "there"
     city = senior.get("city") or ""
@@ -125,12 +113,6 @@ def _build_senior_context(session_state: dict) -> str:
         logger.info("System prompt includes memory context ({n} chars)", n=len(memory_ctx))
     else:
         logger.warning("No memory context in session_state for system prompt")
-
-    # --- Pre-cached news (fetched daily based on interests) ---
-    news_ctx = session_state.get("news_context")
-    if news_ctx:
-        parts.append(f"\n{news_ctx}")
-        logger.info("System prompt includes news context ({n} chars)", n=len(news_ctx))
 
     # --- Insights from last call analysis ---
     analysis = session_state.get("last_call_analysis") or {}

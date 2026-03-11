@@ -103,7 +103,11 @@ server.listen(PORT, async () => {
 
   // Start the reminder scheduler (check every minute)
   // Passes Pipecat URL so outbound calls point to the voice pipeline
-  startScheduler(PIPECAT_BASE_URL, 60000);
+  if (process.env.SCHEDULER_ENABLED === 'false') {
+    console.log('Scheduler disabled (SCHEDULER_ENABLED=false)');
+  } else {
+    startScheduler(PIPECAT_BASE_URL, 60000);
+  }
 });
 
 // Graceful shutdown

@@ -1,3 +1,4 @@
+import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { Pressable, Text, View, useWindowDimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -11,32 +12,27 @@ export default function LandingScreen() {
     <View className="flex-1 bg-cream">
       {/* Hero image area — top 45% of viewport */}
       <View style={{ height: height * 0.45 }} className="relative">
-        {/* Placeholder: sage background until real hero image is available */}
-        <View className="absolute inset-0 bg-sage" />
+        {/* Placeholder: sage-to-dark gradient until real hero image is available */}
+        <LinearGradient
+          colors={[COLORS.sageDark, COLORS.sage, "#5a7060"]}
+          locations={[0, 0.5, 1]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+        />
 
-        {/* Gradient fade from hero into cream background (layered opacity Views) */}
-        <View className="absolute bottom-0 left-0 right-0" style={{ height: 120 }}>
-          <View
-            className="flex-1"
-            style={{ backgroundColor: COLORS.cream, opacity: 0.15 }}
-          />
-          <View
-            className="flex-1"
-            style={{ backgroundColor: COLORS.cream, opacity: 0.35 }}
-          />
-          <View
-            className="flex-1"
-            style={{ backgroundColor: COLORS.cream, opacity: 0.6 }}
-          />
-          <View
-            className="flex-1"
-            style={{ backgroundColor: COLORS.cream, opacity: 0.85 }}
-          />
-          <View
-            className="flex-1"
-            style={{ backgroundColor: COLORS.cream, opacity: 1 }}
-          />
-        </View>
+        {/* Gradient fade from hero into cream background */}
+        <LinearGradient
+          colors={["transparent", COLORS.cream]}
+          locations={[0.4, 1]}
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 120,
+          }}
+        />
       </View>
 
       {/* Content below hero */}

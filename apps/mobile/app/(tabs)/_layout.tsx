@@ -52,42 +52,101 @@ export default function TabLayout() {
         tabBarStyle: {
           backgroundColor: COLORS.white,
           borderTopColor: COLORS.border,
-          paddingBottom: 20,
-          height: 80,
+          borderTopWidth: 1,
+          paddingBottom: 28,
+          paddingTop: 8,
+          height: 88,
         },
         tabBarActiveTintColor: COLORS.sage,
         tabBarInactiveTintColor: COLORS.muted,
         tabBarLabelStyle: {
           fontSize: 11,
+          fontWeight: "500",
         },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
-          tabBarIcon: ({ color }) => <Home size={22} color={color} />,
+          title: "Dashboard",
+          tabBarIcon: ({ color, focused }) => (
+            <View
+              style={
+                focused
+                  ? {
+                      backgroundColor: COLORS.beige,
+                      borderRadius: 12,
+                      padding: 6,
+                    }
+                  : { padding: 6 }
+              }
+            >
+              <Home size={22} color={color} />
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
         name="schedule"
         options={{
           title: "Schedule",
-          tabBarIcon: ({ color }) => <Calendar size={22} color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <View
+              style={
+                focused
+                  ? {
+                      backgroundColor: COLORS.beige,
+                      borderRadius: 12,
+                      padding: 6,
+                    }
+                  : { padding: 6 }
+              }
+            >
+              <Calendar size={22} color={color} />
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
         name="reminders"
         options={{
           title: "Reminders",
-          tabBarIcon: ({ color }) => <Bell size={22} color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <View
+              style={
+                focused
+                  ? {
+                      backgroundColor: COLORS.beige,
+                      borderRadius: 12,
+                      padding: 6,
+                    }
+                  : { padding: 6 }
+              }
+            >
+              <Bell size={22} color={color} />
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
           title: "Settings",
-          tabBarIcon: ({ color }) => <Settings size={22} color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <View
+              style={
+                focused
+                  ? {
+                      backgroundColor: COLORS.beige,
+                      borderRadius: 12,
+                      padding: 6,
+                    }
+                  : { padding: 6 }
+              }
+            >
+              <Settings size={22} color={color} />
+            </View>
+          ),
         }}
       />
     </Tabs>

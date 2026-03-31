@@ -5,12 +5,10 @@ export default function RemindersScreen() {
   return (
     <SafeAreaView className="flex-1 bg-cream">
       <View className="flex-1 items-center justify-center px-6">
-        <Text className="text-2xl font-serif-semibold text-charcoal mb-2">
+        <Text className="text-[28px] font-semibold text-charcoal">
           Reminders
         </Text>
-        <Text className="text-muted text-center">
-          Reminders will appear here
-        </Text>
+        <Text className="text-[15px] text-muted mt-2">Coming soon</Text>
       </View>
     </SafeAreaView>
   );

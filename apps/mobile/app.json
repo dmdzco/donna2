@@ -1,26 +1,42 @@
 {
   "expo": {
     "name": "Donna",
-    "slug": "donna-mobile",
+    "slug": "donna-caregiver",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
     "scheme": "donna",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FDFCF8"
+    },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.donna.mobile"
+      "bundleIdentifier": "com.donna.caregiver",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Use Face ID for quick sign-in"
+      }
     },
     "android": {
-      "package": "com.donna.mobile"
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#FDFCF8"
+      },
+      "package": "com.donna.caregiver"
     },
     "web": {
       "bundler": "metro",
-      "output": "static"
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
       "expo-router",
       "expo-secure-store",
       "expo-notifications",
+      "expo-haptics",
       "expo-font"
     ],
     "experiments": {
@@ -28,8 +44,9 @@
     },
     "extra": {
       "eas": {
-        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
-      }
+        "projectId": "donna-caregiver"
+      },
+      "apiUrl": "https://donna-api-production-2450.up.railway.app"
     }
   }
 }

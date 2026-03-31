@@ -4,3 +4,4 @@ export { Card } from "./Card";
 export { Modal } from "./Modal";
 export { Toggle } from "./Toggle";
 export { ProgressBar } from "./ProgressBar";
+export { Skeleton } from "./Skeleton";

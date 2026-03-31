@@ -49,7 +49,7 @@ export default function SignInScreen() {
       if (profile.seniors?.length > 0) {
         router.replace("/(tabs)");
       } else {
-        router.replace("/onboarding/step1" as any);
+        router.replace("/(onboarding)/step1");
       }
     } catch {
       router.replace("/onboarding/step1" as any);

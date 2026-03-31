@@ -8,17 +8,19 @@ export interface Senior {
   zipCode?: string;
   interests?: string[];
   additionalInfo?: string;
-  familyInfo?: Record<string, string>;
+  familyInfo?: Record<string, unknown>;
   preferredCallTimes?: Record<string, unknown>;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  /** Present when returned via /api/caregivers/me (from caregiver assignment) */
+  role?: string;
 }
 
 export interface Reminder {
   id: string;
   seniorId: string;
-  type: "medication" | "custom";
+  type: "medication" | "appointment" | "custom" | "wellness" | "social";
   title: string;
   description?: string;
   scheduledTime?: string;
@@ -55,13 +57,35 @@ export interface CallAnalysis {
   callQuality?: string;
 }
 
+/**
+ * Matches the notification_preferences table in the backend.
+ * Fields correspond to: callCompleted, concernDetected, reminderMissed,
+ * weeklySummary, smsEnabled, emailEnabled, quietHours*, timezone,
+ * weeklyReport*.
+ */
 export interface NotificationPreferences {
-  callSummaries: boolean;
-  missedCallAlerts: boolean;
-  completedCallAlerts: boolean;
-  pauseCalls: boolean;
+  caregiverId?: string;
+  callCompleted?: boolean;
+  concernDetected?: boolean;
+  reminderMissed?: boolean;
+  weeklySummary?: boolean;
+  smsEnabled?: boolean;
+  emailEnabled?: boolean;
+  quietHoursStart?: string | null;
+  quietHoursEnd?: string | null;
+  timezone?: string;
+  weeklyReportDay?: number;
+  weeklyReportTime?: string;
+  callSummaries?: boolean;
+  missedCallAlerts?: boolean;
+  completedCallAlerts?: boolean;
+  pauseCalls?: boolean;
 }
 
+/**
+ * Payload for POST /api/onboarding.
+ * Must match the onboardingSchema in validators/schemas.js on the backend.
+ */
 export interface OnboardingInput {
   senior: {
     name: string;
@@ -72,12 +96,15 @@ export interface OnboardingInput {
     zipCode?: string;
   };
   relation: string;
-  interests: string[];
-  familyInfo?: { interestDetails?: Record<string, string> };
+  interests?: string[];
+  familyInfo?: { relation?: string; interestDetails?: Record<string, string> };
   additionalInfo?: string;
-  reminders: string[];
+  reminders?: string[];
   updateTopics?: string[];
-  callSchedule?: { time?: string };
+  callSchedule?: {
+    days?: ("Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun")[];
+    time?: string;
+  };
 }
 
 export interface CaregiverProfile {

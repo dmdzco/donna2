@@ -132,9 +132,10 @@ export default function DashboardScreen() {
   const seniorFirstName = seniorName.split(" ")[0];
 
   // Resolve schedule: try the schedule endpoint, fall back to senior.preferredCallTimes
-  const resolvedSchedule = useMemo(() => {
-    if (scheduleData?.schedule) return scheduleData.schedule;
-    if (scheduleData?.days || scheduleData?.time) return scheduleData;
+  const resolvedSchedule = useMemo((): { days?: string[]; time?: string } | null => {
+    const sd = scheduleData as Record<string, any> | null | undefined;
+    if (sd?.schedule) return sd.schedule;
+    if (sd?.days || sd?.time) return sd as { days?: string[]; time?: string };
     if (senior?.preferredCallTimes?.schedule) {
       return senior.preferredCallTimes.schedule as { days?: string[]; time?: string };
     }
@@ -312,11 +313,11 @@ export default function DashboardScreen() {
               loading={initiateCall.isPending}
               disabled={initiateCall.isPending}
               icon={<Phone size={18} color={COLORS.white} />}
-              className="bg-accentPink"
+              className="bg-accent-pink"
             />
           </View>
           {initiateCall.isError && (
-            <Text className="text-destructive text-[13px] text-center mt-3">
+            <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
               Failed to initiate call. Please try again.
             </Text>
           )}

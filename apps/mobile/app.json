@@ -17,7 +17,9 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.donna.caregiver",
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Use Face ID for quick sign-in"
+        "NSFaceIDUsageDescription": "Use Face ID for quick sign-in",
+        "NSCameraUsageDescription": "Donna uses the camera to let you set a profile photo",
+        "NSPhotoLibraryUsageDescription": "Donna uses your photo library to let you set a profile photo"
       }
     },
     "android": {
@@ -35,14 +37,21 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-notifications",
-      "expo-haptics",
-      "expo-font"
+      [
+        "expo-notifications",
+        {
+          "sounds": []
+        }
+      ],
+      "expo-font",
+      "expo-splash-screen",
+      "expo-system-ui"
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
+      "_note": "Replace eas.projectId with your real EAS project ID from 'eas project:init'",
       "eas": {
         "projectId": "donna-caregiver"
       },

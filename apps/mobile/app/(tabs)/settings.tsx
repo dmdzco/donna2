@@ -175,7 +175,7 @@ export default function SettingsScreen() {
               <View className="w-10 h-10 rounded-full items-center justify-center bg-red-50">
                 <LogOut size={18} color={COLORS.destructive} />
               </View>
-              <Text className="text-[15px] font-medium text-destructive ml-3">
+              <Text className="text-[15px] font-medium ml-3" style={{ color: COLORS.destructive }}>
                 Sign Out
               </Text>
             </Pressable>

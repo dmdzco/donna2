@@ -10,7 +10,7 @@ export function useSenior(seniorId: string | undefined) {
     queryKey: ["senior", seniorId],
     queryFn: async () => {
       const token = await getToken();
-      return api.seniors.get(seniorId!, token!) as Promise<Senior>;
+      return api.seniors.get(seniorId!, token!);
     },
     enabled: !!seniorId,
   });
@@ -50,7 +50,7 @@ export function useUpdateSchedule(seniorId: string | undefined) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: Record<string, unknown>) => {
+    mutationFn: async (data: { schedule?: unknown; updateTopics?: string[] }) => {
       const token = await getToken();
       return api.seniors.updateSchedule(seniorId!, data, token!);
     },

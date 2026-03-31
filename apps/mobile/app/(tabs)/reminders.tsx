@@ -314,7 +314,7 @@ export default function RemindersScreen() {
           />
 
           {(createReminder.isError || updateReminder.isError) && (
-            <Text className="text-destructive text-[13px] text-center mt-3">
+            <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
               Something went wrong. Please try again.
             </Text>
           )}
@@ -340,7 +340,7 @@ export default function RemindersScreen() {
             variant="destructive"
             loading={deleteReminder.isPending}
             disabled={deleteReminder.isPending}
-            className="bg-accentPink"
+            className="bg-accent-pink"
           />
           <Button
             title="Cancel"
@@ -351,7 +351,7 @@ export default function RemindersScreen() {
         </View>
 
         {deleteReminder.isError && (
-          <Text className="text-destructive text-[13px] text-center mt-3">
+          <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
             Failed to delete reminder. Please try again.
           </Text>
         )}

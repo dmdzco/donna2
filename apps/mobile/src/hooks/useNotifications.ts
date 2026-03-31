@@ -3,6 +3,7 @@ import { useAuth } from "@clerk/clerk-expo";
 import { api } from "@/src/lib/api";
 import type { NotificationPreferences } from "@/src/types";
 
+
 export function useNotificationPreferences() {
   const { getToken } = useAuth();
 
@@ -10,7 +11,7 @@ export function useNotificationPreferences() {
     queryKey: ["notificationPreferences"],
     queryFn: async () => {
       const token = await getToken();
-      return api.notifications.getPreferences(token!) as Promise<NotificationPreferences>;
+      return api.notifications.getPreferences(token!);
     },
   });
 }

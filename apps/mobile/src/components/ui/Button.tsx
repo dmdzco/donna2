@@ -20,7 +20,7 @@ export function Button({
   icon,
   className = "",
 }: ButtonProps) {
-  const base = "flex-row items-center justify-center rounded-3xl min-h-[52] px-6";
+  const base = "flex-row items-center justify-center rounded-3xl min-h-[52px] px-6";
   const variants: Record<string, string> = {
     primary: "bg-sage",
     secondary: "bg-white border border-charcoal/10",

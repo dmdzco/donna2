@@ -896,7 +896,7 @@ export default function ScheduleScreen() {
           </View>
 
           {updateSchedule.isError && (
-            <Text className="text-destructive text-[13px] text-center mt-3">
+            <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
               Failed to save. Please try again.
             </Text>
           )}

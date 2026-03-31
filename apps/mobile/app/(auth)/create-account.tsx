@@ -52,7 +52,7 @@ export default function CreateAccountScreen() {
         router.replace("/(onboarding)/step1");
       }
     } catch {
-      router.replace("/onboarding/step1" as any);
+      router.replace("/(onboarding)/step1" as any);
     }
   }
 

@@ -1,85 +1,87 @@
-import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
-import { Pressable, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../constants/colors';
+import { useRouter } from "expo-router";
+import { Pressable, Text, View, useWindowDimensions } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { COLORS } from "@/src/constants/theme";
 
-export default function Landing() {
+export default function LandingScreen() {
   const router = useRouter();
+  const { height } = useWindowDimensions();
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      {/* Hero image */}
-      <View style={{ flex: 1, position: 'relative' }}>
-        <Image
-          source={{ uri: 'https://images.unsplash.com/photo-1516975080664-ed2fc6a32937?w=800&q=80' }}
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
-          contentFit="cover"
-        />
-        {/* Gradient overlay */}
-        <View
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.35)',
-          }}
-        />
+    <View className="flex-1 bg-cream">
+      {/* Hero image area — top 45% of viewport */}
+      <View style={{ height: height * 0.45 }} className="relative">
+        {/* Placeholder: sage background until real hero image is available */}
+        <View className="absolute inset-0 bg-sage" />
 
-        {/* Content */}
-        <View style={{ flex: 1, justifyContent: 'flex-end', paddingHorizontal: 28, paddingBottom: 52 }}>
-          {/* Logo / Brand */}
-          <View style={{ marginBottom: 12 }}>
+        {/* Gradient fade from hero into cream background (layered opacity Views) */}
+        <View className="absolute bottom-0 left-0 right-0" style={{ height: 120 }}>
+          <View
+            className="flex-1"
+            style={{ backgroundColor: COLORS.cream, opacity: 0.15 }}
+          />
+          <View
+            className="flex-1"
+            style={{ backgroundColor: COLORS.cream, opacity: 0.35 }}
+          />
+          <View
+            className="flex-1"
+            style={{ backgroundColor: COLORS.cream, opacity: 0.6 }}
+          />
+          <View
+            className="flex-1"
+            style={{ backgroundColor: COLORS.cream, opacity: 0.85 }}
+          />
+          <View
+            className="flex-1"
+            style={{ backgroundColor: COLORS.cream, opacity: 1 }}
+          />
+        </View>
+      </View>
+
+      {/* Content below hero */}
+      <SafeAreaView edges={["bottom"]} className="flex-1 px-7">
+        <View className="flex-1 justify-between">
+          {/* Branding */}
+          <View>
             <Text
-              style={{
-                fontSize: 56,
-                color: colors.white,
-                fontStyle: 'italic',
-                fontFamily: 'serif',
-                letterSpacing: -1,
-              }}
+              className="font-serif text-sage mb-3"
+              style={{ fontSize: 56, letterSpacing: -1 }}
             >
               Donna
             </Text>
+            <Text className="text-[18px] text-muted leading-[26px]">
+              A helpful assistant for your parents.{"\n"}A game-changing
+              caregiving tool for you.
+            </Text>
           </View>
 
-          <Text style={{ fontSize: 18, color: 'rgba(255,255,255,0.9)', marginBottom: 36, lineHeight: 26 }}>
-            A caring AI companion that calls your loved one — so they're never alone.
-          </Text>
+          {/* Actions */}
+          <View className="pb-3">
+            <Pressable
+              onPress={() => router.push("/(auth)/create-account")}
+              className="bg-sage rounded-3xl min-h-[52px] items-center justify-center mb-4"
+              accessibilityRole="button"
+              accessibilityLabel="Get Started"
+            >
+              <Text className="text-white text-[17px] font-semibold">
+                Get Started
+              </Text>
+            </Pressable>
 
-          {/* Get Started */}
-          <Pressable
-            onPress={() => router.push('/create-account')}
-            style={({ pressed }) => ({
-              backgroundColor: colors.primary,
-              borderRadius: 16,
-              paddingVertical: 16,
-              alignItems: 'center',
-              marginBottom: 14,
-              opacity: pressed ? 0.85 : 1,
-            })}
-          >
-            <Text style={{ color: colors.white, fontSize: 17, fontWeight: '600' }}>Get Started</Text>
-          </Pressable>
-
-          {/* Sign In */}
-          <Pressable
-            onPress={() => router.push('/create-account')}
-            style={({ pressed }) => ({
-              borderRadius: 16,
-              paddingVertical: 16,
-              alignItems: 'center',
-              borderWidth: 1.5,
-              borderColor: 'rgba(255,255,255,0.7)',
-              opacity: pressed ? 0.75 : 1,
-            })}
-          >
-            <Text style={{ color: colors.white, fontSize: 17, fontWeight: '500' }}>Sign In</Text>
-          </Pressable>
+            <Pressable
+              onPress={() => router.push("/(auth)/sign-in")}
+              className="min-h-[48px] items-center justify-center"
+              accessibilityRole="button"
+              accessibilityLabel="Sign In"
+            >
+              <Text className="text-sage text-[16px] font-medium">
+                Sign In
+              </Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }

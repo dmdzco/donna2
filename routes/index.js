@@ -18,9 +18,11 @@ import adminAuthRoutes from './admin-auth.js';
 import callAnalysesRoutes from './call-analyses.js';
 import dailyContextRoutes from './daily-context.js';
 import notificationRoutes from './notifications.js';
+import waitlistRoutes from './waitlist.js';
 
 export function mountRoutes(app) {
   app.use(healthRoutes);
+  app.use(waitlistRoutes);
   app.use(callRoutes);
   app.use(seniorRoutes);
   app.use(memoryRoutes);

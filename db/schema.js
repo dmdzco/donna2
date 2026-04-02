@@ -165,3 +165,14 @@ export const adminUsers = pgTable('admin_users', {
   lastLoginAt: timestamp('last_login_at'),
 });
 
+// Waitlist signups from calldonna.co
+export const waitlist = pgTable('waitlist', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  email: varchar('email', { length: 255 }).notNull(),
+  phone: varchar('phone', { length: 50 }),
+  whoFor: varchar('who_for', { length: 100 }),
+  thoughts: text('thoughts'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+

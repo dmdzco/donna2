@@ -151,8 +151,8 @@ async def run_gemini_pipeline(
             allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
-            audio_in_sample_rate=8000,
-            audio_out_sample_rate=8000,
+            audio_in_sample_rate=16000,  # Gemini expects 16kHz; Twilio serializer upsamples from 8kHz mulaw
+            audio_out_sample_rate=8000,  # Twilio output; serializer downsamples Gemini's 24kHz PCM
         ),
     )
 

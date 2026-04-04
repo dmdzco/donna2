@@ -20,7 +20,7 @@ import time
 
 from loguru import logger
 
-from pipecat.frames.frames import EndFrame
+from pipecat.frames.frames import EndFrame, InputTextRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -167,6 +167,14 @@ async def run_gemini_pipeline(
         conversation_tracker.flush()
         await task.queue_frame(EndFrame())
         asyncio.create_task(_safe_post_call(session_state, conversation_tracker, elapsed, call_sid))
+
+    # Trigger Gemini to speak first (outbound calls — no user audio yet)
+    async def _trigger_greeting():
+        await asyncio.sleep(1.5)  # Wait for Gemini session to connect
+        logger.info("[{cs}] Sending greeting trigger to Gemini", cs=call_sid)
+        await task.queue_frames([InputTextRawFrame(text="[Begin]")])
+
+    asyncio.create_task(_trigger_greeting())
 
     runner = PipelineRunner(handle_sigint=False)
     logger.info("[{cs}] Gemini pipeline ready, running...", cs=call_sid)

@@ -94,6 +94,7 @@ async def resolve_flags(
         "context_cache_enabled": True,
         "post_call_analysis_enabled": True,
         "scheduler_call_stagger_ms": 5000,
+        "voice_backend": "claude",  # "claude" or "gemini_live"
     }
 
     if not _initialized or not _client:

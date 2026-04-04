@@ -18,6 +18,7 @@ import time
 from deepgram import LiveOptions
 from loguru import logger
 from starlette.websockets import WebSocket
+from lib.sanitize import mask_name
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -238,7 +239,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         logger.warning("[{cs}] Flag resolution failed — using defaults: {err}", cs=call_sid, err=str(e))
 
     senior_name = (session_state.get("senior") or {}).get("name", "unknown")
-    logger.info("[{cs}] Starting pipeline for {name}", cs=call_sid, name=senior_name)
+    logger.info("[{cs}] Starting pipeline for {name}", cs=call_sid, name=mask_name(senior_name))
 
     # -------------------------------------------------------------------------
     # Transport (Twilio ↔ FastAPI WebSocket)
@@ -252,7 +253,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(
                     confidence=0.6,
-                    stop_secs=1.2,
+                    stop_secs=0.8,
                     min_volume=0.5,
                 ),
             ),
@@ -267,8 +268,12 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
 
     # -------------------------------------------------------------------------
     # Route to Gemini Live pipeline if flag is set
+    # Env var VOICE_BACKEND=gemini_live overrides GrowthBook flag
     # -------------------------------------------------------------------------
-    voice_backend = (session_state.get("_flags") or {}).get("voice_backend", "claude")
+    voice_backend = (
+        os.getenv("VOICE_BACKEND")
+        or (session_state.get("_flags") or {}).get("voice_backend", "claude")
+    )
     if voice_backend == "gemini_live":
         logger.info("[{cs}] voice_backend=gemini_live — delegating to Gemini pipeline", cs=call_sid)
         from bot_gemini import run_gemini_pipeline

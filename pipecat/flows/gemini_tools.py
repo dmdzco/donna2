@@ -59,55 +59,6 @@ def _build_gemini_tools(session_state: dict) -> list[dict]:
             },
         },
         {
-            "name": "save_important_detail",
-            "description": (
-                "Save an important detail the senior mentioned that should be remembered "
-                "for future calls. Use for significant life events, health changes, new "
-                "interests, family updates, or emotional state changes."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "detail": {
-                        "type": "string",
-                        "description": "The detail to remember (e.g., 'Grandson Jake graduated from college')",
-                    },
-                    "category": {
-                        "type": "string",
-                        "enum": ["health", "family", "preference", "life_event", "emotional", "activity"],
-                        "description": "Category of the detail",
-                    },
-                },
-                "required": ["detail", "category"],
-            },
-        },
-        {
-            "name": "mark_reminder_acknowledged",
-            "description": (
-                "Mark a reminder as acknowledged after you have delivered it and the senior "
-                "has responded. Call this after delivering a reminder and getting their response."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reminder_id": {
-                        "type": "string",
-                        "description": "The ID of the reminder that was delivered",
-                    },
-                    "status": {
-                        "type": "string",
-                        "enum": ["acknowledged", "confirmed"],
-                        "description": "Whether the senior acknowledged or confirmed the reminder",
-                    },
-                    "user_response": {
-                        "type": "string",
-                        "description": "Brief summary of what the senior said about the reminder",
-                    },
-                },
-                "required": ["reminder_id", "status"],
-            },
-        },
-        {
             "name": "end_call",
             "description": (
                 "End the call gracefully. Call this ONLY when the senior says goodbye "
@@ -154,9 +105,10 @@ def register_gemini_tools(llm, session_state: dict, task_ref: list) -> None:
 
     handlers = make_tool_handlers(session_state)
 
-    # Register existing handlers with Pipecat adapter
-    for name, handler in handlers.items():
-        llm.register_function(name, _pipecat_adapter(name, handler))
+    # Register only the two search tools (Gemini 3.1 sync-only — no save/reminder tools)
+    for name in ("web_search", "search_memories"):
+        if name in handlers:
+            llm.register_function(name, _pipecat_adapter(name, handlers[name]))
 
     # Register end_call — triggers EndFrame to terminate the pipeline
     async def handle_end_call(params: FunctionCallParams):

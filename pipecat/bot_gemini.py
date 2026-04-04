@@ -129,11 +129,9 @@ async def run_gemini_pipeline(
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY", ""),
         model="models/gemini-3.1-flash-live-preview",
+        voice_id="Aoede",
         system_instruction=system_prompt,
         tools=_build_gemini_tools(session_state),
-        settings=GeminiLiveLLMService.Settings(
-            voice="Aoede",
-        ),
     )
 
     # Register tool handlers before pipeline starts

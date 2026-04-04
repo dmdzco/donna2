@@ -12,6 +12,8 @@ from __future__ import annotations
 from datetime import date
 from loguru import logger
 
+from pipecat.services.llm_service import FunctionCallParams
+
 
 def _build_gemini_tools(session_state: dict) -> list[dict]:
     """Build Gemini-format tool schema list."""
@@ -124,23 +126,17 @@ def _build_gemini_tools(session_state: dict) -> list[dict]:
 
 
 def _pipecat_adapter(name: str, handler):
-    """Wrap a simple async (args: dict) -> dict handler for Pipecat's register_function.
-
-    Pipecat's register_function callback signature:
-        async def cb(function_name, tool_call_id, args, llm, context, result_callback)
-
-    result_callback expects a string result.
-    """
-    async def adapted(function_name, tool_call_id, args, llm, context, result_callback):
-        logger.info("Gemini tool CALL: {name}({args})", name=name, args=args)
+    """Wrap a simple async (args: dict) -> dict handler for Pipecat's register_function."""
+    async def adapted(params: FunctionCallParams):
+        logger.info("Gemini tool CALL: {name}({args})", name=name, args=params.arguments)
         try:
-            result = await handler(args or {})
+            result = await handler(params.arguments or {})
             result_str = result.get("result", "ok") if isinstance(result, dict) else str(result)
         except Exception as e:
             logger.error("Gemini tool ERROR {name}: {err}", name=name, err=str(e))
             result_str = "Tool unavailable. Continue naturally."
         logger.info("Gemini tool RESULT: {name} -> {r}", name=name, r=result_str[:100])
-        await result_callback(result_str)
+        await params.result_callback(result_str)
     return adapted
 
 
@@ -163,10 +159,10 @@ def register_gemini_tools(llm, session_state: dict, task_ref: list) -> None:
         llm.register_function(name, _pipecat_adapter(name, handler))
 
     # Register end_call — triggers EndFrame to terminate the pipeline
-    async def handle_end_call(function_name, tool_call_id, args, llm_ref, context, result_callback):
+    async def handle_end_call(params: FunctionCallParams):
         logger.info("Gemini tool: end_call triggered")
         session_state["_end_reason"] = "gemini_end_call_tool"
-        await result_callback("Call ended.")
+        await params.result_callback("Call ended.")
         if task_ref[0] is not None:
             await asyncio.sleep(0.5)  # Brief pause so goodbye TTS finishes
             await task_ref[0].queue_frame(EndFrame())

@@ -77,7 +77,16 @@ def _build_gemini_tools(session_state: dict) -> list[dict]:
 
 
 def _pipecat_adapter(name: str, handler):
-    """Wrap a simple async (args: dict) -> dict handler for Pipecat's register_function."""
+    """Wrap handler for GeminiLiveLLMService without a context aggregator.
+
+    Pipecat's normal tool result path requires a context aggregator:
+      result_callback → FunctionCallResultFrame → context aggregator → LLMContextFrame
+      → _handle_context → _process_completed_function_calls → session.send_tool_response()
+
+    Without a context aggregator the result never reaches Gemini and it waits
+    in silence. We bypass this by calling _tool_result() directly on the LLM
+    service, while still calling result_callback() to cancel Pipecat's timeout.
+    """
     async def adapted(params: FunctionCallParams):
         logger.info("Gemini tool CALL: {name}({args})", name=name, args=params.arguments)
         try:
@@ -87,7 +96,8 @@ def _pipecat_adapter(name: str, handler):
             logger.error("Gemini tool ERROR {name}: {err}", name=name, err=str(e))
             result_str = "Tool unavailable. Continue naturally."
         logger.info("Gemini tool RESULT: {name} -> {r}", name=name, r=result_str[:100])
-        await params.result_callback(result_str)
+        await params.result_callback(result_str)  # cancels Pipecat's internal timeout
+        await params.llm._tool_result(params.tool_call_id, params.function_name, {"value": result_str})
     return adapted
 
 
@@ -115,6 +125,7 @@ def register_gemini_tools(llm, session_state: dict, task_ref: list) -> None:
         logger.info("Gemini tool: end_call triggered")
         session_state["_end_reason"] = "gemini_end_call_tool"
         await params.result_callback("Call ended.")
+        await params.llm._tool_result(params.tool_call_id, params.function_name, {"value": "Call ended."})
         if task_ref[0] is not None:
             await asyncio.sleep(0.5)  # Brief pause so goodbye TTS finishes
             await task_ref[0].queue_frame(EndFrame())

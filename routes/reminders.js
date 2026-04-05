@@ -11,12 +11,21 @@ import {
   reminderIdParamSchema,
 } from '../validators/schemas.js';
 import { getAccessibleSeniorIds, canAccessSenior } from './helpers.js';
+import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
 
 // List all reminders with senior info (admins see all, caregivers see their seniors')
 router.get('/api/reminders', requireAuth, async (req, res) => {
   try {
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'read',
+      resourceType: 'reminder',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
     const accessibleIds = await getAccessibleSeniorIds(req.auth);
     let query = db.select({
       id: reminders.id,
@@ -66,6 +75,16 @@ router.post('/api/reminders', requireAuth, writeLimiter, validateBody(createRemi
       isRecurring,
       cronExpression,
     }).returning();
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'create',
+      resourceType: 'reminder',
+      resourceId: reminder.id,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { seniorId, reminderType: type },
+    });
     res.json(reminder);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -94,6 +113,17 @@ router.patch('/api/reminders/:id', requireAuth, writeLimiter, validateParams(rem
     if (cronExpression !== undefined) updateData.cronExpression = cronExpression;
     if (isActive !== undefined) updateData.isActive = isActive;
 
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'update',
+      resourceType: 'reminder',
+      resourceId: req.params.id,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { fields: Object.keys(updateData) },
+    });
+
     const [reminder] = await db.update(reminders)
       .set(updateData)
       .where(eq(reminders.id, req.params.id))
@@ -117,6 +147,15 @@ router.delete('/api/reminders/:id', requireAuth, writeLimiter, validateParams(re
       return res.status(403).json({ error: 'Access denied to this reminder' });
     }
 
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'delete',
+      resourceType: 'reminder',
+      resourceId: req.params.id,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
     await db.delete(reminders).where(eq(reminders.id, req.params.id));
     res.json({ success: true });
   } catch (error) {

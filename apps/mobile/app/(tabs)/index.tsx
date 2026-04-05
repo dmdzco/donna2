@@ -1,285 +1,389 @@
-import { useAuth } from '@clerk/clerk-expo';
-import { useRouter } from 'expo-router';
-import { Phone, ChevronRight, Clock, Sparkles } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
+import { useState, useCallback, useMemo } from "react";
 import {
-  ActivityIndicator,
-  Modal,
-  Pressable,
-  ScrollView,
-  Text,
   View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../../constants/colors';
-import { useApi } from '../../lib/api';
+  Text,
+  ScrollView,
+  Pressable,
+  TextInput,
+  ActivityIndicator,
+  RefreshControl,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
+import { useUser } from "@clerk/clerk-expo";
+import { Phone, Calendar } from "lucide-react-native";
+import * as Haptics from "expo-haptics";
+import { format, differenceInCalendarDays, isAfter } from "date-fns";
+import { COLORS } from "@/src/constants/theme";
+import {
+  useCurrentSenior,
+  useConversations,
+  useInitiateCall,
+  useSchedule,
+} from "@/src/hooks";
+import { Button } from "@/src/components/ui";
+import { Modal } from "@/src/components/ui";
+import type { Conversation } from "@/src/types";
 
-interface Highlight {
-  id: string;
-  date: string;
-  duration: string;
-  summary: string;
-  status: 'completed' | 'missed';
+// --- Next-call computation ---
+
+const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function parseTimeString(timeStr: string): { hours: number; minutes: number } | null {
+  // Handles "9:00 AM", "3:30 PM", "14:00", etc.
+  const matchAmPm = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (matchAmPm) {
+    let hours = parseInt(matchAmPm[1], 10);
+    const minutes = parseInt(matchAmPm[2], 10);
+    const period = matchAmPm[3].toUpperCase();
+    if (period === "PM" && hours !== 12) hours += 12;
+    if (period === "AM" && hours === 12) hours = 0;
+    return { hours, minutes };
+  }
+  const match24 = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if (match24) {
+    return { hours: parseInt(match24[1], 10), minutes: parseInt(match24[2], 10) };
+  }
+  return null;
 }
 
-export default function Dashboard() {
-  const router = useRouter();
-  const { signOut } = useAuth();
-  const api = useApi();
+function getNextCallDate(
+  scheduleData: { days?: string[]; time?: string } | null | undefined
+): Date | null {
+  if (!scheduleData?.time) return null;
 
-  const [lovedOneName, setLovedOneName] = useState('Your Loved One');
-  const [nextCall, setNextCall] = useState<{ day: string; time: string } | null>(null);
-  const [highlights, setHighlights] = useState<Highlight[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [callModalVisible, setCallModalVisible] = useState(false);
-  const [calling, setCalling] = useState(false);
+  const parsed = parseTimeString(scheduleData.time);
+  if (!parsed) return null;
 
-  const hours = new Date().getHours();
-  const greeting =
-    hours < 12 ? 'Good morning' : hours < 17 ? 'Good afternoon' : 'Good evening';
+  const now = new Date();
+  const days = scheduleData.days;
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [seniors, convos] = await Promise.all([
-          api.getSeniors().catch(() => null),
-          api.getConversations().catch(() => null),
-        ]);
+  // If no specific days, treat as daily
+  if (!days || days.length === 0) {
+    const today = new Date();
+    today.setHours(parsed.hours, parsed.minutes, 0, 0);
+    if (isAfter(today, now)) return today;
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(parsed.hours, parsed.minutes, 0, 0);
+    return tomorrow;
+  }
 
-        if (seniors?.seniors?.[0]?.name) {
-          setLovedOneName(seniors.seniors[0].name);
-        }
-        if (convos?.conversations) {
-          setHighlights(
-            convos.conversations.slice(0, 5).map((c: any) => ({
-              id: c.id,
-              date: new Date(c.created_at || c.startedAt).toLocaleDateString('en-US', {
-                weekday: 'short',
-                month: 'short',
-                day: 'numeric',
-              }),
-              duration: c.duration ? `${Math.round(c.duration / 60)} min` : '--',
-              summary: c.summary || 'Call completed',
-              status: c.status === 'completed' ? 'completed' : 'missed',
-            }))
-          );
-        }
-      } catch (e) {
-        // non-fatal
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, []);
+  // Check the next 7 days for a matching day
+  for (let offset = 0; offset < 7; offset++) {
+    const candidate = new Date();
+    candidate.setDate(candidate.getDate() + offset);
+    candidate.setHours(parsed.hours, parsed.minutes, 0, 0);
 
-  async function handleInstantCall() {
-    setCalling(true);
-    try {
-      await api.initiateCall({ type: 'instant' });
-      setCallModalVisible(false);
-    } catch (e) {
-      // show error
-    } finally {
-      setCalling(false);
+    const dayName = DAYS_SHORT[candidate.getDay()];
+    if (days.includes(dayName) && isAfter(candidate, now)) {
+      return candidate;
     }
   }
 
+  return null;
+}
+
+function formatNextCall(nextDate: Date | null): string {
+  if (!nextDate) return "No calls scheduled";
+
+  const now = new Date();
+  const dayDiff = differenceInCalendarDays(nextDate, now);
+  const timeStr = format(nextDate, "h:mm a");
+
+  if (dayDiff === 0) return `Today at ${timeStr}`;
+  if (dayDiff === 1) return `Tomorrow at ${timeStr}`;
+  return `In ${dayDiff} days at ${timeStr}`;
+}
+
+// --- Status badge ---
+
+function getCallStatus(conversation: Conversation) {
+  const duration = conversation.durationSeconds ?? 0;
+  if (
+    conversation.status === "completed" ||
+    (conversation.endedAt && duration > 10)
+  ) {
+    return "Answered";
+  }
+  return "Missed";
+}
+
+// --- Component ---
+
+export default function DashboardScreen() {
+  const router = useRouter();
+  const { user } = useUser();
+  const { senior, seniorId, isLoading: seniorLoading } = useCurrentSenior();
+  const {
+    data: conversations,
+    isLoading: convoLoading,
+    refetch: refetchConversations,
+  } = useConversations(seniorId);
+  const { data: scheduleData, isLoading: scheduleLoading } = useSchedule(seniorId);
+  const initiateCall = useInitiateCall();
+
+  const [callModalVisible, setCallModalVisible] = useState(false);
+  const [callContext, setCallContext] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+
+  const caregiverName = user?.firstName ?? "there";
+  const seniorName = senior?.name ?? "your loved one";
+  const seniorFirstName = seniorName.split(" ")[0];
+
+  // Resolve schedule: try the schedule endpoint, fall back to senior.preferredCallTimes
+  const resolvedSchedule = useMemo((): { days?: string[]; time?: string } | null => {
+    const sd = scheduleData as Record<string, any> | null | undefined;
+    if (sd?.schedule) return sd.schedule;
+    if (sd?.days || sd?.time) return sd as { days?: string[]; time?: string };
+    if (senior?.preferredCallTimes?.schedule) {
+      return senior.preferredCallTimes.schedule as { days?: string[]; time?: string };
+    }
+    return null;
+  }, [scheduleData, senior?.preferredCallTimes]);
+
+  const nextCallDate = useMemo(() => getNextCallDate(resolvedSchedule), [resolvedSchedule]);
+  const nextCallText = useMemo(() => formatNextCall(nextCallDate), [nextCallDate]);
+
+  const recentConversations = useMemo(
+    () => (conversations ?? []).slice(0, 5),
+    [conversations]
+  );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refetchConversations();
+    setRefreshing(false);
+  }, [refetchConversations]);
+
+  const handleOpenCallModal = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setCallModalVisible(true);
+  }, []);
+
+  const handleInitiateCall = useCallback(async () => {
+    if (!senior?.phone) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      await initiateCall.mutateAsync(senior.phone);
+      setCallModalVisible(false);
+      setCallContext("");
+    } catch {
+      // Error is handled by react-query -- could show alert here
+    }
+  }, [senior?.phone, initiateCall]);
+
+  // Loading state
+  if (seniorLoading) {
+    return (
+      <SafeAreaView className="flex-1 bg-cream">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color={COLORS.sage} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView className="flex-1 bg-cream" edges={["top"]}>
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 100 }}
+        className="flex-1"
+        contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={COLORS.sage}
+          />
+        }
       >
-        {/* Header */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
-          <View>
-            <Text style={{ fontSize: 22, fontWeight: '800', color: colors.textPrimary }}>
-              {greeting}!
-            </Text>
-            <Text style={{ fontSize: 15, color: colors.textSecondary, marginTop: 2 }}>
-              {lovedOneName}'s companion
-            </Text>
-          </View>
-          <View
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              backgroundColor: colors.primary,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Text style={{ color: colors.white, fontSize: 18, fontWeight: '700' }}>
-              {lovedOneName[0]?.toUpperCase() ?? 'D'}
-            </Text>
-          </View>
+        {/* Greeting */}
+        <View className="px-6 pt-4 pb-2">
+          <Text className="text-[28px] font-semibold text-charcoal">
+            Hello, {caregiverName}
+          </Text>
+          <Text className="text-[15px] text-muted mt-1">
+            Here's what's happening with {seniorFirstName}
+          </Text>
         </View>
 
         {/* Next Call Card */}
-        <View
+        <Pressable
+          className="mx-6 mt-4 rounded-[20px] bg-sage p-6"
           style={{
-            backgroundColor: colors.primary,
-            borderRadius: 20,
-            padding: 20,
-            marginBottom: 20,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.1,
+            shadowRadius: 8,
+            elevation: 3,
           }}
+          onPress={() => router.push("/(tabs)/schedule")}
+          accessibilityRole="button"
+          accessibilityLabel={`Next call: ${nextCallText}. Tap to view schedule.`}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-            <Clock size={16} color="rgba(255,255,255,0.7)" />
-            <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600', marginLeft: 6 }}>
+          <View className="flex-row items-center mb-3">
+            <Calendar size={16} color={COLORS.white} />
+            <Text className="text-white/70 text-[11px] font-semibold tracking-widest ml-2">
               NEXT CALL
             </Text>
           </View>
-          <Text style={{ color: colors.white, fontSize: 28, fontWeight: '800', marginBottom: 4 }}>
-            {nextCall ? `${nextCall.day} at ${nextCall.time}` : 'Schedule a call'}
-          </Text>
-          <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 14 }}>
-            {nextCall ? `Calling ${lovedOneName}` : 'Go to Schedule tab to set up calls'}
-          </Text>
-          <Pressable
-            onPress={() => router.push('/(tabs)/schedule')}
-            style={{ marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-          >
-            <Text style={{ color: colors.white, fontSize: 14, fontWeight: '600' }}>View schedule</Text>
-            <ChevronRight size={16} color={colors.white} />
-          </Pressable>
-        </View>
+          {scheduleLoading ? (
+            <ActivityIndicator size="small" color={COLORS.white} />
+          ) : (
+            <Text className="text-white text-[20px] font-semibold">
+              {nextCallText}
+            </Text>
+          )}
+        </Pressable>
 
-        {/* Recent Highlights */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
-          <Sparkles size={18} color={colors.primary} />
-          <Text style={{ fontSize: 18, fontWeight: '700', color: colors.textPrimary, marginLeft: 8 }}>
+        {/* Recent Call Highlights */}
+        <View className="px-6 mt-8">
+          <Text className="text-[20px] font-semibold text-charcoal mb-4">
             Recent Call Highlights
           </Text>
-        </View>
 
-        {loading ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
-        ) : highlights.length === 0 ? (
-          <View
-            style={{
-              backgroundColor: colors.card,
-              borderRadius: 16,
-              padding: 24,
-              alignItems: 'center',
-            }}
-          >
-            <Text style={{ fontSize: 15, color: colors.textSecondary, textAlign: 'center', lineHeight: 22 }}>
-              No calls yet. Once Donna calls {lovedOneName}, you'll see summaries here.
-            </Text>
-          </View>
-        ) : (
-          highlights.map((h) => (
+          {convoLoading ? (
+            <ActivityIndicator
+              size="small"
+              color={COLORS.sage}
+              style={{ marginTop: 16 }}
+            />
+          ) : recentConversations.length === 0 ? (
             <View
-              key={h.id}
-              style={{
-                backgroundColor: colors.card,
-                borderRadius: 16,
-                padding: 16,
-                marginBottom: 12,
-              }}
+              className="bg-white rounded-2xl p-6 items-center"
+              style={{ borderWidth: 1, borderColor: COLORS.border }}
             >
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: colors.textPrimary }}>{h.date}</Text>
-                <View
-                  style={{
-                    backgroundColor: h.status === 'completed' ? colors.goodBg : colors.missedBg,
-                    borderRadius: 8,
-                    paddingHorizontal: 8,
-                    paddingVertical: 3,
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 4,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 12,
-                      fontWeight: '600',
-                      color: h.status === 'completed' ? colors.goodText : colors.missedText,
-                    }}
-                  >
-                    {h.status === 'completed' ? `✓ ${h.duration}` : 'Missed'}
-                  </Text>
-                </View>
-              </View>
-              <Text style={{ fontSize: 14, color: colors.textSecondary, lineHeight: 20 }}>{h.summary}</Text>
+              <Phone size={32} color={COLORS.muted} />
+              <Text className="text-muted text-[15px] mt-3 text-center">
+                No recent calls yet.{"\n"}Donna will call {seniorFirstName} at the
+                scheduled time.
+              </Text>
             </View>
-          ))
-        )}
+          ) : (
+            recentConversations.map((convo) => (
+              <CallCard key={convo.id} conversation={convo} />
+            ))
+          )}
+        </View>
       </ScrollView>
 
-      {/* FAB - Instant Call */}
+      {/* Floating Phone Button */}
       <Pressable
-        onPress={() => setCallModalVisible(true)}
-        style={({ pressed }) => ({
-          position: 'absolute',
-          bottom: 96,
-          right: 20,
-          width: 60,
-          height: 60,
-          borderRadius: 30,
-          backgroundColor: colors.fab,
-          alignItems: 'center',
-          justifyContent: 'center',
-          shadowColor: '#000',
+        className="absolute right-6 bottom-28 w-14 h-14 rounded-full items-center justify-center"
+        style={{
+          backgroundColor: COLORS.accentPink,
+          shadowColor: COLORS.accentPink,
           shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.2,
+          shadowOpacity: 0.35,
           shadowRadius: 8,
-          elevation: 6,
-          opacity: pressed ? 0.85 : 1,
-        })}
+          elevation: 5,
+        }}
+        onPress={handleOpenCallModal}
+        accessibilityRole="button"
+        accessibilityLabel={`Call ${seniorFirstName} now`}
       >
-        <Phone size={26} color={colors.white} />
+        <Phone size={24} color={COLORS.white} />
       </Pressable>
 
-      {/* Call Modal */}
-      <Modal visible={callModalVisible} transparent animationType="fade">
-        <Pressable
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 }}
-          onPress={() => setCallModalVisible(false)}
-        >
-          <Pressable
-            style={{ backgroundColor: colors.bg, borderRadius: 24, padding: 28 }}
-            onPress={() => {}}
-          >
-            <Text style={{ fontSize: 22, fontWeight: '800', color: colors.textPrimary, marginBottom: 8 }}>
-              Call {lovedOneName} now?
+      {/* Instant Call Modal */}
+      <Modal
+        visible={callModalVisible}
+        onClose={() => setCallModalVisible(false)}
+        title="Instant Call"
+        variant="bottom-sheet"
+      >
+        <View className="pb-6">
+          <Text className="text-muted text-[14px] mb-3">
+            Is there any additional context for this call?
+          </Text>
+          <TextInput
+            className="bg-beige rounded-2xl p-4 text-charcoal text-[15px] min-h-[100px]"
+            placeholder={`e.g. Remind ${seniorFirstName} about their doctor appointment tomorrow`}
+            placeholderTextColor={COLORS.muted}
+            multiline
+            textAlignVertical="top"
+            value={callContext}
+            onChangeText={setCallContext}
+          />
+          <View className="mt-5">
+            <Button
+              title={`Call ${seniorFirstName} Now`}
+              onPress={handleInitiateCall}
+              loading={initiateCall.isPending}
+              disabled={initiateCall.isPending}
+              icon={<Phone size={18} color={COLORS.white} />}
+              className="bg-accent-pink"
+            />
+          </View>
+          {initiateCall.isError && (
+            <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
+              Failed to initiate call. Please try again.
             </Text>
-            <Text style={{ fontSize: 15, color: colors.textSecondary, lineHeight: 22, marginBottom: 28 }}>
-              Donna will call {lovedOneName} right now for a friendly check-in conversation.
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <Pressable
-                onPress={() => setCallModalVisible(false)}
-                style={{ flex: 1, backgroundColor: colors.card, borderRadius: 14, paddingVertical: 14, alignItems: 'center' }}
-              >
-                <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 16 }}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleInstantCall}
-                disabled={calling}
-                style={({ pressed }) => ({
-                  flex: 1,
-                  backgroundColor: colors.primary,
-                  borderRadius: 14,
-                  paddingVertical: 14,
-                  alignItems: 'center',
-                  opacity: pressed || calling ? 0.75 : 1,
-                })}
-              >
-                {calling ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={{ color: colors.white, fontWeight: '600', fontSize: 16 }}>Call Now</Text>
-                )}
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
+          )}
+        </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+// --- Call Card Sub-component ---
+
+function CallCard({ conversation }: { conversation: Conversation }) {
+  const status = getCallStatus(conversation);
+  const isAnswered = status === "Answered";
+
+  const dateStr = useMemo(() => {
+    try {
+      const date = new Date(conversation.startedAt);
+      const dayDiff = differenceInCalendarDays(new Date(), date);
+      const time = format(date, "h:mm a");
+      if (dayDiff === 0) return `Today at ${time}`;
+      if (dayDiff === 1) return `Yesterday at ${time}`;
+      return format(date, "MMM d") + ` at ${time}`;
+    } catch {
+      return "Unknown date";
+    }
+  }, [conversation.startedAt]);
+
+  return (
+    <View
+      className="bg-white rounded-2xl p-4 mb-3"
+      style={{
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.04,
+        shadowRadius: 3,
+        elevation: 1,
+      }}
+    >
+      <View className="flex-row items-center justify-between mb-2">
+        <Text className="text-charcoal text-[14px] font-medium">{dateStr}</Text>
+        <View
+          className="rounded-full px-3 py-1"
+          style={{
+            backgroundColor: isAnswered ? COLORS.successBg : COLORS.warningBg,
+          }}
+        >
+          <Text
+            className="text-[12px] font-semibold"
+            style={{ color: isAnswered ? COLORS.success : COLORS.warning }}
+          >
+            {status}
+          </Text>
+        </View>
+      </View>
+      {conversation.summary ? (
+        <Text className="text-muted text-[14px] leading-5" numberOfLines={3}>
+          {conversation.summary}
+        </Text>
+      ) : (
+        <Text className="text-muted/60 text-[14px] italic">
+          No summary available
+        </Text>
+      )}
+    </View>
   );
 }

@@ -1,0 +1,145 @@
+"""Data export API route.
+
+HIPAA right-to-access — exports all stored data for a senior in a single JSON bundle.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
+from loguru import logger
+
+from api.middleware.auth import require_auth, AuthContext
+from db.client import query_one, query_many
+
+router = APIRouter()
+
+
+async def _can_access_senior(auth: AuthContext, senior_id: str) -> bool:
+    """Check if the authenticated user can access this senior's data."""
+    if auth.is_admin or auth.is_cofounder:
+        return True
+    if auth.clerk_user_id:
+        row = await query_one(
+            "SELECT id FROM caregivers WHERE clerk_user_id = $1 AND senior_id = $2 LIMIT 1",
+            auth.clerk_user_id,
+            senior_id,
+        )
+        return row is not None
+    return False
+
+
+def _serialize(obj):
+    """JSON-safe serialization for datetime, UUID, and other types."""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if hasattr(obj, "hex"):  # UUID
+        return str(obj)
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    return str(obj)
+
+
+def _clean_rows(rows: list[dict]) -> list[dict]:
+    """Make all rows JSON-serializable, stripping embedding vectors."""
+    cleaned = []
+    for row in rows:
+        clean = {}
+        for k, v in row.items():
+            # Skip raw embedding vectors — they are large and not human-readable
+            if k == "embedding":
+                continue
+            if isinstance(v, (datetime,)):
+                clean[k] = v.isoformat()
+            elif hasattr(v, "hex"):
+                clean[k] = str(v)
+            elif isinstance(v, bytes):
+                clean[k] = v.decode("utf-8", errors="replace")
+            else:
+                clean[k] = v
+        cleaned.append(clean)
+    return cleaned
+
+
+@router.get("/api/seniors/{senior_id}/export")
+async def export_senior_data(
+    senior_id: str,
+    auth: AuthContext = Depends(require_auth),
+):
+    """Export all data for a senior (HIPAA right-to-access).
+
+    Returns a JSON bundle with: senior profile, conversations, memories,
+    reminders, call analyses, daily context, and caregiver links.
+    """
+    if not await _can_access_senior(auth, senior_id):
+        raise HTTPException(status_code=403, detail="Access denied to this senior")
+
+    # Verify senior exists
+    senior = await query_one("SELECT * FROM seniors WHERE id = $1", senior_id)
+    if not senior:
+        raise HTTPException(status_code=404, detail="Senior not found")
+
+    # Fetch all data in parallel via individual queries
+    conversations = await query_many(
+        """SELECT id, senior_id, call_sid, started_at, ended_at,
+                  duration_seconds, status, summary, sentiment, concerns, transcript, call_metrics
+           FROM conversations WHERE senior_id = $1 ORDER BY started_at DESC""",
+        senior_id,
+    )
+
+    memories = await query_many(
+        """SELECT id, senior_id, type, content, source, importance, metadata,
+                  created_at, last_accessed_at
+           FROM memories WHERE senior_id = $1 ORDER BY created_at DESC""",
+        senior_id,
+    )
+
+    reminders = await query_many(
+        """SELECT id, senior_id, type, title, description, scheduled_time,
+                  is_recurring, cron_expression, is_active, last_delivered_at, created_at
+           FROM reminders WHERE senior_id = $1 ORDER BY created_at DESC""",
+        senior_id,
+    )
+
+    call_analyses = await query_many(
+        """SELECT id, conversation_id, senior_id, summary, topics,
+                  engagement_score, concerns, positive_observations,
+                  follow_up_suggestions, call_quality, created_at
+           FROM call_analyses WHERE senior_id = $1 ORDER BY created_at DESC""",
+        senior_id,
+    )
+
+    daily_context = await query_many(
+        """SELECT id, senior_id, call_date, call_sid, topics_discussed,
+                  reminders_delivered, advice_given, key_moments, summary, created_at
+           FROM daily_call_context WHERE senior_id = $1 ORDER BY call_date DESC""",
+        senior_id,
+    )
+
+    caregiver_links = await query_many(
+        "SELECT id, clerk_user_id, senior_id, role, created_at FROM caregivers WHERE senior_id = $1",
+        senior_id,
+    )
+
+    logger.info(
+        "Data export for senior {sid}: {c} conversations, {m} memories, {r} reminders",
+        sid=senior_id[:8],
+        c=len(conversations),
+        m=len(memories),
+        r=len(reminders),
+    )
+
+    # Strip embedding vectors from senior (if call_context_snapshot has any)
+    clean_senior = {k: v for k, v in senior.items() if k != "embedding"}
+
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "senior": _clean_rows([clean_senior])[0] if clean_senior else None,
+        "conversations": _clean_rows(conversations),
+        "memories": _clean_rows(memories),
+        "reminders": _clean_rows(reminders),
+        "call_analyses": _clean_rows(call_analyses),
+        "daily_context": _clean_rows(daily_context),
+        "caregiver_links": _clean_rows(caregiver_links),
+    }

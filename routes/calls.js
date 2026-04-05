@@ -6,6 +6,7 @@ import { callLimiter } from '../middleware/rate-limit.js';
 import { validateBody } from '../middleware/validate.js';
 import { initiateCallSchema } from '../validators/schemas.js';
 import { canAccessSenior } from './helpers.js';
+import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
 
@@ -15,6 +16,16 @@ router.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSche
   const twilioClient = req.app.get('twilioClient');
   // Twilio webhooks must hit Pipecat (voice pipeline), not this Node.js server
   const PIPECAT_URL = process.env.PIPECAT_BASE_URL || req.app.get('baseUrl');
+
+  logAudit({
+    userId: req.auth.userId,
+    userRole: authToRole(req.auth),
+    action: 'create',
+    resourceType: 'call',
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent'),
+    metadata: { phoneLast4: phoneNumber ? phoneNumber.slice(-4) : null },
+  });
 
   try {
     // PRE-FETCH: Look up senior and build context BEFORE calling Twilio

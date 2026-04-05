@@ -2,6 +2,7 @@ import { db } from '../db/client.js';
 import { conversations, seniors } from '../db/schema.js';
 import { eq, desc, and, sql } from 'drizzle-orm';
 import { createLogger } from '../lib/logger.js';
+import { encrypt, decrypt, encryptJson, decryptJson } from '../lib/encryption.js';
 
 const log = createLogger('Conversation');
 
@@ -27,7 +28,9 @@ export const conversationService = {
         durationSeconds: data.durationSeconds,
         status: data.status || 'completed',
         summary: data.summary,
+        summaryEncrypted: encrypt(data.summary),
         transcript: data.transcript,
+        transcriptEncrypted: encryptJson(data.transcript),
         callMetrics: data.callMetrics,
         sentiment: data.sentiment,
         concerns: data.concerns,
@@ -60,7 +63,7 @@ export const conversationService = {
   async updateSummary(callSid, summary) {
     try {
       const [conversation] = await db.update(conversations)
-        .set({ summary })
+        .set({ summary, summaryEncrypted: encrypt(summary) })
         .where(eq(conversations.callSid, callSid))
         .returning();
 
@@ -78,6 +81,7 @@ export const conversationService = {
   async getRecentSummaries(seniorId, limit = 3) {
     const recentCalls = await db.select({
       summary: conversations.summary,
+      summaryEncrypted: conversations.summaryEncrypted,
       startedAt: conversations.startedAt,
       durationSeconds: conversations.durationSeconds,
     })
@@ -85,8 +89,8 @@ export const conversationService = {
     .where(and(
       eq(conversations.seniorId, seniorId),
       eq(conversations.status, 'completed'),
-      sql`summary IS NOT NULL`,
-      sql`summary != ''`
+      sql`(summary IS NOT NULL OR summary_encrypted IS NOT NULL)`,
+      sql`(summary != '' OR summary_encrypted IS NOT NULL)`
     ))
     .orderBy(desc(conversations.startedAt))
     .limit(limit);
@@ -98,10 +102,11 @@ export const conversationService = {
       const daysAgo = Math.floor((Date.now() - new Date(call.startedAt).getTime()) / (1000 * 60 * 60 * 24));
       const timeAgo = daysAgo === 0 ? 'Earlier today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo} days ago`;
       const duration = call.durationSeconds ? `(${Math.round(call.durationSeconds / 60)} min)` : '';
-      return `- ${timeAgo} ${duration}: ${call.summary}`;
-    });
+      const summary = call.summaryEncrypted ? decrypt(call.summaryEncrypted) : call.summary;
+      return `- ${timeAgo} ${duration}: ${summary}`;
+    }).filter(s => !s.includes('[encrypted]'));
 
-    return summaries.join('\n');
+    return summaries.length ? summaries.join('\n') : null;
   },
 
   // Legacy: Get recent conversation history for context (across calls)
@@ -110,13 +115,14 @@ export const conversationService = {
     // Get last few completed conversations with transcripts
     const recentCalls = await db.select({
       transcript: conversations.transcript,
+      transcriptEncrypted: conversations.transcriptEncrypted,
       startedAt: conversations.startedAt,
     })
     .from(conversations)
     .where(and(
       eq(conversations.seniorId, seniorId),
       eq(conversations.status, 'completed'),
-      sql`transcript IS NOT NULL`
+      sql`(transcript IS NOT NULL OR transcript_encrypted IS NOT NULL)`
     ))
     .orderBy(desc(conversations.startedAt))
     .limit(2); // Last 2 calls
@@ -127,9 +133,14 @@ export const conversationService = {
     const allMessages = [];
     for (const call of recentCalls) {
       try {
-        const transcript = typeof call.transcript === 'string'
-          ? JSON.parse(call.transcript)
-          : call.transcript;
+        let transcript;
+        if (call.transcriptEncrypted) {
+          transcript = decryptJson(call.transcriptEncrypted);
+        } else {
+          transcript = typeof call.transcript === 'string'
+            ? JSON.parse(call.transcript)
+            : call.transcript;
+        }
 
         if (Array.isArray(transcript)) {
           // Take last few messages from each call
@@ -160,9 +171,11 @@ export const conversationService = {
       durationSeconds: conversations.durationSeconds,
       status: conversations.status,
       summary: conversations.summary,
+      summaryEncrypted: conversations.summaryEncrypted,
       sentiment: conversations.sentiment,
       concerns: conversations.concerns,
       transcript: conversations.transcript,
+      transcriptEncrypted: conversations.transcriptEncrypted,
       seniorName: seniors.name,
     })
     .from(conversations)
@@ -170,6 +183,13 @@ export const conversationService = {
     .orderBy(desc(conversations.startedAt))
     .limit(limit);
 
-    return results;
+    // Decrypt PHI fields for admin view
+    return results.map(r => ({
+      ...r,
+      summary: r.summaryEncrypted ? decrypt(r.summaryEncrypted) : r.summary,
+      transcript: r.transcriptEncrypted ? decryptJson(r.transcriptEncrypted) : r.transcript,
+      summaryEncrypted: undefined,
+      transcriptEncrypted: undefined,
+    }));
   }
 };

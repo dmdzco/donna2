@@ -7,22 +7,33 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from loguru import logger
 
 from api.middleware.auth import require_admin, AuthContext
 from db.client import query_many, query_one
+from services.audit import fire_and_forget_audit, auth_to_role
 
 router = APIRouter()
 
 
 @router.get("/api/metrics/calls")
 async def get_call_metrics(
+    request: Request,
     auth: AuthContext = Depends(require_admin),
     hours: int = Query(24, ge=1, le=168, description="Lookback window in hours"),
     limit: int = Query(50, ge=1, le=500, description="Max rows to return"),
 ):
     """Get recent call metrics for the observability dashboard."""
+    fire_and_forget_audit(
+        user_id=auth.user_id,
+        user_role=auth_to_role(auth),
+        action="read",
+        resource_type="call_metrics",
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        metadata={"hours": hours, "limit": limit},
+    )
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     rows = await query_many(
         """SELECT call_sid, senior_id, call_type, duration_seconds,
@@ -41,10 +52,20 @@ async def get_call_metrics(
 
 @router.get("/api/metrics/summary")
 async def get_metrics_summary(
+    request: Request,
     auth: AuthContext = Depends(require_admin),
     hours: int = Query(24, ge=1, le=168, description="Lookback window in hours"),
 ):
     """Get aggregated metrics summary for dashboard widgets."""
+    fire_and_forget_audit(
+        user_id=auth.user_id,
+        user_role=auth_to_role(auth),
+        action="read",
+        resource_type="call_metrics",
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        metadata={"hours": hours, "endpoint": "summary"},
+    )
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     row = await query_one(
         """SELECT

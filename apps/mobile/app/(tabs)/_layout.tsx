@@ -1,24 +1,46 @@
-import { useAuth } from '@clerk/clerk-expo';
-import { Tabs, useRouter } from 'expo-router';
-import { useEffect } from 'react';
-import { ActivityIndicator, View } from 'react-native';
-import { colors } from '../../constants/colors';
-import { HomeIcon, BellIcon, CalendarIcon, SettingsIcon } from 'lucide-react-native';
+import { useEffect } from "react";
+import { ActivityIndicator, View } from "react-native";
+import { Tabs, useRouter } from "expo-router";
+import { useAuth } from "@clerk/clerk-expo";
+import { useQuery } from "@tanstack/react-query";
+import { Home, Calendar, Bell, Settings } from "lucide-react-native";
+import { COLORS } from "@/src/constants/theme";
+import { api } from "@/src/lib/api";
 
 export default function TabLayout() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { getToken, isSignedIn } = useAuth();
   const router = useRouter();
 
-  useEffect(() => {
-    if (isLoaded && !isSignedIn) {
-      router.replace('/');
-    }
-  }, [isLoaded, isSignedIn]);
+  const { data: profile, isLoading } = useQuery({
+    queryKey: ["profile"],
+    queryFn: async () => {
+      const token = await getToken();
+      return api.caregivers.me(token!);
+    },
+    enabled: !!isSignedIn,
+  });
 
-  if (!isLoaded) {
+  useEffect(() => {
+    if (
+      !isLoading &&
+      profile &&
+      (!profile.seniors || profile.seniors.length === 0)
+    ) {
+      router.replace("/(onboarding)/step1");
+    }
+  }, [isLoading, profile]);
+
+  if (isLoading) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg }}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: COLORS.cream,
+        }}
+      >
+        <ActivityIndicator size="large" color={COLORS.sage} />
       </View>
     );
   }
@@ -27,56 +49,106 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textSecondary,
         tabBarStyle: {
-          backgroundColor: colors.white,
-          borderTopColor: colors.border,
+          backgroundColor: COLORS.white,
+          borderTopColor: COLORS.border,
           borderTopWidth: 1,
-          height: 84,
-          paddingBottom: 24,
-          paddingTop: 10,
+          paddingBottom: 28,
+          paddingTop: 8,
+          height: 88,
         },
+        tabBarActiveTintColor: COLORS.sage,
+        tabBarInactiveTintColor: COLORS.muted,
         tabBarLabelStyle: {
           fontSize: 11,
-          fontWeight: '600',
-          marginTop: 2,
+          fontWeight: "500",
         },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
-          tabBarIcon: ({ color, size }) => <HomeIcon size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="reminders"
-        options={{
-          title: 'Reminders',
-          tabBarIcon: ({ color, size }) => <BellIcon size={size} color={color} />,
+          title: "Dashboard",
+          tabBarIcon: ({ color, focused }) => (
+            <View
+              style={
+                focused
+                  ? {
+                      backgroundColor: COLORS.beige,
+                      borderRadius: 12,
+                      padding: 6,
+                    }
+                  : { padding: 6 }
+              }
+            >
+              <Home size={22} color={color} />
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
         name="schedule"
         options={{
-          title: 'Schedule',
-          tabBarIcon: ({ color, size }) => <CalendarIcon size={size} color={color} />,
+          title: "Schedule",
+          tabBarIcon: ({ color, focused }) => (
+            <View
+              style={
+                focused
+                  ? {
+                      backgroundColor: COLORS.beige,
+                      borderRadius: 12,
+                      padding: 6,
+                    }
+                  : { padding: 6 }
+              }
+            >
+              <Calendar size={22} color={color} />
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
-        name="settings/index"
+        name="reminders"
         options={{
-          title: 'Settings',
-          tabBarIcon: ({ color, size }) => <SettingsIcon size={size} color={color} />,
+          title: "Reminders",
+          tabBarIcon: ({ color, focused }) => (
+            <View
+              style={
+                focused
+                  ? {
+                      backgroundColor: COLORS.beige,
+                      borderRadius: 12,
+                      padding: 6,
+                    }
+                  : { padding: 6 }
+              }
+            >
+              <Bell size={22} color={color} />
+            </View>
+          ),
         }}
       />
-      {/* Hide sub-screens from tab bar */}
-      <Tabs.Screen name="settings/loved-one" options={{ href: null }} />
-      <Tabs.Screen name="settings/caregiver" options={{ href: null }} />
-      <Tabs.Screen name="settings/preferences" options={{ href: null }} />
-      <Tabs.Screen name="settings/help-center" options={{ href: null }} />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: "Settings",
+          tabBarIcon: ({ color, focused }) => (
+            <View
+              style={
+                focused
+                  ? {
+                      backgroundColor: COLORS.beige,
+                      borderRadius: 12,
+                      padding: 6,
+                    }
+                  : { padding: 6 }
+              }
+            >
+              <Settings size={22} color={color} />
+            </View>
+          ),
+        }}
+      />
     </Tabs>
   );
 }

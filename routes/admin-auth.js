@@ -5,12 +5,30 @@ import { eq } from 'drizzle-orm';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { authLimiter } from '../middleware/rate-limit.js';
+import { requireAdmin } from '../middleware/auth.js';
+import { tokenRevocationService } from '../services/token-revocation.js';
+import { logAudit } from '../services/audit.js';
 
 const router = Router();
 if (!process.env.JWT_SECRET && process.env.RAILWAY_PUBLIC_DOMAIN) {
   throw new Error('JWT_SECRET environment variable is required in production');
 }
 const JWT_SECRET = process.env.JWT_SECRET || 'donna-admin-secret-change-me';
+const JWT_SECRET_PREVIOUS = process.env.JWT_SECRET_PREVIOUS || '';
+
+/**
+ * Try to verify a JWT with the current secret, then the previous one.
+ */
+function verifyJwtDualKey(token) {
+  for (const secret of [JWT_SECRET, JWT_SECRET_PREVIOUS].filter(Boolean)) {
+    try {
+      return jwt.verify(token, secret);
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
 
 // Login - no auth required
 router.post('/api/admin/login', authLimiter, async (req, res) => {
@@ -25,11 +43,29 @@ router.post('/api/admin/login', authLimiter, async (req, res) => {
       .where(eq(adminUsers.email, email.toLowerCase().trim()));
 
     if (!admin) {
+      logAudit({
+        userId: 'anonymous',
+        userRole: 'unknown',
+        action: 'auth_failure',
+        resourceType: 'auth',
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        metadata: { reason: 'unknown_email' },
+      });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     const valid = await bcrypt.compare(password, admin.passwordHash);
     if (!valid) {
+      logAudit({
+        userId: admin.id,
+        userRole: 'admin',
+        action: 'auth_failure',
+        resourceType: 'auth',
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        metadata: { reason: 'wrong_password' },
+      });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -44,6 +80,16 @@ router.post('/api/admin/login', authLimiter, async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    logAudit({
+      userId: admin.id,
+      userRole: 'admin',
+      action: 'create',
+      resourceType: 'auth',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { event: 'login_success' },
+    });
+
     res.json({
       token,
       admin: { id: admin.id, email: admin.email, name: admin.name },
@@ -54,7 +100,7 @@ router.post('/api/admin/login', authLimiter, async (req, res) => {
   }
 });
 
-// Get current admin - requires valid JWT
+// Get current admin - requires valid JWT (dual-key + revocation check)
 router.get('/api/admin/me', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -63,7 +109,25 @@ router.get('/api/admin/me', async (req, res) => {
     }
 
     const token = authHeader.slice(7);
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = verifyJwtDualKey(token);
+
+    if (!decoded) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    // Check token revocation
+    try {
+      const revocation = await tokenRevocationService.isTokenRevoked(token);
+      if (revocation) {
+        return res.status(401).json({ error: 'Token has been revoked' });
+      }
+      const adminRevoked = await tokenRevocationService.isAdminRevoked(decoded.adminId);
+      if (adminRevoked) {
+        return res.status(401).json({ error: 'All sessions revoked — please log in again' });
+      }
+    } catch {
+      // Pre-migration: table doesn't exist yet, allow through
+    }
 
     const [admin] = await db.select({
       id: adminUsers.id,
@@ -83,6 +147,51 @@ router.get('/api/admin/me', async (req, res) => {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
     res.status(500).json({ error: 'Auth check failed' });
+  }
+});
+
+// Revoke a specific token (admin only)
+router.post('/api/admin/revoke-token', requireAdmin, async (req, res) => {
+  try {
+    const { token, reason } = req.body;
+    if (!token) {
+      return res.status(400).json({ error: 'Token is required' });
+    }
+
+    await tokenRevocationService.revokeToken(token, req.auth.userId, reason || '');
+    res.json({ success: true, message: 'Token revoked' });
+  } catch (error) {
+    console.error('[Admin Auth] Revoke token error:', error);
+    res.status(500).json({ error: 'Failed to revoke token' });
+  }
+});
+
+// Revoke all tokens for an admin (admin only — e.g. after password reset)
+router.post('/api/admin/revoke-all', requireAdmin, async (req, res) => {
+  try {
+    const { adminId, reason } = req.body;
+    if (!adminId) {
+      return res.status(400).json({ error: 'adminId is required' });
+    }
+
+    await tokenRevocationService.revokeAllForAdmin(adminId, req.auth.userId, reason || '');
+    res.json({ success: true, message: `All tokens revoked for admin ${adminId}` });
+  } catch (error) {
+    console.error('[Admin Auth] Revoke all error:', error);
+    res.status(500).json({ error: 'Failed to revoke tokens' });
+  }
+});
+
+// Logout — revoke the caller's own token
+router.post('/api/admin/logout', requireAdmin, async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader.slice(7);
+    await tokenRevocationService.revokeToken(token, req.auth.userId, 'logout');
+    res.json({ success: true, message: 'Logged out' });
+  } catch (error) {
+    console.error('[Admin Auth] Logout error:', error);
+    res.status(500).json({ error: 'Logout failed' });
   }
 });
 

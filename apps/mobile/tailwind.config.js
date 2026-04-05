@@ -1,27 +1,27 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: [
-    './app/**/*.{js,jsx,ts,tsx}',
-    './components/**/*.{js,jsx,ts,tsx}',
-  ],
-  presets: [require('nativewind/preset')],
+  content: ["./app/**/*.{js,jsx,ts,tsx}", "./src/**/*.{js,jsx,ts,tsx}"],
+  presets: [require("nativewind/preset")],
   theme: {
     extend: {
       colors: {
-        bg: '#FDFCF8',
-        primary: '#4A5D4F',
-        'primary-dark': '#3d4e42',
-        card: '#F2F0E9',
-        'text-primary': '#1A1A1A',
-        'text-secondary': '#5E5D5A',
-        fab: '#E8A0A0',
-        'good-bg': '#E8F5E9',
-        'good-text': '#2E7D32',
-        'missed-bg': '#FFF3E0',
-        'missed-text': '#E65100',
+        sage: { DEFAULT: "#4A5D4F", dark: "#3d4e42" },
+        cream: "#FDFCF8",
+        beige: "#F2F0E9",
+        "accent-pink": { DEFAULT: "#E8A0A0", hover: "#D89090" },
+        charcoal: "#1A1A1A",
+        muted: "#5E5D5A",
       },
       fontFamily: {
-        serif: ['Georgia', 'serif'],
+        serif: ["PlayfairDisplay_400Regular"],
+        "serif-medium": ["PlayfairDisplay_500Medium"],
+        "serif-semibold": ["PlayfairDisplay_600SemiBold"],
+        "serif-bold": ["PlayfairDisplay_700Bold"],
+      },
+      borderRadius: {
+        "2xl": "16px",
+        "3xl": "20px",
+        "4xl": "24px",
       },
     },
   },

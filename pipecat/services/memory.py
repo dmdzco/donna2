@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from loguru import logger
 
 from lib.circuit_breaker import CircuitBreaker
+from lib.encryption import encrypt, decrypt
 
 _embedding_breaker = CircuitBreaker("openai_embedding", failure_threshold=3, recovery_timeout=60.0, call_timeout=10.0)
 
@@ -134,12 +135,13 @@ async def store(
         return None
 
     row = await query_one(
-        f"""INSERT INTO memories ({owner_col}, type, content, source, importance, embedding, metadata)
-           VALUES ($1, $2, $3, $4, $5, $6::vector, $7)
+        f"""INSERT INTO memories ({owner_col}, type, content, content_encrypted, source, importance, embedding, metadata)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8)
            RETURNING *""",
         owner_id,
         type_,
         content,
+        encrypt(content),
         source,
         importance,
         emb_str,
@@ -171,7 +173,7 @@ async def search(
     emb_str = json.dumps(query_embedding)
 
     rows = await query_many(
-        f"""SELECT id, type, content, importance, metadata, created_at,
+        f"""SELECT id, type, content, content_encrypted, importance, metadata, created_at,
                   1 - (embedding <=> $1::vector) AS similarity
            FROM memories
            WHERE {owner_col} = $2
@@ -193,6 +195,12 @@ async def search(
             *ids,
         )
 
+    # Decrypt content: prefer encrypted column, fall back to original
+    for r in rows:
+        if r.get("content_encrypted"):
+            r["content"] = decrypt(r["content_encrypted"])
+        r.pop("content_encrypted", None)
+
     return rows
 
 
@@ -200,12 +208,17 @@ async def get_recent(senior_id: str, limit: int = 10) -> list[dict]:
     """Get the most recent memories for a senior."""
     from db import query_many
 
-    return await query_many(
-        """SELECT id, type, content, importance, metadata, created_at, last_accessed_at
+    rows = await query_many(
+        """SELECT id, type, content, content_encrypted, importance, metadata, created_at, last_accessed_at
            FROM memories WHERE senior_id = $1 ORDER BY created_at DESC LIMIT $2""",
         senior_id,
         limit,
     )
+    for r in rows:
+        if r.get("content_encrypted"):
+            r["content"] = decrypt(r["content_encrypted"])
+        r.pop("content_encrypted", None)
+    return rows
 
 
 async def get_important(senior_id: str, limit: int = 5) -> list[dict]:
@@ -213,7 +226,7 @@ async def get_important(senior_id: str, limit: int = 5) -> list[dict]:
     from db import query_many
 
     rows = await query_many(
-        """SELECT id, type, content, importance, metadata, created_at, last_accessed_at
+        """SELECT id, type, content, content_encrypted, importance, metadata, created_at, last_accessed_at
            FROM memories
            WHERE senior_id = $1 AND importance >= 50
            ORDER BY importance DESC
@@ -221,6 +234,11 @@ async def get_important(senior_id: str, limit: int = 5) -> list[dict]:
         senior_id,
         limit * 3,
     )
+
+    for r in rows:
+        if r.get("content_encrypted"):
+            r["content"] = decrypt(r["content_encrypted"])
+        r.pop("content_encrypted", None)
 
     with_effective = []
     for m in rows:
@@ -238,8 +256,8 @@ async def get_critical(senior_id: str, limit: int = 3) -> list[dict]:
     """Tier 1: health concerns + high-importance memories."""
     from db import query_many
 
-    return await query_many(
-        """SELECT id, type, content, importance, metadata, created_at, last_accessed_at
+    rows = await query_many(
+        """SELECT id, type, content, content_encrypted, importance, metadata, created_at, last_accessed_at
            FROM memories
            WHERE senior_id = $1
              AND (type = 'concern' OR importance >= 80)
@@ -248,6 +266,11 @@ async def get_critical(senior_id: str, limit: int = 3) -> list[dict]:
         senior_id,
         limit,
     )
+    for r in rows:
+        if r.get("content_encrypted"):
+            r["content"] = decrypt(r["content_encrypted"])
+        r.pop("content_encrypted", None)
+    return rows
 
 
 def group_by_type(memories_list: list[dict]) -> dict[str, list[str]]:
@@ -294,13 +317,18 @@ async def build_context(
 
     # Top memories by importance + recency (prefetch supplements mid-call)
     all_memories = await query_many(
-        """SELECT id, type, content, importance, metadata, created_at
+        """SELECT id, type, content, content_encrypted, importance, metadata, created_at
            FROM memories
            WHERE senior_id = $1
            ORDER BY importance DESC, created_at DESC
            LIMIT 20""",
         senior_id,
     )
+
+    for r in all_memories:
+        if r.get("content_encrypted"):
+            r["content"] = decrypt(r["content_encrypted"])
+        r.pop("content_encrypted", None)
 
     logger.info(
         "build_context({sid}): loaded {n} memories",

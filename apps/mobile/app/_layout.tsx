@@ -1,30 +1,32 @@
-import '../global.css';
-import { ClerkProvider, useAuth } from '@clerk/clerk-expo';
-import * as SecureStore from 'expo-secure-store';
-import { Slot, useRouter, useSegments } from 'expo-router';
-import { useEffect } from 'react';
-import { ActivityIndicator, View } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { colors } from '../constants/colors';
+import "../global.css";
+import { useEffect } from "react";
+import { Slot, useRouter, useSegments } from "expo-router";
+import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { tokenCache } from "@/src/lib/auth";
+import {
+  registerForPushNotifications,
+  addNotificationResponseListener,
+} from "@/src/lib/notifications";
+import {
+  useFonts,
+  PlayfairDisplay_400Regular,
+  PlayfairDisplay_500Medium,
+  PlayfairDisplay_600SemiBold,
+  PlayfairDisplay_700Bold,
+} from "@expo-google-fonts/playfair-display";
+import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
+import { ActivityIndicator, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { COLORS } from "@/src/constants/theme";
+import { ErrorBoundary } from "@/src/components/ErrorBoundary";
 
-const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
+SplashScreen.preventAutoHideAsync();
 
-const tokenCache = {
-  async getToken(key: string) {
-    try {
-      return SecureStore.getItemAsync(key);
-    } catch {
-      return null;
-    }
-  },
-  async saveToken(key: string, value: string) {
-    try {
-      return SecureStore.setItemAsync(key, value);
-    } catch {
-      return;
-    }
-  },
-};
+const queryClient = new QueryClient();
+
+const CLERK_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
 
 function AuthGuard() {
   const { isLoaded, isSignedIn } = useAuth();
@@ -34,17 +36,49 @@ function AuthGuard() {
   useEffect(() => {
     if (!isLoaded) return;
 
-    const inTabsGroup = segments[0] === '(tabs)';
+    const inTabsGroup = segments[0] === "(tabs)";
 
     if (!isSignedIn && inTabsGroup) {
-      router.replace('/');
+      router.replace("/");
     }
   }, [isLoaded, isSignedIn, segments]);
 
+  // Register for push notifications once the user is signed in
+  useEffect(() => {
+    if (!isSignedIn) return;
+
+    registerForPushNotifications().then((token) => {
+      if (token) {
+        console.log("Push token:", token);
+        // TODO: Send token to backend when endpoint exists
+        // api.notifications.registerPushToken(token);
+      }
+    });
+
+    // Handle notification tap — navigate to relevant screen
+    const subscription = addNotificationResponseListener((response) => {
+      const data = response.notification.request.content.data;
+      if (data?.type === "call_summary") {
+        router.push("/(tabs)");
+      } else if (data?.type === "missed_call") {
+        router.push("/(tabs)/schedule");
+      }
+    });
+
+    return () => subscription.remove();
+  }, [isSignedIn]);
+
   if (!isLoaded) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg }}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: COLORS.cream,
+        }}
+      >
+        <ActivityIndicator size="large" color={COLORS.sage} />
       </View>
     );
   }
@@ -53,11 +87,31 @@ function AuthGuard() {
 }
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    PlayfairDisplay_400Regular,
+    PlayfairDisplay_500Medium,
+    PlayfairDisplay_600SemiBold,
+    PlayfairDisplay_700Bold,
+  });
+
+  useEffect(() => {
+    if (fontsLoaded) SplashScreen.hideAsync();
+  }, [fontsLoaded]);
+
+  if (!fontsLoaded) return null;
+
   return (
-    <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <AuthGuard />
-      </GestureHandlerRootView>
-    </ClerkProvider>
+    <ErrorBoundary>
+      <ClerkProvider publishableKey={CLERK_KEY} tokenCache={tokenCache}>
+        <ClerkLoaded>
+          <QueryClientProvider client={queryClient}>
+            <GestureHandlerRootView style={{ flex: 1 }}>
+              <StatusBar style="dark" />
+              <AuthGuard />
+            </GestureHandlerRootView>
+          </QueryClientProvider>
+        </ClerkLoaded>
+      </ClerkProvider>
+    </ErrorBoundary>
   );
 }

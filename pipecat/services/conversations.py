@@ -10,6 +10,7 @@ import math
 from datetime import datetime, timezone, timedelta
 from loguru import logger
 from db import query_one, query_many, execute
+from lib.encryption import encrypt, decrypt, encrypt_json, decrypt_json
 
 
 async def create(senior_id: str | None, call_sid: str, prospect_id: str | None = None) -> dict:
@@ -35,7 +36,11 @@ async def complete(call_sid: str, data: dict) -> dict | None:
 
     Accepts snake_case keys: duration_seconds, status, summary, transcript,
     call_metrics, sentiment, concerns.
+
+    Writes both original columns (backward compat) and *_encrypted columns.
     """
+    transcript_raw = json.dumps(data["transcript"]) if data.get("transcript") else None
+    summary_raw = data.get("summary")
     row = await query_one(
         """UPDATE conversations SET
              ended_at = NOW(),
@@ -45,16 +50,20 @@ async def complete(call_sid: str, data: dict) -> dict | None:
              transcript = $4,
              call_metrics = $5,
              sentiment = $6,
-             concerns = $7
-           WHERE call_sid = $8
+             concerns = $7,
+             summary_encrypted = $8,
+             transcript_encrypted = $9
+           WHERE call_sid = $10
            RETURNING *""",
         data.get("duration_seconds"),
         data.get("status", "completed"),
-        data.get("summary"),
-        json.dumps(data["transcript"]) if data.get("transcript") else None,
+        summary_raw,
+        transcript_raw,
         json.dumps(data["call_metrics"]) if data.get("call_metrics") else None,
         data.get("sentiment"),
         data.get("concerns"),
+        encrypt(summary_raw),
+        encrypt_json(data["transcript"]) if data.get("transcript") else None,
         call_sid,
     )
     if row:
@@ -87,8 +96,12 @@ async def update_summary(call_sid: str, summary: str) -> dict | None:
     """Update conversation summary (called after post-call analysis)."""
     try:
         row = await query_one(
-            "UPDATE conversations SET summary = $1 WHERE call_sid = $2 RETURNING *",
+            """UPDATE conversations
+               SET summary = $1, summary_encrypted = $2
+               WHERE call_sid = $3
+               RETURNING *""",
             summary,
+            encrypt(summary),
             call_sid,
         )
         if row:
@@ -102,12 +115,12 @@ async def update_summary(call_sid: str, summary: str) -> dict | None:
 async def get_recent_summaries(senior_id: str, limit: int = 3) -> str | None:
     """Get recent call summaries formatted as a context string."""
     rows = await query_many(
-        """SELECT summary, started_at, duration_seconds
+        """SELECT summary, summary_encrypted, started_at, duration_seconds
            FROM conversations
            WHERE senior_id = $1
              AND status = 'completed'
-             AND summary IS NOT NULL
-             AND summary != ''
+             AND (summary IS NOT NULL OR summary_encrypted IS NOT NULL)
+             AND (summary != '' OR summary_encrypted IS NOT NULL)
            ORDER BY started_at DESC
            LIMIT $2""",
         senior_id,
@@ -131,9 +144,11 @@ async def get_recent_summaries(senior_id: str, limit: int = 3) -> str | None:
         else:
             time_ago = f"{days_ago} days ago"
         duration = f"({round(row['duration_seconds'] / 60)} min)" if row.get("duration_seconds") else ""
-        lines.append(f"- {time_ago} {duration}: {row['summary']}")
+        summary = decrypt(row.get("summary_encrypted")) if row.get("summary_encrypted") else row.get("summary")
+        if summary and summary != "[encrypted]":
+            lines.append(f"- {time_ago} {duration}: {summary}")
 
-    return "\n".join(lines)
+    return "\n".join(lines) if lines else None
 
 
 async def get_recent_turns(senior_id: str, max_calls: int = 3, turns_per_call: int = 7, max_turns: int = 20) -> str | None:
@@ -144,11 +159,11 @@ async def get_recent_turns(senior_id: str, max_calls: int = 3, turns_per_call: i
     Returns None if no history found.
     """
     rows = await query_many(
-        """SELECT transcript, started_at, duration_seconds
+        """SELECT transcript, transcript_encrypted, started_at, duration_seconds
            FROM conversations
            WHERE senior_id = $1
              AND status = 'completed'
-             AND transcript IS NOT NULL
+             AND (transcript IS NOT NULL OR transcript_encrypted IS NOT NULL)
            ORDER BY started_at DESC
            LIMIT $2""",
         senior_id,
@@ -163,7 +178,11 @@ async def get_recent_turns(senior_id: str, max_calls: int = 3, turns_per_call: i
 
     for row in rows:
         try:
-            transcript = row["transcript"]
+            # Prefer encrypted column, fall back to original
+            if row.get("transcript_encrypted"):
+                transcript = decrypt_json(row["transcript_encrypted"])
+            else:
+                transcript = row["transcript"]
             if isinstance(transcript, str):
                 transcript = json.loads(transcript)
             if not isinstance(transcript, list) or not transcript:
@@ -219,11 +238,11 @@ async def get_recent_turns(senior_id: str, max_calls: int = 3, turns_per_call: i
 async def get_recent_history(senior_id: str, message_limit: int = 6) -> list[dict]:
     """Legacy: get recent conversation messages for context."""
     rows = await query_many(
-        """SELECT transcript, started_at
+        """SELECT transcript, transcript_encrypted, started_at
            FROM conversations
            WHERE senior_id = $1
              AND status = 'completed'
-             AND transcript IS NOT NULL
+             AND (transcript IS NOT NULL OR transcript_encrypted IS NOT NULL)
            ORDER BY started_at DESC
            LIMIT 2""",
         senior_id,
@@ -234,7 +253,10 @@ async def get_recent_history(senior_id: str, message_limit: int = 6) -> list[dic
     all_messages: list[dict] = []
     for row in rows:
         try:
-            transcript = row["transcript"]
+            if row.get("transcript_encrypted"):
+                transcript = decrypt_json(row["transcript_encrypted"])
+            else:
+                transcript = row["transcript"]
             if isinstance(transcript, str):
                 transcript = json.loads(transcript)
             if isinstance(transcript, list):

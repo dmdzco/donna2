@@ -1,0 +1,27 @@
+import { TextInput, View, Text, TextInputProps } from "react-native";
+
+type InputProps = TextInputProps & {
+  label?: string;
+  error?: string;
+};
+
+export function Input({ label, error, className = "", ...props }: InputProps) {
+  return (
+    <View className="w-full">
+      {label && (
+        <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
+          {label}
+        </Text>
+      )}
+      <TextInput
+        className={`w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 text-[15px] text-charcoal ${
+          error ? "border-red-500" : ""
+        } ${className}`}
+        placeholderTextColor="#5E5D5A"
+        accessibilityLabel={label}
+        {...props}
+      />
+      {error && <Text className="text-red-500 text-[13px] mt-1">{error}</Text>}
+    </View>
+  );
+}

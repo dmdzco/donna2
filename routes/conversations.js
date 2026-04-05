@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { validateParams } from '../middleware/validate.js';
 import { seniorIdParamSchema } from '../validators/schemas.js';
 import { getAccessibleSeniorIds, canAccessSenior } from './helpers.js';
+import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
 
@@ -13,6 +14,15 @@ router.get('/api/seniors/:id/conversations', requireAuth, validateParams(seniorI
     if (!await canAccessSenior(req.auth, req.params.id)) {
       return res.status(403).json({ error: 'Access denied to this senior' });
     }
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'read',
+      resourceType: 'conversation',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { seniorId: req.params.id },
+    });
     const convos = await conversationService.getForSenior(req.params.id, 20);
     res.json(convos);
   } catch (error) {
@@ -23,6 +33,14 @@ router.get('/api/seniors/:id/conversations', requireAuth, validateParams(seniorI
 // Get all recent conversations (admins see all, caregivers see their seniors')
 router.get('/api/conversations', requireAuth, async (req, res) => {
   try {
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'read',
+      resourceType: 'conversation',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
     const convos = await conversationService.getRecent(50);
     if (req.auth.isAdmin) {
       return res.json(convos);

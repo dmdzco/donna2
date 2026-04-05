@@ -24,6 +24,7 @@ dependencies = [
     "redis>=5.0.0",
     "growthbook>=1.0.0",
     "tavily-python>=0.7.0",
+    "cryptography>=44.0.0",
 ]
 
 [project.optional-dependencies]

@@ -4,6 +4,7 @@ import { memories } from '../db/schema.js';
 import { eq, sql, desc, and, inArray, lt } from 'drizzle-orm';
 import { newsService } from './news.js';
 import { createLogger } from '../lib/logger.js';
+import { encrypt, decrypt } from '../lib/encryption.js';
 
 const log = createLogger('Memory');
 
@@ -45,6 +46,20 @@ function calculateEffectiveImportance(baseImportance, createdAt, lastAccessedAt)
   }
 
   return Math.round(effective);
+}
+
+/**
+ * Decrypt content in memory rows: prefer contentEncrypted, fall back to content.
+ * Mutates the rows in place and removes the contentEncrypted field.
+ */
+function decryptMemoryRows(rows) {
+  for (const r of rows) {
+    if (r.contentEncrypted) {
+      r.content = decrypt(r.contentEncrypted);
+    }
+    delete r.contentEncrypted;
+  }
+  return rows;
 }
 
 export const memoryService = {
@@ -101,6 +116,7 @@ export const memoryService = {
       seniorId,
       type,
       content,
+      contentEncrypted: encrypt(content),
       source,
       importance,
       embedding,
@@ -121,6 +137,7 @@ export const memoryService = {
         id,
         type,
         content,
+        content_encrypted,
         importance,
         metadata,
         created_at,
@@ -140,15 +157,24 @@ export const memoryService = {
         .where(inArray(memories.id, ids));
     }
 
-    return results.rows;
+    // Decrypt content: prefer encrypted column, fall back to original
+    return results.rows.map(r => {
+      const row = { ...r };
+      if (row.content_encrypted) {
+        row.content = decrypt(row.content_encrypted);
+      }
+      delete row.content_encrypted;
+      return row;
+    });
   },
 
   // Get recent memories for a senior
   async getRecent(seniorId, limit = 10) {
-    return db.select().from(memories)
+    const rows = await db.select().from(memories)
       .where(eq(memories.seniorId, seniorId))
       .orderBy(desc(memories.createdAt))
       .limit(limit);
+    return decryptMemoryRows(rows);
   },
 
   // Get important memories for a senior (with decay applied)
@@ -161,6 +187,8 @@ export const memoryService = {
       ))
       .orderBy(desc(memories.importance))
       .limit(limit * 3); // Get more to account for decay filtering
+
+    decryptMemoryRows(allImportant);
 
     // Calculate effective importance and filter/sort
     const withEffective = allImportant.map(m => ({
@@ -176,13 +204,14 @@ export const memoryService = {
 
   // Get critical memories (health concerns, high importance) - Tier 1
   async getCritical(seniorId, limit = 3) {
-    return db.select().from(memories)
+    const rows = await db.select().from(memories)
       .where(and(
         eq(memories.seniorId, seniorId),
         sql`(type = 'concern' OR importance >= 80)`
       ))
       .orderBy(desc(memories.importance))
       .limit(limit);
+    return decryptMemoryRows(rows);
   },
 
   // Group memories by type for compact display

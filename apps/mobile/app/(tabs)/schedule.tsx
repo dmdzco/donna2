@@ -1,411 +1,1143 @@
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { Plus, ChevronLeft, ChevronRight, Edit2, Trash2 } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
+import { useState, useCallback, useMemo, useRef } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
   View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../../constants/colors';
-import { useApi } from '../../lib/api';
+  Text,
+  ScrollView,
+  Pressable,
+  FlatList,
+  ActivityIndicator,
+  TextInput,
+  Dimensions,
+  Platform,
+  KeyboardAvoidingView,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  Clock,
+  Plus,
+  Edit2,
+  Check,
+  X,
+  Calendar,
+} from "lucide-react-native";
+import * as Haptics from "expo-haptics";
+import {
+  format,
+  addDays,
+  startOfWeek,
+  isSameDay,
+  startOfMonth,
+  getDaysInMonth,
+  addMonths,
+  subMonths,
+  addWeeks,
+  subWeeks,
+  startOfDay,
+  isBefore,
+  getDay,
+} from "date-fns";
+import { COLORS, CALL_TITLE_OPTIONS, TIME_OPTIONS } from "@/src/constants/theme";
+import {
+  useCurrentSenior,
+  useSchedule,
+  useUpdateSchedule,
+  useReminders,
+  useConversations,
+} from "@/src/hooks";
+import { Button, Input, Modal } from "@/src/components/ui";
+import type { Reminder, Conversation } from "@/src/types";
 
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-const DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
-interface ScheduledCall {
-  id: string;
-  date: string; // ISO date
-  time: string;
-  note?: string;
+type Frequency = "daily" | "recurring" | "one-time";
+
+interface ScheduleItem {
+  id?: string;
+  title: string;
+  frequency: Frequency;
+  recurringDays?: number[]; // 0=Sun ... 6=Sat
+  date?: string; // ISO for one-time
+  time: string; // "9:00 AM"
+  contextNotes?: string;
+  reminderIds?: string[];
 }
 
-function getDaysInMonth(year: number, month: number) {
-  return new Date(year, month + 1, 0).getDate();
+interface CallCardData {
+  schedule: ScheduleItem;
+  index: number;
+  isPast: boolean;
+  conversation?: Conversation;
 }
 
-function getFirstDayOfMonth(year: number, month: number) {
-  return new Date(year, month, 1).getDay();
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function parseTimeString(timeStr: string): { hours: number; minutes: number } | null {
+  const matchAmPm = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (matchAmPm) {
+    let hours = parseInt(matchAmPm[1], 10);
+    const minutes = parseInt(matchAmPm[2], 10);
+    const period = matchAmPm[3].toUpperCase();
+    if (period === "PM" && hours !== 12) hours += 12;
+    if (period === "AM" && hours === 12) hours = 0;
+    return { hours, minutes };
+  }
+  const match24 = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if (match24) {
+    return { hours: parseInt(match24[1], 10), minutes: parseInt(match24[2], 10) };
+  }
+  return null;
 }
 
-function formatTime(d: Date) {
-  const h = d.getHours();
-  const m = d.getMinutes().toString().padStart(2, '0');
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  return `${h % 12 || 12}:${m} ${ampm}`;
+function getScheduleForDate(date: Date, scheduleData: ScheduleItem[]): ScheduleItem[] {
+  return scheduleData.filter((schedule) => {
+    if (schedule.frequency === "daily") return true;
+    if (schedule.frequency === "recurring") {
+      return schedule.recurringDays?.includes(getDay(date));
+    }
+    if (schedule.frequency === "one-time" && schedule.date) {
+      return isSameDay(new Date(schedule.date), date);
+    }
+    return false;
+  });
 }
 
-export default function ScheduleTab() {
-  const api = useApi();
-  const today = new Date();
-  const [year, setYear] = useState(today.getFullYear());
-  const [month, setMonth] = useState(today.getMonth());
-  const [selectedDate, setSelectedDate] = useState<number>(today.getDate());
-  const [calls, setCalls] = useState<ScheduledCall[]>([]);
-  const [loading, setLoading] = useState(true);
+function isCallPast(date: Date, timeStr: string): boolean {
+  const parsed = parseTimeString(timeStr);
+  if (!parsed) return false;
+  const callDate = new Date(date);
+  callDate.setHours(parsed.hours, parsed.minutes, 0, 0);
+  return isBefore(callDate, new Date());
+}
+
+function normalizeScheduleData(raw: any): ScheduleItem[] {
+  // Handle various API response shapes
+  if (!raw) return [];
+
+  // If the API returns { schedule: [...] }
+  if (Array.isArray(raw.schedule)) return raw.schedule;
+  if (Array.isArray(raw.calls)) return raw.calls;
+  if (Array.isArray(raw)) return raw;
+
+  // Legacy shape: { time: "9:00 AM", days: ["Mon", "Tue"] }
+  if (raw.time) {
+    const dayMap: Record<string, number> = {
+      Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+    };
+    const recurringDays = (raw.days ?? []).map((d: string) => dayMap[d] ?? 0);
+    return [{
+      title: "Daily Call",
+      frequency: recurringDays.length > 0 ? "recurring" : "daily",
+      recurringDays,
+      time: raw.time,
+    }];
+  }
+
+  // Nested shape: { schedule: { time, days } }
+  if (raw.schedule?.time) {
+    return normalizeScheduleData(raw.schedule);
+  }
+
+  return [];
+}
+
+function getConversationForDate(date: Date, conversations: Conversation[]): Conversation | undefined {
+  return conversations.find((c) => {
+    try {
+      return isSameDay(new Date(c.startedAt), date);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function getCallStatus(conversation: Conversation): "Answered" | "Missed" {
+  const duration = conversation.durationSeconds ?? 0;
+  if (conversation.status === "completed" || (conversation.endedAt && duration > 10)) {
+    return "Answered";
+  }
+  return "Missed";
+}
+
+// ---------------------------------------------------------------------------
+// Component: Schedule Screen
+// ---------------------------------------------------------------------------
+
+export default function ScheduleScreen() {
+  const { senior, seniorId, isLoading: seniorLoading } = useCurrentSenior();
+  const { data: rawSchedule, isLoading: scheduleLoading } = useSchedule(seniorId);
+  const updateSchedule = useUpdateSchedule(seniorId);
+  const { data: reminders } = useReminders(seniorId);
+  const { data: conversations } = useConversations(seniorId);
+
+  const [selectedDate, setSelectedDate] = useState(startOfDay(new Date()));
+  const [baseWeekDate, setBaseWeekDate] = useState(startOfWeek(new Date(), { weekStartsOn: 0 }));
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [monthPickerDate, setMonthPickerDate] = useState(startOfMonth(new Date()));
+
+  // Modal state
   const [modalVisible, setModalVisible] = useState(false);
-  const [editingCall, setEditingCall] = useState<ScheduledCall | null>(null);
-  const [callTime, setCallTime] = useState(new Date());
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [deleteConfirmIndex, setDeleteConfirmIndex] = useState<number | null>(null);
+
+  // Edit form state
+  const [formTitle, setFormTitle] = useState("Daily Call");
+  const [formFrequency, setFormFrequency] = useState<Frequency>("daily");
+  const [formDays, setFormDays] = useState<number[]>([]);
+  const [formDate, setFormDate] = useState("");
+  const [formTime, setFormTime] = useState("9:00 AM");
+  const [formNotes, setFormNotes] = useState("");
+  const [formReminderIds, setFormReminderIds] = useState<string[]>([]);
+  const [customTitle, setCustomTitle] = useState(false);
+
+  // Picker modals
+  const [showTitlePicker, setShowTitlePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
 
-  useEffect(() => {
-    load();
-  }, []);
+  const seniorFirstName = senior?.name?.split(" ")[0] ?? "your loved one";
 
-  async function load() {
-    try {
-      const data = await api.getCalls();
-      setCalls(data?.calls ?? []);
-    } catch {
-      // empty
-    } finally {
-      setLoading(false);
-    }
-  }
+  // ---------------------------------------------------------------------------
+  // Data
+  // ---------------------------------------------------------------------------
 
-  function prevMonth() {
-    if (month === 0) { setMonth(11); setYear((y) => y - 1); }
-    else setMonth((m) => m - 1);
-  }
+  const scheduleItems = useMemo(() => normalizeScheduleData(rawSchedule), [rawSchedule]);
 
-  function nextMonth() {
-    if (month === 11) { setMonth(0); setYear((y) => y + 1); }
-    else setMonth((m) => m + 1);
-  }
-
-  const daysInMonth = getDaysInMonth(year, month);
-  const firstDay = getFirstDayOfMonth(year, month);
-
-  const callsThisMonth = calls.filter((c) => {
-    const d = new Date(c.date);
-    return d.getFullYear() === year && d.getMonth() === month;
-  });
-
-  const datesWithCalls = new Set(
-    callsThisMonth.map((c) => new Date(c.date).getDate())
+  const dailyItems = useMemo(
+    () => getScheduleForDate(selectedDate, scheduleItems),
+    [selectedDate, scheduleItems],
   );
 
-  const selectedDateISO = `${year}-${String(month + 1).padStart(2, '0')}-${String(selectedDate).padStart(2, '0')}`;
-  const callsForSelected = calls.filter((c) => c.date === selectedDateISO);
+  const weekDays = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => addDays(baseWeekDate, i)),
+    [baseWeekDate],
+  );
 
-  function openAdd() {
-    setEditingCall(null);
-    setCallTime(new Date());
-    setModalVisible(true);
-  }
+  // Build card data
+  const cardData = useMemo<CallCardData[]>(() => {
+    const convo = conversations
+      ? getConversationForDate(selectedDate, conversations)
+      : undefined;
 
-  function openEdit(call: ScheduledCall) {
-    setEditingCall(call);
-    const [h, mStr] = call.time.replace(' AM', '').replace(' PM', '').split(':');
-    const isPM = call.time.includes('PM');
-    const d = new Date();
-    d.setHours(isPM ? parseInt(h) % 12 + 12 : parseInt(h) % 12, parseInt(mStr));
-    setCallTime(d);
-    setModalVisible(true);
-  }
+    return dailyItems.map((schedule, index) => ({
+      schedule,
+      index: scheduleItems.indexOf(schedule),
+      isPast: isCallPast(selectedDate, schedule.time),
+      conversation: convo,
+    }));
+  }, [dailyItems, selectedDate, scheduleItems, conversations]);
 
-  async function deleteCall(id: string) {
-    Alert.alert('Delete Call', 'Remove this scheduled call?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          try {
-            await api.deleteReminder(id); // reuse delete endpoint
-            setCalls((prev) => prev.filter((c) => c.id !== id));
-          } catch {
-            Alert.alert('Error', 'Could not delete call.');
-          }
-        },
-      },
-    ]);
-  }
+  // ---------------------------------------------------------------------------
+  // Week navigation
+  // ---------------------------------------------------------------------------
 
-  async function saveCall() {
-    const timeStr = formatTime(callTime);
-    if (editingCall) {
-      setCalls((prev) =>
-        prev.map((c) => (c.id === editingCall.id ? { ...c, time: timeStr } : c))
-      );
-    } else {
-      const newCall: ScheduledCall = {
-        id: Date.now().toString(),
-        date: selectedDateISO,
-        time: timeStr,
-      };
-      setCalls((prev) => [...prev, newCall]);
+  const handlePrevWeek = useCallback(() => {
+    Haptics.selectionAsync();
+    setBaseWeekDate((prev) => subWeeks(prev, 1));
+  }, []);
+
+  const handleNextWeek = useCallback(() => {
+    Haptics.selectionAsync();
+    setBaseWeekDate((prev) => addWeeks(prev, 1));
+  }, []);
+
+  const handleSelectDate = useCallback(
+    (date: Date) => {
+      Haptics.selectionAsync();
+      setSelectedDate(startOfDay(date));
+      setShowMonthPicker(false);
+
+      // Update base week to contain selected date
+      const weekStart = startOfWeek(date, { weekStartsOn: 0 });
+      setBaseWeekDate(weekStart);
+    },
+    [],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Month picker
+  // ---------------------------------------------------------------------------
+
+  const monthPickerDays = useMemo(() => {
+    const firstDay = startOfMonth(monthPickerDate);
+    const daysInMonth = getDaysInMonth(monthPickerDate);
+    const startDayOfWeek = getDay(firstDay); // 0=Sun
+
+    const cells: (Date | null)[] = [];
+    // Leading empty cells
+    for (let i = 0; i < startDayOfWeek; i++) cells.push(null);
+    // Day cells
+    for (let d = 1; d <= daysInMonth; d++) {
+      cells.push(new Date(monthPickerDate.getFullYear(), monthPickerDate.getMonth(), d));
     }
-    setModalVisible(false);
+    return cells;
+  }, [monthPickerDate]);
+
+  // ---------------------------------------------------------------------------
+  // Add/Edit modal
+  // ---------------------------------------------------------------------------
+
+  const openAddModal = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setEditingIndex(null);
+    setFormTitle("Daily Call");
+    setFormFrequency("daily");
+    setFormDays([]);
+    setFormDate(format(selectedDate, "MM/dd/yyyy"));
+    setFormTime("9:00 AM");
+    setFormNotes("");
+    setFormReminderIds([]);
+    setCustomTitle(false);
+    setModalVisible(true);
+  }, [selectedDate]);
+
+  const openEditModal = useCallback(
+    (globalIndex: number) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const item = scheduleItems[globalIndex];
+      if (!item) return;
+
+      setEditingIndex(globalIndex);
+      setFormTitle(item.title || "Daily Call");
+      setFormFrequency(item.frequency || "daily");
+      setFormDays(item.recurringDays ?? []);
+      setFormDate(item.date ? format(new Date(item.date), "MM/dd/yyyy") : "");
+      setFormTime(item.time || "9:00 AM");
+      setFormNotes(item.contextNotes ?? "");
+      setFormReminderIds(item.reminderIds ?? []);
+      setCustomTitle(!CALL_TITLE_OPTIONS.includes(item.title as any));
+      setModalVisible(true);
+    },
+    [scheduleItems],
+  );
+
+  const handleSave = useCallback(async () => {
+    const newItem: ScheduleItem = {
+      title: formTitle,
+      frequency: formFrequency,
+      recurringDays: formFrequency === "recurring" ? formDays : undefined,
+      date: formFrequency === "one-time" ? formDate : undefined,
+      time: formTime,
+      contextNotes: formNotes || undefined,
+      reminderIds: formReminderIds.length > 0 ? formReminderIds : undefined,
+    };
+
+    let updated: ScheduleItem[];
+    if (editingIndex !== null) {
+      updated = scheduleItems.map((item, i) => (i === editingIndex ? newItem : item));
+    } else {
+      updated = [...scheduleItems, newItem];
+    }
+
+    try {
+      await updateSchedule.mutateAsync({ schedule: updated });
+      setModalVisible(false);
+    } catch {
+      // Error handled by react-query
+    }
+  }, [
+    formTitle,
+    formFrequency,
+    formDays,
+    formDate,
+    formTime,
+    formNotes,
+    formReminderIds,
+    editingIndex,
+    scheduleItems,
+    updateSchedule,
+  ]);
+
+  const handleDelete = useCallback(async () => {
+    if (deleteConfirmIndex === null) return;
+    const updated = scheduleItems.filter((_, i) => i !== deleteConfirmIndex);
+    try {
+      await updateSchedule.mutateAsync({ schedule: updated });
+      setDeleteConfirmIndex(null);
+      setModalVisible(false);
+    } catch {
+      // Error handled by react-query
+    }
+  }, [deleteConfirmIndex, scheduleItems, updateSchedule]);
+
+  const toggleFormDay = useCallback((dayIndex: number) => {
+    setFormDays((prev) =>
+      prev.includes(dayIndex) ? prev.filter((d) => d !== dayIndex) : [...prev, dayIndex],
+    );
+  }, []);
+
+  const toggleFormReminder = useCallback((reminderId: string) => {
+    setFormReminderIds((prev) =>
+      prev.includes(reminderId) ? prev.filter((r) => r !== reminderId) : [...prev, reminderId],
+    );
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Loading state
+  // ---------------------------------------------------------------------------
+
+  if (seniorLoading) {
+    return (
+      <SafeAreaView className="flex-1 bg-cream" edges={["top"]}>
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color={COLORS.sage} />
+        </View>
+      </SafeAreaView>
+    );
   }
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 }}>
-          <Text style={{ fontSize: 26, fontWeight: '800', color: colors.textPrimary }}>Schedule</Text>
-        </View>
+    <View className="flex-1 bg-cream">
+      {/* ================================================================= */}
+      {/* SAGE HEADER                                                       */}
+      {/* ================================================================= */}
+      <View
+        className="bg-sage pt-16 pb-6 px-6"
+        style={{ borderBottomLeftRadius: 32, borderBottomRightRadius: 32 }}
+      >
+        {/* Day name */}
+        <Text
+          style={{ fontFamily: "PlayfairDisplay_400Regular" }}
+          className="text-[40px] text-cream leading-[48px]"
+        >
+          {format(selectedDate, "EEEE")}
+        </Text>
 
-        {/* Calendar */}
-        <View style={{ margin: 16, backgroundColor: colors.card, borderRadius: 20, padding: 16 }}>
+        {/* Month/year toggle */}
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync();
+            setMonthPickerDate(startOfMonth(selectedDate));
+            setShowMonthPicker(!showMonthPicker);
+          }}
+          className="flex-row items-center mt-1 min-h-[48px]"
+          accessibilityRole="button"
+          accessibilityLabel={`${format(selectedDate, "MMMM yyyy")}. Tap to open month picker.`}
+        >
+          <Text className="text-[13px] uppercase tracking-widest text-cream/80">
+            {format(selectedDate, "MMM yyyy")}
+          </Text>
+          <ChevronDown
+            size={14}
+            color="rgba(253,252,248,0.6)"
+            style={{ marginLeft: 4 }}
+          />
+        </Pressable>
+
+        {/* Week row */}
+        <View className="flex-row items-center mt-4">
+          <Pressable
+            onPress={handlePrevWeek}
+            className="min-w-[44px] min-h-[48px] items-center justify-center"
+            accessibilityRole="button"
+            accessibilityLabel="Previous week"
+          >
+            <ChevronLeft size={20} color="rgba(253,252,248,0.6)" />
+          </Pressable>
+
+          <View className="flex-1 flex-row justify-between">
+            {weekDays.map((date) => {
+              const isSelected = isSameDay(date, selectedDate);
+              const isToday = isSameDay(date, new Date());
+              return (
+                <Pressable
+                  key={date.toISOString()}
+                  onPress={() => handleSelectDate(date)}
+                  className="items-center min-w-[40px] min-h-[56px] justify-center"
+                  accessibilityRole="button"
+                  accessibilityLabel={format(date, "EEEE, MMMM d")}
+                  accessibilityState={{ selected: isSelected }}
+                >
+                  <Text
+                    className={`text-[11px] uppercase ${
+                      isSelected ? "text-cream font-semibold" : "text-cream/60"
+                    }`}
+                  >
+                    {format(date, "EEEEE")}
+                  </Text>
+                  <Text
+                    style={
+                      isSelected
+                        ? { fontFamily: "PlayfairDisplay_600SemiBold" }
+                        : { fontFamily: "PlayfairDisplay_400Regular" }
+                    }
+                    className={`text-[20px] mt-0.5 ${
+                      isSelected ? "text-cream" : "text-cream/60"
+                    }`}
+                  >
+                    {format(date, "d")}
+                  </Text>
+                  {isSelected && (
+                    <View
+                      className="mt-1 rounded-full"
+                      style={{
+                        width: 16,
+                        height: 3,
+                        borderRadius: 1.5,
+                        backgroundColor: COLORS.accentPink,
+                      }}
+                    />
+                  )}
+                  {!isSelected && isToday && (
+                    <View
+                      className="mt-1 rounded-full"
+                      style={{
+                        width: 4,
+                        height: 4,
+                        borderRadius: 2,
+                        backgroundColor: "rgba(253,252,248,0.4)",
+                      }}
+                    />
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Pressable
+            onPress={handleNextWeek}
+            className="min-w-[44px] min-h-[48px] items-center justify-center"
+            accessibilityRole="button"
+            accessibilityLabel="Next week"
+          >
+            <ChevronRight size={20} color="rgba(253,252,248,0.6)" />
+          </Pressable>
+        </View>
+      </View>
+
+      {/* ================================================================= */}
+      {/* MONTH PICKER OVERLAY                                              */}
+      {/* ================================================================= */}
+      {showMonthPicker && (
+        <View
+          className="absolute left-4 right-4 z-50"
+          style={{
+            top: Platform.OS === "ios" ? 210 : 190,
+            backgroundColor: COLORS.sageDark,
+            borderRadius: 24,
+            padding: 20,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.25,
+            shadowRadius: 16,
+            elevation: 10,
+          }}
+        >
           {/* Month nav */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <Pressable onPress={prevMonth} hitSlop={8}>
-              <ChevronLeft size={22} color={colors.textPrimary} />
+          <View className="flex-row items-center justify-between mb-4">
+            <Pressable
+              onPress={() => {
+                Haptics.selectionAsync();
+                setMonthPickerDate((prev) => subMonths(prev, 1));
+              }}
+              className="min-w-[48px] min-h-[48px] items-center justify-center"
+              accessibilityRole="button"
+              accessibilityLabel="Previous month"
+            >
+              <ChevronLeft size={20} color={COLORS.cream} />
             </Pressable>
-            <Text style={{ fontSize: 17, fontWeight: '700', color: colors.textPrimary }}>
-              {MONTHS[month]} {year}
+            <Text
+              style={{ fontFamily: "PlayfairDisplay_500Medium" }}
+              className="text-cream text-[18px]"
+            >
+              {format(monthPickerDate, "MMMM yyyy")}
             </Text>
-            <Pressable onPress={nextMonth} hitSlop={8}>
-              <ChevronRight size={22} color={colors.textPrimary} />
+            <Pressable
+              onPress={() => {
+                Haptics.selectionAsync();
+                setMonthPickerDate((prev) => addMonths(prev, 1));
+              }}
+              className="min-w-[48px] min-h-[48px] items-center justify-center"
+              accessibilityRole="button"
+              accessibilityLabel="Next month"
+            >
+              <ChevronRight size={20} color={COLORS.cream} />
             </Pressable>
           </View>
 
-          {/* Day labels */}
-          <View style={{ flexDirection: 'row', marginBottom: 8 }}>
-            {DAYS_SHORT.map((d) => (
-              <View key={d} style={{ flex: 1, alignItems: 'center' }}>
-                <Text style={{ fontSize: 12, fontWeight: '600', color: colors.textSecondary }}>{d}</Text>
+          {/* Day-of-week headers */}
+          <View className="flex-row mb-2">
+            {DAY_LETTERS.map((letter, i) => (
+              <View key={i} className="flex-1 items-center">
+                <Text className="text-[11px] text-cream/50 uppercase">{letter}</Text>
               </View>
             ))}
           </View>
 
-          {/* Date grid */}
-          {Array.from({ length: Math.ceil((firstDay + daysInMonth) / 7) }).map((_, weekIdx) => (
-            <View key={weekIdx} style={{ flexDirection: 'row', marginBottom: 4 }}>
-              {Array.from({ length: 7 }).map((_, dayIdx) => {
-                const dayNum = weekIdx * 7 + dayIdx - firstDay + 1;
-                if (dayNum < 1 || dayNum > daysInMonth) {
-                  return <View key={dayIdx} style={{ flex: 1 }} />;
-                }
-                const isToday =
-                  dayNum === today.getDate() &&
-                  month === today.getMonth() &&
-                  year === today.getFullYear();
-                const isSelected = dayNum === selectedDate;
-                const hasCall = datesWithCalls.has(dayNum);
-
-                return (
-                  <Pressable
-                    key={dayIdx}
-                    onPress={() => setSelectedDate(dayNum)}
-                    style={{
-                      flex: 1,
-                      alignItems: 'center',
-                      paddingVertical: 6,
-                    }}
+          {/* Day grid */}
+          <View className="flex-row flex-wrap">
+            {monthPickerDays.map((date, i) => {
+              if (!date) {
+                return <View key={`empty-${i}`} style={{ width: "14.28%", height: 40 }} />;
+              }
+              const isSelected = isSameDay(date, selectedDate);
+              const isToday = isSameDay(date, new Date());
+              return (
+                <Pressable
+                  key={date.toISOString()}
+                  onPress={() => handleSelectDate(date)}
+                  style={{ width: "14.28%", height: 40 }}
+                  className="items-center justify-center"
+                  accessibilityRole="button"
+                  accessibilityLabel={format(date, "MMMM d, yyyy")}
+                >
+                  <View
+                    className="items-center justify-center"
+                    style={[
+                      { width: 32, height: 32, borderRadius: 16 },
+                      isSelected && { backgroundColor: COLORS.accentPink },
+                      !isSelected && isToday && {
+                        borderWidth: 1,
+                        borderColor: "rgba(253,252,248,0.4)",
+                      },
+                    ]}
                   >
-                    <View
-                      style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: 17,
-                        backgroundColor: isSelected
-                          ? colors.primary
-                          : isToday
-                          ? colors.card
-                          : 'transparent',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderWidth: isToday && !isSelected ? 1.5 : 0,
-                        borderColor: colors.primary,
-                      }}
+                    <Text
+                      className={`text-[14px] ${
+                        isSelected ? "text-white font-semibold" : "text-cream/80"
+                      }`}
                     >
-                      <Text
-                        style={{
-                          fontSize: 14,
-                          fontWeight: isSelected || isToday ? '700' : '400',
-                          color: isSelected ? colors.white : colors.textPrimary,
-                        }}
-                      >
-                        {dayNum}
-                      </Text>
-                    </View>
-                    {hasCall && (
-                      <View
-                        style={{
-                          width: 5,
-                          height: 5,
-                          borderRadius: 2.5,
-                          backgroundColor: isSelected ? colors.white : colors.primary,
-                          marginTop: 2,
-                        }}
-                      />
-                    )}
+                      {format(date, "d")}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      )}
+
+      {/* Dismiss overlay backdrop */}
+      {showMonthPicker && (
+        <Pressable
+          className="absolute inset-0 z-40"
+          onPress={() => setShowMonthPicker(false)}
+          accessibilityLabel="Close month picker"
+        />
+      )}
+
+      {/* ================================================================= */}
+      {/* SCHEDULE LIST                                                     */}
+      {/* ================================================================= */}
+      <View className="flex-1 px-6 pt-6">
+        <Text className="text-[13px] uppercase tracking-widest text-muted mb-4 font-medium">
+          {format(selectedDate, "EEEE, MMM d")}
+        </Text>
+
+        {scheduleLoading ? (
+          <View className="flex-1 items-center justify-center">
+            <ActivityIndicator size="large" color={COLORS.sage} />
+          </View>
+        ) : cardData.length === 0 ? (
+          <View className="flex-1 items-center justify-center pb-20">
+            <Calendar size={40} color={COLORS.muted} style={{ opacity: 0.4 }} />
+            <Text className="text-muted text-[16px] mt-4 text-center">
+              No calls scheduled{"\n"}for this day
+            </Text>
+            <Text className="text-muted/60 text-[14px] mt-2 text-center">
+              Tap + to add a call for {seniorFirstName}
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={cardData}
+            keyExtractor={(item, i) => `${item.schedule.title}-${i}`}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 120 }}
+            renderItem={({ item }) => (
+              <ScheduleCallCard
+                data={item}
+                reminders={reminders ?? []}
+                onEdit={() => openEditModal(item.index)}
+              />
+            )}
+          />
+        )}
+      </View>
+
+      {/* ================================================================= */}
+      {/* FLOATING ADD BUTTON                                               */}
+      {/* ================================================================= */}
+      <Pressable
+        onPress={openAddModal}
+        className="absolute right-6 bottom-28 w-14 h-14 rounded-full items-center justify-center"
+        style={{
+          backgroundColor: COLORS.accentPink,
+          shadowColor: COLORS.accentPink,
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.35,
+          shadowRadius: 8,
+          elevation: 5,
+        }}
+        accessibilityRole="button"
+        accessibilityLabel="Add new call"
+      >
+        <Plus size={24} color={COLORS.white} />
+      </Pressable>
+
+      {/* ================================================================= */}
+      {/* ADD / EDIT CALL MODAL                                             */}
+      {/* ================================================================= */}
+      <Modal
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title={editingIndex !== null ? "Edit Call" : "Add Call"}
+      >
+        <View className="pb-6">
+          {/* Title picker */}
+          <View className="mb-5">
+            <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
+              Call Title
+            </Text>
+            {customTitle ? (
+              <Input
+                placeholder="Enter custom title"
+                value={formTitle}
+                onChangeText={setFormTitle}
+                autoFocus
+              />
+            ) : (
+              <Pressable
+                onPress={() => setShowTitlePicker(true)}
+                className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
+                accessibilityRole="button"
+                accessibilityLabel="Select call title"
+              >
+                <Text className="text-[15px] text-charcoal">
+                  {formTitle || "Select title"}
+                </Text>
+                <ChevronDown size={18} color={COLORS.muted} />
+              </Pressable>
+            )}
+          </View>
+
+          {/* Frequency */}
+          <View className="mb-5">
+            <Text className="text-[13px] font-medium text-muted mb-2 uppercase tracking-wider">
+              Frequency
+            </Text>
+            <View className="flex-row gap-2">
+              {(
+                [
+                  { key: "daily", label: "Daily" },
+                  { key: "recurring", label: "Recurring" },
+                  { key: "one-time", label: "One-Time" },
+                ] as const
+              ).map(({ key, label }) => (
+                <Pressable
+                  key={key}
+                  onPress={() => setFormFrequency(key)}
+                  className={`flex-1 py-2.5 rounded-xl items-center border ${
+                    formFrequency === key
+                      ? "bg-sage border-sage"
+                      : "bg-white border-charcoal/10"
+                  }`}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: formFrequency === key }}
+                  accessibilityLabel={label}
+                >
+                  <Text
+                    className={`text-[13px] font-medium ${
+                      formFrequency === key ? "text-white" : "text-charcoal"
+                    }`}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+
+          {/* Day picker for recurring */}
+          {formFrequency === "recurring" && (
+            <View className="mb-5">
+              <Text className="text-[13px] font-medium text-muted mb-2 uppercase tracking-wider">
+                Select Days
+              </Text>
+              <View className="flex-row gap-1.5">
+                {DAY_LABELS.map((day, dayIndex) => (
+                  <Pressable
+                    key={day}
+                    onPress={() => toggleFormDay(dayIndex)}
+                    className={`flex-1 py-2.5 rounded-xl items-center ${
+                      formDays.includes(dayIndex) ? "bg-sage" : "bg-beige"
+                    }`}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: formDays.includes(dayIndex) }}
+                    accessibilityLabel={day}
+                  >
+                    <Text
+                      className={`text-[12px] font-medium ${
+                        formDays.includes(dayIndex) ? "text-white" : "text-muted"
+                      }`}
+                    >
+                      {day}
+                    </Text>
                   </Pressable>
-                );
-              })}
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* Date input for one-time */}
+          {formFrequency === "one-time" && (
+            <View className="mb-5">
+              <Input
+                label="Date"
+                placeholder="MM/DD/YYYY"
+                value={formDate}
+                onChangeText={setFormDate}
+                keyboardType="numbers-and-punctuation"
+              />
+            </View>
+          )}
+
+          {/* Time picker */}
+          <View className="mb-5">
+            <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
+              Time
+            </Text>
+            <Pressable
+              onPress={() => setShowTimePicker(true)}
+              className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
+              accessibilityRole="button"
+              accessibilityLabel="Select call time"
+            >
+              <View className="flex-row items-center">
+                <Clock size={16} color={COLORS.muted} style={{ marginRight: 8 }} />
+                <Text className="text-[15px] text-charcoal">{formTime}</Text>
+              </View>
+              <ChevronDown size={18} color={COLORS.muted} />
+            </Pressable>
+          </View>
+
+          {/* Context notes */}
+          <View className="mb-5">
+            <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
+              Context Notes (optional)
+            </Text>
+            <TextInput
+              className="bg-beige rounded-2xl p-4 text-charcoal text-[15px] min-h-[80px]"
+              placeholder={`e.g. Ask ${seniorFirstName} about their weekend`}
+              placeholderTextColor={COLORS.muted}
+              multiline
+              textAlignVertical="top"
+              value={formNotes}
+              onChangeText={setFormNotes}
+              accessibilityLabel="Context notes"
+            />
+          </View>
+
+          {/* Reminder checkboxes */}
+          {reminders && reminders.length > 0 && (
+            <View className="mb-5">
+              <Text className="text-[13px] font-medium text-muted mb-2 uppercase tracking-wider">
+                Include Reminders
+              </Text>
+              <View className="gap-2">
+                {reminders.map((reminder) => {
+                  const isChecked = formReminderIds.includes(reminder.id);
+                  return (
+                    <Pressable
+                      key={reminder.id}
+                      onPress={() => toggleFormReminder(reminder.id)}
+                      className="flex-row items-center gap-3 py-2"
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: isChecked }}
+                      accessibilityLabel={reminder.title}
+                    >
+                      <View
+                        className={`w-5 h-5 rounded-md border items-center justify-center ${
+                          isChecked
+                            ? "bg-sage border-sage"
+                            : "bg-white border-charcoal/20"
+                        }`}
+                      >
+                        {isChecked && <Check size={14} color={COLORS.white} />}
+                      </View>
+                      <Text className="text-[14px] text-charcoal flex-1">
+                        {reminder.title}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {/* Action buttons */}
+          <View className="gap-3 mt-2">
+            <Button
+              title={editingIndex !== null ? "Save Changes" : "Add Call"}
+              onPress={handleSave}
+              loading={updateSchedule.isPending}
+              disabled={!formTitle || !formTime || updateSchedule.isPending}
+            />
+            {editingIndex !== null && (
+              <Button
+                title="Delete Call"
+                onPress={() => setDeleteConfirmIndex(editingIndex)}
+                variant="destructive"
+                disabled={updateSchedule.isPending}
+              />
+            )}
+          </View>
+
+          {updateSchedule.isError && (
+            <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
+              Failed to save. Please try again.
+            </Text>
+          )}
+        </View>
+      </Modal>
+
+      {/* ================================================================= */}
+      {/* TITLE PICKER MODAL                                                */}
+      {/* ================================================================= */}
+      <Modal
+        visible={showTitlePicker}
+        onClose={() => setShowTitlePicker(false)}
+        title="Select Call Title"
+      >
+        <View className="gap-1 pb-4">
+          {[...CALL_TITLE_OPTIONS, "Custom" as const].map((option) => (
+            <Pressable
+              key={option}
+              onPress={() => {
+                if (option === "Custom") {
+                  setCustomTitle(true);
+                  setFormTitle("");
+                } else {
+                  setCustomTitle(false);
+                  setFormTitle(option);
+                }
+                setShowTitlePicker(false);
+              }}
+              className="flex-row items-center justify-between py-3.5 px-2 rounded-xl active:bg-beige"
+              accessibilityRole="button"
+              accessibilityLabel={option}
+            >
+              <Text className="text-[16px] text-charcoal">{option}</Text>
+              {formTitle === option && <Check size={18} color={COLORS.sage} />}
+            </Pressable>
+          ))}
+        </View>
+      </Modal>
+
+      {/* ================================================================= */}
+      {/* TIME PICKER MODAL                                                 */}
+      {/* ================================================================= */}
+      <Modal
+        visible={showTimePicker}
+        onClose={() => setShowTimePicker(false)}
+        title="Select Time"
+      >
+        <View className="gap-0.5 pb-4">
+          {TIME_OPTIONS.map((time) => (
+            <Pressable
+              key={time}
+              onPress={() => {
+                setFormTime(time);
+                setShowTimePicker(false);
+              }}
+              className="flex-row items-center justify-between py-3 px-2 rounded-xl active:bg-beige"
+              accessibilityRole="button"
+              accessibilityLabel={time}
+            >
+              <Text className="text-[15px] text-charcoal">{time}</Text>
+              {formTime === time && <Check size={18} color={COLORS.sage} />}
+            </Pressable>
+          ))}
+        </View>
+      </Modal>
+
+      {/* ================================================================= */}
+      {/* DELETE CONFIRMATION MODAL                                         */}
+      {/* ================================================================= */}
+      <Modal
+        visible={deleteConfirmIndex !== null}
+        onClose={() => setDeleteConfirmIndex(null)}
+        title="Delete Call"
+        variant="centered"
+      >
+        <Text className="text-[15px] text-muted mb-6">
+          Are you sure you want to delete this scheduled call?
+        </Text>
+        <View className="gap-3">
+          <Button
+            title="Delete"
+            onPress={handleDelete}
+            variant="destructive"
+            loading={updateSchedule.isPending}
+          />
+          <Button
+            title="Cancel"
+            onPress={() => setDeleteConfirmIndex(null)}
+            variant="ghost"
+          />
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: Schedule Call Card
+// ---------------------------------------------------------------------------
+
+function ScheduleCallCard({
+  data,
+  reminders,
+  onEdit,
+}: {
+  data: CallCardData;
+  reminders: Reminder[];
+  onEdit: () => void;
+}) {
+  const { schedule, isPast, conversation } = data;
+  const status = conversation ? getCallStatus(conversation) : null;
+  const isAnswered = status === "Answered";
+
+  // Get reminder titles for this call
+  const callReminders = useMemo(() => {
+    if (!schedule.reminderIds || schedule.reminderIds.length === 0) return [];
+    return reminders.filter((r) => schedule.reminderIds!.includes(r.id));
+  }, [schedule.reminderIds, reminders]);
+
+  // Past call with conversation data
+  if (isPast && conversation) {
+    return (
+      <View
+        className="rounded-2xl p-4 mb-3"
+        style={{
+          backgroundColor: isAnswered ? COLORS.successBg : COLORS.warningBg,
+          borderWidth: 1,
+          borderColor: isAnswered
+            ? "rgba(46, 125, 50, 0.15)"
+            : "rgba(230, 81, 0, 0.15)",
+        }}
+      >
+        {/* Header */}
+        <View className="flex-row items-center justify-between mb-2">
+          <View className="flex-row items-center flex-1">
+            <Text className="text-[16px] font-semibold text-charcoal" numberOfLines={1}>
+              {schedule.title}
+            </Text>
+          </View>
+          <View
+            className="rounded-full px-3 py-1 ml-2"
+            style={{
+              backgroundColor: isAnswered
+                ? "rgba(46, 125, 50, 0.15)"
+                : "rgba(230, 81, 0, 0.15)",
+            }}
+          >
+            <Text
+              className="text-[12px] font-semibold"
+              style={{ color: isAnswered ? COLORS.success : COLORS.warning }}
+            >
+              {status}
+            </Text>
+          </View>
+        </View>
+
+        {/* Time */}
+        <View className="flex-row items-center mb-2">
+          <Clock size={14} color={COLORS.muted} />
+          <Text className="text-[13px] text-muted ml-1.5">{schedule.time}</Text>
+        </View>
+
+        {/* Summary */}
+        {conversation.summary && (
+          <Text className="text-[14px] text-muted leading-5" numberOfLines={3}>
+            {conversation.summary}
+          </Text>
+        )}
+      </View>
+    );
+  }
+
+  // Future or past without conversation (upcoming/missed)
+  return (
+    <View
+      className="bg-white rounded-2xl p-4 mb-3"
+      style={{
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.04,
+        shadowRadius: 3,
+        elevation: 1,
+      }}
+    >
+      {/* Header */}
+      <View className="flex-row items-center justify-between mb-2">
+        <Text className="text-[16px] font-semibold text-charcoal flex-1" numberOfLines={1}>
+          {schedule.title}
+        </Text>
+        <Pressable
+          onPress={onEdit}
+          className="min-w-[44px] min-h-[44px] items-center justify-center"
+          accessibilityRole="button"
+          accessibilityLabel={`Edit ${schedule.title}`}
+        >
+          <Edit2 size={16} color={COLORS.muted} />
+        </Pressable>
+      </View>
+
+      {/* Time */}
+      <View className="flex-row items-center mb-2">
+        <Clock size={14} color={COLORS.sage} />
+        <Text className="text-[14px] text-charcoal font-medium ml-1.5">
+          {schedule.time}
+        </Text>
+        {schedule.frequency !== "one-time" && (
+          <View className="bg-beige rounded-full px-2 py-0.5 ml-2">
+            <Text className="text-[11px] text-muted capitalize">
+              {schedule.frequency === "daily"
+                ? "Every day"
+                : schedule.recurringDays
+                    ?.map((d) => DAY_LABELS[d])
+                    .join(", ") ?? "Recurring"}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {/* Context notes */}
+      {schedule.contextNotes && (
+        <Text className="text-[13px] text-muted mb-2 leading-[18px]">
+          {schedule.contextNotes}
+        </Text>
+      )}
+
+      {/* Reminders */}
+      {callReminders.length > 0 && (
+        <View className="mt-1">
+          {callReminders.map((reminder) => (
+            <View key={reminder.id} className="flex-row items-center mb-1">
+              <View
+                className="w-1.5 h-1.5 rounded-full mr-2"
+                style={{ backgroundColor: COLORS.accentPink }}
+              />
+              <Text className="text-[13px] text-muted">{reminder.title}</Text>
             </View>
           ))}
         </View>
-
-        {/* Calls for selected date */}
-        <View style={{ paddingHorizontal: 20 }}>
-          <Text style={{ fontSize: 16, fontWeight: '700', color: colors.textPrimary, marginBottom: 12 }}>
-            {MONTHS[month]} {selectedDate}
-          </Text>
-
-          {loading ? (
-            <ActivityIndicator color={colors.primary} />
-          ) : callsForSelected.length === 0 ? (
-            <View style={{ backgroundColor: colors.card, borderRadius: 14, padding: 20, alignItems: 'center' }}>
-              <Text style={{ color: colors.textSecondary, fontSize: 14 }}>No calls scheduled for this day.</Text>
-            </View>
-          ) : (
-            callsForSelected.map((c) => (
-              <View
-                key={c.id}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  backgroundColor: colors.card,
-                  borderRadius: 14,
-                  paddingHorizontal: 16,
-                  paddingVertical: 14,
-                  marginBottom: 10,
-                }}
-              >
-                <View
-                  style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 20,
-                    backgroundColor: colors.primary,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    marginRight: 12,
-                  }}
-                >
-                  <Text style={{ color: colors.white, fontSize: 11, fontWeight: '700' }}>
-                    {c.time.split(':')[0]}
-                  </Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 15, fontWeight: '600', color: colors.textPrimary }}>Donna's Call</Text>
-                  <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>{c.time}</Text>
-                </View>
-                <Pressable onPress={() => openEdit(c)} hitSlop={8} style={{ marginRight: 12 }}>
-                  <Edit2 size={16} color={colors.textSecondary} />
-                </Pressable>
-                <Pressable onPress={() => deleteCall(c.id)} hitSlop={8}>
-                  <Trash2 size={16} color={colors.textSecondary} />
-                </Pressable>
-              </View>
-            ))
-          )}
-        </View>
-      </ScrollView>
-
-      {/* Add FAB */}
-      <Pressable
-        onPress={openAdd}
-        style={({ pressed }) => ({
-          position: 'absolute',
-          bottom: 96,
-          right: 20,
-          backgroundColor: colors.primary,
-          borderRadius: 28,
-          paddingVertical: 14,
-          paddingHorizontal: 22,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.15,
-          shadowRadius: 8,
-          elevation: 5,
-          opacity: pressed ? 0.8 : 1,
-        })}
-      >
-        <Plus size={20} color={colors.white} />
-        <Text style={{ color: colors.white, fontWeight: '700', fontSize: 15 }}>Add Call</Text>
-      </Pressable>
-
-      {/* Time Picker Modal */}
-      <Modal visible={modalVisible} transparent animationType="slide">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={{ flex: 1, justifyContent: 'flex-end' }}
-        >
-          <View style={{ backgroundColor: 'rgba(0,0,0,0.4)', position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 }} />
-          <View
-            style={{
-              backgroundColor: colors.bg,
-              borderTopLeftRadius: 24,
-              borderTopRightRadius: 24,
-              padding: 24,
-              paddingBottom: 40,
-            }}
-          >
-            <Text style={{ fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: 8 }}>
-              {editingCall ? 'Edit Call Time' : 'Add Call'}
-            </Text>
-            <Text style={{ fontSize: 14, color: colors.textSecondary, marginBottom: 20 }}>
-              {MONTHS[month]} {selectedDate}, {year}
-            </Text>
-
-            <Pressable
-              onPress={() => setShowTimePicker(true)}
-              style={{
-                backgroundColor: colors.card,
-                borderRadius: 14,
-                padding: 16,
-                alignItems: 'center',
-                marginBottom: 20,
-              }}
-            >
-              <Text style={{ fontSize: 32, fontWeight: '800', color: colors.primary }}>
-                {formatTime(callTime)}
-              </Text>
-              <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 4 }}>Tap to change</Text>
-            </Pressable>
-
-            {showTimePicker && (
-              <DateTimePicker
-                value={callTime}
-                mode="time"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={(_, date) => {
-                  setShowTimePicker(Platform.OS === 'ios');
-                  if (date) setCallTime(date);
-                }}
-              />
-            )}
-
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <Pressable
-                onPress={() => setModalVisible(false)}
-                style={{ flex: 1, backgroundColor: colors.card, borderRadius: 14, paddingVertical: 14, alignItems: 'center' }}
-              >
-                <Text style={{ fontWeight: '600', color: colors.textSecondary, fontSize: 16 }}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={saveCall}
-                style={({ pressed }) => ({
-                  flex: 1,
-                  backgroundColor: colors.primary,
-                  borderRadius: 14,
-                  paddingVertical: 14,
-                  alignItems: 'center',
-                  opacity: pressed ? 0.8 : 1,
-                })}
-              >
-                <Text style={{ fontWeight: '600', color: colors.white, fontSize: 16 }}>Save</Text>
-              </Pressable>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-    </SafeAreaView>
+      )}
+    </View>
   );
 }

@@ -56,10 +56,13 @@ class Settings:
 
     # ---- Auth ----
     jwt_secret: str = "donna-admin-secret-change-me"
+    jwt_secret_previous: str = ""  # Old JWT secret during credential rotation
     donna_api_key: str = ""
     cofounder_api_key_1: str = ""
     cofounder_api_key_2: str = ""
     clerk_secret_key: str = ""
+    clerk_publishable_key: str = ""
+    clerk_jwks_url: str = ""  # Auto-derived from publishable key if not set
 
     # ---- Monitoring ----
     sentry_dsn: str = ""
@@ -73,8 +76,20 @@ class Settings:
     growthbook_api_host: str = ""
     growthbook_client_key: str = ""
 
+    # ---- Encryption ----
+    field_encryption_key: str = ""  # 32-byte base64url key for PHI encryption
+
     # ---- Feature Flags ----
     scheduler_enabled: bool = False
+
+    # ---- Data Retention (HIPAA) ----
+    retention_conversations_days: int = 365
+    retention_memories_days: int = 730
+    retention_call_analyses_days: int = 365
+    retention_daily_context_days: int = 90
+    retention_call_metrics_days: int = 180
+    retention_reminder_deliveries_days: int = 90
+    retention_audit_logs_days: int = 730
 
     @property
     def is_production(self) -> bool:
@@ -122,10 +137,13 @@ def _load_settings() -> Settings:
         anthropic_model=_env("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"),
         # Auth
         jwt_secret=_env("JWT_SECRET", "donna-admin-secret-change-me"),
+        jwt_secret_previous=_env("JWT_SECRET_PREVIOUS"),
         donna_api_key=_env("DONNA_API_KEY"),
         cofounder_api_key_1=_env("COFOUNDER_API_KEY_1"),
         cofounder_api_key_2=_env("COFOUNDER_API_KEY_2"),
         clerk_secret_key=_env("CLERK_SECRET_KEY"),
+        clerk_publishable_key=_env("CLERK_PUBLISHABLE_KEY", _env("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")),
+        clerk_jwks_url=_env("CLERK_JWKS_URL"),
         # Monitoring
         sentry_dsn=_env("SENTRY_DSN"),
         # Scalability
@@ -135,8 +153,18 @@ def _load_settings() -> Settings:
         # GrowthBook
         growthbook_api_host=_env("GROWTHBOOK_API_HOST"),
         growthbook_client_key=_env("GROWTHBOOK_CLIENT_KEY"),
+        # Encryption
+        field_encryption_key=_env("FIELD_ENCRYPTION_KEY"),
         # Feature Flags
         scheduler_enabled=_env("SCHEDULER_ENABLED", "false").lower() == "true",
+        # Data Retention (HIPAA)
+        retention_conversations_days=int(_env("RETENTION_CONVERSATIONS_DAYS", "365")),
+        retention_memories_days=int(_env("RETENTION_MEMORIES_DAYS", "730")),
+        retention_call_analyses_days=int(_env("RETENTION_CALL_ANALYSES_DAYS", "365")),
+        retention_daily_context_days=int(_env("RETENTION_DAILY_CONTEXT_DAYS", "90")),
+        retention_call_metrics_days=int(_env("RETENTION_CALL_METRICS_DAYS", "180")),
+        retention_reminder_deliveries_days=int(_env("RETENTION_REMINDER_DELIVERIES_DAYS", "90")),
+        retention_audit_logs_days=int(_env("RETENTION_AUDIT_LOGS_DAYS", "730")),
     )
 
 

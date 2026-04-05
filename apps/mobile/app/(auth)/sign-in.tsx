@@ -77,6 +77,24 @@ export default function SignInScreen() {
       if (result.status === "complete") {
         await setActive({ session: result.createdSessionId });
         await navigateAfterAuth();
+      } else if (result.status === "needs_second_factor") {
+        // Auto-verify with test code in dev mode (Clerk test accounts use 424242)
+        if (__DEV__) {
+          await signIn.prepareSecondFactor({ strategy: "email_code" });
+          const secondResult = await signIn.attemptSecondFactor({
+            strategy: "email_code",
+            code: "424242",
+          });
+          if (secondResult.status === "complete") {
+            await setActive({ session: secondResult.createdSessionId });
+            await navigateAfterAuth();
+          }
+        } else {
+          Alert.alert(
+            "Verification Required",
+            "Please check your email for a verification code."
+          );
+        }
       }
     } catch (err: unknown) {
       const message =
@@ -194,7 +212,7 @@ export default function SignInScreen() {
               value={password}
               onChangeText={setPassword}
               error={errors.password}
-              secureTextEntry
+              secureTextEntry={!__DEV__}
               textContentType="none"
               autoComplete="off"
               testID="sign-in-password"

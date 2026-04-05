@@ -1,15 +1,15 @@
 # Flow 05: Settings Tab — Root Navigation
-# Verifies: All settings rows visible, navigation to each sub-screen
+# Verifies: All settings rows visible, navigation to each sub-screen and back
 
 appId: com.donna.caregiver
 
+env:
+  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "Maestro2026!"
+
 ---
 
-- launchApp:
-    clearKeychain: true
-
 - runFlow: ../subflows/sign_in.yaml
-
 - runFlow: ../subflows/navigate_to_settings.yaml
 
 # Profiles section
@@ -23,22 +23,24 @@ appId: com.donna.caregiver
 # Account section
 - assertVisible: "Sign Out"
 
-# Navigate to Loved One Profile and back
+# App version
+- assertVisible: "Donna v1.0.0"
+
+# Navigate to each sub-screen and back
 - tapOn: "Loved One Profile"
 - assertVisible: "Go back"
 - tapOn: "Go back"
 
-# Navigate to Caregiver Profile and back
 - tapOn: "Caregiver Profile"
 - assertVisible: "Go back"
 - tapOn: "Go back"
 
-# Navigate to Notification Preferences and back
 - tapOn: "Notification Preferences"
 - assertVisible: "Go back"
 - tapOn: "Go back"
 
-# Navigate to Help Center and back
 - tapOn: "Help Center"
 - assertVisible: "Go back"
 - tapOn: "Go back"
+
+- takeScreenshot: 05_settings

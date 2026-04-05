@@ -1,18 +1,18 @@
 # Flow 07: Settings — Caregiver Profile
-# Verifies: Edit name, phone, relationship; email is read-only
+# Verifies: Form fields, edit name/phone/relationship, email read-only, save
 
 appId: com.donna.caregiver
 
+env:
+  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "Maestro2026!"
+
 ---
 
-- launchApp:
-    clearKeychain: true
-
 - runFlow: ../subflows/sign_in.yaml
-
 - runFlow: ../subflows/navigate_to_settings.yaml
-
 - tapOn: "Caregiver Profile"
+
 - assertVisible: "Caregiver Profile"
 
 # Form fields visible
@@ -23,17 +23,17 @@ appId: com.donna.caregiver
 
 # Edit first name
 - tapOn: "First Name"
-- clearText
+- eraseText: 50
 - inputText: "E2E"
 
 # Edit last name
 - tapOn: "Last Name"
-- clearText
+- eraseText: 50
 - inputText: "Tester"
 
 # Edit phone
 - tapOn: "Phone Number"
-- clearText
+- eraseText: 50
 - inputText: "5559876543"
 
 # Select relationship
@@ -52,6 +52,16 @@ appId: com.donna.caregiver
     direction: DOWN
 - tapOn: "Save Changes"
 
+# Wait for save confirmation
+- extendedWaitUntil:
+    visible: "Saved|Profile updated|OK"
+    timeout: 10000
+- tapOn:
+    text: "OK"
+    optional: true
+
 # Navigate back
 - tapOn: "Go back"
 - assertVisible: "Manage your account and preferences"
+
+- takeScreenshot: 07_caregiver

@@ -1,19 +1,20 @@
 # Flow 03: Schedule Tab
-# Verifies: Tab navigation, week view, add/edit call, delete call
+# Verifies: Tab navigation, week view, week navigation, add/edit/delete call
 
 appId: com.donna.caregiver
 
----
+env:
+  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "Maestro2026!"
 
-- launchApp:
-    clearKeychain: true
+---
 
 - runFlow: ../subflows/sign_in.yaml
 
 # Navigate to Schedule tab
 - tapOn: "Schedule"
 
-# Week view header (day name is visible)
+# Week view header (current day name is visible)
 - assertVisible:
     text: "Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday"
 
@@ -21,14 +22,14 @@ appId: com.donna.caregiver
 - assertVisible: "Previous week"
 - assertVisible: "Next week"
 
-# Tap next week and back
+# Navigate forward and back
 - tapOn: "Next week"
 - tapOn: "Previous week"
 
-# Add a new call
+# --- Add a new call ---
 - tapOn: "Add new call"
 
-# Modal: fill out new call form
+# Modal: frequency options visible
 - assertVisible: "Daily|Recurring|One-Time"
 
 # Select call title
@@ -49,16 +50,18 @@ appId: com.donna.caregiver
 # Verify new call appears in schedule
 - assertVisible: "Morning Check-in"
 
-# Edit the call we just created
+# --- Edit the call ---
 - tapOn: "Edit Morning Check-in"
 
 # Change context
 - tapOn: "Context notes"
-- clearText
+- eraseText: 50
 - inputText: "Updated E2E context"
 - tapOn: "Save Changes"
 
-# Delete the test call — re-open edit
+# --- Delete the test call (cleanup) ---
 - tapOn: "Edit Morning Check-in"
 - tapOn: "Delete Call"
 - tapOn: "Delete"
+
+- takeScreenshot: 03_schedule

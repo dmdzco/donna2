@@ -1,20 +1,19 @@
 # Flow 06: Settings — Loved One Profile
-# Verifies: Edit name, phone, city/state/zip, interests, topics to avoid
+# Verifies: Form loads with data, edit fields, save, navigate back
 
 appId: com.donna.caregiver
 
+env:
+  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "Maestro2026!"
+
 ---
 
-- launchApp:
-    clearKeychain: true
-
 - runFlow: ../subflows/sign_in.yaml
-
 - runFlow: ../subflows/navigate_to_settings.yaml
-
 - tapOn: "Loved One Profile"
 
-# Form fields are visible
+# Form fields are visible and pre-filled
 - assertVisible: "Name"
 - assertVisible: "Phone Number"
 - assertVisible: "City"
@@ -22,22 +21,22 @@ appId: com.donna.caregiver
 
 # Edit name field
 - tapOn: "Name"
-- clearText
+- eraseText: 50
 - inputText: "E2E Test Senior"
 
 # Edit phone
 - tapOn: "Phone Number"
-- clearText
+- eraseText: 50
 - inputText: "5551234567"
 
 # Edit city
 - tapOn: "City"
-- clearText
+- eraseText: 50
 - inputText: "Dallas"
 
 # Edit state
 - tapOn: "State"
-- clearText
+- eraseText: 50
 - inputText: "TX"
 
 # Scroll to interests section
@@ -45,7 +44,7 @@ appId: com.donna.caregiver
     element: "Additional Topics"
     direction: DOWN
 
-# Topics to avoid
+# Scroll to topics to avoid
 - scrollUntilVisible:
     element: "Topics to Avoid"
     direction: DOWN
@@ -56,6 +55,16 @@ appId: com.donna.caregiver
     direction: DOWN
 - tapOn: "Save Changes"
 
+# Wait for save confirmation alert
+- extendedWaitUntil:
+    visible: "Saved|Profile updated|OK"
+    timeout: 10000
+- tapOn:
+    text: "OK"
+    optional: true
+
 # Navigate back
 - tapOn: "Go back"
 - assertVisible: "Manage your account and preferences"
+
+- takeScreenshot: 06_loved_one

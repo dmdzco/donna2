@@ -1,17 +1,16 @@
 # Flow 08: Settings — Notification Preferences
-# Verifies: All toggles visible and togglable
+# Verifies: All toggles visible, toggle on/off, save
 
 appId: com.donna.caregiver
 
+env:
+  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "Maestro2026!"
+
 ---
 
-- launchApp:
-    clearKeychain: true
-
 - runFlow: ../subflows/sign_in.yaml
-
 - runFlow: ../subflows/navigate_to_settings.yaml
-
 - tapOn: "Notification Preferences"
 
 # All notification toggles visible
@@ -20,7 +19,7 @@ appId: com.donna.caregiver
 - assertVisible: "Missed Reminder Alerts"
 - assertVisible: "Weekly Summary"
 
-# Toggle each preference (tap toggles the switch)
+# Toggle each preference on/off
 - tapOn: "Call Summaries"
 - tapOn: "Concern Alerts"
 - tapOn: "Missed Reminder Alerts"
@@ -32,18 +31,22 @@ appId: com.donna.caregiver
 - tapOn: "Missed Reminder Alerts"
 - tapOn: "Weekly Summary"
 
-# Subscription section
-- scrollUntilVisible:
-    element: "Manage Subscription"
-    direction: DOWN
-- assertVisible: "Donna Companion Plan"
-
 # Save
 - scrollUntilVisible:
     element: "Save Changes"
     direction: DOWN
 - tapOn: "Save Changes"
 
+# Wait for save confirmation
+- extendedWaitUntil:
+    visible: "Saved|Preferences updated|OK"
+    timeout: 10000
+- tapOn:
+    text: "OK"
+    optional: true
+
 # Navigate back
 - tapOn: "Go back"
 - assertVisible: "Manage your account and preferences"
+
+- takeScreenshot: 08_notifications

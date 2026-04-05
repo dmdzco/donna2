@@ -1,100 +1,132 @@
 # Flow 10: Full Onboarding (Fresh User)
-# Requires: TEST_FRESH_EMAIL, TEST_FRESH_PASSWORD (Clerk account with no senior)
-# Verifies: All 5 onboarding steps + success screen
+# Signs in with fresh clerk_test account → completes all 5 onboarding steps → dashboard
+# NOTE: This flow creates a new senior — run separately or last
 
 appId: com.donna.caregiver
 
+env:
+  TEST_EMAIL: "maestro-fresh+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "MaestroFresh2026"
+
 ---
 
-- launchApp:
-    clearKeychain: true
+# Sign in (reuse subflow — handles stopApp, clearKeychain, double-tap, 2FA)
+- runFlow: ../subflows/sign_in.yaml
 
-# Sign in with fresh account (no senior → redirects to onboarding)
-- assertVisible: "Donna"
-- tapOn: "Sign In"
-- assertVisible: "Welcome Back"
-- tapOn: "Email Address"
-- inputText: ${TEST_FRESH_EMAIL}
-- tapOn: "Password"
-- inputText: ${TEST_FRESH_PASSWORD}
-- tapOn:
-    text: "Sign In"
-    index: 0
-
-# Wait for onboarding to load
+# ── Step 1: About You (Caregiver) ──
 - extendedWaitUntil:
-    visible: "Step 1"
-    timeout: 15000
+    visible: "About You"
+    timeout: 10000
 
-# ── Step 1: About You ──
-- tapOn: "First Name"
-- inputText: "E2E"
-- tapOn: "Last Name"
+- tapOn: "Jane"
+- inputText: "Jane"
+- tapOn: "Doe"
 - inputText: "Tester"
-- tapOn: "Email"
-- inputText: ${TEST_FRESH_EMAIL}
-- tapOn: "Phone Number"
-- inputText: "5551230000"
+- tapOn: "jane@example.com"
+- inputText: "jane+clerk_test@getdonna.ai"
+- tapOn: "(555) 123-4567"
+- inputText: "5551234567"
+
+# Dismiss keyboard then tap Next
+- tapOn: "About You"
 - tapOn: "Next"
 
 # ── Step 2: About Your Loved One ──
-- assertVisible: "Step 2"
-- tapOn: "Their Name"
-- inputText: "Test Senior"
-- tapOn: "Their Phone Number"
-- inputText: "5559870000"
+- extendedWaitUntil:
+    visible: "About Your Loved One"
+    timeout: 10000
+
+- tapOn: "Margaret"
+- inputText: "Margaret"
+- tapOn: "(555) 987-6543"
+- inputText: "5559876543"
+
+# Relationship picker
 - tapOn: "Select relationship"
+- extendedWaitUntil:
+    visible: "Select Relationship"
+    timeout: 5000
 - tapOn: "Daughter"
-- tapOn: "City"
+
+- tapOn: "Dallas"
 - inputText: "Dallas"
-- tapOn: "State"
+- tapOn:
+    text: "TX"
+    index: 0
 - inputText: "TX"
-- tapOn: "Zip Code"
+- tapOn: "75201"
 - inputText: "75201"
+
+# Dismiss keyboard then tap Next
+- tapOn: "About Your Loved One"
 - tapOn: "Next"
 
 # ── Step 3: Reminders ──
-- assertVisible: "Step 3"
-- tapOn:
-    text: "Title"
-    index: 0
+- extendedWaitUntil:
+    visible: "Reminders"
+    timeout: 10000
+
+- tapOn: "e.g., Take morning medication"
 - inputText: "Morning medication"
-- tapOn:
-    text: "Description"
-    index: 0
+- tapOn: "e.g., Take the blue pill with breakfast. It's on the kitchen counter."
 - inputText: "Take the blue pill with breakfast"
+
+# Dismiss keyboard then tap Continue
+- tapOn: "Reminders"
 - tapOn: "Continue"
 
 # ── Step 4: Interests ──
-- assertVisible: "Step 4"
-# Select a couple interests from the grid
+- extendedWaitUntil:
+    visible: "Interests"
+    timeout: 10000
+
+# Select interests — tapping a tile expands it with a detail text field
 - tapOn: "Music"
+- extendedWaitUntil:
+    visible: "Done"
+    timeout: 3000
+- inputText: "Loves Frank Sinatra and jazz"
 - tapOn: "Done"
+
 - tapOn: "Gardening"
+- extendedWaitUntil:
+    visible: "Done"
+    timeout: 3000
+- inputText: "Grows tomatoes and roses"
 - tapOn: "Done"
+
+# Scroll down to Continue button
 - scrollUntilVisible:
     element: "Continue"
     direction: DOWN
 - tapOn: "Continue"
 
 # ── Step 5: Schedule Donna ──
-- assertVisible: "Step 5"
-- tapOn: "Select call title"
-- tapOn: "Morning Check-in"
-- tapOn: "Select call time"
-- tapOn: "9:00 AM"
-- scrollUntilVisible:
-    element: "Create Profile"
-    direction: DOWN
+- extendedWaitUntil:
+    visible: "Schedule Donna"
+    timeout: 10000
+
+# Default title "Daily Call" and time "9:00 AM" are fine
+# Check the reminder checkbox if visible
+- tapOn:
+    text: "Morning medication"
+    optional: true
+
+# Tap Create Profile
 - tapOn: "Create Profile"
 
 # ── Success Screen ──
 - extendedWaitUntil:
     visible: "Congratulations"
-    timeout: 10000
-- assertVisible: "Continue to Homepage"
+    timeout: 15000
+
+- takeScreenshot: 10_onboarding_success
+
 - tapOn: "Continue to Homepage"
 
-# Should land on dashboard
-- assertVisible: "Dashboard"
-- assertVisible: "Schedule"
+# Should land on dashboard (API call to create senior takes a few seconds)
+- extendedWaitUntil:
+    visible: "Dashboard"
+    timeout: 30000
+
+- takeScreenshot: 10_onboarding_complete

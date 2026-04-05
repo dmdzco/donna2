@@ -1,12 +1,13 @@
 # Flow 02: Dashboard (Home Tab)
-# Verifies: Greeting, next call card, recent calls, call-now FAB
+# Verifies: Greeting, next call card, recent calls, instant call FAB + modal
 
 appId: com.donna.caregiver
 
----
+env:
+  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "Maestro2026!"
 
-- launchApp:
-    clearKeychain: true
+---
 
 - runFlow: ../subflows/sign_in.yaml
 
@@ -30,4 +31,12 @@ appId: com.donna.caregiver
 - assertVisible: "Call.*Now"
 
 # Dismiss modal
+- tapOn:
+    text: "Close"
+    optional: true
 - back
+
+# Verify we're still on dashboard
+- assertVisible: "Dashboard"
+
+- takeScreenshot: 02_dashboard

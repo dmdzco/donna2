@@ -1,18 +1,18 @@
 # Flow 09: Settings — Help Center
-# Verifies: FAQ, What's New, Contact Support, Report, Suggest, About links
+# Verifies: All help links, FAQ/What's New alerts, feedback modals
 
 appId: com.donna.caregiver
 
+env:
+  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "Maestro2026!"
+
 ---
 
-- launchApp:
-    clearKeychain: true
-
 - runFlow: ../subflows/sign_in.yaml
-
 - runFlow: ../subflows/navigate_to_settings.yaml
-
 - tapOn: "Help Center"
+
 - assertVisible: "Help Center"
 
 # Help section
@@ -30,19 +30,22 @@ appId: com.donna.caregiver
 
 # Test FAQ alert
 - tapOn: "FAQ"
-- assertVisible: "Frequently asked questions"
+- extendedWaitUntil:
+    visible: "Frequently asked questions"
+    timeout: 3000
 - tapOn: "OK"
 
 # Test What's New alert
 - tapOn: "What's New"
-- assertVisible: "Donna v1.0.0"
+- extendedWaitUntil:
+    visible: "Donna v1.0.0"
+    timeout: 3000
 - tapOn: "OK"
 
 # Test Contact Support modal
 - tapOn: "Contact Support"
 - assertVisible: "Contact Support"
 - assertVisible: "Submit"
-# Dismiss without submitting
 - back
 
 # Test Report a Problem modal
@@ -60,3 +63,5 @@ appId: com.donna.caregiver
 # Navigate back
 - tapOn: "Go back"
 - assertVisible: "Manage your account and preferences"
+
+- takeScreenshot: 09_help

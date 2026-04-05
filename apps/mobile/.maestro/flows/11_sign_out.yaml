@@ -3,13 +3,13 @@
 
 appId: com.donna.caregiver
 
+env:
+  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "Maestro2026!"
+
 ---
 
-- launchApp:
-    clearKeychain: true
-
 - runFlow: ../subflows/sign_in.yaml
-
 - runFlow: ../subflows/navigate_to_settings.yaml
 
 # Tap Sign Out
@@ -27,3 +27,5 @@ appId: com.donna.caregiver
     timeout: 10000
 - assertVisible: "Get Started"
 - assertVisible: "Sign In"
+
+- takeScreenshot: 11_sign_out

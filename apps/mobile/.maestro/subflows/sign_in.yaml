@@ -1,7 +1,10 @@
 # Reusable sign-in subflow
-# Expects: TEST_EMAIL, TEST_PASSWORD env vars set by calling flow
+# Expects: TEST_EMAIL, TEST_PASSWORD env vars set by calling flow or .env
 # Starts from: Any state
 # Ends at: Dashboard (tabs) or Onboarding step 1
+#
+# Clerk test mode: +clerk_test emails auto-verify with code 424242
+# The app's sign-in screen handles needs_second_factor in __DEV__ mode
 
 appId: com.donna.caregiver
 
@@ -19,7 +22,6 @@ appId: com.donna.caregiver
     timeout: 15000
 
 # After relaunch, first tap "wakes" GestureHandlerRootView, second navigates
-# This is a known Maestro + react-native-gesture-handler quirk
 - tapOn: "Sign In"
 - tapOn: "Sign In"
 
@@ -33,38 +35,24 @@ appId: com.donna.caregiver
     text: "OK"
     optional: true
 
-# Email — tap, select all (clears iOS state-restored text), type
+# Email — tap to focus and type
 - tapOn:
     id: "sign-in-email"
-- longPressOn:
-    id: "sign-in-email"
-- tapOn:
-    text: "Select All"
-    optional: true
+- eraseText: 50
 - inputText: ${TEST_EMAIL}
 
-# Brief pause for keyboard/focus state to settle after email input
-- waitForAnimationToEnd
-
-# Password — tap, select all, type
+# Password — secureTextEntry disabled in __DEV__ so inputText works
 - tapOn:
     id: "sign-in-password"
-- longPressOn:
-    id: "sign-in-password"
-- tapOn:
-    text: "Select All"
-    optional: true
 - inputText: ${TEST_PASSWORD}
 
-# Dismiss keyboard before tapping submit
-- tapOn: "Welcome Back"
-
-# Submit sign-in
+# Submit via the Sign In button (testID: sign-in-submit)
+# Fallback: pressKey Enter triggers onSubmitEditing={handleSignIn}
 - tapOn:
     id: "sign-in-submit"
 
-# Wait for Clerk auth + API call + navigation to complete
-# App navigates to Dashboard (returning user) or Onboarding (fresh user)
+# Wait for Clerk auth + 2FA auto-verify + API call + navigation
+# Landing destinations: Dashboard (returning user) or About You (fresh user)
 - extendedWaitUntil:
     visible: "Dashboard|About You"
-    timeout: 15000
+    timeout: 30000

@@ -5,6 +5,7 @@ import { writeLimiter } from '../middleware/rate-limit.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { createMemorySchema, seniorIdParamSchema } from '../validators/schemas.js';
 import { canAccessSenior } from './helpers.js';
+import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
 
@@ -15,6 +16,15 @@ router.post('/api/seniors/:id/memories', requireAuth, writeLimiter, validatePara
     if (!await canAccessSenior(req.auth, req.params.id)) {
       return res.status(403).json({ error: 'Access denied to this senior' });
     }
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'create',
+      resourceType: 'memory',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { seniorId: req.params.id, memoryType: type },
+    });
     const memory = await memoryService.store(
       req.params.id,
       type,
@@ -36,6 +46,15 @@ router.get('/api/seniors/:id/memories/search', requireAuth, validateParams(senio
     if (!await canAccessSenior(req.auth, req.params.id)) {
       return res.status(403).json({ error: 'Access denied to this senior' });
     }
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'read',
+      resourceType: 'memory',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { seniorId: req.params.id, query: q },
+    });
     const memories = await memoryService.search(
       req.params.id,
       q,
@@ -53,6 +72,15 @@ router.get('/api/seniors/:id/memories', requireAuth, validateParams(seniorIdPara
     if (!await canAccessSenior(req.auth, req.params.id)) {
       return res.status(403).json({ error: 'Access denied to this senior' });
     }
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'read',
+      resourceType: 'memory',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { seniorId: req.params.id },
+    });
     const memories = await memoryService.getRecent(req.params.id, 20);
     res.json(memories);
   } catch (error) {

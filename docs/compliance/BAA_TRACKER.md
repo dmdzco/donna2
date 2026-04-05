@@ -1,0 +1,209 @@
+# Business Associate Agreement (BAA) Tracker
+
+> Track BAA status for every third-party service that processes, stores, or transmits PHI.
+
+| Field | Value |
+|-------|-------|
+| Last Updated | April 4, 2026 |
+| Owner | TBD |
+| Review Cadence | Quarterly |
+| Related Docs | [HIPAA Overview](HIPAA_OVERVIEW.md), [Vendor Security Evaluation](VENDOR_SECURITY_EVALUATION.md) |
+
+---
+
+## Table of Contents
+
+1. [What Is a BAA?](#what-is-a-baa)
+2. [BAA Status Summary](#baa-status-summary)
+3. [Detailed Vendor BAA Status](#detailed-vendor-baa-status)
+4. [Action Items by Priority](#action-items-by-priority)
+5. [Timeline](#timeline)
+
+---
+
+## What Is a BAA?
+
+A **Business Associate Agreement (BAA)** is a legally binding contract required by HIPAA (45 CFR 164.502(e), 164.504(e)) between a covered entity (or business associate) and a business associate. It establishes:
+
+- What PHI the business associate can access
+- How the business associate must protect that PHI
+- What happens in the event of a breach
+- That the business associate will comply with applicable HIPAA requirements
+
+**Without a signed BAA, sharing PHI with a third-party vendor is a HIPAA violation**, even if that vendor has excellent security practices.
+
+**Donna's obligation**: Whether Donna is a covered entity or business associate, it must sign BAAs with every subcontractor that accesses PHI. These are called "downstream BAAs" or "subcontractor BAAs."
+
+---
+
+## BAA Status Summary
+
+| Status | Count | Services |
+|--------|-------|----------|
+| BAA Signed | 0 | -- |
+| BAA Available (not yet signed) | 8 | Twilio, Anthropic, Google, Deepgram, OpenAI, Neon, Sentry, Clerk |
+| BAA Availability Unclear | 3 | ElevenLabs, Groq, Railway |
+| BAA Unlikely | 3 | Cerebras, Cartesia, Tavily |
+| BAA Not Required | 2 | Vercel, GrowthBook |
+
+**Critical finding: Zero BAAs are currently signed.** This is the single highest-priority HIPAA compliance gap.
+
+---
+
+## Detailed Vendor BAA Status
+
+### Voice & Telephony
+
+| Service | Data Processed | BAA Required? | BAA Status | BAA Available? | Plan Required | Notes |
+|---------|---------------|---------------|------------|----------------|---------------|-------|
+| **Twilio** | Voice audio (real-time streaming), phone numbers, call metadata, call recordings (if enabled), SMS notifications to caregivers | **Yes** | NOT SIGNED | **Yes** | Enterprise or HIPAA-eligible | Twilio has a dedicated HIPAA product offering. Must enable "HIPAA eligible" project settings. Contact Twilio sales or enable via console. |
+
+### LLM / AI Services
+
+| Service | Data Processed | BAA Required? | BAA Status | BAA Available? | Plan Required | Notes |
+|---------|---------------|---------------|------------|----------------|---------------|-------|
+| **Anthropic (Claude)** | Full conversation transcripts (system prompt + all user/assistant turns), medication reminders, health discussions, senior names, memory context | **Yes** | NOT SIGNED | **Yes** | Enterprise | Claude Sonnet 4.5 is the primary conversational LLM. All conversation content passes through Anthropic. Contact sales@anthropic.com for enterprise BAA. |
+| **Google (Gemini)** | Conversation transcripts (Director analysis), post-call analysis transcripts, call quality assessments, health concerns detected | **Yes** | NOT SIGNED | **Yes** | Google Cloud with BAA enabled | Gemini Flash used for: (1) Director fallback analysis, (2) Post-call analysis + call quality scoring, (3) Caregiver mood summary generation. Enable BAA in Google Cloud Console under "Healthcare" settings. |
+| **Cerebras** | Conversation transcriptions (recent turns), Director analysis context | **Yes** | NOT SIGNED | **Unlikely** | Unknown | Primary Director LLM (Query Director + Guidance Director). Processes 2-6 recent conversation turns per analysis call. Cerebras is an AI chip company with limited enterprise compliance offerings. **HIGH RISK -- evaluate alternatives.** |
+| **Groq** | Conversation transcriptions (Director fallback) | **Yes** | NOT SIGNED | **Unclear** | Enterprise (likely) | Director fallback LLM. Same data as Cerebras when used. Contact Groq sales to inquire about BAA availability. |
+
+### Speech Services
+
+| Service | Data Processed | BAA Required? | BAA Status | BAA Available? | Plan Required | Notes |
+|---------|---------------|---------------|------------|----------------|---------------|-------|
+| **Deepgram** | Raw voice audio stream (8kHz mulaw), produces transcriptions containing health discussions, medication info, personal details | **Yes** | NOT SIGNED | **Yes** | Enterprise | Deepgram offers HIPAA-compliant deployments on enterprise plans. Contact sales for BAA. All spoken words -- including medication names, health complaints, personal details -- pass through Deepgram. |
+| **ElevenLabs** | Text-to-speech input: all of Donna's spoken responses, which may reference medications, health advice, appointment reminders | **Yes** | NOT SIGNED | **Unclear** | Enterprise (if available) | ElevenLabs is used for TTS (eleven_turbo_v2_5). The text input includes Donna's side of conversation, which may contain medication reminders and health references. Contact ElevenLabs support to inquire about HIPAA compliance and BAA. |
+| **Cartesia** | Same as ElevenLabs -- TTS input text containing Donna's spoken responses | **Yes** | NOT SIGNED | **Unlikely** | Unknown | Alternative TTS provider (selected via GrowthBook feature flag `tts_provider`). Cartesia is a smaller company; HIPAA BAA is unlikely. **HIGH RISK -- evaluate alternatives.** |
+
+### Search & Embeddings
+
+| Service | Data Processed | BAA Required? | BAA Status | BAA Available? | Plan Required | Notes |
+|---------|---------------|---------------|------------|----------------|---------------|-------|
+| **OpenAI** | Memory text for embedding generation (health conditions, medications, personal details), web search queries (may include health topics) | **Yes** | NOT SIGNED | **Yes** | Enterprise | Used for: (1) text-embedding-3-small for semantic memory (all memory content gets embedded), (2) Web search for news/information. Memory content includes health facts, medication details, etc. Contact OpenAI enterprise for BAA. |
+| **Tavily** | Search queries generated from conversations, which may include health-related questions ("best exercises for arthritis", "side effects of metformin") | **Yes** | NOT SIGNED | **Unlikely** | Unknown | Web search provider used by Director for real-time information retrieval. Health-related queries expose PHI (combined with context of who is asking). **HIGH RISK -- evaluate alternatives.** |
+
+### Infrastructure & Data
+
+| Service | Data Processed | BAA Required? | BAA Status | BAA Available? | Plan Required | Notes |
+|---------|---------------|---------------|------------|----------------|---------------|-------|
+| **Neon (PostgreSQL)** | ALL persistent data: senior profiles, conversations, transcripts, memories, medication reminders, call analyses, caregiver relationships, medical notes | **Yes** | NOT SIGNED | **Yes** | Pro or Enterprise | Neon is the primary database. Contains all PHI. Neon offers BAAs -- enable in the dashboard or contact sales. This is one of the most critical BAAs to sign. |
+| **Railway** | Application logs (sanitized but may contain PHI in error traces), environment variables (API keys, database URLs), container runtime | **Yes** | NOT SIGNED | **Unclear** | Unknown | Railway hosts both Pipecat and Node.js services. Logs may contain PHI despite sanitization (error traces, unexpected data paths). Environment variables contain database credentials. Contact Railway support to inquire about BAA. |
+| **Sentry** | Error traces that may contain senior IDs, phone numbers (despite `send_default_pii=False`), stack traces with variable contents, request metadata | **Yes** | NOT SIGNED | **Yes** | Business plan | Sentry captures errors server-side. Despite `send_default_pii=False`, error context may include PHI (e.g., a failed database query that includes a senior's name in the error message). Upgrade to Business plan for BAA. |
+
+### Authentication & Feature Management
+
+| Service | Data Processed | BAA Required? | BAA Status | BAA Available? | Plan Required | Notes |
+|---------|---------------|---------------|------------|----------------|---------------|-------|
+| **GrowthBook** | Senior IDs (used as feature flag targeting attributes), feature flag evaluations | **Low risk** | NOT SIGNED | **Unlikely** | Unknown | GrowthBook receives senior IDs for feature flag targeting. Senior IDs alone are not PHI, but combined with other data could be. **Minimize data sent**: use anonymous hashes instead of raw senior IDs. |
+| **Clerk** | Caregiver email addresses, names, authentication tokens | **Low risk** | NOT SIGNED | **Yes** | Enterprise | Clerk handles caregiver authentication only. Caregiver data is not PHI per se (caregivers are not the patients), but if caregiver accounts link to specific seniors, this creates an indirect PHI exposure. Enterprise plan offers BAA. |
+
+### Frontend Hosting
+
+| Service | Data Processed | BAA Required? | BAA Status | BAA Available? | Notes |
+|---------|---------------|---------------|------------|----------------|-------|
+| **Vercel** | Static frontend assets only. No PHI passes through Vercel -- all API calls go directly to Railway-hosted backends. | **No** | N/A | N/A | Frontend apps (admin-v2, consumer, observability) are static React apps hosted on Vercel. API calls bypass Vercel entirely. No BAA needed. |
+
+---
+
+## Action Items by Priority
+
+### CRITICAL: Sign BAAs Immediately (BAA Available)
+
+These vendors offer BAAs and process significant PHI. Signing should begin immediately.
+
+| # | Vendor | Action | Contact | Estimated Time |
+|---|--------|--------|---------|----------------|
+| 1 | **Neon** | Enable BAA in dashboard or contact sales | dashboard.neon.tech or sales@neon.tech | 1-2 weeks |
+| 2 | **Twilio** | Enable HIPAA-eligible project, request BAA | Twilio Console > Settings or sales | 1-2 weeks |
+| 3 | **Anthropic** | Contact enterprise sales for BAA | sales@anthropic.com | 2-4 weeks |
+| 4 | **Deepgram** | Contact enterprise sales for BAA | sales@deepgram.com | 2-4 weeks |
+| 5 | **Google (Gemini)** | Enable BAA in GCP Console | Google Cloud Console > Healthcare | 1-2 weeks |
+| 6 | **OpenAI** | Contact enterprise sales for BAA | Enterprise portal or sales@openai.com | 2-4 weeks |
+| 7 | **Sentry** | Upgrade to Business plan, sign BAA | sentry.io pricing or sales | 1-2 weeks |
+
+### HIGH: Evaluate Alternatives (BAA Unlikely)
+
+These vendors are unlikely to offer BAAs. Evaluate HIPAA-compliant alternatives.
+
+| # | Vendor | Current Use | Alternative | Migration Effort | Notes |
+|---|--------|-------------|-------------|------------------|-------|
+| 8 | **Cerebras** | Director LLM (Query + Guidance) | **Groq** (may offer BAA) or **Google Gemini** (has BAA via GCP) | Medium | Route all Director traffic through Gemini Flash (already used as fallback). Cerebras offers speed advantage but is not HIPAA-viable. |
+| 9 | **Cartesia** | TTS (feature-flagged) | **ElevenLabs** (may offer enterprise BAA) or **Google Cloud TTS** (has BAA via GCP) | Low | Cartesia is already behind a feature flag. Disable the flag and use ElevenLabs exclusively until BAA is confirmed. Google Cloud TTS is the safest option (GCP BAA covers it). |
+| 10 | **Tavily** | Web search (Director-owned) | **OpenAI web search** (already integrated, enterprise BAA available) | Low | OpenAI web search is already used for news retrieval. Extend to cover Director web queries. Remove Tavily dependency entirely. |
+
+### MEDIUM: Clarify BAA Status
+
+| # | Vendor | Action | Contact |
+|---|--------|--------|---------|
+| 11 | **ElevenLabs** | Inquire about HIPAA compliance and BAA on enterprise plan | support@elevenlabs.io or sales |
+| 12 | **Groq** | Inquire about BAA availability | sales@groq.com |
+| 13 | **Railway** | Inquire about BAA availability; if unavailable, evaluate alternatives (AWS ECS/Fargate, GCP Cloud Run -- both offer BAAs) | Railway support or Discord |
+
+### LOW: Minimize Data Exposure
+
+| # | Vendor | Action |
+|---|--------|--------|
+| 14 | **GrowthBook** | Replace raw senior IDs with anonymous hashed identifiers in feature flag targeting attributes |
+| 15 | **Clerk** | Evaluate whether enterprise BAA is needed based on data linking caregivers to specific seniors |
+
+---
+
+## Timeline
+
+### Week 1-2: Initiate Contact
+
+- [ ] Contact Neon to enable BAA (self-service or sales)
+- [ ] Enable HIPAA-eligible project in Twilio Console
+- [ ] Contact Anthropic enterprise sales
+- [ ] Contact Deepgram enterprise sales
+- [ ] Enable BAA in Google Cloud Console
+- [ ] Contact OpenAI enterprise sales
+- [ ] Upgrade Sentry to Business plan
+- [ ] Send inquiry emails to ElevenLabs, Groq, Railway about BAA availability
+
+### Week 3-4: Evaluate and Negotiate
+
+- [ ] Review and sign Neon BAA
+- [ ] Review and sign Twilio BAA
+- [ ] Review and sign Google Cloud BAA
+- [ ] Review and sign Sentry BAA
+- [ ] Evaluate responses from ElevenLabs, Groq, Railway
+- [ ] Begin technical planning for Cerebras/Cartesia/Tavily replacement
+
+### Week 5-8: Replace Non-Compliant Vendors
+
+- [ ] Replace Tavily with OpenAI web search for Director queries
+- [ ] Disable Cartesia feature flag; default to ElevenLabs (or migrate to Google Cloud TTS)
+- [ ] Migrate Director LLM from Cerebras to Gemini Flash (or Groq if BAA available)
+- [ ] Remove Tavily API key and code references
+- [ ] Sign remaining BAAs (Anthropic, Deepgram, OpenAI -- enterprise sales cycles may take longer)
+
+### Week 9-12: Complete and Document
+
+- [ ] Verify all BAAs are signed and filed
+- [ ] Update this tracker with signed dates and contract references
+- [ ] Hash senior IDs sent to GrowthBook
+- [ ] Evaluate Clerk enterprise BAA need
+- [ ] Conduct vendor security review (see [Vendor Security Evaluation](VENDOR_SECURITY_EVALUATION.md))
+
+### Ongoing: Quarterly Review
+
+- [ ] Review all vendor BAA status quarterly
+- [ ] Re-evaluate new vendors before integration (BAA required before any vendor receives PHI)
+- [ ] Update this tracker when vendors are added, removed, or BAA status changes
+
+---
+
+## BAA Filing
+
+Once BAAs are signed, record them here:
+
+| Vendor | BAA Signed Date | Contract Reference | Renewal Date | Signed By |
+|--------|-----------------|--------------------|--------------|-----------|
+| *(none signed yet)* | | | | |
+
+Store physical/digital copies of all signed BAAs in a secure, access-controlled location. BAAs must be retained for 6 years from the date of termination (per HIPAA record retention requirements).
+
+---
+
+*This tracker must be updated every time a vendor is added, removed, or BAA status changes. No new vendor should receive PHI without a signed BAA.*

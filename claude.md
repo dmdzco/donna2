@@ -28,7 +28,7 @@ Do NOT confuse the Node.js `services/` with `pipecat/services/` — they are sep
 
 ---
 
-## Current Status: v5.2
+## Current Status: v5.3
 
 The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (repo root) serves admin/consumer APIs and the reminder scheduler. See "Architecture Decision: Two Backends" below.
 
@@ -73,7 +73,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - Speech transcription (Deepgram Nova 3 via Pipecat)
 - LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - TTS (ElevenLabs via Pipecat)
-- VAD (Silero — confidence=0.6, stop_secs=1.2, min_volume=0.5)
+- VAD (Silero — confidence=0.6, min_volume=0.5; stop_secs=1.2 for senior calls, 0.8 for onboarding calls)
 - News via OpenAI web search (1hr cache)
 - Security: JWT admin auth, API key auth, Twilio webhook validation, rate limiting, security headers
 
@@ -84,6 +84,18 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Enhanced /health** - Database connectivity + circuit breaker states
 - **CI/CD Pipelines** - PR → tests → staging → smoke tests; push to main → production
 - **Multi-Environment** - dev/staging/production with Neon branching + Railway environments
+
+### HIPAA Compliance & Security
+- **HIPAA Audit Logging** - Fire-and-forget audit trail for all PHI access (`services/audit.py` + `services/audit.js`). Records userId, userRole, action, resourceType, resourceId, IP, user-agent. Never blocks the request path.
+- **Field-Level Encryption** - AES-256-GCM encryption for PHI fields (summaries, transcripts, memory content, analysis). Dual-column strategy: `*_encrypted` columns alongside plaintext for gradual migration. `enc:` prefix wire format. (`lib/encryption.py` + `lib/encryption.js`)
+- **Dual-Key JWT Rotation** - `JWT_SECRET` + `JWT_SECRET_PREVIOUS` for zero-downtime credential rotation. Both Python and Node.js auth middleware verify against both keys.
+- **Token Revocation** - DB-backed revoked_tokens table with SHA-256 hashed tokens. Per-token and per-admin revocation. Automatic cleanup of expired entries. (`services/token_revocation.py` + `services/token-revocation.js`)
+- **Data Retention** - Automated batched purge of 7 tables with configurable retention periods (conversations: 365d, memories: 730d, call_analyses: 365d, daily_context: 90d, call_metrics: 180d, reminder_deliveries: 90d, audit_logs: 730d). Runs daily in background loop. (`services/data_retention.py` + `services/data-retention.js`)
+- **Right-to-Access Export** - HIPAA-compliant data export endpoint (`GET /api/seniors/:id/export`) returns all senior data in one JSON bundle (profile, conversations, memories, reminders, analyses, daily context, caregiver links)
+- **Hard Delete** - Complete senior data deletion across all tables (`DELETE /api/seniors/:id/data`) with audit logging
+- **Sentry PII Scrubbing** - Senior IDs SHA-256 hashed in error reports, exception values truncated to 200 chars, `send_default_pii=False`
+- **PII-Safe Logging** - `maskName()` and `maskPhone()` helpers across both backends
+- **Compliance Documentation** - Full HIPAA docs in `docs/compliance/`: overview, BAA tracker (16 vendors), breach notification runbook, data retention policy, vendor security evaluations
 
 ### Frontend Apps (unchanged, on Vercel/separate)
 - **Admin Dashboard (v2)** - React + Vite + Tailwind (`apps/admin-v2/`) on Vercel
@@ -209,23 +221,29 @@ pipecat/
 │   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation (326 LOC)
 │   ├── seniors.py                   ← Senior profile + per-senior call_settings (131 LOC)
 │   ├── caregivers.py                ← Caregiver relationships + notes delivery (101 LOC)
-│   └── news.py                      ← OpenAI web search + circuit breaker (213 LOC)
+│   ├── news.py                      ← OpenAI web search + circuit breaker (213 LOC)
+│   ├── data_retention.py            ← HIPAA data retention: batched purge of 7 tables, 24h loop
+│   ├── audit.py                     ← Fire-and-forget HIPAA audit logging (log_audit, auth_to_role)
+│   └── token_revocation.py          ← JWT token revocation: per-token, per-admin, expired cleanup
 │
 ├── lib/
 │   ├── growthbook.py                ← GrowthBook feature flag SDK helper (99 LOC)
 │   ├── circuit_breaker.py           ← Async circuit breaker for external services (84 LOC)
+│   ├── encryption.py                ← AES-256-GCM field encryption for PHI (enc: prefix, graceful degradation)
 │   └── sanitize.py                  ← PII-safe logging
 │
 ├── api/
 │   ├── routes/
 │   │   ├── voice.py                 ← /voice/answer (TwiML + parallel fetch + snapshot), /voice/status (330 LOC)
-│   │   └── calls.py                 ← /api/call, /api/calls
-│   ├── middleware/                   ← auth, rate_limit, security, error_handler
+│   │   ├── calls.py                 ← /api/call, /api/calls
+│   │   ├── auth.py                  ← Token revocation: revoke-token, revoke-all, logout
+│   │   └── export.py                ← HIPAA right-to-access: /api/seniors/{id}/export
+│   ├── middleware/                   ← auth (dual-key JWT + revocation + JWKS), rate_limit, security, error_handler
 │   └── validators/schemas.py        ← Pydantic input validation
 │
 ├── db/
 │   ├── client.py                    ← asyncpg pool + query helpers + health check (69 LOC)
-│   └── migrations/                  ← SQL migrations (HNSW index, call_context_snapshot, call_metrics)
+│   └── migrations/                  ← SQL migrations (HNSW, snapshots, audit_logs, revoked_tokens, encrypted_phi)
 ├── tests/                           ← 61 test files + helpers/mocks/scenarios
 ├── pyproject.toml                   ← Python 3.12, Pipecat v0.0.101+
 └── Dockerfile                       ← python:3.12-slim + uv
@@ -237,10 +255,11 @@ pipecat/
 /
 ├── index.js                    ← Express server (port 3001, admin/consumer APIs)
 ├── lib/
-│   └── growthbook.js           ← GrowthBook feature flag SDK helper (Node.js)
-├── services/                   ← 9 service files (dual implementation with pipecat/services/)
+│   ├── growthbook.js           ← GrowthBook feature flag SDK helper (Node.js)
+│   └── encryption.js           ← AES-256-GCM field encryption for PHI (mirrors pipecat/lib/encryption.py)
+├── services/                   ← 12 service files (dual implementation with pipecat/services/)
 ├── routes/                     ← 16 route modules (all /api/* endpoints)
-├── middleware/                  ← 7 middleware files (auth, rate-limit, security)
+├── middleware/                  ← 7 middleware files (auth w/ dual-key JWT + revocation, rate-limit, security)
 └── apps/                       ← Frontend apps (still active)
     ├── admin-v2/               ← Admin dashboard (Vercel)
     ├── consumer/               ← Consumer app (Vercel)
@@ -354,7 +373,20 @@ The Railway project has four services per environment:
 | Node.js API | `donna-api` | 3001 | Admin/consumer APIs, reminder scheduler, call initiation |
 **GrowthBook (feature flags):** Hosted on GrowthBook Cloud (app.growthbook.io), not self-hosted. Admin UI at app.growthbook.io, SDK connects to cdn.growthbook.io. No Railway services needed.
 
-**Railway CLI is linked to production by default.** Use `--environment dev` or `--environment staging` flags for other environments. If you switch with `railway environment dev`, remember to switch back with `railway environment production`.
+**Railway CLI in the repo root is linked to `donna-api` (Node.js) by default.** This means bare `railway logs` shows API request logs, NOT voice/call pipeline logs.
+
+**IMPORTANT — Which service has which logs:**
+
+| What you're looking for | Service | Command |
+|---|---|---|
+| Voice call logs, STT, Director, Claude, TTS, web search | `donna-pipecat` | `make logs-prod` or `railway logs --service donna-pipecat --environment production` |
+| Post-call analysis, memory extraction, call metrics | `donna-pipecat` | Same as above |
+| API requests, call initiation, reminder scheduler | `donna-api` | `railway logs --service donna-api --environment production` |
+| Caregiver/senior CRUD, onboarding, notifications API | `donna-api` | Same as above |
+
+**Common mistake:** Running `railway logs` without `--service donna-pipecat` when debugging call issues — you'll see nothing useful because the call pipeline runs on the Pipecat service.
+
+Use `--environment dev` or `--environment staging` flags for other environments. If you switch with `railway environment dev`, remember to switch back with `railway environment production`.
 
 ### Testing Strategy
 
@@ -441,6 +473,11 @@ npx playwright install chromium
 | Modify auth/middleware | `pipecat/api/middleware/` |
 | Database queries | `pipecat/db/client.py` |
 | Server setup / graceful shutdown | `pipecat/main.py` |
+| Modify data retention policies | `pipecat/services/data_retention.py` (Python) + `services/data-retention.js` (Node.js) |
+| Modify audit logging | `pipecat/services/audit.py` (Python) + `services/audit.js` (Node.js) |
+| Modify token revocation | `pipecat/services/token_revocation.py` (Python) + `services/token-revocation.js` (Node.js) |
+| Modify field encryption | `pipecat/lib/encryption.py` (Python) + `lib/encryption.js` (Node.js) |
+| Review HIPAA compliance | `docs/compliance/` (5 docs: overview, BAAs, breach, retention, vendor security) |
 | Update admin UI (v2) | `apps/admin-v2/src/pages/` |
 | Update admin API client | `apps/admin-v2/src/lib/api.ts` |
 | Add/modify frontend E2E tests | `tests/e2e/` — see [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) |
@@ -531,7 +568,14 @@ CEREBRAS_API_KEY=...             # Cerebras (Director primary, speculative pre-p
 
 # Auth
 JWT_SECRET=...
+JWT_SECRET_PREVIOUS=...          # Old JWT secret during credential rotation (remove after 7d)
 DONNA_API_KEY=...
+
+# HIPAA Compliance
+FIELD_ENCRYPTION_KEY=...         # 32-byte base64url key for AES-256-GCM PHI encryption
+RETENTION_CONVERSATIONS_DAYS=365 # Data retention periods (configurable)
+RETENTION_MEMORIES_DAYS=730
+RETENTION_AUDIT_LOGS_DAYS=730
 
 # Scheduler
 SCHEDULER_ENABLED=false          # MUST be false (Node.js runs scheduler)
@@ -577,6 +621,7 @@ Both share the same Neon PostgreSQL database. Dual service implementations (e.g.
 - ~~Prompt Caching (Anthropic)~~ ✓ Completed (`enable_prompt_caching=True` in AnthropicLLMService)
 - ~~Call Answer Optimization~~ ✓ Completed (parallel fetches + pre-computed snapshot + cached news: ~9s → ~2s inbound)
 - ~~Observability & Reliability~~ ✓ Completed (call_metrics table, GrowthBook feature flags, circuit breakers, graceful shutdown)
+- ~~HIPAA Compliance~~ ✓ Completed (audit logging, field encryption, data retention, token revocation, right-to-access export, hard delete, compliance docs, Sentry PII scrubbing)
 - Telnyx Migration (65% cost savings)
 
 ---
@@ -588,4 +633,4 @@ Consult these for product direction, decisions, and priorities.
 
 ---
 
-*Last updated: March 2026 — v5.2 with multi-provider Director, web search prefetch, Claude Sonnet 4.5, GrowthBook feature flags, observability & reliability*
+*Last updated: April 2026 — v5.3 with HIPAA compliance (audit logging, field encryption, data retention, token revocation, compliance docs)*

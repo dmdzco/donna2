@@ -3,15 +3,25 @@
  *
  * Uses Clerk for authentication with cofounder API key fallback.
  * Cofounders can never be locked out even if Clerk is down.
+ *
+ * Supports dual-key JWT for zero-downtime credential rotation:
+ * set JWT_SECRET to the new key, JWT_SECRET_PREVIOUS to the old key,
+ * and remove JWT_SECRET_PREVIOUS after all old tokens expire (7 days).
+ *
+ * Includes token revocation checks and audit logging for HIPAA compliance.
  */
 
 import { clerkMiddleware, getAuth, clerkClient } from '@clerk/express';
 import jwt from 'jsonwebtoken';
+import { logAudit } from '../services/audit.js';
+import { tokenRevocationService } from '../services/token-revocation.js';
 
-if (!process.env.JWT_SECRET && process.env.RAILWAY_PUBLIC_DOMAIN) {
-  throw new Error('JWT_SECRET environment variable is required in production');
+const _DEFAULT_SECRET = 'donna-admin-secret-change-me';
+if (process.env.RAILWAY_PUBLIC_DOMAIN && (!process.env.JWT_SECRET || process.env.JWT_SECRET === _DEFAULT_SECRET)) {
+  throw new Error('JWT_SECRET environment variable is required in production (do not use the default)');
 }
-const JWT_SECRET = process.env.JWT_SECRET || 'donna-admin-secret-change-me';
+const JWT_SECRET = process.env.JWT_SECRET || _DEFAULT_SECRET;
+const JWT_SECRET_PREVIOUS = process.env.JWT_SECRET_PREVIOUS || '';
 
 // Cofounder API keys from environment (comma-separated)
 const COFOUNDER_API_KEYS = [
@@ -28,11 +38,48 @@ function isCofounderRequest(req) {
 }
 
 /**
+ * Try to verify a JWT with the current secret, then the previous one.
+ * Returns decoded payload on success, or null if both fail.
+ */
+function verifyJwtDualKey(token) {
+  const secrets = [JWT_SECRET, JWT_SECRET_PREVIOUS].filter(Boolean);
+  for (const secret of secrets) {
+    try {
+      const decoded = jwt.verify(token, secret);
+      return decoded;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * Check if a token or its admin has been revoked.
+ * Returns { revoked, message } — gracefully skips if table doesn't exist yet.
+ */
+async function checkTokenRevocation(token, adminId) {
+  try {
+    if (await tokenRevocationService.isTokenRevoked(token)) {
+      return { revoked: true, message: 'Token has been revoked' };
+    }
+    if (await tokenRevocationService.isAdminRevoked(adminId)) {
+      return { revoked: true, message: 'All sessions revoked — please log in again' };
+    }
+    return { revoked: false };
+  } catch (err) {
+    // If revoked_tokens table doesn't exist yet (pre-migration), allow through
+    console.warn('[Auth] Token revocation check skipped:', err.message);
+    return { revoked: false };
+  }
+}
+
+/**
  * Main auth middleware
  *
  * Checks in order:
  * 1. Cofounder API key (bypass Clerk entirely)
- * 2. Admin JWT Bearer token
+ * 2. Admin JWT Bearer token (dual-key for rotation + revocation check)
  * 3. Clerk session
  *
  * Sets req.auth with:
@@ -51,20 +98,23 @@ export async function requireAuth(req, res, next) {
     return next();
   }
 
-  // 2. Check for admin JWT Bearer token
+  // 2. Check for admin JWT Bearer token (dual-key for rotation)
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) {
-    try {
-      const token = authHeader.slice(7);
-      const decoded = jwt.verify(token, JWT_SECRET);
+    const token = authHeader.slice(7);
+    const decoded = verifyJwtDualKey(token);
+    if (decoded) {
+      // Check token revocation before granting access
+      const revocation = await checkTokenRevocation(token, decoded.adminId);
+      if (revocation.revoked) {
+        return res.status(401).json({ error: revocation.message });
+      }
       req.auth = {
         isCofounder: false,
         isAdmin: true,
         userId: decoded.adminId,
       };
       return next();
-    } catch {
-      // Invalid JWT - fall through to Clerk
     }
   }
 
@@ -73,6 +123,15 @@ export async function requireAuth(req, res, next) {
     const auth = getAuth(req);
 
     if (!auth || !auth.userId) {
+      logAudit({
+        userId: 'anonymous',
+        userRole: 'unknown',
+        action: 'auth_failure',
+        resourceType: 'auth',
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        metadata: { reason: 'no_clerk_session', path: req.path },
+      });
       return res.status(401).json({
         error: 'Unauthorized',
         message: 'Authentication required',
@@ -97,6 +156,15 @@ export async function requireAuth(req, res, next) {
     next();
   } catch (error) {
     console.error('[Auth] Clerk error:', error.message);
+    logAudit({
+      userId: 'anonymous',
+      userRole: 'unknown',
+      action: 'auth_failure',
+      resourceType: 'auth',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { reason: 'clerk_error', error: error.message, path: req.path },
+    });
     return res.status(401).json({
       error: 'Unauthorized',
       message: 'Invalid or expired session',
@@ -117,20 +185,22 @@ export async function optionalAuth(req, res, next) {
     return next();
   }
 
-  // Check for admin JWT Bearer token
+  // Check for admin JWT Bearer token (dual-key for rotation)
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) {
-    try {
-      const token = authHeader.slice(7);
-      const decoded = jwt.verify(token, JWT_SECRET);
-      req.auth = {
-        isCofounder: false,
-        isAdmin: true,
-        userId: decoded.adminId,
-      };
-      return next();
-    } catch {
-      // Invalid JWT - fall through to Clerk
+    const token = authHeader.slice(7);
+    const decoded = verifyJwtDualKey(token);
+    if (decoded) {
+      // Check revocation even for optional auth
+      const revocation = await checkTokenRevocation(token, decoded.adminId);
+      if (!revocation.revoked) {
+        req.auth = {
+          isCofounder: false,
+          isAdmin: true,
+          userId: decoded.adminId,
+        };
+        return next();
+      }
     }
   }
 

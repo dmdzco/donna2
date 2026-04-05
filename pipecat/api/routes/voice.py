@@ -387,6 +387,18 @@ async def voice_answer(request: Request):
     # Also persist to Redis for multi-instance routing
     await _persist_metadata(call_sid, call_metadata[call_sid])
 
+    # Audit: log PHI access when senior data is fetched for a call
+    if senior:
+        from services.audit import fire_and_forget_audit
+        fire_and_forget_audit(
+            user_id="system",
+            user_role="system",
+            action="read",
+            resource_type="senior",
+            resource_id=str(senior["id"]),
+            metadata={"trigger": "voice_answer", "call_sid": call_sid, "call_type": call_type},
+        )
+
     # 4. Return TwiML
     base_url = os.getenv("BASE_URL", "")
     ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://")

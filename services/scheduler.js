@@ -4,6 +4,7 @@ import { eq, and, lte, isNull, or, sql, ne, lt, gte, desc } from 'drizzle-orm';
 import twilio from 'twilio';
 import { memoryService } from './memory.js';
 import { contextCacheService } from './context-cache.js';
+import { runDailyPurgeIfNeeded } from './data-retention.js';
 import { createLogger } from '../lib/logger.js';
 import { resolveFlags, getValue } from '../lib/growthbook.js';
 
@@ -831,5 +832,30 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
 
   log.info('Weekly report scheduling enabled (hourly check)');
 
-  return { schedulerIntervalId, prefetchIntervalId, weeklyReportIntervalId };
+  // Daily data retention purge (HIPAA compliance)
+  // Checks hourly but only runs the actual purge once per calendar day.
+  const dataRetentionIntervalId = setInterval(async () => {
+    if (!isLeader) return; // Only the leader runs purges
+    try {
+      await runDailyPurgeIfNeeded();
+    } catch (error) {
+      log.error('Data retention check error', { error: error.message });
+    }
+  }, 60 * 60 * 1000); // hourly
+
+  // Initial data retention check (delayed 2 minutes to let server warm up)
+  setTimeout(async () => {
+    if (!isLeader) {
+      isLeader = await tryAcquireLeaderLock();
+    }
+    if (isLeader) {
+      runDailyPurgeIfNeeded().catch(err => {
+        log.error('Initial data retention check error', { error: err.message });
+      });
+    }
+  }, 120000);
+
+  log.info('Data retention purge enabled (daily, hourly check)');
+
+  return { schedulerIntervalId, prefetchIntervalId, weeklyReportIntervalId, dataRetentionIntervalId };
 }

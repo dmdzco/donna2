@@ -13,6 +13,7 @@ import re
 from loguru import logger
 from db import query_one
 from lib.circuit_breaker import CircuitBreaker
+from lib.encryption import encrypt, decrypt, encrypt_json, decrypt_json
 
 _breaker = CircuitBreaker("gemini_analysis", failure_threshold=3, recovery_timeout=60.0, call_timeout=15.0)
 
@@ -156,13 +157,17 @@ async def analyze_completed_call(
 async def save_call_analysis(
     conversation_id: str, senior_id: str, analysis: dict
 ) -> dict | None:
-    """Save call analysis to database."""
+    """Save call analysis to database.
+
+    Writes both original columns (backward compat) and analysis_encrypted.
+    """
     try:
         row = await query_one(
             """INSERT INTO call_analyses
                (conversation_id, senior_id, summary, topics, engagement_score,
-                concerns, positive_observations, follow_up_suggestions, call_quality)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                concerns, positive_observations, follow_up_suggestions, call_quality,
+                analysis_encrypted)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                RETURNING *""",
             conversation_id,
             senior_id,
@@ -173,6 +178,7 @@ async def save_call_analysis(
             analysis.get("positive_observations"),
             analysis.get("follow_up_suggestions"),
             json.dumps(analysis.get("call_quality")),
+            encrypt_json(analysis),
         )
         logger.info("Saved analysis for conversation {cid}", cid=conversation_id)
         return row
@@ -189,10 +195,19 @@ def get_high_severity_concerns(analysis: dict) -> list[dict]:
 
 async def get_latest_analysis(senior_id: str) -> dict | None:
     """Get the most recent call analysis for a senior."""
-    return await query_one(
-        """SELECT engagement_score, call_quality, summary
+    row = await query_one(
+        """SELECT engagement_score, call_quality, summary, analysis_encrypted
            FROM call_analyses
            WHERE senior_id = $1
            ORDER BY created_at DESC LIMIT 1""",
         senior_id,
     )
+    if row and row.get("analysis_encrypted"):
+        full = decrypt_json(row["analysis_encrypted"])
+        if full and isinstance(full, dict):
+            row["summary"] = full.get("summary", row.get("summary"))
+            row["call_quality"] = full.get("call_quality", row.get("call_quality"))
+        row.pop("analysis_encrypted", None)
+    elif row:
+        row.pop("analysis_encrypted", None)
+    return row

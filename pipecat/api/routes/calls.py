@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from twilio.rest import Client as TwilioClient
 
 from api.middleware.auth import require_auth, require_admin, AuthContext
 from api.routes.voice import call_metadata
 from api.validators.schemas import InitiateCallRequest
+from services.audit import fire_and_forget_audit, auth_to_role
 
 router = APIRouter()
 
@@ -34,6 +35,7 @@ def _get_twilio() -> TwilioClient:
 
 @router.post("/api/call")
 async def initiate_call(
+    request: Request,
     body: InitiateCallRequest,
     auth: AuthContext = Depends(require_auth),
 ):
@@ -42,6 +44,16 @@ async def initiate_call(
     Pre-fetches senior context before triggering the Twilio call.
     """
     phone = body.phone_number
+
+    fire_and_forget_audit(
+        user_id=auth.user_id,
+        user_role=auth_to_role(auth),
+        action="create",
+        resource_type="call",
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        metadata={"phone_last4": phone[-4:] if phone else None},
+    )
     base_url = os.getenv("BASE_URL", "")
 
     try:
@@ -79,8 +91,16 @@ async def initiate_call(
 
 
 @router.get("/api/calls")
-async def list_active_calls(auth: AuthContext = Depends(require_admin)):
+async def list_active_calls(request: Request, auth: AuthContext = Depends(require_admin)):
     """List active calls (admin only)."""
+    fire_and_forget_audit(
+        user_id=auth.user_id,
+        user_role=auth_to_role(auth),
+        action="read",
+        resource_type="call",
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
     return {
         "active_calls": len(call_metadata),
         "call_sids": list(call_metadata.keys()),

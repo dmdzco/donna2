@@ -39,12 +39,29 @@ warnings.showwarning = _warning_handler
 # Sentry error monitoring (before FastAPI import for auto-instrumentation)
 try:
     import sentry_sdk
+    import hashlib as _hashlib
+
+    def _sentry_before_send(event, hint):
+        """Strip PII from Sentry events before transmission."""
+        # Hash any senior_id tags to prevent direct identification
+        tags = event.get("tags") or {}
+        sid = tags.get("senior_id")
+        if sid and sid not in ("unknown", "None", None, ""):
+            tags["senior_id"] = _hashlib.sha256(str(sid).encode()).hexdigest()[:8]
+        # Truncate exception values to prevent conversation context leaks
+        for exc_info in (event.get("exception") or {}).get("values", []):
+            val = exc_info.get("value", "")
+            if len(val) > 200:
+                exc_info["value"] = val[:200] + "...[truncated]"
+        return event
+
     _sentry_dsn = os.getenv("SENTRY_DSN", "")
     if _sentry_dsn:
         sentry_sdk.init(
             dsn=_sentry_dsn,
             traces_sample_rate=0,
             send_default_pii=False,
+            before_send=_sentry_before_send,
             environment="production" if os.getenv("RAILWAY_PUBLIC_DOMAIN") else "development",
         )
         logger.info("Sentry initialized")
@@ -60,7 +77,10 @@ from slowapi.errors import RateLimitExceeded
 from api.middleware.error_handler import register_error_handlers
 from api.middleware.rate_limit import limiter
 from api.middleware.security import SecurityHeadersMiddleware
+from api.routes.auth import router as auth_router
 from api.routes.calls import router as calls_router
+from api.routes.data import router as data_router
+from api.routes.export import router as export_router
 from api.routes.metrics import router as metrics_router
 from api.routes.voice import router as voice_router, call_metadata
 from bot import run_bot
@@ -126,8 +146,11 @@ register_error_handlers(app)
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+app.include_router(auth_router)
 app.include_router(voice_router)
 app.include_router(calls_router)
+app.include_router(data_router)
+app.include_router(export_router)
 app.include_router(metrics_router)
 
 
@@ -277,6 +300,14 @@ async def startup():
     # Start background cache cleanup loop
     from lib.cache_cleanup import start_cleanup_loop
     asyncio.create_task(start_cleanup_loop())
+
+    # Start data retention background loop (HIPAA compliance)
+    try:
+        from services.data_retention import start_retention_loop
+        asyncio.create_task(start_retention_loop())
+        logger.info("Data retention loop started")
+    except Exception as e:
+        logger.warning("Data retention init failed: {err}", err=str(e))
 
     # Start scheduler ONLY if explicitly enabled (prevents dual-scheduler conflict)
     scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "false").lower() == "true"

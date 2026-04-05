@@ -30,9 +30,11 @@ export const conversations = pgTable('conversations', {
   durationSeconds: integer('duration_seconds'),
   status: varchar('status', { length: 50 }),
   summary: text('summary'),
+  summaryEncrypted: text('summary_encrypted'),
   sentiment: varchar('sentiment', { length: 50 }),
   concerns: text('concerns').array(),
   transcript: json('transcript'),
+  transcriptEncrypted: text('transcript_encrypted'),
   callMetrics: json('call_metrics'),
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -43,6 +45,7 @@ export const memories = pgTable('memories', {
   seniorId: uuid('senior_id').references(() => seniors.id),
   type: varchar('type', { length: 50 }).notNull(), // fact, preference, event, concern, relationship
   content: text('content').notNull(),
+  contentEncrypted: text('content_encrypted'),
   source: varchar('source', { length: 255 }), // conversation_id or 'manual'
   importance: integer('importance').default(50), // 0-100
   embedding: vector('embedding', { dimensions: 1536 }), // OpenAI text-embedding-3-small
@@ -102,6 +105,7 @@ export const callAnalyses = pgTable('call_analyses', {
   positiveObservations: text('positive_observations').array(),    // Good things noticed
   followUpSuggestions: text('follow_up_suggestions').array(),     // For next call
   callQuality: json('call_quality'),                              // {rapport, goals_achieved, duration_appropriate}
+  analysisEncrypted: text('analysis_encrypted'),                   // AES-256-GCM encrypted full analysis
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -165,6 +169,18 @@ export const adminUsers = pgTable('admin_users', {
   lastLoginAt: timestamp('last_login_at'),
 });
 
+// Audit log for data deletions (hard deletes + retention purges)
+export const dataDeletionLogs = pgTable('data_deletion_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  entityType: varchar('entity_type', { length: 50 }).notNull(),
+  entityId: uuid('entity_id').notNull(),
+  deletionType: varchar('deletion_type', { length: 20 }).notNull(),
+  reason: varchar('reason', { length: 100 }),
+  deletedBy: varchar('deleted_by', { length: 255 }),
+  recordCounts: json('record_counts'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // Waitlist signups from calldonna.co
 export const waitlist = pgTable('waitlist', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -173,6 +189,20 @@ export const waitlist = pgTable('waitlist', {
   phone: varchar('phone', { length: 50 }),
   whoFor: varchar('who_for', { length: 100 }),
   thoughts: text('thoughts'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// HIPAA audit logs — tracks who accessed what PHI and when
+export const auditLogs = pgTable('audit_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: text('user_id').notNull(),
+  userRole: text('user_role').notNull(),
+  action: text('action').notNull(),
+  resourceType: text('resource_type').notNull(),
+  resourceId: text('resource_id'),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  metadata: json('metadata').default({}),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

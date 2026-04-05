@@ -29,6 +29,16 @@ async def start_cleanup_loop() -> None:
         except Exception as e:
             logger.error("[CacheCleanup] Error: {err}", err=str(e))
 
+        # Also clean up expired token revocations (DB-backed, not in-memory)
+        try:
+            from services.token_revocation import cleanup_expired
+            db_cleaned = await cleanup_expired()
+            if db_cleaned > 0:
+                logger.info("[CacheCleanup] Cleaned {n} expired token revocations", n=db_cleaned)
+        except Exception as e:
+            # Table may not exist yet (pre-migration), skip silently
+            logger.debug("[CacheCleanup] Token revocation cleanup skipped: {err}", err=str(e))
+
 
 def _run_cleanup() -> int:
     """Evict stale entries from all in-memory caches. Returns count evicted."""

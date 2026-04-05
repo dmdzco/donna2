@@ -82,8 +82,9 @@ export default function LovedOneProfileScreen() {
           topicsToAvoid: topicsToAvoid.trim(),
         } as unknown as Record<string, string>,
       });
-      Alert.alert("Saved", "Profile updated successfully.");
-      router.back();
+      Alert.alert("Saved", "Profile updated successfully.", [
+        { text: "OK", onPress: () => router.back() },
+      ]);
     } catch {
       Alert.alert("Error", "Failed to update profile. Please try again.");
     }

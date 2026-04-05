@@ -1,6 +1,6 @@
 import "../global.css";
 import { useEffect } from "react";
-import { Slot, useRouter, useSegments } from "expo-router";
+import { Stack, useRouter, useSegments } from "expo-router";
 import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { tokenCache } from "@/src/lib/auth";
@@ -35,11 +35,17 @@ function AuthGuard() {
 
   useEffect(() => {
     if (!isLoaded) return;
+    if (!segments || segments.length === 0) return;
 
-    const inTabsGroup = segments[0] === "(tabs)";
+    const firstSegment = segments[0];
+    const inTabsGroup = firstSegment === "(tabs)";
+    const inAuthGroup = firstSegment === "(auth)";
+    const isLanding = firstSegment === undefined || firstSegment === "";
 
     if (!isSignedIn && inTabsGroup) {
       router.replace("/");
+    } else if (isSignedIn && (isLanding || inAuthGroup)) {
+      router.replace("/(tabs)");
     }
   }, [isLoaded, isSignedIn, segments]);
 
@@ -83,7 +89,7 @@ function AuthGuard() {
     );
   }
 
-  return <Slot />;
+  return <Stack screenOptions={{ headerShown: false }} />;
 }
 
 export default function RootLayout() {

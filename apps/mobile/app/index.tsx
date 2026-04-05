@@ -59,6 +59,7 @@ export default function LandingScreen() {
               className="bg-sage rounded-3xl min-h-[52px] items-center justify-center mb-4"
               accessibilityRole="button"
               accessibilityLabel="Get Started"
+              testID="landing-get-started"
             >
               <Text className="text-white text-[17px] font-semibold">
                 Get Started
@@ -70,6 +71,7 @@ export default function LandingScreen() {
               className="min-h-[48px] items-center justify-center"
               accessibilityRole="button"
               accessibilityLabel="Sign In"
+              testID="landing-sign-in"
             >
               <Text className="text-sage text-[16px] font-medium">
                 Sign In

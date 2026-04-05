@@ -56,13 +56,13 @@ def create_tts_service(session_state: dict):
     Falls back to ElevenLabs if Cartesia key is missing or flag is unset.
     """
     flags = session_state.get("_flags", {})
-    provider = flags.get("tts_provider", "elevenlabs")
+    provider = os.getenv("TTS_PROVIDER") or flags.get("tts_provider", "elevenlabs")
 
     if provider == "cartesia" and os.getenv("CARTESIA_API_KEY"):
         logger.info("TTS provider: Cartesia Sonic 3")
         return CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY", ""),
-            voice_id=os.getenv("CARTESIA_VOICE_ID", "a33f7a4c-100f-41cf-a1fd-5822e8fc253f"),
+            voice_id=os.getenv("CARTESIA_VOICE_ID", "1242fb95-7ddd-44ac-8a05-9e8a22a6137d"),
             model="sonic-3",
             params=CartesiaTTSService.InputParams(
                 generation_config=GenerationConfig(speed=1.05, volume=1.2, emotion="enthusiastic"),
@@ -244,6 +244,11 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     # -------------------------------------------------------------------------
     # Transport (Twilio ↔ FastAPI WebSocket)
     # -------------------------------------------------------------------------
+    # Onboarding callers are adult caregivers (typical speech pace) — shorter pause.
+    # Senior calls use longer pause tolerance for elderly speech patterns.
+    is_onboarding = session_state.get("call_type") == "onboarding"
+    vad_stop_secs = 0.8 if is_onboarding else 1.2
+
     transport = FastAPIWebsocketTransport(
         websocket=websocket,
         params=FastAPIWebsocketParams(
@@ -253,7 +258,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(
                     confidence=0.6,
-                    stop_secs=0.8,
+                    stop_secs=vad_stop_secs,
                     min_volume=0.5,
                 ),
             ),

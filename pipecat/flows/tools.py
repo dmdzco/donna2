@@ -1,11 +1,13 @@
 """LLM tool definitions for Donna's voice pipeline.
 
-Active tools available to Claude during calls:
-- search_memories: Semantic search over senior's memory bank
+Active tools exposed to Claude (2 tools — Director-first architecture):
 - web_search: Real-time web search with spoken filler UX
-- save_important_detail: Store new memories from conversation
 - mark_reminder_acknowledged: Track reminder delivery status (fire-and-forget)
-- check_caregiver_notes: Check for family messages
+
+Retired tools (handlers kept for Gemini / future use):
+- search_memories → Director injects memories as ephemeral context (500ms gate)
+- save_important_detail → post-call extract_from_conversation handles it
+- check_caregiver_notes → pre-fetched at call start, injected into system prompt
 
 Uses closure pattern over session_state to give tool handlers access
 to senior context without Pipecat's non-existent set_function_call_context().
@@ -318,15 +320,30 @@ def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
     """Create FlowsFunctionSchema instances for use with Pipecat Flows.
 
     Returns dict mapping tool name → FlowsFunctionSchema.
+
+    IMPORTANT — only 2 tools are exposed to Claude. The others are intentionally
+    excluded because exposing them would cost ~4.3s per call (two sequential LLM
+    round trips: one to generate the tool call, one to respond after seeing the
+    result). Each excluded tool has a zero-latency alternative:
+
+    - search_memories: EXCLUDED — the Director prefetches memories on every
+      interim transcription and injects them as ephemeral context before Claude
+      ever processes the turn (500ms gate, usually 0ms on cache hit). Giving
+      Claude this tool causes it to fetch memories it already has, at 4.3s cost.
+
+    - save_important_detail: EXCLUDED — post-call extract_from_conversation
+      (Gemini) extracts all important details from the full transcript after
+      the call ends. In-call saving is redundant and adds latency.
+
+    - check_caregiver_notes: EXCLUDED — notes are pre-fetched at call start
+      (/voice/answer parallel fetch) and injected directly into the system
+      prompt. Claude already has them before the first word is spoken.
     """
     handlers = make_tool_handlers(session_state)
 
     all_schemas = [
-        SEARCH_MEMORIES_SCHEMA,
         WEB_SEARCH_SCHEMA,
         MARK_REMINDER_SCHEMA,
-        SAVE_DETAIL_SCHEMA,
-        CHECK_CAREGIVER_NOTES_SCHEMA,
     ]
 
     schemas = {}

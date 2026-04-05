@@ -100,7 +100,7 @@ export const api = {
 
     /** GET /api/seniors/:id/schedule */
     getSchedule: (id: string, token: string) =>
-      fetchJson<{ schedule: unknown; updateTopics: string[] }>(
+      fetchJson<{ schedule: unknown; topicsToAvoid: string[] }>(
         `/api/seniors/${id}/schedule`,
         { token },
       ),
@@ -108,10 +108,10 @@ export const api = {
     /** PATCH /api/seniors/:id/schedule */
     updateSchedule: (
       id: string,
-      data: { schedule?: unknown; updateTopics?: string[] },
+      data: { schedule?: unknown; topicsToAvoid?: string[] },
       token: string,
     ) =>
-      fetchJson<{ schedule: unknown; updateTopics: string[] }>(
+      fetchJson<{ schedule: unknown; topicsToAvoid: string[] }>(
         `/api/seniors/${id}/schedule`,
         { method: "PATCH", body: JSON.stringify(data), token },
       ),

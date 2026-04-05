@@ -89,6 +89,11 @@ export default function CityAutocomplete({ city, state, zip, onCityChange, onSta
           ref={inputRef}
           type="text"
           placeholder="City"
+          aria-label="City"
+          role="combobox"
+          aria-expanded={open && matches.length > 0}
+          aria-autocomplete="list"
+          aria-controls="city-listbox"
           value={city}
           onChange={e => {
             onCityChange(e.target.value);
@@ -100,10 +105,12 @@ export default function CityAutocomplete({ city, state, zip, onCityChange, onSta
           autoComplete="off"
         />
         {open && matches.length > 0 && (
-          <div className="city-dropdown">
+          <div id="city-listbox" role="listbox" className="city-dropdown">
             {matches.map((entry, i) => (
               <div
                 key={`${entry.city}-${entry.state}-${entry.zip}`}
+                role="option"
+                aria-selected={i === highlighted}
                 className={`city-option ${i === highlighted ? 'highlighted' : ''}`}
                 onMouseEnter={() => setHighlighted(i)}
                 onMouseDown={(e) => { e.preventDefault(); handleSelect(entry); }}
@@ -117,6 +124,7 @@ export default function CityAutocomplete({ city, state, zip, onCityChange, onSta
       </div>
 
       <select
+        aria-label="State"
         value={state}
         onChange={e => onStateChange(e.target.value)}
       >
@@ -129,6 +137,7 @@ export default function CityAutocomplete({ city, state, zip, onCityChange, onSta
       <input
         type="text"
         placeholder="Zip"
+        aria-label="Zip code"
         value={zip}
         onChange={e => onZipChange(e.target.value)}
       />

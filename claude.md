@@ -74,7 +74,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - TTS (ElevenLabs via Pipecat)
 - VAD (Silero — confidence=0.6, min_volume=0.5; stop_secs=1.2 for senior calls, 0.8 for onboarding calls)
-- News via OpenAI web search (1hr cache)
+- News via OpenAI web search (1hr cache), in-call web search via Tavily (raw results, no LLM answer)
 - Security: JWT admin auth, API key auth, Twilio webhook validation, rate limiting, security headers
 
 ### Infrastructure & Reliability
@@ -221,7 +221,7 @@ pipecat/
 │   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation (326 LOC)
 │   ├── seniors.py                   ← Senior profile + per-senior call_settings (131 LOC)
 │   ├── caregivers.py                ← Caregiver relationships + notes delivery (101 LOC)
-│   ├── news.py                      ← OpenAI web search + circuit breaker (213 LOC)
+│   ├── news.py                      ← Tavily web search (raw results) + OpenAI fallback + circuit breaker (213 LOC)
 │   ├── data_retention.py            ← HIPAA data retention: batched purge of 7 tables, 24h loop
 │   ├── audit.py                     ← Fire-and-forget HIPAA audit logging (log_audit, auth_to_role)
 │   └── token_revocation.py          ← JWT token revocation: per-token, per-admin, expired cleanup
@@ -561,8 +561,11 @@ DATABASE_URL=...                 # Neon PostgreSQL
 ANTHROPIC_API_KEY=...            # Claude Sonnet (voice LLM)
 GOOGLE_API_KEY=...               # Gemini Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...             # STT
-ELEVENLABS_API_KEY=...           # TTS
+ELEVENLABS_API_KEY=...           # TTS (ElevenLabs)
 ELEVENLABS_VOICE_ID=...          # Voice ID (optional)
+CARTESIA_API_KEY=...             # TTS (Cartesia — alternative to ElevenLabs)
+CARTESIA_VOICE_ID=...            # Cartesia voice ID (optional, has default)
+TTS_PROVIDER=cartesia            # Override GrowthBook flag: "cartesia" or "elevenlabs"
 OPENAI_API_KEY=...               # Embeddings + news search
 CEREBRAS_API_KEY=...             # Cerebras (Director primary, speculative pre-processing)
 

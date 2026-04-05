@@ -41,6 +41,9 @@ Caching web search results to prevent duplicate API calls seems smart but is dan
 ### Query Similarity Is Harder Than It Looks
 Simple word overlap fails on shared generic tokens (years, dates). TF-IDF requires dependencies. Embeddings are too slow (<5ms budget). **Best approach for short queries:** Noise word removal + lemmatization + containment/Jaccard hybrid + bigram bonus. Zero dependencies, <0.1ms. Kept as a utility (`query_similarity()` in `conversation_director.py`) even though web search caching was removed — useful for future dedup needs.
 
+### Tavily `include_answer` Hallucinates — Use Raw Results Only
+Tavily's `include_answer=True` parameter runs an LLM on top of search results to generate a synthesized answer. This answer hallucinated incorrect data in production (e.g., wrong NBA standings — "Lakers leading Western Conference" when they weren't). The raw `results` array contains real snippets from actual web pages and is accurate. **Decision:** Removed `include_answer`, return raw result snippets (title + content) to Claude. Claude already synthesizes the result into speech anyway, so the extra LLM layer adds hallucination risk with no benefit. Same speed (Tavily's answer generation actually adds latency), more accurate.
+
 ### Web Search Gating Timeline
 The ideal flow: Query Director detects a factual question mid-speech → starts web search → final transcription arrives → search already in-flight → filler TTS plays → result injected → Claude responds with answer. This saves ~4.3s vs Claude calling the `web_search` tool (two LLM round trips). The gating only works if the Query Director completes before the final transcription, which requires the continuous speculative to fire early enough.
 
@@ -89,8 +92,10 @@ The Guidance Director prompt went from ~200 tokens (everything) to ~130 tokens (
 ### Cartesia TTS Must Output PCM
 Cartesia with `pcm_mulaw` encoding causes garbled Twilio audio — Pipecat's `TwilioFrameSerializer` assumes all `TTSAudioRawFrame` data is PCM and re-encodes to mulaw. Double-encoding = garbled. Always output PCM from TTS; let the serializer handle mulaw conversion. Current code relies on Cartesia SDK defaults (which output PCM).
 
-### VAD Settings for Elderly Speech
-Elderly speakers have longer pauses, softer voices, and slower speech. Default Silero VAD settings cut them off. **Tuned settings:** `confidence=0.6` (lower sensitivity), `stop_secs=1.2` (longer pause tolerance), `min_volume=0.5` (accommodate softer voices).
+### VAD Settings Are Caller-Type Dependent
+Senior calls use `stop_secs=1.2` — elderly speakers pause longer between thoughts, have softer voices, and speak more slowly. Default settings cut them off. **Tuned settings:** `confidence=0.6`, `stop_secs=1.2`, `min_volume=0.5`.
+
+Onboarding calls use `stop_secs=0.8` — these are adult caregivers with typical speech pace. The longer elderly pause tolerance makes the bot feel sluggish for them. `bot.py` switches `stop_secs` based on `call_type == "onboarding"`.
 
 ### Import Pipeline Modules at Startup
 Importing `run_bot` inside the WebSocket handler (lazy import) causes a 17-second cold start on the first call due to Pipecat module loading. Import at the top of `main.py` instead.
@@ -110,6 +115,9 @@ Always `str(senior_id)` before string operations (slicing, logging, comparison).
 
 ### Scheduler Conflict Prevention
 Only one scheduler instance should run across all environments. Set `SCHEDULER_ENABLED=false` in Pipecat — the Node.js backend runs the scheduler. Two active schedulers = double reminder calls.
+
+### `datetime.utcnow()` Breaks Recurring Reminder Scheduling on Non-UTC Servers
+`datetime.utcnow()` returns a naive datetime. When `.astimezone(ZoneInfo(senior_tz))` is called on a naive datetime, Python assumes the value is in the **server's local timezone**, not UTC. On a UTC server this happens to work — but if Railway ever runs in a non-UTC zone, recurring reminders fire at the wrong local time. **Fix:** Always use `datetime.now(timezone.utc)` which returns a timezone-aware datetime. `.astimezone()` then correctly converts from UTC.
 
 ---
 

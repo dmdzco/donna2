@@ -21,6 +21,15 @@ export default function Modal({ open, onClose, title, children, maxWidth = '600p
     return () => { document.body.style.overflow = ''; };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   return (
@@ -30,13 +39,17 @@ export default function Modal({ open, onClose, title, children, maxWidth = '600p
       onClick={(e) => { if (e.target === overlayRef.current) onClose(); }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
         className="bg-white rounded-xl p-6 w-[90%] max-h-[80vh] overflow-y-auto"
         style={{ maxWidth }}
       >
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-bold text-admin-text">{title}</h2>
+          <h2 id="modal-title" className="text-lg font-bold text-admin-text">{title}</h2>
           <button
             onClick={onClose}
+            aria-label="Close"
             className="p-1 hover:bg-gray-100 rounded-lg transition-colors text-admin-text-muted"
           >
             <X size={20} />

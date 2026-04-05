@@ -1,56 +1,109 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { SignInButton, useAuth } from '@clerk/clerk-react';
+import { useState } from 'react';
 import { Phone, Heart, Clock, CheckCircle, Smile, Star } from 'lucide-react';
 import seniorGardening from '../assets/senior_gardening.jpg';
 import seniorOnPhone from '../assets/senior_on_phone.png';
 
-export default function Landing() {
-  const navigate = useNavigate();
-  const { isSignedIn, getToken } = useAuth();
-  const [checkingProfile, setCheckingProfile] = useState(false);
+const API_URL = import.meta.env.VITE_API_URL || '';
 
-  const API_URL = import.meta.env.VITE_API_URL || '';
+// TODO: Replace with real App Store / Google Play URLs when the app is published
+const APP_STORE_URL = '#';
+const PLAY_STORE_URL = '#';
 
-  // Only redirect signed-in users who have completed onboarding
-  useEffect(() => {
-    if (!isSignedIn) return;
+function AppStoreButtons({ className = '' }: { className?: string }) {
+  return (
+    <div className={`flex flex-wrap items-center gap-3 ${className}`}>
+      <a
+        href={APP_STORE_URL}
+        className="inline-flex items-center gap-2 bg-text-primary text-white px-5 py-3 rounded-xl font-semibold text-sm hover:bg-gray-800 transition-colors"
+      >
+        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
+        </svg>
+        App Store
+      </a>
+      <a
+        href={PLAY_STORE_URL}
+        className="inline-flex items-center gap-2 bg-text-primary text-white px-5 py-3 rounded-xl font-semibold text-sm hover:bg-gray-800 transition-colors"
+      >
+        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M3.18 23.76c.35.2.74.24 1.12.14l11.73-11.73L12.56 9l-9.38 14.76zm17.16-10.4L17.6 11.8l-3.12 3.12 3.12 3.12 2.76-1.57c.79-.45.79-1.47-.02-1.91zM3.03.47C2.67.68 2.43 1.07 2.43 1.56v20.88c0 .49.24.87.6 1.08l.07.04L14.43 12 3.1.43l-.07.04zm10.41 10.41L3.71.15C3.35.05 2.97.1 2.62.3L13.44 11.12l-.01-.24z" />
+        </svg>
+        Google Play
+      </a>
+    </div>
+  );
+}
 
-    const checkProfile = async () => {
-      setCheckingProfile(true);
-      try {
-        const token = await getToken();
-        const res = await fetch(`${API_URL}/api/caregivers/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+function WaitlistForm() {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
-        if (res.ok) {
-          // User has a profile, redirect to dashboard
-          navigate('/dashboard');
-        }
-        // If 404, user needs onboarding - stay on landing page
-      } catch (err) {
-        // On error, stay on landing page
-      } finally {
-        setCheckingProfile(false);
-      }
-    };
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name || !email) return;
+    setStatus('loading');
+    try {
+      const res = await fetch(`${API_URL}/waitlist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email }),
+      });
+      setStatus(res.ok ? 'success' : 'error');
+    } catch {
+      setStatus('error');
+    }
+  };
 
-    checkProfile();
-  }, [isSignedIn, getToken, navigate, API_URL]);
-
-  if (checkingProfile) {
+  if (status === 'success') {
     return (
-      <div className="min-h-screen bg-bg-cream flex items-center justify-center">
-        <div className="animate-pulse text-sage-green">Loading...</div>
-      </div>
+      <p className="text-white/90 text-sm">
+        You're on the list! We'll reach out when Donna is ready for you.
+      </p>
     );
   }
 
   return (
+    <div>
+      <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-2 max-w-sm mx-auto">
+        <input
+          type="text"
+          placeholder="Your name"
+          aria-label="Your name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+          className="flex-1 px-4 py-2.5 rounded-xl text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-white"
+        />
+        <input
+          type="email"
+          placeholder="Email address"
+          aria-label="Email address"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          className="flex-1 px-4 py-2.5 rounded-xl text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-white"
+        />
+        <button
+          type="submit"
+          disabled={status === 'loading'}
+          className="px-5 py-2.5 rounded-xl bg-white text-sage-green font-semibold text-sm hover:bg-gray-100 transition-colors disabled:opacity-60"
+        >
+          {status === 'loading' ? 'Joining…' : 'Join'}
+        </button>
+      </form>
+      {status === 'error' && (
+        <p className="text-red-300 text-xs mt-2">Something went wrong. Try again.</p>
+      )}
+    </div>
+  );
+}
+
+export default function Landing() {
+  return (
     <div className="min-h-screen bg-bg-cream">
       {/* Navigation */}
-      <nav className="fixed top-4 left-1/2 -translate-x-1/2 z-50">
+      <nav aria-label="Main navigation" className="fixed top-4 left-1/2 -translate-x-1/2 z-50">
         <div className="glass-panel px-6 py-3 rounded-full flex items-center gap-8">
           <span className="text-sage-green font-bold text-xl">Donna</span>
           <div className="hidden md:flex items-center gap-6 text-sm text-gray-600">
@@ -58,27 +111,12 @@ export default function Landing() {
             <a href="#how-it-works" className="hover:text-sage-green transition-colors">How it Works</a>
             <a href="/faq" className="hover:text-sage-green transition-colors">FAQ</a>
           </div>
-          <div className="flex items-center gap-3">
-            {isSignedIn ? (
-              <button
-                className="bg-text-primary text-white text-sm px-5 py-2 rounded-full font-semibold hover:bg-gray-800 transition-colors"
-                onClick={() => navigate('/onboarding')}
-              >
-                Complete Setup
-              </button>
-            ) : (
-              <>
-                <SignInButton mode="modal">
-                  <button className="text-sm text-sage-green hover:underline">Sign In</button>
-                </SignInButton>
-                <SignInButton mode="modal" forceRedirectUrl="/onboarding">
-                  <button className="bg-text-primary text-white text-sm px-5 py-2 rounded-full font-semibold hover:bg-gray-800 transition-colors">
-                    Get Started
-                  </button>
-                </SignInButton>
-              </>
-            )}
-          </div>
+          <a
+            href={APP_STORE_URL}
+            className="bg-text-primary text-white text-sm px-5 py-2 rounded-full font-semibold hover:bg-gray-800 transition-colors"
+          >
+            Download
+          </a>
         </div>
       </nav>
 
@@ -93,22 +131,7 @@ export default function Landing() {
             Donna calls your loved ones to offer them helpful reminders and chat about their day and lives,
             giving them independence and you peace of mind.
           </p>
-          <div className="flex items-center justify-center">
-            {isSignedIn ? (
-              <button
-                className="btn-primary text-lg px-8 py-4"
-                onClick={() => navigate('/onboarding')}
-              >
-                Get Started
-              </button>
-            ) : (
-              <SignInButton mode="modal" forceRedirectUrl="/onboarding">
-                <button className="btn-primary text-lg px-8 py-4">
-                  Get Started
-                </button>
-              </SignInButton>
-            )}
-          </div>
+          <AppStoreButtons className="justify-center" />
         </div>
       </section>
 
@@ -130,7 +153,7 @@ export default function Landing() {
                     <Clock className="w-5 h-5 text-sage-green" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-text-primary">Scheduled Daily Check-ins</h4>
+                    <h3 className="font-semibold text-text-primary">Scheduled Daily Check-ins</h3>
                     <p className="text-gray-500 text-sm">Consistent, friendly calls at their preferred times</p>
                   </div>
                 </div>
@@ -139,7 +162,7 @@ export default function Landing() {
                     <CheckCircle className="w-5 h-5 text-sage-green" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-text-primary">Ad Hoc Reminders</h4>
+                    <h3 className="font-semibold text-text-primary">Ad Hoc Reminders</h3>
                     <p className="text-gray-500 text-sm">Add reminders anytime — Donna delivers them naturally</p>
                   </div>
                 </div>
@@ -181,7 +204,7 @@ export default function Landing() {
                     <Heart className="w-5 h-5 text-accent-pink" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-text-primary">Loneliness is a public health crisis</h4>
+                    <h3 className="font-semibold text-text-primary">Loneliness is a public health crisis</h3>
                     <p className="text-gray-500 text-sm">As harmful as smoking 15 cigarettes per day</p>
                   </div>
                 </div>
@@ -190,7 +213,7 @@ export default function Landing() {
                     <Clock className="w-5 h-5 text-sage-green" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-text-primary">Donna fills the gaps</h4>
+                    <h3 className="font-semibold text-text-primary">Donna fills the gaps</h3>
                     <p className="text-gray-500 text-sm">Between check-ins with friendly companionship</p>
                   </div>
                 </div>
@@ -199,7 +222,7 @@ export default function Landing() {
                     <Smile className="w-5 h-5 text-accent-pink" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-text-primary">Meaningful conversations</h4>
+                    <h3 className="font-semibold text-text-primary">Meaningful conversations</h3>
                     <p className="text-gray-500 text-sm">About any topic they love</p>
                   </div>
                 </div>
@@ -208,7 +231,7 @@ export default function Landing() {
                     <Star className="w-5 h-5 text-sage-green" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-text-primary">Builds connection over time</h4>
+                    <h3 className="font-semibold text-text-primary">Builds connection over time</h3>
                     <p className="text-gray-500 text-sm">By remembering past conversations</p>
                   </div>
                 </div>
@@ -234,7 +257,7 @@ export default function Landing() {
               </div>
               <h3 className="text-xl font-bold mb-2">1. Build a Profile</h3>
               <p className="text-gray-600">
-                Tell us about their interests and routine. Takes 3 minutes.
+                Download the app and tell us about their interests and routine. Takes 3 minutes.
               </p>
             </div>
             <div className="glass-card p-8">
@@ -265,20 +288,9 @@ export default function Landing() {
           <h2 className="text-3xl md:text-4xl font-bold text-white mb-8 leading-tight">
             Ready to give the gift of independence?
           </h2>
-          {isSignedIn ? (
-            <button
-              className="text-white text-lg px-8 py-4 rounded-full font-semibold border-2 border-white hover:bg-white hover:text-sage-green transition-colors"
-              onClick={() => navigate('/onboarding')}
-            >
-              Start Your Free Trial
-            </button>
-          ) : (
-            <SignInButton mode="modal" forceRedirectUrl="/onboarding">
-              <button className="text-white text-lg px-8 py-4 rounded-full font-semibold border-2 border-white hover:bg-white hover:text-sage-green transition-colors">
-                Start Your Free Trial
-              </button>
-            </SignInButton>
-          )}
+          <AppStoreButtons className="justify-center mb-10" />
+          <p className="text-white/70 text-sm mb-3">Not available in your region yet?</p>
+          <WaitlistForm />
         </div>
       </section>
 

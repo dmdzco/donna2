@@ -12,7 +12,7 @@ env:
 
 - runFlow: ../subflows/sign_in.yaml
 
-# After sign-in, returning user lands on dashboard
-- assertVisible: "Dashboard"
+# After sign-in, returning user lands on dashboard with greeting
+- assertVisible: "Hello.*"
 
 - takeScreenshot: 01_sign_in_success

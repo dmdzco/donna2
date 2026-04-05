@@ -6,5 +6,5 @@ appId: com.donna.caregiver
 
 ---
 
-- tapOn: "Settings"
+- tapOn: "Settings, tab.*"
 - assertVisible: "Manage your account and preferences"

@@ -100,6 +100,7 @@ export default function Step3Screen() {
                     placeholder="e.g., Take morning medication"
                     value={reminder.title}
                     onChangeText={(v) => updateReminder(index, "title", v)}
+                    testID={`input-reminder-title-${index}`}
                   />
 
                   <View className="w-full">

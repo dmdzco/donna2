@@ -103,9 +103,9 @@ export default function SettingsScreen() {
     setSigningOut(true);
     try {
       await signOut();
-      router.replace("/");
+      // AuthGuard in _layout.tsx handles navigation when isSignedIn becomes false
     } catch {
-      // Clerk handles sign-out errors
+      // Sign out failed
     } finally {
       setSigningOut(false);
       setShowSignOutModal(false);
@@ -205,6 +205,7 @@ export default function SettingsScreen() {
             variant="destructive"
             onPress={handleSignOut}
             loading={signingOut}
+            testID="sign-out-confirm"
           />
           <Button
             title="Cancel"

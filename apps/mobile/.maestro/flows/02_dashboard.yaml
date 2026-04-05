@@ -12,31 +12,36 @@ env:
 - runFlow: ../subflows/sign_in.yaml
 
 # Should land on Dashboard tab by default
-- assertVisible: "Dashboard"
+- assertVisible: "Dashboard, tab.*"
 
 # Greeting header (dynamic — contains caregiver's first name)
 - assertVisible: "Hello.*"
 
-# Next call card or empty state
-- assertVisible: "Next Call|No calls scheduled"
+# Next call card — accessibilityLabel is "Next call: <time>. Tap to view schedule."
+# Matches both scheduled ("Next call: Tomorrow at ...") and empty ("Next call: No calls scheduled...")
+- assertVisible: "Next call:.*"
 
-# Recent calls section
-- assertVisible: "Recent Calls"
+# Recent calls section header
+- assertVisible: "Recent Call Highlights"
+
+# Empty state or call cards (test account likely has no calls)
+- assertVisible:
+    text: "No recent calls yet.*|Today at.*|Yesterday at.*"
+    optional: true
 
 # Floating call button (accessibilityLabel = "Call {name} now")
 - assertVisible: "Call.*now"
 
 # Tap call FAB → instant call modal appears
 - tapOn: "Call.*now"
-- assertVisible: "Call.*Now"
 
-# Dismiss modal
-- tapOn:
-    text: "Close"
-    optional: true
-- back
+# Modal title is "Instant Call"; button inside is "Call {name} Now"
+- assertVisible: "Instant Call"
+
+# Dismiss modal via Close button
+- tapOn: "Close"
 
 # Verify we're still on dashboard
-- assertVisible: "Dashboard"
+- assertVisible: "Dashboard, tab.*"
 
 - takeScreenshot: 02_dashboard

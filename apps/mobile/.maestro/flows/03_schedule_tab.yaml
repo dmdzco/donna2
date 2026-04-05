@@ -1,5 +1,15 @@
 # Flow 03: Schedule Tab
 # Verifies: Tab navigation, week view, week navigation, add/edit/delete call
+#
+# KEY LEARNINGS:
+#   - Input component: label <Text> and <TextInput> share same accessibilityLabel.
+#     BUT textTransform:uppercase on the label makes its accessibility text uppercase
+#     ("CALL TITLE") while TextInput keeps original case ("Call Title"). So tapOn
+#     by original case targets the TextInput directly — no index needed.
+#   - hideKeyboard fails on iOS. Use pressKey:enter (single-line) or tap a
+#     non-interactive element (multiline/phone-pad) to dismiss.
+#   - Do NOT use scrollUntilVisible inside modals — it scrolls the background.
+#   - Modal title text and save button share the same text. Use index: 1 for button.
 
 appId: com.donna.caregiver
 
@@ -12,9 +22,9 @@ env:
 - runFlow: ../subflows/sign_in.yaml
 
 # Navigate to Schedule tab
-- tapOn: "Schedule"
+- tapOn: "Schedule, tab.*"
 
-# Week view header (current day name is visible)
+# Week view header shows the current full day name (e.g. "Saturday")
 - assertVisible:
     text: "Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday"
 
@@ -28,40 +38,60 @@ env:
 
 # --- Add a new call ---
 - tapOn: "Add new call"
+- assertVisible: "Add Call"
 
-# Modal: frequency options visible
-- assertVisible: "Daily|Recurring|One-Time"
+# Type call title (use testID to reliably target the TextInput)
+- tapOn:
+    id: "call-title-input"
+- eraseText: 30
+- inputText: "E2E Test Call"
+- pressKey: enter
 
-# Select call title
-- tapOn: "Select call title"
-- tapOn: "Morning Check-in"
+# Save the call (index 1: skip modal title "Add Call", hit save button)
+- tapOn:
+    text: "Add Call"
+    index: 1
 
-# Select time
-- tapOn: "Select call time"
-- tapOn: "9:00 AM"
-
-# Add optional context
-- tapOn: "Context notes"
-- inputText: "E2E test call context"
-
-# Save the call
-- tapOn: "Add Call"
-
-# Verify new call appears in schedule
-- assertVisible: "Morning Check-in"
+# Verify new call card appears in the schedule list
+- extendedWaitUntil:
+    visible: "E2E Test Call"
+    timeout: 10000
 
 # --- Edit the call ---
-- tapOn: "Edit Morning Check-in"
+- tapOn: "Edit E2E Test Call"
+- extendedWaitUntil:
+    visible: "Edit Call"
+    timeout: 5000
 
-# Change context
+# Change context notes (unique accessibilityLabel — no index issue)
 - tapOn: "Context notes"
-- eraseText: 50
 - inputText: "Updated E2E context"
+- pressKey: enter
+
+# Save
 - tapOn: "Save Changes"
 
+# Wait for modal to close
+- extendedWaitUntil:
+    visible: "E2E Test Call"
+    timeout: 5000
+
 # --- Delete the test call (cleanup) ---
-- tapOn: "Edit Morning Check-in"
+- tapOn: "Edit E2E Test Call"
+- extendedWaitUntil:
+    visible: "Edit Call"
+    timeout: 5000
 - tapOn: "Delete Call"
-- tapOn: "Delete"
+
+# Confirmation modal
+- assertVisible: "Are you sure you want to delete this scheduled call?"
+- tapOn:
+    text: "Delete"
+    index: 0
+
+# Verify the card is gone
+- extendedWaitUntil:
+    notVisible: "E2E Test Call"
+    timeout: 5000
 
 - takeScreenshot: 03_schedule

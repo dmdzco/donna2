@@ -15,7 +15,10 @@ export const Input = forwardRef<TextInput, InputProps>(
     return (
       <View className="w-full">
         {label && (
-          <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
+          <Text
+            className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider"
+            accessible={false}
+          >
             {label}
           </Text>
         )}

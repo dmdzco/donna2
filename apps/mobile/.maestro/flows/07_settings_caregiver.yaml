@@ -52,7 +52,7 @@ env:
     direction: DOWN
 - tapOn: "Save Changes"
 
-# Wait for save confirmation
+# Wait for save confirmation (OK button triggers router.back())
 - extendedWaitUntil:
     visible: "Saved|Profile updated|OK"
     timeout: 10000
@@ -60,8 +60,9 @@ env:
     text: "OK"
     optional: true
 
-# Navigate back
-- tapOn: "Go back"
-- assertVisible: "Manage your account and preferences"
+# Tapping OK auto-navigates back via router.back(), verify we're on settings root
+- extendedWaitUntil:
+    visible: "Manage your account and preferences"
+    timeout: 5000
 
 - takeScreenshot: 07_caregiver

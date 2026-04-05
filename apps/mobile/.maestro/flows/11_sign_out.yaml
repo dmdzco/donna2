@@ -1,5 +1,15 @@
 # Flow 11: Sign Out
 # Verifies: Sign out from settings returns to landing screen
+#
+# Sign Out modal (centered variant):
+#   - Modal title text: "Sign Out"
+#   - Body: "Are you sure you want to sign out?..."
+#   - Destructive Button: "Sign Out"
+#   - Secondary Button: "Cancel"
+#
+# When modal is open, Maestro sees the modal title text AND the button text.
+# The settings page "Sign Out" is also in the tree behind the modal on iOS.
+# We scroll to the button, open the modal, then target the destructive button.
 
 appId: com.donna.caregiver
 
@@ -12,20 +22,27 @@ env:
 - runFlow: ../subflows/sign_in.yaml
 - runFlow: ../subflows/navigate_to_settings.yaml
 
-# Tap Sign Out
+# Scroll to and tap Sign Out button in settings (may be below the fold)
+- scrollUntilVisible:
+    element: "Sign Out"
+    direction: DOWN
 - tapOn: "Sign Out"
 
-# Confirmation modal
-- assertVisible: "Are you sure you want to sign out"
-- tapOn:
-    text: "Sign Out"
-    index: 1
-
-# Should return to landing screen
+# Wait for confirmation modal
 - extendedWaitUntil:
-    visible: "Donna"
-    timeout: 10000
-- assertVisible: "Get Started"
+    visible: "Cancel"
+    timeout: 5000
+
+# Tap the destructive "Sign Out" button in the modal (by testID to avoid ambiguity)
+- tapOn:
+    id: "sign-out-confirm"
+
+# Should return to landing screen — Clerk signOut is async, give it time
+# "Get Started" is unique to the landing page (not found on settings/dashboard)
+- extendedWaitUntil:
+    visible: "Get Started"
+    timeout: 30000
+
 - assertVisible: "Sign In"
 
 - takeScreenshot: 11_sign_out

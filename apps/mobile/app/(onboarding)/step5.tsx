@@ -13,16 +13,10 @@ import {
   ArrowLeft,
   Plus,
   X,
-  ChevronDown,
-  Check,
   Lightbulb,
 } from "lucide-react-native";
 import { Button, Input, Modal, ProgressBar } from "@/src/components/ui";
-import {
-  COLORS,
-  CALL_TITLE_OPTIONS,
-  TIME_OPTIONS,
-} from "@/src/constants/theme";
+import { COLORS, TIME_OPTIONS } from "@/src/constants/theme";
 import { useOnboardingStore, type OnboardingCall } from "@/src/stores/onboarding";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -33,10 +27,9 @@ export default function Step5Screen() {
     useOnboardingStore();
 
   const [activePicker, setActivePicker] = useState<{
-    type: "title" | "time";
+    type: "time";
     callIndex: number;
   } | null>(null);
-  const [customTitleIndex, setCustomTitleIndex] = useState<number | null>(null);
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
 
   function toggleDay(callIndex: number, day: number) {
@@ -65,9 +58,6 @@ export default function Step5Screen() {
       setDeleteIndex(null);
     }
   }
-
-  // Determine which options to show for title picker
-  const titleOptions = [...CALL_TITLE_OPTIONS, "Custom"] as const;
 
   return (
     <SafeAreaView className="flex-1 bg-cream">
@@ -130,33 +120,15 @@ export default function Step5Screen() {
                   )}
                 </View>
 
-                {/* Title picker */}
+                {/* Title */}
                 <View className="mb-4">
-                  <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-                    Call Title
-                  </Text>
-                  {customTitleIndex === index ? (
-                    <Input
-                      placeholder="Enter custom title"
-                      value={call.title}
-                      onChangeText={(v) => updateCall(index, "title", v)}
-                      autoFocus
-                    />
-                  ) : (
-                    <Pressable
-                      onPress={() =>
-                        setActivePicker({ type: "title", callIndex: index })
-                      }
-                      className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
-                      accessibilityRole="button"
-                      accessibilityLabel="Select call title"
-                    >
-                      <Text className="text-[15px] text-charcoal">
-                        {call.title || "Select title"}
-                      </Text>
-                      <ChevronDown size={18} color={COLORS.muted} />
-                    </Pressable>
-                  )}
+                  <Input
+                    label="Call Title"
+                    placeholder="e.g., Daily Call, Morning Check-in"
+                    value={call.title}
+                    onChangeText={(v) => updateCall(index, "title", v)}
+                    testID={`input-call-title-${index}`}
+                  />
                 </View>
 
                 {/* Frequency */}
@@ -337,40 +309,6 @@ export default function Step5Screen() {
           <Button title="Create Profile" onPress={handleCreateProfile} />
         </View>
       </KeyboardAvoidingView>
-
-      {/* Title picker modal */}
-      <Modal
-        visible={activePicker?.type === "title"}
-        onClose={() => setActivePicker(null)}
-        title="Select Call Title"
-      >
-        <View className="gap-1 pb-4">
-          {titleOptions.map((option) => (
-            <Pressable
-              key={option}
-              onPress={() => {
-                if (option === "Custom") {
-                  setCustomTitleIndex(activePicker!.callIndex);
-                  updateCall(activePicker!.callIndex, "title", "");
-                } else {
-                  updateCall(activePicker!.callIndex, "title", option);
-                  setCustomTitleIndex(null);
-                }
-                setActivePicker(null);
-              }}
-              className="flex-row items-center justify-between py-3.5 px-2 rounded-xl active:bg-beige"
-              accessibilityRole="button"
-              accessibilityLabel={option}
-            >
-              <Text className="text-[16px] text-charcoal">{option}</Text>
-              {activePicker &&
-                calls[activePicker.callIndex]?.title === option && (
-                  <Check size={18} color={COLORS.sage} />
-                )}
-            </Pressable>
-          ))}
-        </View>
-      </Modal>
 
       {/* Time picker modal */}
       <Modal

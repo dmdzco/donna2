@@ -52,7 +52,8 @@ appId: com.donna.caregiver
     id: "sign-in-submit"
 
 # Wait for Clerk auth + 2FA auto-verify + API call + navigation
-# Landing destinations: Dashboard (returning user) or About You (fresh user)
+# Landing destinations: "Hello" greeting (returning user) or "About You" (fresh user)
+# 2FA chain: signIn.create + prepareSecondFactor + attemptSecondFactor + setActive + API = ~50-60s
 - extendedWaitUntil:
-    visible: "Dashboard|About You"
-    timeout: 30000
+    visible: "Hello.*|About You"
+    timeout: 90000

@@ -123,4 +123,32 @@ Tests that verify Director actions (force end at 12 minutes, force winding-down 
 
 ---
 
-*Last updated: March 2026 — Split Director architecture, ephemeral context, web search gating*
+## Gemini Live S2S (April 2026 — Evaluated, Not Production)
+
+### Gemini 3.1 Flash Live Sync-Only Tool Calls Make It Unsuitable for Memory-Heavy Calls
+Gemini 3.1 Flash Live only supports synchronous function calling — the model goes completely silent while waiting for a tool response. Our `search_memories` tool takes ~600-800ms (OpenAI embedding + pgvector HNSW). Combined with Gemini audio generation startup after receiving the result, this creates 2-3 second silent gaps that are unacceptable in a conversational call. The Claude pipeline avoids this via the Director's speculative memory prefetch — memories are pre-fetched before Claude ever asks, so tool "calls" return from cache in ~0ms.
+
+### GeminiLiveLLMService Requires a Context Aggregator for Tool Calls to Work
+Without a context aggregator in the pipeline, tool results never reach Gemini. The path is: `result_callback → FunctionCallResultFrame → context aggregator → LLMContextFrame → _handle_context → _process_completed_function_calls → session.send_tool_response()`. With no context aggregator, the `FunctionCallResultFrame` flows through with nothing to process it, and Gemini waits in silence indefinitely. Workaround: call `params.llm._tool_result()` directly, bypassing the context path.
+
+### No Mid-Call Context Injection with Gemini 3.1 Live
+The Director's ephemeral context injection (via `LLMMessagesAppendFrame`) has no equivalent with Gemini Live. `send_client_content` is limited to initial session seeding only in Gemini 3.1. `InputTextRawFrame` injects text as user speech, not system guidance. Gemini manages its own internal context and provides no API to push messages mid-conversation. The entire speculative prefetch + Director architecture cannot be ported.
+
+### Valid Gemini 3.1 Flash Live Configuration
+- **Model**: `models/gemini-3.1-flash-live-preview` (recommended; `gemini-2.5-flash-native-audio-preview-12-2025` is deprecated)
+- **Voices**: Full 30-voice TTS list applies (Aoede, Kore, Charon, Puck, etc.) — NOT the small subset in older Pipecat docs
+- **Audio in**: Set `audio_in_sample_rate=16000` — TwilioFrameSerializer upsamples 8kHz mulaw to 16kHz PCM, which is what Gemini expects. Sending 8kHz causes poor transcription.
+- **Audio out**: `audio_out_sample_rate=8000` — serializer downsamples Gemini's 24kHz output to 8kHz mulaw for Twilio automatically.
+- **Tool format**: `[{"function_declarations": [...]}]` passed as-is to `GeminiLiveLLMService(tools=...)` — Pipecat falls through to raw dict when not a `ToolsSchema`.
+- **Greeting trigger**: Send `InputTextRawFrame(text="[Begin]")` ~1.5s after pipeline start to trigger Donna to speak first on outbound calls.
+
+### Gemini 3.1 vs 2.5 Key Differences
+- Sync-only tool calls (2.5 had async/non-blocking option)
+- `thinkingLevel` replaces `thinkingBudget`
+- `send_client_content` for initial seeding only (2.5 supported ongoing)
+- Affective dialog and proactive audio not supported
+- Single server event can contain multiple content parts simultaneously
+
+---
+
+*Last updated: April 2026 — Gemini Live evaluation, Split Director architecture, ephemeral context, web search gating*

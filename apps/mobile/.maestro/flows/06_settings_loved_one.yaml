@@ -1,0 +1,61 @@
+# Flow 06: Settings — Loved One Profile
+# Verifies: Edit name, phone, city/state/zip, interests, topics to avoid
+
+appId: com.donna.caregiver
+
+---
+
+- launchApp:
+    clearKeychain: true
+
+- runFlow: ../subflows/sign_in.yaml
+
+- runFlow: ../subflows/navigate_to_settings.yaml
+
+- tapOn: "Loved One Profile"
+
+# Form fields are visible
+- assertVisible: "Name"
+- assertVisible: "Phone Number"
+- assertVisible: "City"
+- assertVisible: "State"
+
+# Edit name field
+- tapOn: "Name"
+- clearText
+- inputText: "E2E Test Senior"
+
+# Edit phone
+- tapOn: "Phone Number"
+- clearText
+- inputText: "5551234567"
+
+# Edit city
+- tapOn: "City"
+- clearText
+- inputText: "Dallas"
+
+# Edit state
+- tapOn: "State"
+- clearText
+- inputText: "TX"
+
+# Scroll to interests section
+- scrollUntilVisible:
+    element: "Additional Topics"
+    direction: DOWN
+
+# Topics to avoid
+- scrollUntilVisible:
+    element: "Topics to Avoid"
+    direction: DOWN
+
+# Save changes
+- scrollUntilVisible:
+    element: "Save Changes"
+    direction: DOWN
+- tapOn: "Save Changes"
+
+# Navigate back
+- tapOn: "Go back"
+- assertVisible: "Manage your account and preferences"

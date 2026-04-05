@@ -1,0 +1,70 @@
+# Reusable sign-in subflow
+# Expects: TEST_EMAIL, TEST_PASSWORD env vars set by calling flow
+# Starts from: Any state
+# Ends at: Dashboard (tabs) or Onboarding step 1
+
+appId: com.donna.caregiver
+
+---
+
+# Kill app process + clear keychain (sign-out) but NOT clearState
+# clearState wipes Metro bundler cache in dev builds → app won't load
+- stopApp
+- launchApp:
+    clearKeychain: true
+
+# Wait for landing page (clearKeychain signs user out → landing page)
+- extendedWaitUntil:
+    visible: "Sign In"
+    timeout: 15000
+
+# After relaunch, first tap "wakes" GestureHandlerRootView, second navigates
+# This is a known Maestro + react-native-gesture-handler quirk
+- tapOn: "Sign In"
+- tapOn: "Sign In"
+
+# Wait for sign-in screen to render
+- extendedWaitUntil:
+    visible: "Welcome Back"
+    timeout: 10000
+
+# Dismiss any leftover alert from a previous failed run
+- tapOn:
+    text: "OK"
+    optional: true
+
+# Email — tap, select all (clears iOS state-restored text), type
+- tapOn:
+    id: "sign-in-email"
+- longPressOn:
+    id: "sign-in-email"
+- tapOn:
+    text: "Select All"
+    optional: true
+- inputText: ${TEST_EMAIL}
+
+# Brief pause for keyboard/focus state to settle after email input
+- waitForAnimationToEnd
+
+# Password — tap, select all, type
+- tapOn:
+    id: "sign-in-password"
+- longPressOn:
+    id: "sign-in-password"
+- tapOn:
+    text: "Select All"
+    optional: true
+- inputText: ${TEST_PASSWORD}
+
+# Dismiss keyboard before tapping submit
+- tapOn: "Welcome Back"
+
+# Submit sign-in
+- tapOn:
+    id: "sign-in-submit"
+
+# Wait for Clerk auth + API call + navigation to complete
+# App navigates to Dashboard (returning user) or Onboarding (fresh user)
+- extendedWaitUntil:
+    visible: "Dashboard|About You"
+    timeout: 15000

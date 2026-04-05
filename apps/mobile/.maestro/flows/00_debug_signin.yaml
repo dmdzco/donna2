@@ -1,0 +1,29 @@
+# Debug: clearKeychain, wait for landing page, THEN deep link
+appId: com.donna.caregiver
+
+env:
+  TEST_EMAIL: "maestro-test@getdonna.ai"
+  TEST_PASSWORD: "MaestroTest2026"
+
+---
+
+- stopApp
+- launchApp:
+    clearKeychain: true
+
+# Wait for Clerk to fully initialize and landing page to render
+# After clearKeychain, user is NOT signed in → landing page shows
+- extendedWaitUntil:
+    visible: "Sign In"
+    timeout: 15000
+
+# NOW open deep link — Clerk is loaded, AuthGuard is ready
+- openLink: "donna://(auth)/sign-in"
+- tapOn:
+    text: "Open"
+    optional: true
+
+# Wait for sign-in screen
+- extendedWaitUntil:
+    visible: "Welcome Back"
+    timeout: 10000

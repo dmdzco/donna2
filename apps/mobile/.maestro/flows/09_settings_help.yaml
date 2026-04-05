@@ -1,0 +1,62 @@
+# Flow 09: Settings — Help Center
+# Verifies: FAQ, What's New, Contact Support, Report, Suggest, About links
+
+appId: com.donna.caregiver
+
+---
+
+- launchApp:
+    clearKeychain: true
+
+- runFlow: ../subflows/sign_in.yaml
+
+- runFlow: ../subflows/navigate_to_settings.yaml
+
+- tapOn: "Help Center"
+- assertVisible: "Help Center"
+
+# Help section
+- assertVisible: "FAQ"
+- assertVisible: "What's New"
+- assertVisible: "Contact Support"
+
+# Feedback section
+- assertVisible: "Report a Problem"
+- assertVisible: "Make a Suggestion"
+
+# About section
+- assertVisible: "Privacy Policy"
+- assertVisible: "Third Party Services"
+
+# Test FAQ alert
+- tapOn: "FAQ"
+- assertVisible: "Frequently asked questions"
+- tapOn: "OK"
+
+# Test What's New alert
+- tapOn: "What's New"
+- assertVisible: "Donna v1.0.0"
+- tapOn: "OK"
+
+# Test Contact Support modal
+- tapOn: "Contact Support"
+- assertVisible: "Contact Support"
+- assertVisible: "Submit"
+# Dismiss without submitting
+- back
+
+# Test Report a Problem modal
+- tapOn: "Report a Problem"
+- assertVisible: "Report a Problem"
+- assertVisible: "Submit"
+- back
+
+# Test Make a Suggestion modal
+- tapOn: "Make a Suggestion"
+- assertVisible: "Make a Suggestion"
+- assertVisible: "Submit"
+- back
+
+# Navigate back
+- tapOn: "Go back"
+- assertVisible: "Manage your account and preferences"

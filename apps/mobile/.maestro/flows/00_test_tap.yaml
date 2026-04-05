@@ -1,0 +1,9 @@
+# Quick test: can Maestro tap the "Open" button on the system dialog?
+
+appId: com.donna.caregiver
+
+---
+
+- tapOn: "Open"
+- waitForAnimationToEnd
+- assertVisible: "Welcome Back"

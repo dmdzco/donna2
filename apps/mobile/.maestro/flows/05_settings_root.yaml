@@ -1,0 +1,44 @@
+# Flow 05: Settings Tab — Root Navigation
+# Verifies: All settings rows visible, navigation to each sub-screen
+
+appId: com.donna.caregiver
+
+---
+
+- launchApp:
+    clearKeychain: true
+
+- runFlow: ../subflows/sign_in.yaml
+
+- runFlow: ../subflows/navigate_to_settings.yaml
+
+# Profiles section
+- assertVisible: "Loved One Profile"
+- assertVisible: "Caregiver Profile"
+
+# Preferences section
+- assertVisible: "Notification Preferences"
+- assertVisible: "Help Center"
+
+# Account section
+- assertVisible: "Sign Out"
+
+# Navigate to Loved One Profile and back
+- tapOn: "Loved One Profile"
+- assertVisible: "Go back"
+- tapOn: "Go back"
+
+# Navigate to Caregiver Profile and back
+- tapOn: "Caregiver Profile"
+- assertVisible: "Go back"
+- tapOn: "Go back"
+
+# Navigate to Notification Preferences and back
+- tapOn: "Notification Preferences"
+- assertVisible: "Go back"
+- tapOn: "Go back"
+
+# Navigate to Help Center and back
+- tapOn: "Help Center"
+- assertVisible: "Go back"
+- tapOn: "Go back"

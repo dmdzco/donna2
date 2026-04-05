@@ -1,0 +1,47 @@
+# Debug: use select-all to replace accumulated text
+
+appId: com.donna.caregiver
+
+env:
+  TEST_EMAIL: "maestro-test@getdonna.ai"
+  TEST_PASSWORD: "MaestroTest2026"
+
+---
+
+- stopApp
+- launchApp:
+    clearKeychain: true
+    clearState: true
+- openLink: "donna://(auth)/sign-in"
+- tapOn:
+    text: "Open"
+    optional: true
+- waitForAnimationToEnd
+- tapOn:
+    text: "OK"
+    optional: true
+- waitForAnimationToEnd
+
+- assertVisible: "Welcome Back"
+
+# Email — select all existing text and replace
+- tapOn:
+    id: "sign-in-email"
+- longPressOn:
+    id: "sign-in-email"
+- tapOn:
+    text: "Select All"
+    optional: true
+- inputText: ${TEST_EMAIL}
+- takeScreenshot: after_email
+
+# Password — select all existing text and replace
+- tapOn:
+    id: "sign-in-password"
+- longPressOn:
+    id: "sign-in-password"
+- tapOn:
+    text: "Select All"
+    optional: true
+- inputText: ${TEST_PASSWORD}
+- takeScreenshot: after_password

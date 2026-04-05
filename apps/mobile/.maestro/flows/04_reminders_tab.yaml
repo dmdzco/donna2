@@ -1,0 +1,47 @@
+# Flow 04: Reminders Tab
+# Verifies: Tab navigation, add/edit/delete reminder
+
+appId: com.donna.caregiver
+
+---
+
+- launchApp:
+    clearKeychain: true
+
+- runFlow: ../subflows/sign_in.yaml
+
+# Navigate to Reminders tab
+- tapOn: "Reminders"
+
+# Header text (dynamic — contains senior's first name)
+- assertVisible: "Manage what Donna reminds"
+
+# Add a new reminder
+- tapOn: "Add New Reminder"
+
+# Fill out reminder form
+- tapOn:
+    text: "Title"
+    index: 0
+- inputText: "E2E Test Reminder"
+
+- tapOn: "Description"
+- inputText: "Take the test pill with breakfast"
+
+# Save
+- tapOn: "Add Reminder"
+
+# Verify reminder appears in list
+- assertVisible: "E2E Test Reminder"
+
+# Edit the reminder
+- tapOn: "Edit E2E Test Reminder"
+- tapOn: "Description"
+- clearText
+- inputText: "Updated description for E2E"
+- tapOn: "Save Changes"
+
+# Delete the reminder
+- tapOn: "Delete E2E Test Reminder"
+- assertVisible: "This will permanently remove"
+- tapOn: "Delete Reminder"

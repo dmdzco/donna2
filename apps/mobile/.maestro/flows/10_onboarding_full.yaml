@@ -1,0 +1,100 @@
+# Flow 10: Full Onboarding (Fresh User)
+# Requires: TEST_FRESH_EMAIL, TEST_FRESH_PASSWORD (Clerk account with no senior)
+# Verifies: All 5 onboarding steps + success screen
+
+appId: com.donna.caregiver
+
+---
+
+- launchApp:
+    clearKeychain: true
+
+# Sign in with fresh account (no senior → redirects to onboarding)
+- assertVisible: "Donna"
+- tapOn: "Sign In"
+- assertVisible: "Welcome Back"
+- tapOn: "Email Address"
+- inputText: ${TEST_FRESH_EMAIL}
+- tapOn: "Password"
+- inputText: ${TEST_FRESH_PASSWORD}
+- tapOn:
+    text: "Sign In"
+    index: 0
+
+# Wait for onboarding to load
+- extendedWaitUntil:
+    visible: "Step 1"
+    timeout: 15000
+
+# ── Step 1: About You ──
+- tapOn: "First Name"
+- inputText: "E2E"
+- tapOn: "Last Name"
+- inputText: "Tester"
+- tapOn: "Email"
+- inputText: ${TEST_FRESH_EMAIL}
+- tapOn: "Phone Number"
+- inputText: "5551230000"
+- tapOn: "Next"
+
+# ── Step 2: About Your Loved One ──
+- assertVisible: "Step 2"
+- tapOn: "Their Name"
+- inputText: "Test Senior"
+- tapOn: "Their Phone Number"
+- inputText: "5559870000"
+- tapOn: "Select relationship"
+- tapOn: "Daughter"
+- tapOn: "City"
+- inputText: "Dallas"
+- tapOn: "State"
+- inputText: "TX"
+- tapOn: "Zip Code"
+- inputText: "75201"
+- tapOn: "Next"
+
+# ── Step 3: Reminders ──
+- assertVisible: "Step 3"
+- tapOn:
+    text: "Title"
+    index: 0
+- inputText: "Morning medication"
+- tapOn:
+    text: "Description"
+    index: 0
+- inputText: "Take the blue pill with breakfast"
+- tapOn: "Continue"
+
+# ── Step 4: Interests ──
+- assertVisible: "Step 4"
+# Select a couple interests from the grid
+- tapOn: "Music"
+- tapOn: "Done"
+- tapOn: "Gardening"
+- tapOn: "Done"
+- scrollUntilVisible:
+    element: "Continue"
+    direction: DOWN
+- tapOn: "Continue"
+
+# ── Step 5: Schedule Donna ──
+- assertVisible: "Step 5"
+- tapOn: "Select call title"
+- tapOn: "Morning Check-in"
+- tapOn: "Select call time"
+- tapOn: "9:00 AM"
+- scrollUntilVisible:
+    element: "Create Profile"
+    direction: DOWN
+- tapOn: "Create Profile"
+
+# ── Success Screen ──
+- extendedWaitUntil:
+    visible: "Congratulations"
+    timeout: 10000
+- assertVisible: "Continue to Homepage"
+- tapOn: "Continue to Homepage"
+
+# Should land on dashboard
+- assertVisible: "Dashboard"
+- assertVisible: "Schedule"

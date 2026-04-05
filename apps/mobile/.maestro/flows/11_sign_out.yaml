@@ -1,0 +1,29 @@
+# Flow 11: Sign Out
+# Verifies: Sign out from settings returns to landing screen
+
+appId: com.donna.caregiver
+
+---
+
+- launchApp:
+    clearKeychain: true
+
+- runFlow: ../subflows/sign_in.yaml
+
+- runFlow: ../subflows/navigate_to_settings.yaml
+
+# Tap Sign Out
+- tapOn: "Sign Out"
+
+# Confirmation modal
+- assertVisible: "Are you sure you want to sign out"
+- tapOn:
+    text: "Sign Out"
+    index: 1
+
+# Should return to landing screen
+- extendedWaitUntil:
+    visible: "Donna"
+    timeout: 10000
+- assertVisible: "Get Started"
+- assertVisible: "Sign In"

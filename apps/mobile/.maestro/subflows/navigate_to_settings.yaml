@@ -1,0 +1,10 @@
+# Reusable subflow: navigate to Settings tab
+# Starts from: Any tab screen
+# Ends at: Settings root screen
+
+appId: com.donna.caregiver
+
+---
+
+- tapOn: "Settings"
+- assertVisible: "Manage your account and preferences"

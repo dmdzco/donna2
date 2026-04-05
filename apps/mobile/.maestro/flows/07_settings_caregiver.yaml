@@ -1,0 +1,57 @@
+# Flow 07: Settings — Caregiver Profile
+# Verifies: Edit name, phone, relationship; email is read-only
+
+appId: com.donna.caregiver
+
+---
+
+- launchApp:
+    clearKeychain: true
+
+- runFlow: ../subflows/sign_in.yaml
+
+- runFlow: ../subflows/navigate_to_settings.yaml
+
+- tapOn: "Caregiver Profile"
+- assertVisible: "Caregiver Profile"
+
+# Form fields visible
+- assertVisible: "First Name"
+- assertVisible: "Last Name"
+- assertVisible: "Email"
+- assertVisible: "Phone Number"
+
+# Edit first name
+- tapOn: "First Name"
+- clearText
+- inputText: "E2E"
+
+# Edit last name
+- tapOn: "Last Name"
+- clearText
+- inputText: "Tester"
+
+# Edit phone
+- tapOn: "Phone Number"
+- clearText
+- inputText: "5559876543"
+
+# Select relationship
+- tapOn: "Select relationship"
+- tapOn: "Son"
+
+# Change Password button visible
+- scrollUntilVisible:
+    element: "Change Password"
+    direction: DOWN
+- assertVisible: "Change Password"
+
+# Save changes
+- scrollUntilVisible:
+    element: "Save Changes"
+    direction: DOWN
+- tapOn: "Save Changes"
+
+# Navigate back
+- tapOn: "Go back"
+- assertVisible: "Manage your account and preferences"

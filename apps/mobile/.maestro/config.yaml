@@ -1,0 +1,5 @@
+# Maestro E2E Test Configuration for Donna Mobile App
+# https://maestro.mobile.dev/
+
+appId: com.donna.caregiver
+name: Donna Mobile E2E Tests

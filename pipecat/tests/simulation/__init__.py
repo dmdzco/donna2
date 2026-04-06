@@ -35,6 +35,7 @@ from tests.simulation.pipeline import (
     LiveSimComponents,
     build_live_sim_pipeline,
 )
+from tests.simulation.runner import run_simulated_call
 from tests.simulation.transport import (
     CallerEvent,
     CallerTransport,
@@ -59,6 +60,7 @@ __all__ = [
     "build_session_state",
     "cleanup_test_senior",
     "create_test_conversation",
+    "run_simulated_call",
     "seed_test_senior",
     "memory_recall_scenario",
     "memory_seed_scenario",

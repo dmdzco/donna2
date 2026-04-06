@@ -488,3 +488,45 @@ class CallerTransport(Protocol):
     async def receive_response(self, timeout: float = 30.0) -> CallerEvent:
         """Wait for and return the next pipeline response event."""
         ...
+
+
+# ---------------------------------------------------------------------------
+# AudioCallerTransport — Phase 2 audio-loop stub
+# ---------------------------------------------------------------------------
+
+
+class AudioCallerTransport:
+    """Phase 2: Audio-loop caller transport (STUB -- not yet implemented).
+
+    Same interface as TextCallerTransport, but:
+    - send_utterance: text -> TTS -> audio frames -> pipeline STT
+    - receive_response: pipeline TTS -> audio -> STT -> text
+
+    This tests the full audio path except Twilio transport.
+    Catches STT/TTS edge cases (mumbling, overlapping, accent handling).
+
+    CallerAgent, scenarios, and assertions remain identical.
+    """
+
+    def __init__(
+        self,
+        pipeline_task: PipelineTask,
+        response_collector: ResponseCollector,
+        **kwargs,
+    ):
+        self._task = pipeline_task
+        self._collector = response_collector
+        raise NotImplementedError(
+            "AudioCallerTransport is Phase 2 — use TextCallerTransport for now"
+        )
+
+    async def send_utterance(self, text: str) -> None:
+        raise NotImplementedError
+
+    async def receive_response(self, timeout: float = 60.0) -> CallerEvent:
+        raise NotImplementedError
+
+    @property
+    def collector(self) -> ResponseCollector:
+        """The ``ResponseCollector`` wired into the pipeline."""
+        return self._collector

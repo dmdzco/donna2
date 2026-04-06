@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 
 from tests.simulation.transport import (
+    AudioCallerTransport,
     CallerEvent,
     CallerTransport,
     CallResult,
@@ -696,3 +697,23 @@ class TestTextCallerTransport:
 
         for f in task._queued_frames:
             assert f.user_id == "senior-margaret-001"
+
+
+# ---------------------------------------------------------------------------
+# AudioCallerTransport — Phase 2 stub
+# ---------------------------------------------------------------------------
+
+
+class TestAudioCallerTransport:
+    """Tests for the AudioCallerTransport Phase 2 stub."""
+
+    def test_audio_caller_transport_raises_not_implemented(self):
+        """Constructing AudioCallerTransport raises NotImplementedError."""
+        task = _make_mock_task()
+        collector = ResponseCollector()
+
+        with pytest.raises(NotImplementedError, match="Phase 2"):
+            AudioCallerTransport(
+                pipeline_task=task,
+                response_collector=collector,
+            )

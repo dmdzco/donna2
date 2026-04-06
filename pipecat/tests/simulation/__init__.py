@@ -37,6 +37,7 @@ from tests.simulation.pipeline import (
 )
 from tests.simulation.runner import run_simulated_call
 from tests.simulation.transport import (
+    AudioCallerTransport,
     CallerEvent,
     CallerTransport,
     CallResult,
@@ -45,6 +46,7 @@ from tests.simulation.transport import (
 )
 
 __all__ = [
+    "AudioCallerTransport",
     "CallerAgent",
     "CallerGoal",
     "CallerPersona",

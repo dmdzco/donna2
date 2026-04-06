@@ -48,6 +48,7 @@ import {
   useConversations,
 } from "@/src/hooks";
 import { Button, Input, Modal } from "@/src/components/ui";
+import { getErrorMessage } from "@/src/lib/api";
 import type { Reminder, Conversation } from "@/src/types";
 
 // ---------------------------------------------------------------------------
@@ -877,7 +878,7 @@ export default function ScheduleScreen() {
 
           {updateSchedule.isError && (
             <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
-              Failed to save. Please try again.
+              {getErrorMessage(updateSchedule.error, "Failed to save")}
             </Text>
           )}
         </View>

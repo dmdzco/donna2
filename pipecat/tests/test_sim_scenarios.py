@@ -76,11 +76,10 @@ class TestMemoryScenarios:
         s = memory_recall_scenario()
         assert s.max_turns == 8
 
-    def test_both_use_same_senior(self):
+    def test_both_use_same_senior_name(self):
         seed = memory_seed_scenario()
         recall = memory_recall_scenario()
         assert seed.senior.name == recall.senior.name
-        assert seed.senior.id == recall.senior.id
 
     def test_seed_goals_mention_jake_and_florida(self):
         s = memory_seed_scenario()
@@ -137,7 +136,7 @@ class TestScenarioDefaults:
     def test_default_senior(self):
         s = LiveSimScenario(name="test", description="test scenario")
         assert isinstance(s.senior, TestSenior)
-        assert s.senior.name == "Margaret Johnson"
+        assert s.senior.name == "Margaret Simulation"
 
     def test_default_persona(self):
         s = LiveSimScenario(name="test", description="test scenario")

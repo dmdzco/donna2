@@ -3,6 +3,7 @@ import { db } from '../db/client.js';
 import { callAnalyses, seniors } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
+import { routeError } from './helpers.js';
 
 const router = Router();
 
@@ -30,7 +31,7 @@ router.get('/api/call-analyses', requireAdmin, async (req, res) => {
 
     res.json(analyses);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/call-analyses');
   }
 });
 

@@ -12,7 +12,7 @@ import {
   updateScheduleSchema,
   seniorIdParamSchema,
 } from '../validators/schemas.js';
-import { getAccessibleSeniorIds, canAccessSenior } from './helpers.js';
+import { getAccessibleSeniorIds, canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
@@ -64,7 +64,7 @@ router.get('/api/seniors', requireAuth, async (req, res) => {
     const filtered = allSeniors.filter(s => accessibleIds.includes(s.id));
     res.json(filtered);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/seniors');
   }
 });
 
@@ -89,7 +89,7 @@ router.get('/api/seniors/:id', requireAuth, validateParams(seniorIdParamSchema),
     }
     res.json(senior);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/seniors/:id');
   }
 });
 
@@ -112,7 +112,7 @@ router.patch('/api/seniors/:id', requireAuth, writeLimiter, validateParams(senio
     const senior = await seniorService.update(req.params.id, req.body);
     res.json(senior);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'PATCH /api/seniors/:id');
   }
 });
 
@@ -134,7 +134,7 @@ router.get('/api/seniors/:id/schedule', requireAuth, validateParams(seniorIdPara
       topicsToAvoid: senior.preferredCallTimes?.topicsToAvoid || [],
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/seniors/:id/schedule');
   }
 });
 
@@ -166,7 +166,7 @@ router.patch('/api/seniors/:id/schedule', requireAuth, writeLimiter, validatePar
       topicsToAvoid: updated.preferredCallTimes?.topicsToAvoid || [],
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'PATCH /api/seniors/:id/schedule');
   }
 });
 

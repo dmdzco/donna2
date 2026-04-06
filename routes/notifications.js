@@ -6,6 +6,7 @@ import { db } from '../db/client.js';
 import { caregivers, notifications } from '../db/schema.js';
 import { eq, and, desc } from 'drizzle-orm';
 import crypto from 'crypto';
+import { routeError } from './helpers.js';
 
 const router = Router();
 
@@ -58,8 +59,7 @@ router.get('/api/notifications/preferences', requireAuth, async (req, res) => {
     const prefs = await notificationService.getPreferences(caregiverId);
     res.json(prefs);
   } catch (error) {
-    console.error('[Notifications] Get preferences error:', error.message);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/notifications/preferences');
   }
 });
 
@@ -84,8 +84,7 @@ router.patch('/api/notifications/preferences', requireAuth, async (req, res) => 
     const updated = await notificationService.upsertPreferences(caregiverId, parsed.data);
     res.json(updated);
   } catch (error) {
-    console.error('[Notifications] Update preferences error:', error.message);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'PATCH /api/notifications/preferences');
   }
 });
 
@@ -112,8 +111,7 @@ router.get('/api/notifications', requireAuth, async (req, res) => {
 
     res.json(results);
   } catch (error) {
-    console.error('[Notifications] List error:', error.message);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/notifications');
   }
 });
 
@@ -141,8 +139,7 @@ router.patch('/api/notifications/:id/read', requireAuth, async (req, res) => {
 
     res.json(updated);
   } catch (error) {
-    console.error('[Notifications] Mark read error:', error.message);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'PATCH /api/notifications/:id/read');
   }
 });
 
@@ -177,8 +174,7 @@ router.post('/api/notifications/trigger', requireServiceApiKey, async (req, res)
 
     res.json({ success: true, event_type });
   } catch (error) {
-    console.error('[Notifications] Trigger error:', error.message);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'POST /api/notifications/trigger');
   }
 });
 

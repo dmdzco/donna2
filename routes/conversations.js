@@ -3,7 +3,7 @@ import { conversationService } from '../services/conversations.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validateParams } from '../middleware/validate.js';
 import { seniorIdParamSchema } from '../validators/schemas.js';
-import { getAccessibleSeniorIds, canAccessSenior } from './helpers.js';
+import { getAccessibleSeniorIds, canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
@@ -26,7 +26,7 @@ router.get('/api/seniors/:id/conversations', requireAuth, validateParams(seniorI
     const convos = await conversationService.getForSenior(req.params.id, 20);
     res.json(convos);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/seniors/:id/conversations');
   }
 });
 
@@ -50,7 +50,7 @@ router.get('/api/conversations', requireAuth, async (req, res) => {
     const filtered = convos.filter(c => accessibleIds.includes(c.seniorId));
     res.json(filtered);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/conversations');
   }
 });
 

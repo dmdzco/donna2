@@ -47,10 +47,12 @@ const cronSchema = z.string()
   )
   .optional();
 
-// ISO date string
+// ISO date string — validates format only, no transform.
+// Drizzle and PostgreSQL accept ISO strings for timestamp columns natively.
+// A previous .transform(date => new Date(date)) silently converted strings
+// to Date objects, causing type mismatches in route handlers.
 const isoDateSchema = z.string()
-  .refine(date => !isNaN(Date.parse(date)), 'Invalid date format')
-  .transform(date => new Date(date));
+  .refine(date => !isNaN(Date.parse(date)), 'Invalid date format');
 
 // =============================================================================
 // Senior Schemas

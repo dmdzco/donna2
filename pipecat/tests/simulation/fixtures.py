@@ -28,6 +28,7 @@ from loguru import logger
 
 @dataclass
 class TestSenior:
+    __test__ = False  # Prevent pytest from trying to collect this as a test class
     """Senior profile used in simulation scenarios.
 
     Mirrors the columns that matter for call behaviour.  When used with

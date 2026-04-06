@@ -1,22 +1,26 @@
 """Unit tests for the simulation transport layer.
 
-Tests ResponseCollector (FrameProcessor that captures pipeline output) and
-the CallerEvent / CallResult data classes.
+Tests ResponseCollector (FrameProcessor that captures pipeline output),
+TextCallerTransport (speech timing simulation), and the CallerEvent /
+CallResult data classes.
 """
 
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import MagicMock
 
 import pytest
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
     FunctionCallFromLLM,
+    InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     TextFrame,
+    TranscriptionFrame,
     TTSSpeakFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -26,6 +30,7 @@ from tests.simulation.transport import (
     CallerTransport,
     CallResult,
     ResponseCollector,
+    TextCallerTransport,
 )
 
 
@@ -91,7 +96,7 @@ class TestCallResult:
         assert result.web_search_results == []
         assert result.fillers == []
         assert result.total_duration_ms == 0.0
-        assert result.end_reason == ""
+        assert result.end_reason == "unknown"
         assert result.post_call_completed is False
 
     def test_populated_result(self):
@@ -540,3 +545,154 @@ class TestCallerTransportProtocol:
 
         transport = FakeTransport()
         assert isinstance(transport, CallerTransport)
+
+
+# ---------------------------------------------------------------------------
+# TextCallerTransport — speech timing simulation
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_task() -> MagicMock:
+    """Create a mock PipelineTask with a recording queue_frame."""
+    task = MagicMock()
+    task._queued_frames: list[Frame] = []
+
+    def _queue(frame):
+        task._queued_frames.append(frame)
+
+    task.queue_frame = MagicMock(side_effect=_queue)
+    return task
+
+
+class TestTextCallerTransport:
+    """Tests for TextCallerTransport speech timing simulation."""
+
+    @pytest.mark.asyncio
+    async def test_emits_interims_before_final(self):
+        """Multi-word sentence produces InterimTranscriptionFrames before the final."""
+        task = _make_mock_task()
+        collector = ResponseCollector()
+        transport = TextCallerTransport(
+            pipeline_task=task,
+            response_collector=collector,
+        )
+
+        # 7 words → should produce at least 2 interim chunks + full interim + final
+        await transport.send_utterance("I went to the garden this morning")
+
+        frames = task._queued_frames
+        assert len(frames) >= 3, f"Expected at least 3 frames, got {len(frames)}"
+
+        # All frames before the last should be InterimTranscriptionFrame
+        for f in frames[:-1]:
+            assert isinstance(f, InterimTranscriptionFrame), (
+                f"Expected InterimTranscriptionFrame, got {type(f).__name__}"
+            )
+
+        # Last frame should be the final TranscriptionFrame
+        assert isinstance(frames[-1], TranscriptionFrame)
+        assert frames[-1].text == "I went to the garden this morning"
+
+    @pytest.mark.asyncio
+    async def test_short_utterance_emits_final_only(self):
+        """A 1-2 word utterance emits only a final TranscriptionFrame."""
+        task = _make_mock_task()
+        collector = ResponseCollector()
+        transport = TextCallerTransport(
+            pipeline_task=task,
+            response_collector=collector,
+        )
+
+        await transport.send_utterance("Hello")
+
+        frames = task._queued_frames
+        assert len(frames) == 1
+        assert isinstance(frames[0], TranscriptionFrame)
+        assert frames[0].text == "Hello"
+
+    @pytest.mark.asyncio
+    async def test_marks_injection_time(self):
+        """send_utterance calls collector.mark_injection_time() before the final frame."""
+        task = _make_mock_task()
+        collector = ResponseCollector()
+        transport = TextCallerTransport(
+            pipeline_task=task,
+            response_collector=collector,
+        )
+
+        # _injection_time is None before any utterance
+        assert collector._injection_time is None
+
+        await transport.send_utterance("How are you doing today")
+
+        # After send_utterance, injection time should be set
+        assert collector._injection_time is not None
+
+    @pytest.mark.asyncio
+    async def test_implements_caller_transport_protocol(self):
+        """TextCallerTransport satisfies the CallerTransport protocol."""
+        task = _make_mock_task()
+        collector = ResponseCollector()
+        transport = TextCallerTransport(
+            pipeline_task=task,
+            response_collector=collector,
+        )
+        assert isinstance(transport, CallerTransport)
+
+    @pytest.mark.asyncio
+    async def test_three_word_utterance_no_interims(self):
+        """Exactly 3 words (INTERIM_CHUNK_WORDS) should NOT produce interims."""
+        task = _make_mock_task()
+        collector = ResponseCollector()
+        transport = TextCallerTransport(
+            pipeline_task=task,
+            response_collector=collector,
+        )
+
+        await transport.send_utterance("Good morning dear")
+
+        frames = task._queued_frames
+        # 3 words = INTERIM_CHUNK_WORDS, so len(words) is NOT > INTERIM_CHUNK_WORDS
+        assert len(frames) == 1
+        assert isinstance(frames[0], TranscriptionFrame)
+
+    @pytest.mark.asyncio
+    async def test_interim_chunks_build_progressively(self):
+        """Interim chunks should build up progressively from the start."""
+        task = _make_mock_task()
+        collector = ResponseCollector()
+        transport = TextCallerTransport(
+            pipeline_task=task,
+            response_collector=collector,
+        )
+
+        # 6 words → 2 interim chunks + 1 full interim + 1 final
+        await transport.send_utterance("I really love my rose garden")
+
+        frames = task._queued_frames
+        interims = [f for f in frames if isinstance(f, InterimTranscriptionFrame)]
+        finals = [f for f in frames if isinstance(f, TranscriptionFrame)]
+
+        assert len(interims) >= 2, f"Expected at least 2 interims, got {len(interims)}"
+        assert len(finals) == 1
+
+        # First interim should be the first 3 words
+        assert interims[0].text == "I really love"
+        # Second interim should be the first 6 words
+        assert interims[1].text == "I really love my rose garden"
+
+    @pytest.mark.asyncio
+    async def test_user_id_propagated(self):
+        """Custom user_id is set on all emitted frames."""
+        task = _make_mock_task()
+        collector = ResponseCollector()
+        transport = TextCallerTransport(
+            pipeline_task=task,
+            response_collector=collector,
+            user_id="senior-margaret-001",
+        )
+
+        await transport.send_utterance("Tell me about the weather today please")
+
+        for f in task._queued_frames:
+            assert f.user_id == "senior-margaret-001"

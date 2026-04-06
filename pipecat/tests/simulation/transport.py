@@ -2,8 +2,8 @@
 
 ResponseCollector is a FrameProcessor that sits in the Donna pipeline and
 captures output frames: streamed text chunks (TextFrame), Director fillers
-(TTSSpeakFrame), ephemeral injections (LLMMessagesAppendFrame with [MEMORY]
-or [WEB RESULT] content), tool calls (FunctionCallFromLLM), and pipeline
+(TTSSpeakFrame), ephemeral injections (LLMMessagesAppendFrame with
+[EPHEMERAL: MEMORY ...] or [WEB RESULT] content), tool calls (FunctionCallFromLLM), and pipeline
 termination (EndFrame).
 
 CallerTransport is a Protocol that abstracts how caller utterances are
@@ -22,12 +22,15 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     FunctionCallFromLLM,
+    InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     TextFrame,
+    TranscriptionFrame,
     TTSSpeakFrame,
 )
+from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameProcessor
 
 
@@ -81,7 +84,7 @@ class CallResult:
     web_search_results: list[str] = field(default_factory=list)
     fillers: list[str] = field(default_factory=list)
     total_duration_ms: float = 0.0
-    end_reason: str = ""
+    end_reason: str = "unknown"
     post_call_completed: bool = False
 
 
@@ -347,6 +350,108 @@ class ResponseCollector(FrameProcessor):
         self._tool_calls.clear()
         self._ended = False
         self._end_event.clear()
+
+
+# ---------------------------------------------------------------------------
+# TextCallerTransport — text-only caller with realistic speech timing
+# ---------------------------------------------------------------------------
+
+
+class TextCallerTransport:
+    """Simulates a caller by injecting transcription frames with realistic timing.
+
+    Produces progressive ``InterimTranscriptionFrame`` chunks (3 words at a
+    time with 150ms gaps), then a silence gap (300ms — above the Director's
+    250ms threshold to trigger speculative analysis), marks injection time on
+    the ``ResponseCollector``, and finally emits the full
+    ``TranscriptionFrame``.
+
+    This timing pattern causes the Director's continuous speculative analysis,
+    silence detection, and memory prefetch to fire naturally — exactly as they
+    would during a real phone call with Deepgram STT.
+    """
+
+    INTERIM_CHUNK_WORDS: int = 3
+    INTERIM_GAP_MS: int = 150
+    POST_INTERIM_SILENCE_MS: int = 300
+
+    def __init__(
+        self,
+        pipeline_task: PipelineTask,
+        response_collector: ResponseCollector,
+        user_id: str = "senior-test-001",
+    ):
+        self._task = pipeline_task
+        self._collector = response_collector
+        self._user_id = user_id
+
+    @property
+    def collector(self) -> ResponseCollector:
+        """The ``ResponseCollector`` wired into the pipeline."""
+        return self._collector
+
+    async def send_utterance(self, text: str) -> None:
+        """Inject a caller utterance with progressive interims and silence gap.
+
+        1. Emit progressive ``InterimTranscriptionFrame`` chunks (3 words at a
+           time, 150ms gap between each).
+        2. If the text was long enough for multiple interims, emit a final
+           interim with the full text.
+        3. Wait 300ms (silence gap — exceeds Director's 250ms threshold).
+        4. Call ``collector.mark_injection_time()``.
+        5. Emit the final ``TranscriptionFrame``.
+        """
+        words = text.split()
+
+        # Step 1: Emit progressive interims (3 words at a time)
+        if len(words) > self.INTERIM_CHUNK_WORDS:
+            num_chunks = (len(words) + self.INTERIM_CHUNK_WORDS - 1) // self.INTERIM_CHUNK_WORDS
+            last_partial = ""
+            for i in range(num_chunks):
+                start = 0
+                end = min((i + 1) * self.INTERIM_CHUNK_WORDS, len(words))
+                last_partial = " ".join(words[start:end])
+                frame = InterimTranscriptionFrame(
+                    text=last_partial,
+                    user_id=self._user_id,
+                    timestamp="",
+                    language="en",
+                )
+                self._task.queue_frame(frame)
+                await asyncio.sleep(self.INTERIM_GAP_MS / 1000.0)
+
+            # Step 2: Emit full text as final interim if last chunk was a subset
+            if last_partial != text:
+                full_interim = InterimTranscriptionFrame(
+                    text=text,
+                    user_id=self._user_id,
+                    timestamp="",
+                    language="en",
+                )
+                self._task.queue_frame(full_interim)
+                await asyncio.sleep(self.INTERIM_GAP_MS / 1000.0)
+
+        # Step 3: Silence gap (exceeds Director's 250ms threshold)
+        await asyncio.sleep(self.POST_INTERIM_SILENCE_MS / 1000.0)
+
+        # Step 4: Mark injection time for latency measurement
+        self._collector.mark_injection_time()
+
+        # Step 5: Emit final TranscriptionFrame
+        final = TranscriptionFrame(
+            text=text,
+            user_id=self._user_id,
+            timestamp="",
+            language="en",
+        )
+        self._task.queue_frame(final)
+
+    async def receive_response(self, timeout: float = 60.0) -> CallerEvent:
+        """Wait for and return the next pipeline response event.
+
+        Delegates to the ``ResponseCollector.wait_for_response()`` method.
+        """
+        return await self._collector.wait_for_response(timeout)
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ import { useAuth, useOAuth, useSignIn } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -10,6 +10,7 @@ import {
   Pressable,
   ScrollView,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -41,6 +42,7 @@ export default function SignInScreen() {
   const [errors, setErrors] = useState<{ email?: string; password?: string }>(
     {}
   );
+  const passwordRef = useRef<TextInput>(null);
 
   async function navigateAfterAuth() {
     const token = await getToken();
@@ -75,6 +77,24 @@ export default function SignInScreen() {
       if (result.status === "complete") {
         await setActive({ session: result.createdSessionId });
         await navigateAfterAuth();
+      } else if (result.status === "needs_second_factor") {
+        // Auto-verify with test code in dev mode (Clerk test accounts use 424242)
+        if (__DEV__) {
+          await signIn.prepareSecondFactor({ strategy: "email_code" });
+          const secondResult = await signIn.attemptSecondFactor({
+            strategy: "email_code",
+            code: "424242",
+          });
+          if (secondResult.status === "complete") {
+            await setActive({ session: secondResult.createdSessionId });
+            await navigateAfterAuth();
+          }
+        } else {
+          Alert.alert(
+            "Verification Required",
+            "Please check your email for a verification code."
+          );
+        }
       }
     } catch (err: unknown) {
       const message =
@@ -175,22 +195,29 @@ export default function SignInScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
-              textContentType="emailAddress"
-              autoComplete="email"
+              textContentType="none"
+              autoComplete="off"
+              testID="sign-in-email"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
             />
           </View>
 
           {/* Password input */}
           <View className="mb-2">
             <Input
+              ref={passwordRef}
               label="Password"
               placeholder="••••••••"
               value={password}
               onChangeText={setPassword}
               error={errors.password}
-              secureTextEntry
-              textContentType="password"
-              autoComplete="current-password"
+              secureTextEntry={!__DEV__}
+              textContentType="none"
+              autoComplete="off"
+              testID="sign-in-password"
+              returnKeyType="go"
+              onSubmitEditing={handleSignIn}
             />
           </View>
 
@@ -213,6 +240,7 @@ export default function SignInScreen() {
             loading={loading}
             disabled={loading || oauthLoading !== null}
             className="mb-6"
+            testID="sign-in-submit"
           />
 
           {/* Divider */}

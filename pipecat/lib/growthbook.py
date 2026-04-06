@@ -21,6 +21,8 @@ Usage:
 
 from __future__ import annotations
 
+import os
+
 from loguru import logger
 
 _client = None
@@ -90,7 +92,7 @@ async def resolve_flags(
         "news_search_enabled": True,
         "memory_search_enabled": True,
         "tts_fallback": False,
-        "tts_provider": "elevenlabs",  # "cartesia" or "elevenlabs"
+        "tts_provider": os.getenv("TTS_PROVIDER", "elevenlabs"),  # "cartesia" or "elevenlabs"
         "context_cache_enabled": True,
         "post_call_analysis_enabled": True,
         "scheduler_call_stagger_ms": 5000,

@@ -36,22 +36,30 @@ export default function DailyContext() {
 
       {/* Filters */}
       <div className="flex gap-3 mb-4">
-        <select
-          value={seniorId}
-          onChange={(e) => setSeniorId(e.target.value)}
-          className="flex-1 px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
-        >
-          <option value="">All seniors</option>
-          {seniors.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
-        </select>
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className="w-40 px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
-        />
+        <div className="flex-1">
+          <label htmlFor="daily-context-senior" className="sr-only">Senior</label>
+          <select
+            id="daily-context-senior"
+            value={seniorId}
+            onChange={(e) => setSeniorId(e.target.value)}
+            className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
+          >
+            <option value="">All seniors</option>
+            {seniors.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="daily-context-date" className="sr-only">Date</label>
+          <input
+            id="daily-context-date"
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-40 px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
+          />
+        </div>
         <button
           onClick={loadData}
           className="bg-admin-accent hover:bg-admin-accent-hover text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:-translate-y-0.5 hover:shadow-card-hover transition-all"

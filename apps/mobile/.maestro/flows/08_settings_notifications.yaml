@@ -1,0 +1,53 @@
+# Flow 08: Settings — Notification Preferences
+# Verifies: All toggles visible, toggle on/off, save
+
+appId: com.donna.caregiver
+
+env:
+  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "Maestro2026!"
+
+---
+
+- runFlow: ../subflows/sign_in.yaml
+- runFlow: ../subflows/navigate_to_settings.yaml
+- tapOn: "Notification Preferences"
+
+# All notification toggles visible
+- assertVisible: "Call Summaries"
+- assertVisible: "Concern Alerts"
+- assertVisible: "Missed Reminder Alerts"
+- assertVisible: "Weekly Summary"
+
+# Toggle each preference on/off
+- tapOn: "Call Summaries"
+- tapOn: "Concern Alerts"
+- tapOn: "Missed Reminder Alerts"
+- tapOn: "Weekly Summary"
+
+# Toggle them back
+- tapOn: "Call Summaries"
+- tapOn: "Concern Alerts"
+- tapOn: "Missed Reminder Alerts"
+- tapOn: "Weekly Summary"
+
+# Save
+- scrollUntilVisible:
+    element: "Save Changes"
+    direction: DOWN
+- tapOn: "Save Changes"
+
+# Wait for save confirmation (OK button triggers router.back())
+- extendedWaitUntil:
+    visible: "Saved|Preferences updated|OK"
+    timeout: 10000
+- tapOn:
+    text: "OK"
+    optional: true
+
+# Tapping OK auto-navigates back via router.back(), verify we're on settings root
+- extendedWaitUntil:
+    visible: "Manage your account and preferences"
+    timeout: 5000
+
+- takeScreenshot: 08_notifications

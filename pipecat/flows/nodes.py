@@ -148,9 +148,6 @@ def _build_senior_context(session_state: dict) -> str:
                 parts.append(f"- {content}")
         parts.append("Share naturally: \"Oh, your daughter wanted me to mention...\" Don't force it if the moment isn't right.")
 
-    # News is NOT in system prompt — injected dynamically by Director
-    # when should_mention_news is true (saves ~300 tokens per turn)
-
     return "\n".join(parts)
 
 

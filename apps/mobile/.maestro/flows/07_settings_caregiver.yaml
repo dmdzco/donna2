@@ -1,0 +1,68 @@
+# Flow 07: Settings — Caregiver Profile
+# Verifies: Form fields, edit name/phone/relationship, email read-only, save
+
+appId: com.donna.caregiver
+
+env:
+  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "Maestro2026!"
+
+---
+
+- runFlow: ../subflows/sign_in.yaml
+- runFlow: ../subflows/navigate_to_settings.yaml
+- tapOn: "Caregiver Profile"
+
+- assertVisible: "Caregiver Profile"
+
+# Form fields visible
+- assertVisible: "First Name"
+- assertVisible: "Last Name"
+- assertVisible: "Email"
+- assertVisible: "Phone Number"
+
+# Edit first name
+- tapOn: "First Name"
+- eraseText: 50
+- inputText: "E2E"
+
+# Edit last name
+- tapOn: "Last Name"
+- eraseText: 50
+- inputText: "Tester"
+
+# Edit phone
+- tapOn: "Phone Number"
+- eraseText: 50
+- inputText: "5559876543"
+
+# Select relationship
+- tapOn: "Select relationship"
+- tapOn: "Son"
+
+# Change Password button visible
+- scrollUntilVisible:
+    element: "Change Password"
+    direction: DOWN
+- assertVisible: "Change Password"
+
+# Save changes
+- scrollUntilVisible:
+    element: "Save Changes"
+    direction: DOWN
+- tapOn: "Save Changes"
+
+# Wait for save confirmation (OK button triggers router.back())
+- extendedWaitUntil:
+    visible: "Saved|Profile updated|OK"
+    timeout: 10000
+- tapOn:
+    text: "OK"
+    optional: true
+
+# Tapping OK auto-navigates back via router.back(), verify we're on settings root
+- extendedWaitUntil:
+    visible: "Manage your account and preferences"
+    timeout: 5000
+
+- takeScreenshot: 07_caregiver

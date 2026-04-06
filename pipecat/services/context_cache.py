@@ -20,6 +20,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from loguru import logger
 from db import execute
+from lib.sanitize import mask_name
 
 # In-memory cache: senior_id -> cached context dict
 _cache: dict[str, dict] = {}
@@ -301,7 +302,7 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
                         news_context_full,
                         senior_id,
                     )
-                    logger.info("Persisted cached news for {name}", name=senior.get("name"))
+                    logger.info("Persisted cached news for {name}", name=mask_name(senior.get("name")))
                 except Exception as e:
                     logger.error("Failed to persist news for {sid}: {err}", sid=senior_id, err=str(e))
 
@@ -369,7 +370,7 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
         _cache[senior_id] = cached
 
         elapsed = round((time.time() - start) * 1000)
-        logger.info("Pre-cached context for {name} in {ms}ms", name=senior.get("name"), ms=elapsed)
+        logger.info("Pre-cached context for {name} in {ms}ms", name=mask_name(senior.get("name")), ms=elapsed)
         return cached
 
     except Exception as e:

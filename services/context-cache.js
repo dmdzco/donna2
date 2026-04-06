@@ -15,6 +15,7 @@ import { memoryService } from './memory.js';
 import { conversationService } from './conversations.js';
 import { seniorService } from './seniors.js';
 import { greetingService } from './greetings.js';
+import { maskName } from '../lib/sanitize.js';
 
 // In-memory cache (could be Redis for multi-instance deployments)
 const cache = new Map();
@@ -208,7 +209,7 @@ async function prefetchAndCache(seniorId) {
       seniorId: senior.id,
     });
 
-    console.log(`[ContextCache] Generated greeting for ${senior.name}: period=${period}, template=${templateIndex}, interest=${selectedInterest || 'none'}`);
+    console.log(`[ContextCache] Generated greeting for ${maskName(senior.name)}: period=${period}, template=${templateIndex}, interest=${selectedInterest || 'none'}`);
 
     // Build memory context string (Tier 1 + important)
     const memoryParts = [];
@@ -243,7 +244,7 @@ async function prefetchAndCache(seniorId) {
     cache.set(seniorId, cachedContext);
 
     const elapsed = Date.now() - startTime;
-    console.log(`[ContextCache] Pre-cached context for ${senior.name} in ${elapsed}ms`);
+    console.log(`[ContextCache] Pre-cached context for ${maskName(senior.name)} in ${elapsed}ms`);
 
     return cachedContext;
   } catch (error) {

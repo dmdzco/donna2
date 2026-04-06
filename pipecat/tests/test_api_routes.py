@@ -12,6 +12,7 @@ os.environ.setdefault("TWILIO_ACCOUNT_SID", "ACtest")
 os.environ.setdefault("TWILIO_AUTH_TOKEN", "test-token")
 os.environ.setdefault("TWILIO_PHONE_NUMBER", "+15551234567")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/testdb")
+os.environ.setdefault("SKIP_TWILIO_VALIDATION", "true")
 
 from main import app
 

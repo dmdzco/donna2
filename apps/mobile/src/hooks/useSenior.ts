@@ -50,7 +50,7 @@ export function useUpdateSchedule(seniorId: string | undefined) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { schedule?: unknown; updateTopics?: string[] }) => {
+    mutationFn: async (data: { schedule?: unknown; topicsToAvoid?: string[] }) => {
       const token = await getToken();
       return api.seniors.updateSchedule(seniorId!, data, token!);
     },

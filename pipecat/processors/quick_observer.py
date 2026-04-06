@@ -303,7 +303,7 @@ class QuickObserverProcessor(FrameProcessor):
 
     # Seconds to wait after goodbye detection before forcing call end.
     # Gives the LLM time to generate and TTS to speak the goodbye audio.
-    GOODBYE_DELAY_SECONDS = 2.0
+    GOODBYE_DELAY_SECONDS = 5.0
 
     def __init__(self, session_state: dict | None = None, **kwargs):
         super().__init__(**kwargs)
@@ -362,7 +362,7 @@ class QuickObserverProcessor(FrameProcessor):
             if analysis.guidance:
                 guidance_msg = {
                     "role": "user",
-                    "content": f"[Internal guidance — do not read aloud]\n{analysis.guidance}",
+                    "content": f"[EPHEMERAL: Observer guidance — do not read aloud]\n{analysis.guidance}",
                 }
                 await self.push_frame(
                     LLMMessagesAppendFrame(messages=[guidance_msg], run_llm=False)

@@ -9,6 +9,7 @@ import json
 import re
 from loguru import logger
 from db import query_one, query_many, execute
+from lib.sanitize import mask_name, mask_phone
 
 
 def _normalize_phone(phone: str) -> str:
@@ -23,7 +24,9 @@ async def find_by_phone(phone: str) -> dict | None:
     return await query_one(
         """SELECT id, name, phone, timezone, interests, family_info,
                   medical_notes, preferred_call_times, is_active,
-                  city, state, zip_code, additional_info
+                  city, state, zip_code, additional_info,
+                  call_context_snapshot, cached_news, call_settings,
+                  interest_scores
            FROM seniors WHERE phone = $1""",
         normalized,
     )
@@ -49,7 +52,7 @@ async def create(data: dict) -> dict:
         data.get("zipCode"),
         data.get("additionalInfo"),
     )
-    logger.info("Created senior: {name} {phone}", name=row["name"], phone=phone)
+    logger.info("Created senior: {name} {phone}", name=mask_name(row["name"]), phone=mask_phone(phone))
     return row
 
 
@@ -106,7 +109,7 @@ async def get_by_id(senior_id: str) -> dict | None:
     return await query_one("SELECT * FROM seniors WHERE id = $1", senior_id)
 
 
-async def delete(senior_id: str) -> dict | None:
+async def deactivate(senior_id: str) -> dict | None:
     """Soft-delete a senior (set is_active = false)."""
     return await query_one(
         "UPDATE seniors SET is_active = false, updated_at = NOW() WHERE id = $1 RETURNING *",
@@ -114,11 +117,15 @@ async def delete(senior_id: str) -> dict | None:
     )
 
 
+# Backward-compatible alias
+delete = deactivate
+
+
 DEFAULT_CALL_SETTINGS = {
     "max_call_minutes": 12,
     "winding_down_minutes": 9,
-    "goodbye_delay_seconds": 2.0,
-    "greeting_followup_chance": 0.6,
+    "goodbye_delay_seconds": 5.0,
+    "greeting_followup_chance": 0.3,
     "memory_decay_half_life_days": 30,
     "max_consecutive_questions": 2,
     "memory_refresh_after_minutes": 5,

@@ -126,7 +126,8 @@ def format_news_context(raw_news: str) -> str:
 
 
 async def _tavily_search(query: str) -> str | None:
-    """Search via Tavily (fast, 1-3s typical)."""
+    """Search via Tavily (fast, 1-3s typical). Returns raw result snippets only —
+    never use include_answer (LLM-generated, hallucinates on real-time data)."""
     client = _get_tavily()
     if client is None:
         return None
@@ -136,25 +137,18 @@ async def _tavily_search(query: str) -> str | None:
             query=query,
             search_depth="basic",
             max_results=3,
-            include_answer=True,
         )
 
     result = await _tavily_breaker.call(_call(), fallback=None)
     if result is None:
         return None
 
-    # Tavily returns a pre-generated answer + individual results
-    answer = result.get("answer", "").strip()
-    if answer:
-        return answer
-
-    # Fallback: summarize from individual results
     results = result.get("results", [])
-    if results:
-        snippets = [r.get("content", "")[:200] for r in results[:3]]
-        return " ".join(snippets).strip()
+    if not results:
+        return None
 
-    return None
+    snippets = [f"- {r.get('title', '')}: {r.get('content', '')[:300]}" for r in results[:3]]
+    return "\n".join(snippets).strip()
 
 
 async def _openai_search(query: str) -> str | None:

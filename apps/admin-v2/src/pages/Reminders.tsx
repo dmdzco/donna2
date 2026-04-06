@@ -139,9 +139,10 @@ export default function Reminders() {
         <form onSubmit={handleSubmit}>
           <div className="grid grid-cols-2 gap-3.5">
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Senior *</label>
+              <label htmlFor="reminder-senior" className="block text-sm font-semibold text-admin-text-light mb-1">Senior *</label>
               <select
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="reminder-senior"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 value={seniorId}
                 onChange={(e) => setSeniorId(e.target.value)}
                 required
@@ -155,9 +156,10 @@ export default function Reminders() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Type</label>
+              <label htmlFor="reminder-type" className="block text-sm font-semibold text-admin-text-light mb-1">Type</label>
               <select
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="reminder-type"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 value={type}
                 onChange={(e) => setType(e.target.value)}
               >
@@ -167,9 +169,10 @@ export default function Reminders() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Title *</label>
+              <label htmlFor="reminder-title" className="block text-sm font-semibold text-admin-text-light mb-1">Title *</label>
               <input
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="reminder-title"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -178,9 +181,10 @@ export default function Reminders() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Description</label>
+              <label htmlFor="reminder-description" className="block text-sm font-semibold text-admin-text-light mb-1">Description</label>
               <textarea
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="reminder-description"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={1}
@@ -188,9 +192,10 @@ export default function Reminders() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Date</label>
+              <label htmlFor="reminder-date" className="block text-sm font-semibold text-admin-text-light mb-1">Date</label>
               <input
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="reminder-date"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
@@ -198,9 +203,10 @@ export default function Reminders() {
               <p className="text-[11px] text-admin-text-muted mt-0.5">Required for one-time reminders</p>
             </div>
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Time *</label>
+              <label htmlFor="reminder-time" className="block text-sm font-semibold text-admin-text-light mb-1">Time *</label>
               <input
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="reminder-time"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 type="time"
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
@@ -209,8 +215,8 @@ export default function Reminders() {
             </div>
           </div>
 
-          <div className="mt-3.5">
-            <label className="block text-sm font-semibold text-admin-text-light mb-1">Recurring</label>
+          <fieldset className="mt-3.5">
+            <legend className="block text-sm font-semibold text-admin-text-light mb-1">Recurring</legend>
             <div className="flex gap-4">
               {[
                 { value: 'one-time', label: 'One-time' },
@@ -229,7 +235,7 @@ export default function Reminders() {
                 </label>
               ))}
             </div>
-          </div>
+          </fieldset>
 
           <div className="mt-4">
             <button

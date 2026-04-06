@@ -182,6 +182,7 @@ class ConversationDirectorProcessor(FrameProcessor):
         self._session_state = session_state
         self._pipeline_task = None
         self._last_result: dict | None = None
+        self._last_result_age: int = 0
         self._delayed_end_task: asyncio.Task | None = None
         self._turn_count = 0
         self._end_scheduled = False
@@ -270,13 +271,16 @@ class ConversationDirectorProcessor(FrameProcessor):
                 # SAME-TURN guidance from speculative analysis
                 self._speculative_hits += 1
                 self._last_result = speculative_result
+                self._last_result_age = 0
                 await self._inject_guidance(speculative_result)
                 await self._take_actions(speculative_result)
                 asyncio.create_task(self._run_director_prefetch(speculative_result))
                 logger.info("[Director] SAME-TURN guidance injected (speculative)")
 
-            elif self._last_result and not goodbye_in_progress:
-                # PREVIOUS-TURN guidance (fallback to existing behavior)
+            elif self._last_result and not goodbye_in_progress and self._last_result_age < 1:
+                # PREVIOUS-TURN guidance — only inject once as fallback,
+                # don't keep re-injecting stale guidance on every turn.
+                self._last_result_age += 1
                 await self._inject_guidance(self._last_result)
                 await self._take_actions(self._last_result)
 
@@ -533,16 +537,47 @@ class ConversationDirectorProcessor(FrameProcessor):
         Called at the start of each new turn so only fresh, relevant
         context is present. The senior's conversation stays permanent;
         Director guidance, memories, and web results are ephemeral.
+
+        Handles merged messages (where context aggregator combines ephemeral
+        guidance with user speech into multi-block messages) by stripping
+        only the ephemeral blocks rather than removing the whole message.
         """
         ctx = self._session_state.get("_llm_context")
         if not ctx:
             return
         messages = ctx.get_messages()
-        filtered = [m for m in messages if not _is_ephemeral(m)]
-        n_stripped = len(messages) - len(filtered)
+        filtered = []
+        n_stripped = 0
+        for m in messages:
+            if not isinstance(m, dict):
+                filtered.append(m)
+                continue
+            content = m.get("content", "")
+            # Simple string content — remove if ephemeral
+            if isinstance(content, str):
+                if content.startswith(_EPHEMERAL_PREFIX):
+                    n_stripped += 1
+                    continue
+                filtered.append(m)
+                continue
+            # Multi-block content — strip only ephemeral blocks, keep the rest
+            if isinstance(content, list):
+                kept_blocks = []
+                for block in content:
+                    if isinstance(block, dict) and isinstance(block.get("text", ""), str):
+                        if block["text"].startswith(_EPHEMERAL_PREFIX):
+                            n_stripped += 1
+                            continue
+                    kept_blocks.append(block)
+                if kept_blocks:
+                    filtered.append({**m, "content": kept_blocks if len(kept_blocks) > 1 else kept_blocks[0].get("text", "") if isinstance(kept_blocks[0], dict) else kept_blocks})
+                else:
+                    n_stripped += 1  # all blocks were ephemeral
+                continue
+            filtered.append(m)
         if n_stripped > 0:
             ctx.set_messages(filtered)
-            logger.debug("[Director] Stripped {n} ephemeral messages", n=n_stripped)
+            logger.debug("[Director] Stripped {n} ephemeral blocks", n=n_stripped)
 
 
     # ------------------------------------------------------------------

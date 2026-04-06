@@ -87,6 +87,7 @@ export default function Step1Screen() {
               autoCapitalize="words"
               textContentType="givenName"
               autoComplete="given-name"
+              testID="input-first-name"
             />
             <Input
               label="Last Name"
@@ -97,6 +98,7 @@ export default function Step1Screen() {
               autoCapitalize="words"
               textContentType="familyName"
               autoComplete="family-name"
+              testID="input-last-name"
             />
             <Input
               label="Email"
@@ -109,6 +111,7 @@ export default function Step1Screen() {
               autoCorrect={false}
               textContentType="emailAddress"
               autoComplete="email"
+              testID="input-email"
             />
             <Input
               label="Phone Number"
@@ -119,6 +122,7 @@ export default function Step1Screen() {
               keyboardType="phone-pad"
               textContentType="telephoneNumber"
               autoComplete="tel"
+              testID="input-phone"
             />
           </View>
         </ScrollView>

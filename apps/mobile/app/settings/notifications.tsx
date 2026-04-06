@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { ArrowLeft, AlertTriangle } from "lucide-react-native";
+import { ArrowLeft } from "lucide-react-native";
 import { COLORS } from "@/src/constants/theme";
 import { Toggle } from "@/src/components/ui/Toggle";
 import { Button } from "@/src/components/ui/Button";
@@ -20,26 +20,31 @@ import {
 } from "@/src/hooks";
 
 type ToggleRow = {
-  key: "callSummaries" | "missedCallAlerts" | "completedCallAlerts";
+  key: "callCompleted" | "concernDetected" | "reminderMissed" | "weeklySummary";
   title: string;
   description: string;
 };
 
 const NOTIFICATION_TOGGLES: ToggleRow[] = [
   {
-    key: "callSummaries",
+    key: "callCompleted",
     title: "Call Summaries",
-    description: "Receive a summary after each call",
+    description: "Receive a summary after each completed call",
   },
   {
-    key: "missedCallAlerts",
-    title: "Missed Call Alerts",
-    description: "Get notified when a scheduled call is missed",
+    key: "concernDetected",
+    title: "Concern Alerts",
+    description: "Get notified when a health or safety concern is detected",
   },
   {
-    key: "completedCallAlerts",
-    title: "Completed Call Alerts",
-    description: "Get notified when a call is completed",
+    key: "reminderMissed",
+    title: "Missed Reminder Alerts",
+    description: "Get notified when a scheduled reminder is missed",
+  },
+  {
+    key: "weeklySummary",
+    title: "Weekly Summary",
+    description: "Receive a weekly report of all calls and activity",
   },
 ];
 
@@ -48,43 +53,46 @@ export default function NotificationPreferencesScreen() {
   const { data: preferences, isLoading } = useNotificationPreferences();
   const updatePreferences = useUpdateNotificationPreferences();
 
-  const [callSummaries, setCallSummaries] = useState(true);
-  const [missedCallAlerts, setMissedCallAlerts] = useState(true);
-  const [completedCallAlerts, setCompletedCallAlerts] = useState(true);
-  const [pauseCalls, setPauseCalls] = useState(false);
+  const [callCompleted, setCallCompleted] = useState(true);
+  const [concernDetected, setConcernDetected] = useState(true);
+  const [reminderMissed, setReminderMissed] = useState(true);
+  const [weeklySummary, setWeeklySummary] = useState(true);
 
   // Pre-fill from server
   useEffect(() => {
     if (preferences) {
-      setCallSummaries(preferences.callSummaries ?? true);
-      setMissedCallAlerts(preferences.missedCallAlerts ?? true);
-      setCompletedCallAlerts(preferences.completedCallAlerts ?? true);
-      setPauseCalls(preferences.pauseCalls ?? false);
+      setCallCompleted(preferences.callCompleted ?? true);
+      setConcernDetected(preferences.concernDetected ?? true);
+      setReminderMissed(preferences.reminderMissed ?? true);
+      setWeeklySummary(preferences.weeklySummary ?? true);
     }
   }, [preferences]);
 
   const toggleState: Record<string, boolean> = {
-    callSummaries,
-    missedCallAlerts,
-    completedCallAlerts,
+    callCompleted,
+    concernDetected,
+    reminderMissed,
+    weeklySummary,
   };
 
   const toggleSetters: Record<string, (val: boolean) => void> = {
-    callSummaries: setCallSummaries,
-    missedCallAlerts: setMissedCallAlerts,
-    completedCallAlerts: setCompletedCallAlerts,
+    callCompleted: setCallCompleted,
+    concernDetected: setConcernDetected,
+    reminderMissed: setReminderMissed,
+    weeklySummary: setWeeklySummary,
   };
 
   const handleSave = async () => {
     try {
       await updatePreferences.mutateAsync({
-        callSummaries,
-        missedCallAlerts,
-        completedCallAlerts,
-        pauseCalls,
+        callCompleted,
+        concernDetected,
+        reminderMissed,
+        weeklySummary,
       });
-      Alert.alert("Saved", "Notification preferences updated.");
-      router.back();
+      Alert.alert("Saved", "Notification preferences updated.", [
+        { text: "OK", onPress: () => router.back() },
+      ]);
     } catch {
       Alert.alert("Error", "Failed to update preferences. Please try again.");
     }
@@ -159,46 +167,6 @@ export default function NotificationPreferencesScreen() {
                 </View>
               ))}
             </View>
-          </View>
-
-          {/* Pause Calls */}
-          <View className="mt-6">
-            <Text className="text-[13px] font-medium text-muted uppercase tracking-wider mb-3">
-              Call Settings
-            </Text>
-            <View className="bg-white rounded-2xl border border-charcoal/10 px-4">
-              <View
-                className="flex-row items-center justify-between py-4"
-                style={{ minHeight: 56 }}
-              >
-                <View className="flex-1 mr-4">
-                  <Text className="text-[15px] font-medium text-charcoal">
-                    Pause Calls
-                  </Text>
-                  <Text className="text-[13px] text-muted mt-0.5">
-                    Temporarily stop all scheduled calls
-                  </Text>
-                </View>
-                <Toggle
-                  value={pauseCalls}
-                  onToggle={setPauseCalls}
-                  accessibilityLabel="Pause Calls"
-                />
-              </View>
-            </View>
-            {pauseCalls && (
-              <View className="flex-row items-start bg-orange-50 rounded-2xl p-4 mt-3 border border-orange-200">
-                <AlertTriangle
-                  size={18}
-                  color={COLORS.warning}
-                  style={{ marginTop: 1 }}
-                />
-                <Text className="text-[13px] text-orange-800 ml-2.5 flex-1">
-                  Pausing will stop all scheduled calls to your loved one. They
-                  won't receive any calls from Donna until you turn this off.
-                </Text>
-              </View>
-            )}
           </View>
 
           {/* Subscription Card */}

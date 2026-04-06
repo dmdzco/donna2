@@ -15,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from db import query_one, query_many, execute
+from lib.sanitize import mask_name
 from services.reminder_delivery import mark_delivered, format_reminder_prompt
 
 # Lazy-loaded Twilio client
@@ -66,7 +67,7 @@ async def get_due_reminders() -> list[dict]:
     Checks: non-recurring past due, recurring time-of-day match,
     and retry-pending deliveries ready for retry (>30 min since last attempt).
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     one_minute = now + timedelta(minutes=1)
     thirty_minutes_ago = now - timedelta(minutes=30)
 
@@ -220,7 +221,7 @@ async def trigger_reminder_call(
         return None
 
     try:
-        logger.info("Pre-fetching context for {name}", name=senior.get("name"))
+        logger.info("Pre-fetching context for {name}", name=mask_name(senior.get("name")))
 
         from services.memory import build_context
         memory_context = await build_context(senior["id"], None, senior)
@@ -291,7 +292,7 @@ async def trigger_reminder_call(
 
 async def prefetch_for_phone(phone_number: str, senior: dict | None) -> dict:
     """Pre-fetch context for a manual outbound call."""
-    logger.info("Pre-fetching for manual call: {name}", name=senior.get("name") if senior else "unknown")
+    logger.info("Pre-fetching for manual call: {name}", name=mask_name(senior.get("name")) if senior else "unknown")
 
     memory_context = None
     pre_generated_greeting = None
@@ -307,7 +308,7 @@ async def prefetch_for_phone(phone_number: str, senior: dict | None) -> dict:
         if cached:
             memory_context = cached.get("memory_context")
             pre_generated_greeting = cached.get("greeting")
-            logger.info("Using cached context for {name}", name=senior.get("name"))
+            logger.info("Using cached context for {name}", name=mask_name(senior.get("name")))
         else:
             from services.memory import build_context
             memory_context = await build_context(senior["id"], None, senior)

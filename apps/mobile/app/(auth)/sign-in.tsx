@@ -74,27 +74,12 @@ export default function SignInScreen() {
         password,
       });
 
-      if (result.status === "complete") {
+      // With 2FA disabled in Clerk, status is always "complete"
+      if (result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
         await navigateAfterAuth();
-      } else if (result.status === "needs_second_factor") {
-        // Auto-verify with test code in dev mode (Clerk test accounts use 424242)
-        if (__DEV__) {
-          await signIn.prepareSecondFactor({ strategy: "email_code" });
-          const secondResult = await signIn.attemptSecondFactor({
-            strategy: "email_code",
-            code: "424242",
-          });
-          if (secondResult.status === "complete") {
-            await setActive({ session: secondResult.createdSessionId });
-            await navigateAfterAuth();
-          }
-        } else {
-          Alert.alert(
-            "Verification Required",
-            "Please check your email for a verification code."
-          );
-        }
+      } else {
+        Alert.alert("Sign In Failed", "Something went wrong. Please try again.");
       }
     } catch (err: unknown) {
       const message =

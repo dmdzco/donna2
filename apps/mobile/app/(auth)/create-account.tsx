@@ -74,18 +74,12 @@ export default function CreateAccountScreen() {
         password,
       });
 
-      if (result.status === "complete") {
+      // With email verification disabled in Clerk, status is always "complete"
+      if (result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
         await navigateAfterAuth();
       } else {
-        // Email verification may be required
-        await signUp.prepareEmailAddressVerification({
-          strategy: "email_code",
-        });
-        Alert.alert(
-          "Verify your email",
-          "Please check your inbox and verify your email to continue."
-        );
+        Alert.alert("Sign Up Failed", "Something went wrong. Please try again.");
       }
     } catch (err: unknown) {
       const message =

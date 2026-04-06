@@ -16,6 +16,14 @@ from tests.simulation.caller import (
     CallerGoal,
     CallerPersona,
 )
+from tests.simulation.fixtures import TestSenior
+from tests.simulation.scenarios import (
+    LiveSimScenario,
+    memory_recall_scenario,
+    memory_seed_scenario,
+    reminder_scenario,
+    web_search_scenario,
+)
 from tests.simulation.transport import (
     CallerEvent,
     CallerTransport,
@@ -31,6 +39,12 @@ __all__ = [
     "CallerEvent",
     "CallerTransport",
     "CallResult",
+    "LiveSimScenario",
     "ResponseCollector",
+    "TestSenior",
     "TextCallerTransport",
+    "memory_recall_scenario",
+    "memory_seed_scenario",
+    "reminder_scenario",
+    "web_search_scenario",
 ]

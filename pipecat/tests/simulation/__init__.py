@@ -31,6 +31,10 @@ from tests.simulation.scenarios import (
     reminder_scenario,
     web_search_scenario,
 )
+from tests.simulation.pipeline import (
+    LiveSimComponents,
+    build_live_sim_pipeline,
+)
 from tests.simulation.transport import (
     CallerEvent,
     CallerTransport,
@@ -46,10 +50,12 @@ __all__ = [
     "CallerEvent",
     "CallerTransport",
     "CallResult",
+    "LiveSimComponents",
     "LiveSimScenario",
     "ResponseCollector",
     "TestSenior",
     "TextCallerTransport",
+    "build_live_sim_pipeline",
     "build_session_state",
     "cleanup_test_senior",
     "create_test_conversation",

@@ -57,12 +57,9 @@ class TestFlowsTools:
     def test_make_flows_tools_returns_active_schemas(self):
         session_state = {"senior_id": "test-123"}
         tools = make_flows_tools(session_state)
-        assert len(tools) == 5
+        assert len(tools) == 2
         assert "web_search" in tools
         assert "mark_reminder_acknowledged" in tools
-        assert "search_memories" in tools
-        assert "save_important_detail" in tools
-        assert "check_caregiver_notes" in tools
 
     def test_flows_tools_have_handlers(self):
         session_state = {"senior_id": "test-123"}

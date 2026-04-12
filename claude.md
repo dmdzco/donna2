@@ -258,7 +258,7 @@ pipecat/
 │   ├── growthbook.js           ← GrowthBook feature flag SDK helper (Node.js)
 │   └── encryption.js           ← AES-256-GCM field encryption for PHI (mirrors pipecat/lib/encryption.py)
 ├── services/                   ← 12 service files (dual implementation with pipecat/services/)
-├── routes/                     ← 16 route modules (all /api/* endpoints)
+├── routes/                     ← 16 route modules (all /api/* endpoints) + helpers.js (routeError, canAccessSenior)
 ├── middleware/                  ← 7 middleware files (auth w/ dual-key JWT + revocation, rate-limit, security)
 └── apps/                       ← Frontend apps (still active)
     ├── admin-v2/               ← Admin dashboard (Vercel)
@@ -395,6 +395,8 @@ Use `--environment dev` or `--environment staging` flags for other environments.
 - **Frontend E2E tests:** `npm run test:e2e` — Playwright browser tests across all 3 frontend apps (31 tests, ~15s)
 - **Regression:** `make test-regression` — scenario-based tests run in CI on every PR
 
+- **LLM-to-LLM Voice Simulation:** `cd pipecat && python -m pytest tests/test_live_simulation.py -v -m llm_simulation` — Haiku caller vs real Donna pipeline (real Claude, Director, Observer, DB). Tests web_search, memory injection, reminder processing across multiple calls. Requires ANTHROPIC_API_KEY + dev DATABASE_URL. Design doc: `docs/plans/2026-04-05-llm-voice-simulation-testing.md`
+
 **Do NOT** test voice features locally with ngrok — always deploy to Railway dev environment
 
 ### Frontend E2E Tests (Playwright)
@@ -481,6 +483,10 @@ npx playwright install chromium
 | Update admin UI (v2) | `apps/admin-v2/src/pages/` |
 | Update admin API client | `apps/admin-v2/src/lib/api.ts` |
 | Add/modify frontend E2E tests | `tests/e2e/` — see [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) |
+| Add/modify route error handling | `routes/helpers.js` (`routeError()`) — all route catch blocks use this |
+| Add/modify mobile error display | `apps/mobile/src/lib/api.ts` (`getErrorMessage()`) — all screens use this |
+| Add/modify Zod validation schemas | `validators/schemas.js` — **do NOT add `.transform()` for DB-bound fields** |
+| Add/modify LLM voice simulation tests | `pipecat/tests/simulation/` (framework) + `pipecat/tests/test_live_simulation.py` (tests) |
 
 ### Commit Messages & PR Titles
 

@@ -1,6 +1,6 @@
 import "../global.css";
 import { useEffect } from "react";
-import { Stack, useRouter, useSegments } from "expo-router";
+import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { tokenCache } from "@/src/lib/auth";
@@ -31,23 +31,23 @@ const CLERK_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
 function AuthGuard() {
   const { isLoaded, isSignedIn } = useAuth();
   const segments = useSegments();
+  const pathname = usePathname();
   const router = useRouter();
 
   useEffect(() => {
     if (!isLoaded) return;
-    if (!segments || segments.length === 0) return;
 
     const firstSegment = segments[0];
     const inTabsGroup = firstSegment === "(tabs)";
     const inAuthGroup = firstSegment === "(auth)";
-    const isLanding = firstSegment === undefined || firstSegment === "";
+    const isLanding = pathname === "/";
 
     if (!isSignedIn && inTabsGroup) {
       router.replace("/");
     } else if (isSignedIn && (isLanding || inAuthGroup)) {
       router.replace("/(tabs)");
     }
-  }, [isLoaded, isSignedIn, segments]);
+  }, [isLoaded, isSignedIn, pathname, router, segments]);
 
   // Register for push notifications once the user is signed in
   useEffect(() => {

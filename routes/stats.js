@@ -3,6 +3,7 @@ import { db } from '../db/client.js';
 import { reminders, seniors, conversations } from '../db/schema.js';
 import { eq, desc, gte, and, sql } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
+import { routeError } from './helpers.js';
 
 const router = Router();
 
@@ -61,7 +62,7 @@ router.get('/api/stats', requireAdmin, async (req, res) => {
       recentCalls,
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/stats');
   }
 });
 

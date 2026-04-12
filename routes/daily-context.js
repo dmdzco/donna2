@@ -3,6 +3,7 @@ import { db } from '../db/client.js';
 import { dailyCallContext, seniors } from '../db/schema.js';
 import { eq, and, gte, lt, desc } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
+import { routeError } from './helpers.js';
 
 const router = Router();
 
@@ -47,7 +48,7 @@ router.get('/api/daily-context', requireAdmin, async (req, res) => {
 
     res.json(results);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/daily-context');
   }
 });
 

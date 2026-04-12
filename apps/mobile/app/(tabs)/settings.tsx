@@ -1,8 +1,11 @@
 import { useState } from "react";
-import { View, Text, Pressable, ScrollView } from "react-native";
+import { View, Text, Pressable, ScrollView, DevSettings } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useAuth } from "@clerk/clerk-expo";
+import { useQueryClient } from "@tanstack/react-query";
+import * as SecureStore from "expo-secure-store";
+import * as Updates from "expo-updates";
 import {
   Heart,
   User,
@@ -96,19 +99,45 @@ function SettingsRowItem({
 export default function SettingsScreen() {
   const router = useRouter();
   const { signOut } = useAuth();
+  const queryClient = useQueryClient();
   const [showSignOutModal, setShowSignOutModal] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
   const handleSignOut = async () => {
     setSigningOut(true);
+
+    // 1. Clear all cached API data immediately
+    queryClient.clear();
+
+    // 2. Try Clerk signOut with timeout (hangs in dev builds)
     try {
-      await signOut();
-      // AuthGuard in _layout.tsx handles navigation when isSignedIn becomes false
+      await Promise.race([
+        signOut(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), 3000)
+        ),
+      ]);
     } catch {
-      // Sign out failed
-    } finally {
-      setSigningOut(false);
-      setShowSignOutModal(false);
+      // Timed out or failed — continue to force-clear below
+    }
+
+    // 3. Always clear Clerk token from SecureStore
+    try {
+      await SecureStore.deleteItemAsync("__clerk_client_jwt");
+    } catch {}
+
+    // 4. Force full app reload so Clerk re-initializes with no stored token
+    try {
+      await Updates.reloadAsync();
+    } catch {
+      // Updates.reloadAsync() fails in dev builds — use DevSettings reload
+      if (__DEV__ && DevSettings?.reload) {
+        DevSettings.reload();
+      } else {
+        setSigningOut(false);
+        setShowSignOutModal(false);
+        router.replace("/");
+      }
     }
   };
 

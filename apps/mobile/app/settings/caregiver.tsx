@@ -67,30 +67,9 @@ export default function CaregiverProfileScreen() {
   const handleChangePassword = () => {
     Alert.alert(
       "Change Password",
-      "A password reset link will be sent to your email address.",
+      "Use Forgot password from the sign-in screen to reset your password. This profile screen should not trigger a verification code flow on its own.",
       [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Send Link",
-          onPress: async () => {
-            try {
-              if (user?.primaryEmailAddress) {
-                await user.primaryEmailAddress.prepareVerification({
-                  strategy: "email_code",
-                });
-                Alert.alert(
-                  "Email Sent",
-                  "Check your email for the password reset link."
-                );
-              }
-            } catch {
-              Alert.alert(
-                "Note",
-                "Please use the Clerk account portal to change your password."
-              );
-            }
-          },
-        },
+        { text: "OK" },
       ]
     );
   };

@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Edit2, Trash2, Plus, Bell, Clock, Check, ChevronDown } from "lucide-react-native";
 import { COLORS, TIME_OPTIONS } from "@/src/constants/theme";
+import { getErrorMessage } from "@/src/lib/api";
 import {
   useCurrentSenior,
   useReminders,
@@ -398,7 +399,7 @@ export default function RemindersScreen() {
 
           {(createReminder.isError || updateReminder.isError) && (
             <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
-              Something went wrong. Please try again.
+              {getErrorMessage(createReminder.error ?? updateReminder.error)}
             </Text>
           )}
         </View>
@@ -460,7 +461,7 @@ export default function RemindersScreen() {
 
         {deleteReminder.isError && (
           <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
-            Failed to delete reminder. Please try again.
+            {getErrorMessage(deleteReminder.error, "Failed to delete reminder")}
           </Text>
         )}
       </Modal>

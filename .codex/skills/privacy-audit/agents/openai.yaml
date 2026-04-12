@@ -1,0 +1,4 @@
+interface:
+  display_name: "Privacy Audit"
+  short_description: "Audit Donna for HIPAA and PHI handling risks"
+  default_prompt: "Use $privacy-audit to review Donna for HIPAA, PHI, and security issues."

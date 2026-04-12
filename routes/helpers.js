@@ -1,7 +1,7 @@
 /**
  * Shared route helpers
  *
- * Auth helpers used across multiple route files.
+ * Auth helpers and error handling used across all route files.
  */
 
 import { db } from '../db/client.js';
@@ -33,4 +33,17 @@ export async function canAccessSenior(auth, seniorId) {
     ))
     .limit(1);
   return !!assignment;
+}
+
+/**
+ * Log a route error and send a 500 response.
+ * Ensures every unhandled route error is visible in Railway logs.
+ *
+ * @param {import('express').Response} res
+ * @param {Error} error
+ * @param {string} context - e.g. "POST /api/reminders"
+ */
+export function routeError(res, error, context) {
+  console.error(`[${context}]`, error);
+  res.status(500).json({ error: error.message });
 }

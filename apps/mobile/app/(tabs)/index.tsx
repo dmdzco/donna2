@@ -23,6 +23,7 @@ import {
 } from "@/src/hooks";
 import { Button } from "@/src/components/ui";
 import { Modal } from "@/src/components/ui";
+import { getErrorMessage } from "@/src/lib/api";
 import type { Conversation } from "@/src/types";
 
 // --- Next-call computation ---
@@ -350,7 +351,7 @@ export default function DashboardScreen() {
           </View>
           {initiateCall.isError && (
             <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
-              Failed to initiate call. Please try again.
+              {getErrorMessage(initiateCall.error, "Failed to initiate call")}
             </Text>
           )}
         </View>

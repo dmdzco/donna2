@@ -58,3 +58,31 @@
 **Fix:** Added `Check` and `ChevronDown` to the import statement.
 
 **Rule:** After adding JSX that references new icons or components, always verify the import statement includes them. Search for all symbol references in the file and cross-check against imports.
+
+## Expo Native Module Missing From Project Dependencies
+
+**Date:** 2026-04-10
+
+**Problem:** The iPhone simulator opened the app, but Metro failed to bundle with `Unable to resolve "expo-updates" from "app/(tabs)/settings.tsx"`. The native rebuild also exposed that the installed dev client was `com.donna.mobile`, while `app.json` claimed `com.donna.caregiver`.
+
+**Root cause:**
+1. `app/(tabs)/settings.tsx` imported and called `Updates.reloadAsync()`, but `expo-updates` was never added to `apps/mobile/package.json`.
+2. `npx expo install expo-updates` was blocked by existing npm peer dependency conflicts in the project, so the missing package was never added automatically.
+3. `app.json` pointed Android adaptive icon config at `./assets/images/adaptive-icon.png`, but the repo only had `assets/images/adaptive_icon.png`.
+4. Because `ios/` already exists, Expo does not sync `app.json` bundle settings into the native project. The actual iOS bundle identifier lives in `ios/Donna.xcodeproj/project.pbxproj`, which is currently `com.donna.mobile`.
+
+**Fix:**
+1. Installed the Expo SDK 54 pinned package directly with `npm install expo-updates@~29.0.16 --legacy-peer-deps`.
+2. Ran `npx pod-install` so `EXUpdates` and related iOS pods were linked into the native project.
+3. Fixed `app.json` to reference the existing `assets/images/adaptive_icon.png` file.
+4. Rebuilt with `npx expo run:ios -d "iPhone 17 Pro" --no-install --no-bundler`, which succeeded and removed the Metro bundle error.
+
+**Rules to follow:**
+1. If code imports an Expo native module, that package must exist in `apps/mobile/package.json`; importing it in JS is not enough.
+2. When `npx expo install` is blocked by peer conflicts, read `expo/bundledNativeModules.json` to get the SDK-pinned version, then install that exact version explicitly.
+3. In prebuilt Expo projects with `ios/` or `android/` checked in, treat the native project as the source of truth for bundle identifiers and other synced config.
+4. Keep asset filenames in `app.json` exact; Expo config validation will fail on even small naming mismatches.
+
+**Remaining warnings:**
+1. `expo-doctor` still warns that `assets/images/icon.png` and `assets/images/adaptive_icon.png` are not square.
+2. `expo-doctor` also warns that native config fields in `app.json` are not auto-synced because this is not a pure CNG project.

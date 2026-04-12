@@ -68,13 +68,13 @@
 **Root cause:**
 1. `app/(tabs)/settings.tsx` imported and called `Updates.reloadAsync()`, but `expo-updates` was never added to `apps/mobile/package.json`.
 2. `npx expo install expo-updates` was blocked by existing npm peer dependency conflicts in the project, so the missing package was never added automatically.
-3. `app.json` pointed Android adaptive icon config at `./assets/images/adaptive-icon.png`, but the repo only had `assets/images/adaptive_icon.png`.
+3. `app.json` and the asset verifier expect `./assets/images/adaptive-icon.png`, but the repo had the same asset tracked as `assets/images/adaptive_icon.png`.
 4. Because `ios/` already exists, Expo does not sync `app.json` bundle settings into the native project. The actual iOS bundle identifier lives in `ios/Donna.xcodeproj/project.pbxproj`, which is currently `com.donna.mobile`.
 
 **Fix:**
 1. Installed the Expo SDK 54 pinned package directly with `npm install expo-updates@~29.0.16 --legacy-peer-deps`.
 2. Ran `npx pod-install` so `EXUpdates` and related iOS pods were linked into the native project.
-3. Fixed `app.json` to reference the existing `assets/images/adaptive_icon.png` file.
+3. Renamed the tracked asset to the canonical `assets/images/adaptive-icon.png` filename used by `app.json` and the asset verifier.
 4. Rebuilt with `npx expo run:ios -d "iPhone 17 Pro" --no-install --no-bundler`, which succeeded and removed the Metro bundle error.
 
 **Rules to follow:**
@@ -84,5 +84,5 @@
 4. Keep asset filenames in `app.json` exact; Expo config validation will fail on even small naming mismatches.
 
 **Remaining warnings:**
-1. `expo-doctor` still warns that `assets/images/icon.png` and `assets/images/adaptive_icon.png` are not square.
+1. `expo-doctor` still warns that `assets/images/icon.png` and `assets/images/adaptive-icon.png` are not square.
 2. `expo-doctor` also warns that native config fields in `app.json` are not auto-synced because this is not a pure CNG project.

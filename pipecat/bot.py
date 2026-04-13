@@ -440,7 +440,13 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         # Previously run_post_call was awaited before EndFrame, so if Gemini/OpenAI
         # hung during analysis the pipeline would never terminate.
         await task.queue_frame(EndFrame())
-        asyncio.create_task(_safe_post_call(session_state, conversation_tracker, elapsed, call_sid))
+        post_call_task = asyncio.create_task(
+            _safe_post_call(session_state, conversation_tracker, elapsed, call_sid)
+        )
+        # Register so graceful shutdown waits for post-call to complete
+        register_fn = session_state.get("_register_task")
+        if register_fn:
+            register_fn(post_call_task)
 
     # -------------------------------------------------------------------------
     # Run pipeline

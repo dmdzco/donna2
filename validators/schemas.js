@@ -47,10 +47,12 @@ const cronSchema = z.string()
   )
   .optional();
 
-// ISO date string
+// ISO date string — validates format only, no transform.
+// Drizzle and PostgreSQL accept ISO strings for timestamp columns natively.
+// A previous .transform(date => new Date(date)) silently converted strings
+// to Date objects, causing type mismatches in route handlers.
 const isoDateSchema = z.string()
-  .refine(date => !isNaN(Date.parse(date)), 'Invalid date format')
-  .transform(date => new Date(date));
+  .refine(date => !isNaN(Date.parse(date)), 'Invalid date format');
 
 // =============================================================================
 // Senior Schemas
@@ -79,6 +81,10 @@ export const updateSeniorSchema = z.object({
   medicalNotes: z.string().max(10000).optional(),
   preferredCallTimes: z.record(z.unknown()).optional(),
   isActive: z.boolean().optional(),
+  city: z.string().max(100).optional(),
+  state: z.string().max(50).optional(),
+  zipCode: z.string().max(20).optional(),
+  additionalInfo: z.string().max(5000).optional(),
 }).refine(data => Object.keys(data).length > 0, {
   message: 'At least one field must be provided for update',
 });
@@ -134,19 +140,8 @@ export const createReminderSchema = z.object({
   description: z.string().max(2000).optional(),
   scheduledTime: isoDateSchema.optional(),
   isRecurring: z.boolean().default(false),
-  cronExpression: cronSchema,
-}).refine(data => {
-  // If recurring, must have cron expression
-  if (data.isRecurring && !data.cronExpression) {
-    return false;
-  }
-  // If not recurring, must have scheduled time
-  if (!data.isRecurring && !data.scheduledTime) {
-    return false;
-  }
-  return true;
-}, {
-  message: 'Recurring reminders need cronExpression, non-recurring need scheduledTime',
+  isActive: z.boolean().default(true),
+  cronExpression: cronSchema.optional(),
 });
 
 export const updateReminderSchema = z.object({
@@ -233,7 +228,11 @@ export const updateCaregiverSchema = z.object({
 // Onboarding Schema (Combined caregiver + senior creation)
 // =============================================================================
 
-const relationEnum = z.enum(['Mother', 'Father', 'Client', 'Other Loved One']);
+const relationEnum = z.enum([
+  'Mother', 'Father', 'Daughter', 'Son', 'Spouse', 'Sibling',
+  'Grandchild', 'Uncle', 'Aunt', 'Cousin',
+  'Friend', 'Professional Caregiver', 'Client', 'Other Loved One', 'Other',
+]);
 
 const structuredInterestSchema = z.object({
   topic: z.string().min(1).max(100),
@@ -265,13 +264,46 @@ export const onboardingSchema = z.object({
   interests: z.array(z.string().max(100)).max(20).optional(),
   additionalInfo: z.string().max(5000).optional(),
   reminders: z.array(z.string().max(255)).max(20).optional(),
-  updateTopics: z.array(z.string().max(100)).max(10).optional(),
+  topicsToAvoid: z.array(z.string().max(100)).max(10).optional(),
   callSchedule: callScheduleSchema.optional(),
   // Family info from frontend
   familyInfo: z.object({
     relation: z.string().optional(),
     interestDetails: z.record(z.string()).optional(),
   }).optional(),
+});
+
+// =============================================================================
+// Schedule Schemas
+// =============================================================================
+
+const scheduleFrequencyEnum = z.enum(['daily', 'recurring', 'one-time']);
+
+const scheduleItemSchema = z.object({
+  title: z.string().min(1).max(255).trim(),
+  frequency: scheduleFrequencyEnum,
+  recurringDays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+  date: z.string().max(50).optional(),
+  time: z.string()
+    .min(1)
+    .max(20)
+    .regex(/^(\d{1,2}:\d{2}(\s*(AM|PM))?|\d{2}:\d{2})$/i, 'Invalid time format'),
+  contextNotes: z.string().max(2000).optional(),
+  reminderIds: z.array(uuidSchema).max(20).optional(),
+}).refine(data => {
+  if (data.frequency === 'recurring' && (!data.recurringDays || data.recurringDays.length === 0)) {
+    return false;
+  }
+  return true;
+}, {
+  message: 'Recurring schedules require at least one day',
+});
+
+export const updateScheduleSchema = z.object({
+  schedule: z.array(scheduleItemSchema).max(20).optional(),
+  topicsToAvoid: z.array(z.string().max(100)).max(10).optional(),
+}).refine(data => Object.keys(data).length > 0, {
+  message: 'At least one field must be provided',
 });
 
 // =============================================================================
@@ -347,6 +379,9 @@ export const schemas = {
   // Twilio webhooks
   voiceAnswer: voiceAnswerSchema,
   voiceStatus: voiceStatusSchema,
+
+  // Schedule
+  updateSchedule: updateScheduleSchema,
 
   // Notifications
   notificationPreferences: notificationPreferencesSchema,

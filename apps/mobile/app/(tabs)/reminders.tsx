@@ -9,8 +9,9 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Edit2, Trash2, Plus, Bell } from "lucide-react-native";
-import { COLORS } from "@/src/constants/theme";
+import { Edit2, Trash2, Plus, Bell, Clock, Check, ChevronDown } from "lucide-react-native";
+import { COLORS, TIME_OPTIONS } from "@/src/constants/theme";
+import { getErrorMessage } from "@/src/lib/api";
 import {
   useCurrentSenior,
   useReminders,
@@ -27,25 +28,48 @@ type ReminderFormData = {
   title: string;
   description: string;
   faqs: string;
+  time: string;
+  isRecurring: boolean;
 };
 
-const EMPTY_FORM: ReminderFormData = { title: "", description: "", faqs: "" };
+const EMPTY_FORM: ReminderFormData = {
+  title: "",
+  description: "",
+  faqs: "",
+  time: "9:00 AM",
+  isRecurring: true,
+};
 
-// --- Helper ---
+// --- Helpers ---
+
+/** Convert "9:00 AM" → UTC ISO string using device's local timezone */
+function timeToISO(timeStr: string): string {
+  const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return new Date().toISOString();
+  let h = parseInt(match[1]);
+  const m = parseInt(match[2]);
+  const period = match[3].toUpperCase();
+  if (period === "PM" && h !== 12) h += 12;
+  if (period === "AM" && h === 12) h = 0;
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d.toISOString();
+}
+
+/** Convert UTC ISO string → local "9:00 AM" display string */
+function isoToTimeString(iso: string): string {
+  const d = new Date(iso);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const period = h < 12 ? "AM" : "PM";
+  const displayH = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${displayH}:${m.toString().padStart(2, "0")} ${period}`;
+}
 
 function getScheduleLabel(reminder: Reminder): string {
-  if (reminder.isRecurring && reminder.cronExpression) return "Daily";
-  if (reminder.scheduledTime) {
-    try {
-      return new Date(reminder.scheduledTime).toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-      });
-    } catch {
-      return "Scheduled";
-    }
-  }
-  return "Not scheduled";
+  if (!reminder.scheduledTime) return "Not scheduled";
+  const timeStr = isoToTimeString(reminder.scheduledTime);
+  return reminder.isRecurring ? `Daily · ${timeStr}` : timeStr;
 }
 
 // --- Component ---
@@ -64,6 +88,7 @@ export default function RemindersScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [formModalVisible, setFormModalVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
   const [deletingReminder, setDeletingReminder] = useState<Reminder | null>(null);
   const [form, setForm] = useState<ReminderFormData>(EMPTY_FORM);
@@ -98,6 +123,8 @@ export default function RemindersScreen() {
       title: reminder.title,
       description: reminder.description ?? "",
       faqs: "",
+      time: reminder.scheduledTime ? isoToTimeString(reminder.scheduledTime) : "9:00 AM",
+      isRecurring: reminder.isRecurring ?? true,
     });
     setFormModalVisible(true);
   }, []);
@@ -133,6 +160,8 @@ export default function RemindersScreen() {
           data: {
             title: trimmedTitle,
             description: description || undefined,
+            isRecurring: form.isRecurring,
+            scheduledTime: timeToISO(form.time),
           },
         });
       } else {
@@ -140,8 +169,9 @@ export default function RemindersScreen() {
           type: "custom",
           title: trimmedTitle,
           description: description || undefined,
-          isRecurring: false,
+          isRecurring: form.isRecurring,
           isActive: true,
+          scheduledTime: timeToISO(form.time),
         });
       }
       closeFormModal();
@@ -298,6 +328,60 @@ export default function RemindersScreen() {
             />
           </View>
 
+          {/* Time picker */}
+          <View className="mb-4">
+            <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
+              Time
+            </Text>
+            <Pressable
+              onPress={() => setShowTimePicker(true)}
+              className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
+              accessibilityRole="button"
+              accessibilityLabel="Select reminder time"
+            >
+              <View className="flex-row items-center">
+                <Clock size={16} color={COLORS.muted} style={{ marginRight: 8 }} />
+                <Text className="text-[15px] text-charcoal">{form.time}</Text>
+              </View>
+              <ChevronDown size={18} color={COLORS.muted} />
+            </Pressable>
+          </View>
+
+          {/* Recurring toggle */}
+          <View className="mb-5">
+            <Text className="text-[13px] font-medium text-muted mb-2 uppercase tracking-wider">
+              Frequency
+            </Text>
+            <View className="flex-row gap-2">
+              <Pressable
+                onPress={() => setForm((prev) => ({ ...prev, isRecurring: true }))}
+                className={`flex-1 py-2.5 rounded-xl items-center border ${
+                  form.isRecurring ? "bg-sage border-sage" : "bg-white border-charcoal/10"
+                }`}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: form.isRecurring }}
+                accessibilityLabel="Daily"
+              >
+                <Text className={`text-[13px] font-medium ${form.isRecurring ? "text-white" : "text-charcoal"}`}>
+                  Daily
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setForm((prev) => ({ ...prev, isRecurring: false }))}
+                className={`flex-1 py-2.5 rounded-xl items-center border ${
+                  !form.isRecurring ? "bg-sage border-sage" : "bg-white border-charcoal/10"
+                }`}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: !form.isRecurring }}
+                accessibilityLabel="One-time"
+              >
+                <Text className={`text-[13px] font-medium ${!form.isRecurring ? "text-white" : "text-charcoal"}`}>
+                  One-Time
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+
           {/* Tip box */}
           <View className="bg-beige rounded-2xl p-4 mb-5">
             <Text className="text-muted text-[13px] leading-5">
@@ -315,9 +399,34 @@ export default function RemindersScreen() {
 
           {(createReminder.isError || updateReminder.isError) && (
             <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
-              Something went wrong. Please try again.
+              {getErrorMessage(createReminder.error ?? updateReminder.error)}
             </Text>
           )}
+        </View>
+      </Modal>
+
+      {/* Time Picker Modal */}
+      <Modal
+        visible={showTimePicker}
+        onClose={() => setShowTimePicker(false)}
+        title="Select Time"
+      >
+        <View className="gap-0.5 pb-4">
+          {TIME_OPTIONS.map((time) => (
+            <Pressable
+              key={time}
+              onPress={() => {
+                setForm((prev) => ({ ...prev, time }));
+                setShowTimePicker(false);
+              }}
+              className="flex-row items-center justify-between py-3 px-2 rounded-xl active:bg-beige"
+              accessibilityRole="button"
+              accessibilityLabel={time}
+            >
+              <Text className="text-[15px] text-charcoal">{time}</Text>
+              {form.time === time && <Check size={18} color={COLORS.sage} />}
+            </Pressable>
+          ))}
         </View>
       </Modal>
 
@@ -352,7 +461,7 @@ export default function RemindersScreen() {
 
         {deleteReminder.isError && (
           <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
-            Failed to delete reminder. Please try again.
+            {getErrorMessage(deleteReminder.error, "Failed to delete reminder")}
           </Text>
         )}
       </Modal>

@@ -55,6 +55,11 @@ export class ApiError extends Error {
   get needsOnboarding() {
     return this.status === 404 && this.body?.needsOnboarding === true;
   }
+
+  /** Human-readable message including status code for debugging */
+  get displayMessage() {
+    return `${this.message} (${this.status})`;
+  }
 }
 
 /** A single notification record from the backend */
@@ -68,6 +73,17 @@ export interface DonnaNotification {
   metadata?: Record<string, unknown>;
   sentAt: string;
   readAt?: string | null;
+}
+
+/**
+ * Extract a user-facing error message from a React Query error.
+ * Shows the API error message + status code for debugging.
+ * Falls back to a generic message for non-API errors.
+ */
+export function getErrorMessage(error: unknown, fallback = "Something went wrong"): string {
+  if (error instanceof ApiError) return error.displayMessage;
+  if (error instanceof Error) return error.message;
+  return fallback;
 }
 
 export const api = {
@@ -100,7 +116,7 @@ export const api = {
 
     /** GET /api/seniors/:id/schedule */
     getSchedule: (id: string, token: string) =>
-      fetchJson<{ schedule: unknown; updateTopics: string[] }>(
+      fetchJson<{ schedule: unknown; topicsToAvoid: string[] }>(
         `/api/seniors/${id}/schedule`,
         { token },
       ),
@@ -108,10 +124,10 @@ export const api = {
     /** PATCH /api/seniors/:id/schedule */
     updateSchedule: (
       id: string,
-      data: { schedule?: unknown; updateTopics?: string[] },
+      data: { schedule?: unknown; topicsToAvoid?: string[] },
       token: string,
     ) =>
-      fetchJson<{ schedule: unknown; updateTopics: string[] }>(
+      fetchJson<{ schedule: unknown; topicsToAvoid: string[] }>(
         `/api/seniors/${id}/schedule`,
         { method: "PATCH", body: JSON.stringify(data), token },
       ),

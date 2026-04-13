@@ -80,7 +80,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Anthropic LLM      │  Claude Sonnet 4.5 (streaming)
-              │   + Flow Manager     │  4 tools, 3-phase state machine
+              │   + Flow Manager     │  2 tools, 3-phase state machine
               └─────────┬───────────┘
                         │ TextFrame
                         ▼
@@ -435,7 +435,7 @@ pipecat/
 │
 ├── flows/
 │   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts
-│   └── tools.py                     ← LLM tool schemas + async handlers (4 tools)
+│   └── tools.py                     ← LLM tool schemas + async handlers (2 active tools: web_search, mark_reminder_acknowledged)
 │
 ├── processors/
 │   ├── patterns.py                  ← 268 regex patterns, 19 categories (data only)
@@ -555,7 +555,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
 | **STT** | Deepgram Nova 3 | Real-time, interim results |
 | **TTS** | ElevenLabs | `eleven_turbo_v2_5` |
-| **VAD** | Silero | confidence=0.6, stop_secs=1.2, min_volume=0.5 |
+| **VAD** | Silero | confidence=0.6, min_volume=0.5; stop_secs=1.2 (senior calls), 0.8 (onboarding) |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
 | **News** | OpenAI GPT-4o-mini | Web search tool, 1hr cache |

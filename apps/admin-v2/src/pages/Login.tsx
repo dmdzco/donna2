@@ -38,25 +38,27 @@ export default function Login() {
 
         <form onSubmit={handleSubmit}>
           <div className="mb-3.5">
-            <label className="block text-sm font-semibold text-admin-text-light mb-1">Email</label>
+            <label htmlFor="login-email" className="block text-sm font-semibold text-admin-text-light mb-1">Email</label>
             <input
+              id="login-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
               placeholder="admin@donna.com"
-              className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+              className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
             />
           </div>
           <div className="mb-3.5">
-            <label className="block text-sm font-semibold text-admin-text-light mb-1">Password</label>
+            <label htmlFor="login-password" className="block text-sm font-semibold text-admin-text-light mb-1">Password</label>
             <input
+              id="login-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               placeholder="Your password"
-              className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+              className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
             />
           </div>
 

@@ -18,6 +18,21 @@ import { COLORS } from "@/src/constants/theme";
 import { api } from "@/src/lib/api";
 import { useOnboardingStore } from "@/src/stores/onboarding";
 
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+const ALL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+/** Convert "9:00 AM" → "09:00", "12:30 PM" → "12:30" */
+function to24h(time12: string): string {
+  const match = time12.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return "09:00";
+  let hour = parseInt(match[1], 10);
+  const minute = match[2];
+  const period = match[3].toUpperCase();
+  if (period === "AM" && hour === 12) hour = 0;
+  else if (period === "PM" && hour !== 12) hour += 12;
+  return `${hour.toString().padStart(2, "0")}:${minute}`;
+}
+
 // Simple confetti circles
 const CONFETTI_COLORS = [
   COLORS.sage,
@@ -151,13 +166,19 @@ export default function SuccessScreen() {
         additionalInfo: store.additionalTopics || undefined,
         reminders: store.reminders
           .filter((r) => r.title.trim())
-          .map((r) => (r.description ? `${r.title}: ${r.description}` : r.title)),
-        updateTopics: store.topicsToAvoid
+          .map((r) => r.title.trim()),
+        topicsToAvoid: store.topicsToAvoid
           ? [store.topicsToAvoid]
           : undefined,
-        callSchedule: {
-          time: store.calls[0]?.callTime,
-        },
+        callSchedule: store.calls[0]
+          ? {
+              time: to24h(store.calls[0].callTime),
+              days:
+                store.calls[0].frequency === "daily"
+                  ? [...ALL_DAYS]
+                  : store.calls[0].selectedDays.map((i) => DAY_LABELS[i]),
+            }
+          : undefined,
       };
 
       await api.onboarding.complete(payload, token!);

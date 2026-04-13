@@ -39,7 +39,7 @@ import {
   isBefore,
   getDay,
 } from "date-fns";
-import { COLORS, CALL_TITLE_OPTIONS, TIME_OPTIONS } from "@/src/constants/theme";
+import { COLORS, TIME_OPTIONS } from "@/src/constants/theme";
 import {
   useCurrentSenior,
   useSchedule,
@@ -48,6 +48,7 @@ import {
   useConversations,
 } from "@/src/hooks";
 import { Button, Input, Modal } from "@/src/components/ui";
+import { getErrorMessage } from "@/src/lib/api";
 import type { Reminder, Conversation } from "@/src/types";
 
 // ---------------------------------------------------------------------------
@@ -197,10 +198,8 @@ export default function ScheduleScreen() {
   const [formTime, setFormTime] = useState("9:00 AM");
   const [formNotes, setFormNotes] = useState("");
   const [formReminderIds, setFormReminderIds] = useState<string[]>([]);
-  const [customTitle, setCustomTitle] = useState(false);
 
   // Picker modals
-  const [showTitlePicker, setShowTitlePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
 
   const seniorFirstName = senior?.name?.split(" ")[0] ?? "your loved one";
@@ -295,7 +294,6 @@ export default function ScheduleScreen() {
     setFormTime("9:00 AM");
     setFormNotes("");
     setFormReminderIds([]);
-    setCustomTitle(false);
     setModalVisible(true);
   }, [selectedDate]);
 
@@ -313,7 +311,6 @@ export default function ScheduleScreen() {
       setFormTime(item.time || "9:00 AM");
       setFormNotes(item.contextNotes ?? "");
       setFormReminderIds(item.reminderIds ?? []);
-      setCustomTitle(!CALL_TITLE_OPTIONS.includes(item.title as any));
       setModalVisible(true);
     },
     [scheduleItems],
@@ -696,31 +693,15 @@ export default function ScheduleScreen() {
         title={editingIndex !== null ? "Edit Call" : "Add Call"}
       >
         <View className="pb-6">
-          {/* Title picker */}
+          {/* Title */}
           <View className="mb-5">
-            <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-              Call Title
-            </Text>
-            {customTitle ? (
-              <Input
-                placeholder="Enter custom title"
-                value={formTitle}
-                onChangeText={setFormTitle}
-                autoFocus
-              />
-            ) : (
-              <Pressable
-                onPress={() => setShowTitlePicker(true)}
-                className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
-                accessibilityRole="button"
-                accessibilityLabel="Select call title"
-              >
-                <Text className="text-[15px] text-charcoal">
-                  {formTitle || "Select title"}
-                </Text>
-                <ChevronDown size={18} color={COLORS.muted} />
-              </Pressable>
-            )}
+            <Input
+              label="Call Title"
+              placeholder="e.g., Daily Call, Morning Check-in"
+              value={formTitle}
+              onChangeText={setFormTitle}
+              testID="call-title-input"
+            />
           </View>
 
           {/* Frequency */}
@@ -897,42 +878,9 @@ export default function ScheduleScreen() {
 
           {updateSchedule.isError && (
             <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
-              Failed to save. Please try again.
+              {getErrorMessage(updateSchedule.error, "Failed to save")}
             </Text>
           )}
-        </View>
-      </Modal>
-
-      {/* ================================================================= */}
-      {/* TITLE PICKER MODAL                                                */}
-      {/* ================================================================= */}
-      <Modal
-        visible={showTitlePicker}
-        onClose={() => setShowTitlePicker(false)}
-        title="Select Call Title"
-      >
-        <View className="gap-1 pb-4">
-          {[...CALL_TITLE_OPTIONS, "Custom" as const].map((option) => (
-            <Pressable
-              key={option}
-              onPress={() => {
-                if (option === "Custom") {
-                  setCustomTitle(true);
-                  setFormTitle("");
-                } else {
-                  setCustomTitle(false);
-                  setFormTitle(option);
-                }
-                setShowTitlePicker(false);
-              }}
-              className="flex-row items-center justify-between py-3.5 px-2 rounded-xl active:bg-beige"
-              accessibilityRole="button"
-              accessibilityLabel={option}
-            >
-              <Text className="text-[16px] text-charcoal">{option}</Text>
-              {formTitle === option && <Check size={18} color={COLORS.sage} />}
-            </Pressable>
-          ))}
         </View>
       </Modal>
 

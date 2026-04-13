@@ -172,9 +172,10 @@ export default function Seniors() {
         <form onSubmit={handleAdd}>
           <div className="grid grid-cols-2 gap-3.5">
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Name</label>
+              <label htmlFor="senior-name" className="block text-sm font-semibold text-admin-text-light mb-1">Name</label>
               <input
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="senior-name"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Full name"
@@ -182,9 +183,10 @@ export default function Seniors() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Phone</label>
+              <label htmlFor="senior-phone" className="block text-sm font-semibold text-admin-text-light mb-1">Phone</label>
               <input
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="senior-phone"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="+1234567890"
@@ -194,18 +196,20 @@ export default function Seniors() {
           </div>
           <div className="grid grid-cols-2 gap-3.5 mt-3.5">
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Location</label>
+              <label htmlFor="senior-location" className="block text-sm font-semibold text-admin-text-light mb-1">Location</label>
               <input
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="senior-location"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
                 placeholder="City, State"
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Interests (comma-separated)</label>
+              <label htmlFor="senior-interests" className="block text-sm font-semibold text-admin-text-light mb-1">Interests (comma-separated)</label>
               <input
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="senior-interests"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 value={interests}
                 onChange={(e) => setInterests(e.target.value)}
                 placeholder="gardening, crosswords, jazz"
@@ -213,9 +217,10 @@ export default function Seniors() {
             </div>
           </div>
           <div className="mt-3.5">
-            <label className="block text-sm font-semibold text-admin-text-light mb-1">Medical Notes</label>
+            <label htmlFor="senior-medical-notes" className="block text-sm font-semibold text-admin-text-light mb-1">Medical Notes</label>
             <textarea
-              className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+              id="senior-medical-notes"
+              className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
               rows={2}
               value={medicalNotes}
               onChange={(e) => setMedicalNotes(e.target.value)}
@@ -290,17 +295,19 @@ export default function Seniors() {
         <div>
           <div className="grid grid-cols-2 gap-3.5">
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Name</label>
+              <label htmlFor="edit-senior-name" className="block text-sm font-semibold text-admin-text-light mb-1">Name</label>
               <input
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="edit-senior-name"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Phone</label>
+              <label htmlFor="edit-senior-phone" className="block text-sm font-semibold text-admin-text-light mb-1">Phone</label>
               <input
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="edit-senior-phone"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 value={editPhone}
                 onChange={(e) => setEditPhone(e.target.value)}
               />
@@ -308,26 +315,29 @@ export default function Seniors() {
           </div>
           <div className="grid grid-cols-2 gap-3.5 mt-3.5">
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Location</label>
+              <label htmlFor="edit-senior-location" className="block text-sm font-semibold text-admin-text-light mb-1">Location</label>
               <input
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="edit-senior-location"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 value={editLocation}
                 onChange={(e) => setEditLocation(e.target.value)}
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-admin-text-light mb-1">Interests (comma-separated)</label>
+              <label htmlFor="edit-senior-interests" className="block text-sm font-semibold text-admin-text-light mb-1">Interests (comma-separated)</label>
               <input
-                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                id="edit-senior-interests"
+                className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                 value={editInterests}
                 onChange={(e) => setEditInterests(e.target.value)}
               />
             </div>
           </div>
           <div className="mt-3.5">
-            <label className="block text-sm font-semibold text-admin-text-light mb-1">Medical Notes</label>
+            <label htmlFor="edit-senior-medical-notes" className="block text-sm font-semibold text-admin-text-light mb-1">Medical Notes</label>
             <textarea
-              className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+              id="edit-senior-medical-notes"
+              className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
               rows={2}
               value={editMedicalNotes}
               onChange={(e) => setEditMedicalNotes(e.target.value)}
@@ -362,9 +372,10 @@ export default function Seniors() {
             {/* Add Memory */}
             <div className="flex gap-2 items-end">
               <div className="shrink-0">
-                <label className="block text-sm font-semibold text-admin-text-light mb-1">Type</label>
+                <label htmlFor="memory-type" className="block text-sm font-semibold text-admin-text-light mb-1">Type</label>
                 <select
-                  className="px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                  id="memory-type"
+                  className="px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                   value={newMemoryType}
                   onChange={(e) => setNewMemoryType(e.target.value)}
                 >
@@ -374,9 +385,10 @@ export default function Seniors() {
                 </select>
               </div>
               <div className="flex-1">
-                <label className="block text-sm font-semibold text-admin-text-light mb-1">Content</label>
+                <label htmlFor="memory-content" className="block text-sm font-semibold text-admin-text-light mb-1">Content</label>
                 <input
-                  className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:border-admin-primary transition-colors"
+                  id="memory-content"
+                  className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
                   value={newMemoryContent}
                   onChange={(e) => setNewMemoryContent(e.target.value)}
                   placeholder="Enter memory content..."

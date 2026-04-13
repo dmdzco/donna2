@@ -23,6 +23,7 @@ import {
 } from "@/src/hooks";
 import { Button } from "@/src/components/ui";
 import { Modal } from "@/src/components/ui";
+import { getErrorMessage } from "@/src/lib/api";
 import type { Conversation } from "@/src/types";
 
 // --- Next-call computation ---
@@ -132,13 +133,45 @@ export default function DashboardScreen() {
   const seniorFirstName = seniorName.split(" ")[0];
 
   // Resolve schedule: try the schedule endpoint, fall back to senior.preferredCallTimes
+  // Handles both legacy shape { days, time } and new ScheduleItem[] from schedule tab
   const resolvedSchedule = useMemo((): { days?: string[]; time?: string } | null => {
     const sd = scheduleData as Record<string, any> | null | undefined;
-    if (sd?.schedule) return sd.schedule;
-    if (sd?.days || sd?.time) return sd as { days?: string[]; time?: string };
-    if (senior?.preferredCallTimes?.schedule) {
-      return senior.preferredCallTimes.schedule as { days?: string[]; time?: string };
+    const raw = sd?.schedule ?? senior?.preferredCallTimes?.schedule;
+
+    if (!raw) {
+      // Top-level legacy shape: { days, time }
+      if (sd?.days || sd?.time) return sd as { days?: string[]; time?: string };
+      return null;
     }
+
+    // New shape: ScheduleItem[] — find the next applicable call
+    if (Array.isArray(raw)) {
+      const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const todayIndex = new Date().getDay();
+
+      for (const item of raw as any[]) {
+        if (!item.time) continue;
+
+        if (item.frequency === "daily") {
+          return { days: dayLabels, time: item.time };
+        }
+        if (item.frequency === "recurring" && item.recurringDays?.length > 0) {
+          return {
+            days: (item.recurringDays as number[]).map((d: number) => dayLabels[d]),
+            time: item.time,
+          };
+        }
+        // one-time or no frequency — treat as daily
+        return { time: item.time };
+      }
+      return null;
+    }
+
+    // Legacy object shape: { days, time }
+    if (raw.time || raw.days) {
+      return raw as { days?: string[]; time?: string };
+    }
+
     return null;
   }, [scheduleData, senior?.preferredCallTimes]);
 
@@ -318,7 +351,7 @@ export default function DashboardScreen() {
           </View>
           {initiateCall.isError && (
             <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
-              Failed to initiate call. Please try again.
+              {getErrorMessage(initiateCall.error, "Failed to initiate call")}
             </Text>
           )}
         </View>

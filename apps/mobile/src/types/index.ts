@@ -76,10 +76,6 @@ export interface NotificationPreferences {
   timezone?: string;
   weeklyReportDay?: number;
   weeklyReportTime?: string;
-  callSummaries?: boolean;
-  missedCallAlerts?: boolean;
-  completedCallAlerts?: boolean;
-  pauseCalls?: boolean;
 }
 
 /**
@@ -100,7 +96,7 @@ export interface OnboardingInput {
   familyInfo?: { relation?: string; interestDetails?: Record<string, string> };
   additionalInfo?: string;
   reminders?: string[];
-  updateTopics?: string[];
+  topicsToAvoid?: string[];
   callSchedule?: {
     days?: ("Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun")[];
     time?: string;

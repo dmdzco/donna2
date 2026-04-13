@@ -5,7 +5,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { callLimiter } from '../middleware/rate-limit.js';
 import { validateBody } from '../middleware/validate.js';
 import { initiateCallSchema } from '../validators/schemas.js';
-import { canAccessSenior } from './helpers.js';
+import { canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
@@ -71,7 +71,7 @@ router.post('/api/calls/:callSid/end', requireAdmin, async (req, res) => {
     await twilioClient.calls(req.params.callSid).update({ status: 'completed' });
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'POST /api/calls/:callSid/end');
   }
 });
 

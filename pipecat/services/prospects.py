@@ -97,15 +97,9 @@ def build_context_for_prompt(prospect: dict) -> str:
             parts.append(f"They are a {relationship}.")
         if loved_one:
             parts.append(f"They are calling about {loved_one}.")
-        if ctx:
-            details = []
-            for key, val in ctx.items():
-                if isinstance(val, list):
-                    details.extend(val)
-                elif isinstance(val, str):
-                    details.append(val)
-            if details:
-                parts.append(f"What you know about them: {'; '.join(details[:10])}")
+        call_summary = ctx.get("call_summary")
+        if call_summary:
+            parts.append(f"Last conversation: {call_summary}")
     else:
         parts.append("NEW CALLER: This is an unsubscribed caller you have not spoken with before.")
 

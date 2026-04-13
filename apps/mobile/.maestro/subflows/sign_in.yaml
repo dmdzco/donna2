@@ -1,0 +1,59 @@
+# Reusable sign-in subflow
+# Expects: TEST_EMAIL, TEST_PASSWORD env vars set by calling flow or .env
+# Starts from: Any state
+# Ends at: Dashboard (tabs) or Onboarding step 1
+#
+# Clerk test mode: +clerk_test emails auto-verify with code 424242
+# The app's sign-in screen handles needs_second_factor in __DEV__ mode
+
+appId: com.donna.caregiver
+
+---
+
+# Kill app process + clear keychain (sign-out) but NOT clearState
+# clearState wipes Metro bundler cache in dev builds → app won't load
+- stopApp
+- launchApp:
+    clearKeychain: true
+
+# Wait for landing page (clearKeychain signs user out → landing page)
+- extendedWaitUntil:
+    visible: "Sign In"
+    timeout: 15000
+
+# After relaunch, first tap "wakes" GestureHandlerRootView, second navigates
+- tapOn: "Sign In"
+- tapOn: "Sign In"
+
+# Wait for sign-in screen to render
+- extendedWaitUntil:
+    visible: "Welcome Back"
+    timeout: 10000
+
+# Dismiss any leftover alert from a previous failed run
+- tapOn:
+    text: "OK"
+    optional: true
+
+# Email — tap to focus and type
+- tapOn:
+    id: "sign-in-email"
+- eraseText: 50
+- inputText: ${TEST_EMAIL}
+
+# Password — secureTextEntry disabled in __DEV__ so inputText works
+- tapOn:
+    id: "sign-in-password"
+- inputText: ${TEST_PASSWORD}
+
+# Submit via the Sign In button (testID: sign-in-submit)
+# Fallback: pressKey Enter triggers onSubmitEditing={handleSignIn}
+- tapOn:
+    id: "sign-in-submit"
+
+# Wait for Clerk auth + 2FA auto-verify + API call + navigation
+# Landing destinations: "Hello" greeting (returning user) or "About You" (fresh user)
+# 2FA chain: signIn.create + prepareSecondFactor + attemptSecondFactor + setActive + API = ~50-60s
+- extendedWaitUntil:
+    visible: "Hello.*|About You"
+    timeout: 90000

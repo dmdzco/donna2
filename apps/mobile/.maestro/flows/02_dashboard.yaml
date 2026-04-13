@@ -1,0 +1,47 @@
+# Flow 02: Dashboard (Home Tab)
+# Verifies: Greeting, next call card, recent calls, instant call FAB + modal
+
+appId: com.donna.caregiver
+
+env:
+  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "Maestro2026!"
+
+---
+
+- runFlow: ../subflows/sign_in.yaml
+
+# Should land on Dashboard tab by default
+- assertVisible: "Dashboard, tab.*"
+
+# Greeting header (dynamic — contains caregiver's first name)
+- assertVisible: "Hello.*"
+
+# Next call card — accessibilityLabel is "Next call: <time>. Tap to view schedule."
+# Matches both scheduled ("Next call: Tomorrow at ...") and empty ("Next call: No calls scheduled...")
+- assertVisible: "Next call:.*"
+
+# Recent calls section header
+- assertVisible: "Recent Call Highlights"
+
+# Empty state or call cards (test account likely has no calls)
+- assertVisible:
+    text: "No recent calls yet.*|Today at.*|Yesterday at.*"
+    optional: true
+
+# Floating call button (accessibilityLabel = "Call {name} now")
+- assertVisible: "Call.*now"
+
+# Tap call FAB → instant call modal appears
+- tapOn: "Call.*now"
+
+# Modal title is "Instant Call"; button inside is "Call {name} Now"
+- assertVisible: "Instant Call"
+
+# Dismiss modal via Close button
+- tapOn: "Close"
+
+# Verify we're still on dashboard
+- assertVisible: "Dashboard, tab.*"
+
+- takeScreenshot: 02_dashboard

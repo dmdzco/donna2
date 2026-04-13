@@ -1,0 +1,18 @@
+# Flow 01: Sign In with Clerk
+# Verifies: Landing page → Sign In → Dashboard navigation
+# Account: Returning user (has a senior)
+
+appId: com.donna.caregiver
+
+env:
+  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "Maestro2026!"
+
+---
+
+- runFlow: ../subflows/sign_in.yaml
+
+# After sign-in, returning user lands on dashboard with greeting
+- assertVisible: "Hello.*"
+
+- takeScreenshot: 01_sign_in_success

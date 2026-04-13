@@ -1,0 +1,151 @@
+# Flow 10: Full Onboarding (Fresh User)
+# Signs in with fresh clerk_test account → completes all 5 onboarding steps → dashboard
+# NOTE: This flow creates a new senior — run separately or last
+#
+# KEY LEARNINGS:
+#   - Input component: use testID to reliably target TextInput fields.
+#     The label <Text> and TextInput share the same accessibility text.
+#   - hideKeyboard fails on iOS. Use pressKey:enter (single-line) to dismiss.
+#   - For phone-pad keyboard (no Return key), tap a non-interactive heading.
+#   - Between fields, just tap the next field directly — keyboard stays open.
+#   - Before tapping fixed-bottom buttons (Next/Continue), dismiss keyboard first.
+
+appId: com.donna.caregiver
+
+env:
+  TEST_EMAIL: "maestro-fresh+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "MaestroFresh2026"
+
+---
+
+# Sign in (reuse subflow — handles stopApp, clearKeychain, double-tap, 2FA)
+- runFlow: ../subflows/sign_in.yaml
+
+# ── Step 1: About You (Caregiver) ──
+- extendedWaitUntil:
+    visible: "About You"
+    timeout: 10000
+
+# Fields start empty — no eraseText needed. Use testID to target TextInput.
+- tapOn:
+    id: "input-first-name"
+- inputText: "Jane"
+- tapOn:
+    id: "input-last-name"
+- inputText: "Tester"
+- tapOn:
+    id: "input-email"
+- inputText: "jane+clerk_test@getdonna.ai"
+- tapOn:
+    id: "input-phone"
+- inputText: "5551234567"
+
+# Dismiss phone-pad keyboard (no Return key) by tapping non-interactive heading
+- tapOn:
+    text: "About You"
+    index: 0
+- tapOn: "Next"
+
+# ── Step 2: About Your Loved One ──
+- extendedWaitUntil:
+    visible: "About Your Loved One"
+    timeout: 10000
+
+- tapOn:
+    id: "input-their-name"
+- inputText: "Margaret"
+- tapOn:
+    id: "input-their-phone"
+- inputText: "5559876543"
+
+# Relationship picker
+- tapOn: "Select relationship"
+- extendedWaitUntil:
+    visible: "Select Relationship"
+    timeout: 5000
+- tapOn: "Daughter"
+
+- tapOn:
+    id: "input-city"
+- inputText: "Dallas"
+- tapOn:
+    id: "input-state"
+- inputText: "TX"
+- tapOn:
+    id: "input-zipcode"
+- inputText: "75201"
+
+# Dismiss keyboard before tapping Next
+- pressKey: enter
+- tapOn: "Next"
+
+# ── Step 3: Reminders ──
+- extendedWaitUntil:
+    visible: "Reminders"
+    timeout: 10000
+
+- tapOn:
+    id: "input-reminder-title-0"
+- inputText: "Morning medication"
+
+# Dismiss keyboard then Continue
+- pressKey: enter
+- tapOn: "Continue"
+
+# ── Step 4: Interests ──
+- extendedWaitUntil:
+    visible: "Interests"
+    timeout: 10000
+
+# Tap interest tile to expand it
+- tapOn: "Music"
+- extendedWaitUntil:
+    visible: "Done"
+    timeout: 3000
+- tapOn: "e.g., jazz, Frank Sinatra, classical..."
+- inputText: "Loves Frank Sinatra and jazz"
+- tapOn: "Done"
+
+- tapOn: "Gardening"
+- extendedWaitUntil:
+    visible: "Done"
+    timeout: 3000
+- tapOn: "e.g., roses, vegetable garden..."
+- inputText: "Grows tomatoes and roses"
+- tapOn: "Done"
+
+# Scroll to Continue button
+- scrollUntilVisible:
+    element: "Continue"
+    direction: DOWN
+- tapOn: "Continue"
+
+# ── Step 5: Schedule Donna ──
+- extendedWaitUntil:
+    visible: "Schedule Donna"
+    timeout: 10000
+
+# Default title and time are pre-selected — no changes needed
+# Check the reminder checkbox if visible
+- tapOn:
+    text: "Morning medication"
+    optional: true
+
+# Tap Create Profile
+- tapOn: "Create Profile"
+
+# ── Success Screen ──
+- extendedWaitUntil:
+    visible: "Congratulations.*"
+    timeout: 15000
+
+- takeScreenshot: 10_onboarding_success
+
+# Navigate to dashboard
+- tapOn: "Continue to Homepage"
+
+- extendedWaitUntil:
+    visible: "Hello.*|Dashboard"
+    timeout: 30000
+
+- takeScreenshot: 10_onboarding_complete

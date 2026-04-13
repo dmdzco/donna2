@@ -10,7 +10,7 @@ import {
   updateReminderSchema,
   reminderIdParamSchema,
 } from '../validators/schemas.js';
-import { getAccessibleSeniorIds, canAccessSenior } from './helpers.js';
+import { getAccessibleSeniorIds, canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
@@ -54,7 +54,7 @@ router.get('/api/reminders', requireAuth, async (req, res) => {
     const filtered = result.filter(r => accessibleIds.includes(r.seniorId));
     res.json(filtered);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/reminders');
   }
 });
 
@@ -87,7 +87,7 @@ router.post('/api/reminders', requireAuth, writeLimiter, validateBody(createRemi
     });
     res.json(reminder);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'POST /api/reminders');
   }
 });
 
@@ -130,7 +130,7 @@ router.patch('/api/reminders/:id', requireAuth, writeLimiter, validateParams(rem
       .returning();
     res.json(reminder);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'PATCH /api/reminders/:id');
   }
 });
 
@@ -159,7 +159,7 @@ router.delete('/api/reminders/:id', requireAuth, writeLimiter, validateParams(re
     await db.delete(reminders).where(eq(reminders.id, req.params.id));
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'DELETE /api/reminders/:id');
   }
 });
 

@@ -75,8 +75,20 @@ async def run_post_call(
             return
         from services.memory import extract_from_conversation
         if isinstance(transcript, list):
+            def _text(content):
+                if content is None:
+                    return ""
+                if isinstance(content, str):
+                    return content
+                if isinstance(content, list):
+                    return " ".join(
+                        b.get("text", "") for b in content
+                        if isinstance(b, dict) and b.get("type") == "text"
+                    )
+                return str(content)
+
             formatted = "\n".join(
-                f"{t.get('role', 'unknown')}: {t.get('content', '')}"
+                f"{t.get('role', 'unknown')}: {_text(t.get('content'))}"
                 for t in transcript if isinstance(t, dict)
             )
         else:
@@ -279,6 +291,90 @@ async def _persist_call_metrics(
     )
 
 
+def _format_transcript(transcript: list | str) -> str:
+    """Convert transcript (list of message dicts or string) to readable text."""
+    if isinstance(transcript, str):
+        return transcript
+    if not isinstance(transcript, list):
+        return str(transcript)
+
+    def _text(content):
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " ".join(
+                b.get("text", "") for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+                and not b.get("text", "").startswith("[EPHEMERAL")
+                and not b.get("text", "").startswith("[Internal")
+            )
+        return str(content)
+
+    lines = []
+    for turn in transcript:
+        if not isinstance(turn, dict):
+            continue
+        role = turn.get("role", "unknown")
+        text = _text(turn.get("content")).strip()
+        if text and not text.startswith("[EPHEMERAL") and not text.startswith("[Internal"):
+            label = "Donna" if role == "assistant" else "Caller"
+            lines.append(f"{label}: {text}")
+    return "\n".join(lines)
+
+
+async def _summarize_onboarding_call(transcript: list | str, call_sid: str) -> str | None:
+    """Summarize an onboarding call transcript into a brief context for the next call.
+
+    Uses Gemini Flash for speed and cost. Returns a short paragraph or None on failure.
+    """
+    import os
+    import google.generativeai as genai
+
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        logger.warning("[{cs}] No GOOGLE_API_KEY, skipping onboarding summary", cs=call_sid)
+        return None
+
+    formatted = _format_transcript(transcript)
+    if not formatted or len(formatted) < 50:
+        logger.info("[{cs}] Transcript too short for summary", cs=call_sid)
+        return None
+
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-2.0-flash")
+
+    prompt = (
+        "Summarize this onboarding phone call between Donna (an AI companion service for seniors) "
+        "and a prospective caller. Extract:\n"
+        "- Caller's name (if given)\n"
+        "- Who they're calling about (parent, grandparent, themselves) and that person's name\n"
+        "- What they learned about Donna\n"
+        "- Any concerns or questions they raised\n"
+        "- Any details about the senior (interests, health, living situation)\n"
+        "- Whether they seemed interested in signing up\n\n"
+        "Write 2-4 sentences as a brief context note that Donna can reference on the next call. "
+        "Be specific — use names and details, not vague summaries.\n\n"
+        f"TRANSCRIPT:\n{formatted}"
+    )
+
+    try:
+        response = await model.generate_content_async(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                max_output_tokens=200,
+                temperature=0.3,
+            ),
+        )
+        summary = response.text.strip()
+        logger.info("[{cs}] Onboarding summary: {s}", cs=call_sid, s=summary[:100])
+        return summary
+    except Exception as e:
+        logger.error("[{cs}] Onboarding summary failed: {err}", cs=call_sid, err=str(e))
+        return None
+
+
 async def _run_onboarding_post_call(
     session_state: dict,
     conversation_tracker,
@@ -310,39 +406,23 @@ async def _run_onboarding_post_call(
         logger.error("[{cs}] Onboarding post-call step 1 (complete conversation) failed: {err}",
                      cs=call_sid, err=str(e))
 
-    # 2. Extract and store memories with prospect_id
+    # 2. Summarize conversation and store on prospect record
     try:
         if transcript and prospect_id:
-            from services.memory import extract_from_conversation
-            if isinstance(transcript, list):
-                formatted_transcript = "\n".join(
-                    f"{turn.get('role', 'unknown')}: {turn.get('content', '')}"
-                    for turn in transcript
-                    if isinstance(turn, dict)
-                )
+            summary = await _summarize_onboarding_call(transcript, call_sid)
+            if summary:
+                from services.prospects import update_after_call
+                await update_after_call(prospect_id, {
+                    "caller_context": {"call_summary": summary},
+                })
+                logger.info("[{cs}] Stored onboarding call summary ({n} chars)",
+                            cs=call_sid, n=len(summary))
             else:
-                formatted_transcript = str(transcript)
-            await extract_from_conversation(
-                None, formatted_transcript, conversation_id or "unknown",
-                prospect_id=prospect_id,
-            )
+                # Still increment call_count even without summary
+                from services.prospects import update_after_call
+                await update_after_call(prospect_id, {})
     except Exception as e:
-        logger.error("[{cs}] Onboarding post-call step 2 (memory extraction) failed: {err}",
-                     cs=call_sid, err=str(e))
-
-    # 3. Update prospect record with learned info
-    try:
-        if prospect_id:
-            from services.prospects import update_after_call
-            # Collect what we learned from the conversation tracker
-            update_data: dict = {}
-
-            # The prospect fields (learned_name, relationship, loved_one_name)
-            # are already updated in real-time by save_prospect_detail tool handler.
-            # Here we just increment call_count and update last_call_at.
-            await update_after_call(prospect_id, update_data)
-    except Exception as e:
-        logger.error("[{cs}] Onboarding post-call step 3 (update prospect) failed: {err}",
+        logger.error("[{cs}] Onboarding post-call step 2 (summary + update) failed: {err}",
                      cs=call_sid, err=str(e))
 
     logger.info("[{cs}] Onboarding post-call processing complete", cs=call_sid)

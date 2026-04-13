@@ -54,8 +54,9 @@ export default function CaregiverProfileScreen() {
           relationship,
         },
       });
-      Alert.alert("Saved", "Profile updated successfully.");
-      router.back();
+      Alert.alert("Saved", "Profile updated successfully.", [
+        { text: "OK", onPress: () => router.back() },
+      ]);
     } catch {
       Alert.alert("Error", "Failed to update profile. Please try again.");
     } finally {
@@ -66,30 +67,9 @@ export default function CaregiverProfileScreen() {
   const handleChangePassword = () => {
     Alert.alert(
       "Change Password",
-      "A password reset link will be sent to your email address.",
+      "Use Forgot password from the sign-in screen to reset your password. This profile screen should not trigger a verification code flow on its own.",
       [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Send Link",
-          onPress: async () => {
-            try {
-              if (user?.primaryEmailAddress) {
-                await user.primaryEmailAddress.prepareVerification({
-                  strategy: "email_code",
-                });
-                Alert.alert(
-                  "Email Sent",
-                  "Check your email for the password reset link."
-                );
-              }
-            } catch {
-              Alert.alert(
-                "Note",
-                "Please use the Clerk account portal to change your password."
-              );
-            }
-          },
-        },
+        { text: "OK" },
       ]
     );
   };

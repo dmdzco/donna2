@@ -9,6 +9,7 @@ type ButtonProps = {
   loading?: boolean;
   icon?: React.ReactNode;
   className?: string;
+  testID?: string;
 };
 
 export function Button({
@@ -19,6 +20,7 @@ export function Button({
   loading,
   icon,
   className = "",
+  testID,
 }: ButtonProps) {
   const base = "flex-row items-center justify-center rounded-3xl min-h-[52px] px-6";
   const variants: Record<string, string> = {
@@ -41,6 +43,7 @@ export function Button({
       disabled={disabled || loading}
       accessibilityRole="button"
       accessibilityLabel={title}
+      testID={testID}
     >
       {loading ? (
         <ActivityIndicator color={variant === "primary" ? "#fff" : COLORS.sage} />

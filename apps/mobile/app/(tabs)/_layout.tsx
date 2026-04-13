@@ -1,9 +1,9 @@
 import { useEffect } from "react";
-import { ActivityIndicator, View } from "react-native";
 import { Tabs, useRouter } from "expo-router";
 import { useAuth } from "@clerk/clerk-expo";
 import { useQuery } from "@tanstack/react-query";
 import { Home, Calendar, Bell, Settings } from "lucide-react-native";
+import { View } from "react-native";
 import { COLORS } from "@/src/constants/theme";
 import { api } from "@/src/lib/api";
 
@@ -11,7 +11,7 @@ export default function TabLayout() {
   const { getToken, isSignedIn } = useAuth();
   const router = useRouter();
 
-  const { data: profile, isLoading } = useQuery({
+  const { data: profile } = useQuery({
     queryKey: ["profile"],
     queryFn: async () => {
       const token = await getToken();
@@ -21,29 +21,10 @@ export default function TabLayout() {
   });
 
   useEffect(() => {
-    if (
-      !isLoading &&
-      profile &&
-      (!profile.seniors || profile.seniors.length === 0)
-    ) {
+    if (profile && (!profile.seniors || profile.seniors.length === 0)) {
       router.replace("/(onboarding)/step1");
     }
-  }, [isLoading, profile]);
-
-  if (isLoading) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: COLORS.cream,
-        }}
-      >
-        <ActivityIndicator size="large" color={COLORS.sage} />
-      </View>
-    );
-  }
+  }, [profile]);
 
   return (
     <Tabs

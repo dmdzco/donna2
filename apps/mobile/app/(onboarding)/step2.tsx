@@ -95,6 +95,7 @@ export default function Step2Screen() {
               error={errors.lovedOneName}
               autoCapitalize="words"
               textContentType="name"
+              testID="input-their-name"
             />
 
             <Input
@@ -105,6 +106,7 @@ export default function Step2Screen() {
               error={errors.lovedOnePhone}
               keyboardType="phone-pad"
               textContentType="telephoneNumber"
+              testID="input-their-phone"
             />
 
             {/* Relationship Picker */}
@@ -141,6 +143,7 @@ export default function Step2Screen() {
               onChangeText={(v) => setField("city", v)}
               autoCapitalize="words"
               textContentType="addressCity"
+              testID="input-city"
             />
 
             {/* State + Zip side by side */}
@@ -157,6 +160,7 @@ export default function Step2Screen() {
                   autoCapitalize="characters"
                   maxLength={2}
                   textContentType="addressState"
+                  testID="input-state"
                 />
               </View>
               <View className="flex-1">
@@ -171,6 +175,7 @@ export default function Step2Screen() {
                   keyboardType="number-pad"
                   maxLength={5}
                   textContentType="postalCode"
+                  testID="input-zipcode"
                 />
               </View>
             </View>

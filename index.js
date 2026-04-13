@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/node';
 import 'dotenv/config';
+import { createHash } from 'crypto';
 
 // Initialize Sentry before all other imports for auto-instrumentation
 if (process.env.SENTRY_DSN) {
@@ -8,6 +9,20 @@ if (process.env.SENTRY_DSN) {
     tracesSampleRate: 0,
     sendDefaultPii: false,
     environment: process.env.RAILWAY_PUBLIC_DOMAIN ? 'production' : 'development',
+    beforeSend(event) {
+      // Hash senior_id tags to prevent direct identification
+      const sid = event.tags?.senior_id;
+      if (sid && sid !== 'unknown' && sid !== 'None') {
+        event.tags.senior_id = createHash('sha256').update(String(sid)).digest('hex').slice(0, 8);
+      }
+      // Truncate exception values to prevent conversation context leaks
+      for (const exc of event.exception?.values || []) {
+        if (exc.value && exc.value.length > 200) {
+          exc.value = exc.value.slice(0, 200) + '...[truncated]';
+        }
+      }
+      return event;
+    },
   });
 }
 
@@ -36,22 +51,28 @@ app.use(requestId());
 app.use(securityHeaders());
 
 // CORS - allow admin dashboard, consumer app, observability, and local development
-app.use(cors({
-  origin: [
-    'https://admin-v2-liart.vercel.app',
-    'https://consumer-ruddy.vercel.app',
-    'https://observability-five.vercel.app',
-    'https://www.calldonna.co',
-    'https://calldonna.co',
-    'https://www.call-donna.com',
-    'https://call-donna.com',
+const CORS_ORIGINS = [
+  'https://admin-v2-liart.vercel.app',
+  'https://consumer-ruddy.vercel.app',
+  'https://observability-five.vercel.app',
+  'https://www.calldonna.co',
+  'https://calldonna.co',
+  'https://www.call-donna.com',
+  'https://call-donna.com',
+];
+// Only allow localhost origins in non-deployed environments (no RAILWAY_PUBLIC_DOMAIN)
+if (!process.env.RAILWAY_PUBLIC_DOMAIN) {
+  CORS_ORIGINS.push(
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',  // Observability dashboard (local)
     'http://localhost:5173',  // Admin dashboard (React)
     'http://localhost:5174',  // Consumer app (React)
     'http://localhost:5175',  // Admin v2 (React)
-  ],
+  );
+}
+app.use(cors({
+  origin: CORS_ORIGINS,
   credentials: true,
 }));
 

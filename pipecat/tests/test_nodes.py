@@ -125,9 +125,8 @@ class TestMainNode:
         assert "web_search" in func_names
         assert "mark_reminder_acknowledged" in func_names
         assert "transition_to_winding_down" in func_names
-        assert "search_memories" in func_names
-        assert "save_important_detail" in func_names
-        assert "check_caregiver_notes" in func_names
+        # search_memories, save_important_detail, check_caregiver_notes removed
+        # (Director-first architecture: handled by prefetch/post-call/pre-fetch)
 
     def test_node_does_not_have_get_news(self):
         state = _make_session_state()

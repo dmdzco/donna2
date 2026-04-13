@@ -9,7 +9,7 @@ const faqData = [
     items: [
       {
         question: 'How do I sign up for Donna?',
-        answer: 'Simply click "Get Started" on our homepage and follow the onboarding process. You\'ll create an account, add information about your loved one, and set up a call schedule in just a few minutes.'
+        answer: 'Download the Donna app on iOS or Android, create an account, and follow the in-app setup. You\'ll add information about your loved one and set up a call schedule in just a few minutes.'
       },
       {
         question: 'How much does Donna cost?',
@@ -34,7 +34,7 @@ const faqData = [
       },
       {
         question: 'Can I customize what Donna talks about?',
-        answer: 'Absolutely! During onboarding, you\'ll specify your loved one\'s interests, and you can update these anytime through the dashboard. Donna adapts her conversation topics accordingly.'
+        answer: 'Absolutely! During setup, you\'ll specify your loved one\'s interests, and you can update these anytime in the app. Donna adapts her conversation topics accordingly.'
       },
     ],
   },
@@ -43,7 +43,7 @@ const faqData = [
     items: [
       {
         question: 'Is my loved one\'s information secure?',
-        answer: 'Yes, we take privacy very seriously. All data is encrypted, and we comply with healthcare privacy standards. We never share personal information with third parties.'
+        answer: 'We take privacy seriously. All data is transmitted securely using TLS encryption, and access to your loved one\'s information is restricted to authorized caregivers on their account. Conversations are processed by AI services to provide the companion experience. We are committed to handling your data responsibly and transparently.'
       },
       {
         question: 'How do I know if something is wrong?',
@@ -100,6 +100,8 @@ export default function FAQ() {
                     <div key={key} className="glass-card overflow-hidden">
                       <button
                         onClick={() => toggleItem(key)}
+                        aria-expanded={isOpen}
+                        aria-controls={`faq-panel-${key}`}
                         className="w-full px-6 py-4 flex items-center justify-between text-left"
                       >
                         <span className="font-medium pr-4">{item.question}</span>
@@ -107,12 +109,13 @@ export default function FAQ() {
                           animate={{ rotate: isOpen ? 180 : 0 }}
                           transition={{ duration: 0.2 }}
                         >
-                          <ChevronDown className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                          <ChevronDown className="w-5 h-5 text-gray-400 flex-shrink-0" aria-hidden="true" />
                         </motion.div>
                       </button>
                       <AnimatePresence>
                         {isOpen && (
                           <motion.div
+                            id={`faq-panel-${key}`}
                             initial={{ height: 0, opacity: 0 }}
                             animate={{ height: 'auto', opacity: 1 }}
                             exit={{ height: 0, opacity: 0 }}

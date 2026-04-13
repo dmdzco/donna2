@@ -74,7 +74,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - TTS (ElevenLabs via Pipecat)
 - VAD (Silero — confidence=0.6, min_volume=0.5; stop_secs=1.2 for senior calls, 0.8 for onboarding calls)
-- News via OpenAI web search (1hr cache)
+- News via OpenAI web search (1hr cache), in-call web search via Tavily (raw results, no LLM answer)
 - Security: JWT admin auth, API key auth, Twilio webhook validation, rate limiting, security headers
 
 ### Infrastructure & Reliability
@@ -221,7 +221,7 @@ pipecat/
 │   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation (326 LOC)
 │   ├── seniors.py                   ← Senior profile + per-senior call_settings (131 LOC)
 │   ├── caregivers.py                ← Caregiver relationships + notes delivery (101 LOC)
-│   ├── news.py                      ← OpenAI web search + circuit breaker (213 LOC)
+│   ├── news.py                      ← Tavily web search (raw results) + OpenAI fallback + circuit breaker (213 LOC)
 │   ├── data_retention.py            ← HIPAA data retention: batched purge of 7 tables, 24h loop
 │   ├── audit.py                     ← Fire-and-forget HIPAA audit logging (log_audit, auth_to_role)
 │   └── token_revocation.py          ← JWT token revocation: per-token, per-admin, expired cleanup
@@ -258,7 +258,7 @@ pipecat/
 │   ├── growthbook.js           ← GrowthBook feature flag SDK helper (Node.js)
 │   └── encryption.js           ← AES-256-GCM field encryption for PHI (mirrors pipecat/lib/encryption.py)
 ├── services/                   ← 12 service files (dual implementation with pipecat/services/)
-├── routes/                     ← 16 route modules (all /api/* endpoints)
+├── routes/                     ← 16 route modules (all /api/* endpoints) + helpers.js (routeError, canAccessSenior)
 ├── middleware/                  ← 7 middleware files (auth w/ dual-key JWT + revocation, rate-limit, security)
 └── apps/                       ← Frontend apps (still active)
     ├── admin-v2/               ← Admin dashboard (Vercel)
@@ -395,6 +395,8 @@ Use `--environment dev` or `--environment staging` flags for other environments.
 - **Frontend E2E tests:** `npm run test:e2e` — Playwright browser tests across all 3 frontend apps (31 tests, ~15s)
 - **Regression:** `make test-regression` — scenario-based tests run in CI on every PR
 
+- **LLM-to-LLM Voice Simulation:** `cd pipecat && python -m pytest tests/test_live_simulation.py -v -m llm_simulation` — Haiku caller vs real Donna pipeline (real Claude, Director, Observer, DB). Tests web_search, memory injection, reminder processing across multiple calls. Requires ANTHROPIC_API_KEY + dev DATABASE_URL. Design doc: `docs/plans/2026-04-05-llm-voice-simulation-testing.md`
+
 **Do NOT** test voice features locally with ngrok — always deploy to Railway dev environment
 
 ### Frontend E2E Tests (Playwright)
@@ -481,6 +483,10 @@ npx playwright install chromium
 | Update admin UI (v2) | `apps/admin-v2/src/pages/` |
 | Update admin API client | `apps/admin-v2/src/lib/api.ts` |
 | Add/modify frontend E2E tests | `tests/e2e/` — see [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) |
+| Add/modify route error handling | `routes/helpers.js` (`routeError()`) — all route catch blocks use this |
+| Add/modify mobile error display | `apps/mobile/src/lib/api.ts` (`getErrorMessage()`) — all screens use this |
+| Add/modify Zod validation schemas | `validators/schemas.js` — **do NOT add `.transform()` for DB-bound fields** |
+| Add/modify LLM voice simulation tests | `pipecat/tests/simulation/` (framework) + `pipecat/tests/test_live_simulation.py` (tests) |
 
 ### Commit Messages & PR Titles
 
@@ -561,8 +567,11 @@ DATABASE_URL=...                 # Neon PostgreSQL
 ANTHROPIC_API_KEY=...            # Claude Sonnet (voice LLM)
 GOOGLE_API_KEY=...               # Gemini Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...             # STT
-ELEVENLABS_API_KEY=...           # TTS
+ELEVENLABS_API_KEY=...           # TTS (ElevenLabs)
 ELEVENLABS_VOICE_ID=...          # Voice ID (optional)
+CARTESIA_API_KEY=...             # TTS (Cartesia — alternative to ElevenLabs)
+CARTESIA_VOICE_ID=...            # Cartesia voice ID (optional, has default)
+TTS_PROVIDER=cartesia            # Override GrowthBook flag: "cartesia" or "elevenlabs"
 OPENAI_API_KEY=...               # Embeddings + news search
 CEREBRAS_API_KEY=...             # Cerebras (Director primary, speculative pre-processing)
 

@@ -10,7 +10,9 @@ Run with:
 from __future__ import annotations
 
 import os
+import socket
 import uuid
+from urllib.parse import urlparse
 
 import pytest
 
@@ -65,9 +67,27 @@ class TestTestSenior:
 # Integration tests (require DATABASE_URL)
 # ---------------------------------------------------------------------------
 
+def _database_available() -> bool:
+    database_url = os.environ.get("DATABASE_URL", "")
+    if not database_url:
+        return False
+
+    parsed = urlparse(database_url)
+    host = parsed.hostname
+    port = parsed.port or 5432
+    if not host:
+        return False
+
+    try:
+        with socket.create_connection((host, port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
 _skip_no_db = pytest.mark.skipif(
-    not os.environ.get("DATABASE_URL"),
-    reason="Requires DATABASE_URL",
+    not _database_available(),
+    reason="Requires a reachable DATABASE_URL",
 )
 
 

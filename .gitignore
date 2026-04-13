@@ -19,6 +19,7 @@ apps/mobile/**/*.p8
 # Build
 dist/
 .next/
+.vercel/
 
 # IDE
 .idea/
@@ -41,6 +42,13 @@ npm-debug.log*
 # Test
 coverage/
 .turbo/
+test-results/
+
+# Local agent/debug artifacts
+/.codex/context/
+/Design iOS App for Donna/
+/app.json
+apps/mobile/*.png
 
 # Python
 __pycache__/

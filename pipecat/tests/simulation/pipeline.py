@@ -58,7 +58,7 @@ class LiveSimComponents:
         response_collector: ``ResponseCollector`` capturing LLM text output.
         caller_transport: ``TextCallerTransport`` for injecting utterances.
         quick_observer: Layer 1 regex observer (268 patterns).
-        conversation_director: Layer 2 Groq/Cerebras speculative analysis.
+        conversation_director: Layer 2 Groq speculative analysis.
         conversation_tracker: Topic/question/advice tracking.
         flow_manager: 4-phase call state machine.
         llm: Real ``AnthropicLLMService`` (Claude Sonnet with prompt caching).

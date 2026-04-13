@@ -43,10 +43,15 @@ async def list_seniors(auth: AuthContext = Depends(require_auth)):
 - `user_id: str` — authenticated user identifier
 - `clerk_user_id: str | None` — Clerk-specific ID
 
-### API Key Auth (`api/middleware/api_auth.py`)
-- `DONNA_API_KEY` env var for service-to-service calls
-- Constant-time comparison via `hmac.compare_digest()`
-- Exempt prefixes: `/admin/`, `/observability/` (use JWT instead)
+### Cofounder API Key Auth (`pipecat/api/middleware/auth.py`)
+- `COFOUNDER_API_KEY_1` / `COFOUNDER_API_KEY_2` env vars provide full-access cofounder bypass
+- Checked before admin JWT and Clerk session auth
+- Use only for trusted operator/service access
+
+### Node API Key Auth (`middleware/api-auth.js`)
+- `DONNA_API_KEY` env var for service-to-service calls on selected Node `/api/*` routes
+- Constant-time comparison via `crypto.timingSafeEqual()`
+- Route prefixes that own JWT/Clerk auth are exempt
 - Disabled in development when key not set
 
 ---
@@ -192,7 +197,7 @@ Global exception handlers prevent internal details from leaking:
 | File | Purpose |
 |------|---------|
 | `pipecat/api/middleware/auth.py` | 3-tier authentication (109 LOC) |
-| `pipecat/api/middleware/api_auth.py` | API key auth with constant-time comparison (42 LOC) |
+| `middleware/api-auth.js` | Node service API key auth with constant-time comparison |
 | `pipecat/api/middleware/twilio.py` | Twilio webhook signature validation (53 LOC) |
 | `pipecat/api/middleware/rate_limit.py` | 5-tier rate limiting config (17 LOC) |
 | `pipecat/api/middleware/security.py` | Security headers (31 LOC) |

@@ -217,9 +217,6 @@ export default function Onboarding() {
         throw new Error('API URL not configured');
       }
 
-      console.log('Submitting to:', `${apiUrl}/api/onboarding`);
-      console.log('Payload:', JSON.stringify(payload, null, 2));
-
       const response = await fetch(`${apiUrl}/api/onboarding`, {
         method: 'POST',
         headers: {
@@ -235,8 +232,8 @@ export default function Onboarding() {
           const err = await response.json();
           throw new Error(err.message || err.error || 'Failed to complete onboarding');
         } else {
-          const text = await response.text();
-          console.error('Non-JSON error response:', text);
+          await response.text();
+          console.error('Non-JSON onboarding error response');
           throw new Error(`Server error (${response.status}): ${response.statusText}`);
         }
       }

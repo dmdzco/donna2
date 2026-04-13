@@ -1,10 +1,7 @@
-"""Tests for web_search_query service (used by Director web search gating).
+"""Tests for web_search_query service used by the active web_search tool.
 
-Mocks the OpenAI client to test the full chain:
-  Director → web_search_query → OpenAI Responses API → formatted result
-
-Note: The web_search LLM tool was removed — the Director now owns web
-searches entirely and injects results into Claude's context directly.
+Mocks the search clients to test the full chain:
+  Claude web_search tool → web_search_query → Tavily/OpenAI → formatted result
 """
 
 import pytest

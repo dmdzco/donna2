@@ -58,7 +58,7 @@ Senior (phone call)
     │
     ▼
 ┌─────────┐     ┌───────────┐     ┌──────────────┐     ┌────────────────┐
-│ Twilio   │────►│ Deepgram  │────►│ Cerebras/    │────►│ Anthropic      │
+│ Twilio   │────►│ Deepgram  │────►│ Groq/Google  │────►│ Anthropic      │
 │ (audio + │     │ (audio →  │     │ Groq/Google  │     │ (Claude:       │
 │  phone#) │     │  text)    │     │ (Director    │     │  full convo)   │
 └─────────┘     └───────────┘     │  analysis)   │     └───────┬────────┘
@@ -86,7 +86,7 @@ Senior (phone call)
                         └──────────┘                     └──────────┘
 ```
 
-**PHI touches 13 external vendors** during a single phone call. This is the primary compliance risk.
+**PHI touches 12+ external vendors** during or shortly after a single phone call. This is the primary compliance risk.
 
 ---
 
@@ -158,34 +158,33 @@ Senior (phone call)
 
 ---
 
-### 4. Director LLM: Cerebras
+### 4. Legacy Director LLM: Cerebras
 
 | Criterion | Assessment |
 |-----------|-----------|
-| **PHI Exposure** | HIGH -- receives 2-6 recent conversation turns for Director analysis (Query Director + Guidance Director). Conversation turns include senior speech about health, medications, and personal details. |
+| **PHI Exposure** | HIGH if re-enabled -- would receive recent conversation turns for Director analysis. Current `pipecat/services/director_llm.py` does not call Cerebras. |
 | **BAA Available** | **Unlikely** -- Cerebras is primarily an AI chip/infrastructure company. No public HIPAA program or BAA offering found. |
 | **Security Certifications** | Limited public information; primarily focused on hardware performance, not compliance |
 | **Data Retention** | Unknown -- no public data retention policy for inference API |
 | **Encryption** | TLS in transit (assumed); at-rest details unknown |
 | **Data Residency** | Unknown |
 | **Incident Response** | Unknown |
-| **Risk Rating** | **CRITICAL** |
+| **Risk Rating** | **CRITICAL if re-enabled; legacy/not active in current runtime** |
 
 **Actions:**
-1. Contact Cerebras to inquire about BAA (low probability of success)
-2. **Plan migration to Gemini Flash or Groq** for Director LLM workload
-3. As interim mitigation, consider stripping identifiers (senior name, phone) from Director context before sending to Cerebras
-4. Document risk acceptance if Cerebras is retained temporarily
+1. Confirm no deployed branch or Railway environment still routes Director traffic to Cerebras.
+2. Remove stale Cerebras environment variables and references if unused.
+3. Do not re-enable Cerebras for PHI workloads without a signed BAA and documented retention terms.
 
-**Recommended alternative:** Route all Director traffic through **Google Gemini Flash** (already used as fallback). Gemini has a clear BAA path and the latency difference (~200ms Cerebras vs ~400ms Gemini) is acceptable for the Director workload. The existing fallback code path in `pipecat/services/director_llm.py` can be promoted to primary.
+**Recommended alternative:** Keep Director traffic on **Groq only with a signed BAA** or route it through **Google Gemini Flash** on a BAA-covered GCP path.
 
 ---
 
-### 5. Director LLM Fallback: Groq
+### 5. Director LLM: Groq
 
 | Criterion | Assessment |
 |-----------|-----------|
-| **PHI Exposure** | HIGH -- same as Cerebras when used as Director fallback |
+| **PHI Exposure** | HIGH -- current primary Director provider receives recent conversation turns for Query Director and Guidance Director analysis |
 | **BAA Available** | **Unclear** -- Groq has enterprise offerings but no public HIPAA program |
 | **Security Certifications** | SOC 2 Type II (claimed); details limited |
 | **Data Retention** | Unknown for inference API |
@@ -196,8 +195,8 @@ Senior (phone call)
 
 **Actions:**
 1. Contact Groq sales to inquire about BAA availability
-2. If BAA is available, Groq is a viable alternative to Cerebras for Director LLM
-3. If BAA is not available, migrate to Gemini Flash (same recommendation as Cerebras)
+2. If BAA is available, document plan, data retention, and subprocessor terms
+3. If BAA is not available, migrate Director traffic to Gemini Flash through a BAA-covered GCP path
 
 ---
 
@@ -301,9 +300,9 @@ Senior (phone call)
 
 **Actions:**
 1. **Replace Tavily with OpenAI web search** -- OpenAI is already integrated for news retrieval (`pipecat/services/news.py`) and offers enterprise BAA
-2. Update Director web search in `pipecat/processors/conversation_director.py` to use OpenAI search instead of Tavily
+2. Update `pipecat/services/news.py` so the active `web_search` tool uses OpenAI search only when Tavily cannot support compliant terms
 3. Remove `TAVILY_API_KEY` from environment variables and `pipecat/config.py`
-4. Migration effort: LOW (OpenAI web search is already integrated; extend to Director queries)
+4. Migration effort: LOW (OpenAI web search is already integrated as the fallback path)
 
 **Recommended alternative:** **OpenAI web search** (already integrated, enterprise BAA available). The migration is straightforward since OpenAI web search is already used for news retrieval. Alternatively, search queries could be de-identified before sending to any provider, but this is complex and may reduce search quality.
 
@@ -431,17 +430,16 @@ Senior (phone call)
 
 These three vendors represent the greatest HIPAA compliance risk and should be addressed first:
 
-### 1. Cerebras -- CRITICAL Risk
+### 1. Groq Director -- HIGH Risk Until BAA Is Confirmed
 
-**Why:** Processes conversation transcripts (2-6 recent turns per Director analysis call, fired continuously during calls). No BAA available. No public HIPAA program. No relevant certifications. Cerebras is focused on AI chip performance, not healthcare compliance.
+**Why:** Processes recent conversation turns for Director analysis, fired continuously during calls. BAA status is unclear.
 
 **Data exposed:** Senior speech transcriptions including health discussions, medication references, personal details, emotional expressions. Approximately 50-100 API calls per 10-minute conversation.
 
-**Recommended action:** Migrate Director LLM from Cerebras to **Google Gemini Flash**.
+**Recommended action:** Sign a Groq BAA or migrate Director LLM traffic to **Google Gemini Flash** through a BAA-covered GCP path.
 - Gemini is already the fallback in `pipecat/services/director_llm.py`
-- GCP BAA covers Gemini API calls through Vertex AI
-- Latency increase (~200ms to ~400ms) is acceptable for Director analysis
-- Migration effort: LOW -- promote existing fallback code path to primary
+- GCP BAA can cover Gemini API calls through eligible Google Cloud services
+- Migration effort: LOW to MEDIUM depending on SDK/API path and latency acceptance
 
 **Timeline:** Complete within 2 weeks.
 
@@ -467,7 +465,7 @@ These three vendors represent the greatest HIPAA compliance risk and should be a
 **Recommended action:** Replace Tavily with **OpenAI web search**.
 - OpenAI web search is already integrated in `pipecat/services/news.py`
 - OpenAI offers enterprise BAA
-- Extend the existing OpenAI search integration to handle Director web queries
+- Make the active `web_search` tool use the existing OpenAI fallback path by default
 - Remove `TAVILY_API_KEY` from config
 
 **Timeline:** Complete within 2 weeks.
@@ -614,8 +612,8 @@ Quick reference comparing compliance readiness across all vendors:
 | Twilio | High | Available | Yes | No | Medium | Sign BAA |
 | Anthropic | Critical | Available | Yes | No | Medium | Sign BAA |
 | Google (Gemini) | High | Available | Yes | Yes | Low | Sign BAA |
-| Cerebras | High | Unlikely | No | No | **Critical** | **Replace** |
-| Groq | High | Unclear | Claimed | No | High | Evaluate |
+| Groq | High | Unclear | Claimed | No | High | Evaluate or replace |
+| Cerebras | High if re-enabled | Unlikely | No | No | **Critical if active** | Keep disabled/remove legacy refs |
 | Deepgram | Critical | Available | Yes | No | Medium | Sign BAA |
 | ElevenLabs | Medium | Unclear | Yes (Ent.) | No | High | Evaluate |
 | Cartesia | Medium | Unlikely | No | No | **Critical** | **Disable** |

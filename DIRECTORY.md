@@ -18,6 +18,7 @@
 | Change post-call analysis prompts | `pipecat/services/call_analysis.py` |
 | Change memory search/storage | `pipecat/services/memory.py` |
 | Change predictive prefetch | `pipecat/services/prefetch.py` (cache + extraction) + `pipecat/processors/conversation_director.py` (orchestration) |
+| Change in-call web search | `pipecat/services/news.py` (Tavily/OpenAI search) + `pipecat/flows/tools.py` (Claude tool schema/handler) |
 | Change greeting templates | `pipecat/services/greetings.py` |
 | Change context pre-caching | `pipecat/services/context_cache.py` |
 | Change reminder scheduling | `pipecat/services/scheduler.py` (polling/calls) + `pipecat/services/reminder_delivery.py` (delivery CRUD) |
@@ -35,7 +36,7 @@
 | Change consumer app | `apps/consumer/src/` |
 | Change admin/consumer API endpoints | `routes/*.js` (Node.js — serves all /api/* for frontends) |
 | Change admin API middleware/auth | `middleware/*.js` (Node.js) |
-| Change database schema | `db/schema.js` (Drizzle ORM, shared by both backends) |
+| Change database schema | `db/schema.js` (Drizzle ORM) + `pipecat/db/migrations/` (runtime SQL migrations used by Pipecat/shared DB) |
 | Add/modify frontend E2E tests | `tests/e2e/` + `playwright.config.ts` — see [guide](docs/guides/FRONTEND_TESTING.md) |
 | Change data retention policies | `pipecat/services/data_retention.py` (Python) + `services/data-retention.js` (Node.js) |
 | Change audit logging | `pipecat/services/audit.py` (Python) + `services/audit.js` (Node.js) |
@@ -66,12 +67,12 @@ Donna runs two backend services. Change the wrong one and nothing happens.
 ```
 
 **Call lifecycle (Pipecat path — primary):**
-1. Call arrives (inbound, scheduled, or manual via Pipecat `/api/call`)
+1. Call arrives (inbound, scheduled, or manual via Node `/api/call` or Pipecat `/api/call`)
 2. Pipecat `/voice/answer` fetches senior context, creates conversation record, returns TwiML `<Stream url="/ws">`
 3. Twilio connects WebSocket → **Pipecat runs full pipeline** (STT → Observer → Director → Claude → TTS)
 4. Call ends → Pipecat `services/post_call.py` runs analysis, memory extraction, daily context save
 
-**Note:** Node.js also has `/voice/answer` and `/api/call` routes (legacy path). Both backends can initiate calls — which path is used depends on which service URL is in the Twilio callback. Frontends hit Node.js APIs for call initiation.
+**Note:** Frontends hit Node.js APIs for call initiation. The active Node `routes/calls.js` sets Twilio callbacks to Pipecat `/voice/answer` and `/voice/status`; there is no active root Node `routes/voice.js` route.
 
 ---
 
@@ -94,9 +95,9 @@ pipecat/
 │   └── tools.py         2 LLM tool schemas (web_search, mark_reminder) + handlers (190 LOC)
 │
 ├── processors/          Frame processors in the audio pipeline
-│   ├── patterns.py             Pattern data: 268 regex patterns, 19 categories (503 LOC)
+│   ├── patterns.py             Pattern data for Quick Observer categories (503 LOC)
 │   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (386 LOC)
-│   ├── conversation_director.py Layer 2: Split Director (Query + Guidance) + web search gating + prefetch + ephemeral context (750 LOC)
+│   ├── conversation_director.py Layer 2: Split Director (memory Query + Guidance) + memory prefetch + ephemeral context (750 LOC)
 │   ├── conversation_tracker.py  Tracks topics/questions/advice per call (246 LOC)
 │   ├── metrics_logger.py        Call metrics + prefetch stats logging (110 LOC)
 │   ├── goodbye_gate.py          False-goodbye grace period — NOT in active pipeline (135 LOC)
@@ -117,7 +118,7 @@ pipecat/
 │   ├── conversations.py     Conversation CRUD (250 LOC)
 │   ├── daily_context.py     Same-day cross-call memory (161 LOC)
 │   ├── seniors.py           Senior profile + per-senior call_settings (131 LOC)
-│   ├── news.py              OpenAI web search, 1hr cache + circuit breaker (213 LOC)
+│   ├── news.py              OpenAI cached news; in-call web search uses Tavily first, OpenAI fallback (213 LOC)
 │   ├── caregivers.py        Caregiver relationships + notes delivery (101 LOC)
 │   ├── data_retention.py    HIPAA data retention: batched purge of 7 tables (configurable via env)
 │   ├── audit.py             Fire-and-forget HIPAA audit logging (log_audit, auth_to_role)
@@ -229,8 +230,7 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 ├── index.js             Express server entry (101 LOC) — CORS, middleware, scheduler start
 │
 ├── routes/              16 files, 1.2k LOC — all /api/* endpoints
-│   ├── voice.js         /voice/answer → returns TwiML pointing to Pipecat WebSocket (146 LOC)
-│   ├── calls.js         /api/call — initiate manual outbound call (66 LOC)
+│   ├── calls.js         /api/call — initiate manual outbound call with Twilio callbacks pointed at Pipecat (66 LOC)
 │   ├── seniors.js       CRUD /api/seniors (126 LOC)
 │   ├── reminders.js     CRUD /api/reminders + delivery tracking (127 LOC)
 │   ├── observability.js Call monitoring endpoints (368 LOC)
@@ -251,7 +251,7 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   ├── greetings.js     Greeting templates (257 LOC)
 │   ├── daily-context.js Cross-call memory (196 LOC)
 │   ├── conversations.js Conversation CRUD (175 LOC)
-│   ├── news.js          OpenAI web search (103 LOC)
+│   ├── news.js          OpenAI cached news helper (103 LOC)
 │   ├── caregivers.js    Caregiver relationships (90 LOC)
 │   ├── seniors.js       Senior profiles (77 LOC)
 │   ├── audit.js         Fire-and-forget HIPAA audit logging (logAudit, authToRole)
@@ -268,7 +268,7 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   └── error-handler.js Error formatting (33 LOC)
 │
 ├── db/
-│   ├── schema.js        12 Drizzle tables: seniors, conversations, memories, reminders, auditLogs, etc.
+│   ├── schema.js        Drizzle tables for Node-owned app/API access; Pipecat SQL migrations add shared runtime columns/tables
 │   ├── client.js        Neon PostgreSQL + Drizzle ORM init
 │   └── setup-pgvector.js
 │
@@ -338,16 +338,16 @@ Only load these when your task specifically requires them.
 
 | File | LOC | Why it's big |
 |---|---|---|
-| `pipecat/processors/patterns.py` | 503 | 268 regex patterns, 19 categories (pure data) |
+| `pipecat/processors/patterns.py` | 503 | Regex pattern data (pure data) |
 | `pipecat/services/scheduler.py` | 427 | Polling + call triggering + prefetch + state |
 | `pipecat/services/memory.py` | 392 | pgvector + HNSW + circuit breaker + mid-call refresh |
 | `pipecat/processors/quick_observer.py` | 392 | Analysis logic + goodbye detection + model recs |
-| `pipecat/services/director_llm.py` | 374 | Gemini Flash analysis prompts + response parsing |
+| `pipecat/services/director_llm.py` | 374 | Groq/Gemini Director prompts + response parsing |
 | `pipecat/bot.py` | 335 | Pipeline assembly + sentiment greetings + call settings |
 | `pipecat/services/greetings.py` | 326 | Sentiment-aware greeting templates + rotation |
 | `pipecat/flows/nodes.py` | 370 | 3-phase flow config + greeting merge + context builders |
 | `pipecat/services/context_cache.py` | 290 | Pre-cache senior context at 5 AM |
-| `pipecat/flows/tools.py` | 269 | 5 LLM tool schemas + closure-based handlers |
+| `pipecat/flows/tools.py` | 269 | 2 active LLM tool schemas + closure-based handlers |
 | `pipecat/main.py` | 258 | FastAPI + graceful shutdown + enhanced /health |
 | `services/scheduler.js` | 489 | Node.js reminder polling (mirrors pipecat scheduler) |
 | `services/context-cache.js` | 364 | Node.js context pre-caching |

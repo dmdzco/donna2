@@ -46,11 +46,11 @@ router.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSche
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
     });
 
-    console.log(`Initiated call ${call.sid} to ${phoneNumber}`);
+    console.log(`Initiated call ${call.sid} to phone ending ${phoneNumber?.slice(-4) || 'unknown'}`);
     res.json({ success: true, callSid: call.sid });
 
   } catch (error) {
-    console.error('Failed to initiate call:', error);
+    console.error('Failed to initiate call:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

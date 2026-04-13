@@ -270,8 +270,7 @@ async def voice_answer(request: Request):
                 prospect = await find_prospect(target_phone)
                 if not prospect:
                     prospect = await create_prospect(target_phone)
-                logger.info("[{cs}] Onboarding: prospect={pid} call_count={n}",
-                            cs=call_sid, pid=str(prospect["id"])[:8],
+                logger.info("Onboarding caller matched: call_count={n}",
                             n=prospect.get("call_count", 0))
                 # For return callers, load prospect memory context
                 if prospect.get("call_count", 0) > 0:
@@ -286,11 +285,9 @@ async def voice_answer(request: Request):
                                 f"- {r['content']}" for r in results
                             )
                     except Exception as e:
-                        logger.error("[{cs}] Error loading prospect memories: {err}",
-                                     cs=call_sid, err=str(e))
+                        logger.error("Error loading prospect memories: {err}", err=str(e))
             except Exception as e:
-                logger.error("[{cs}] Error in prospect lookup/create: {err}",
-                             cs=call_sid, err=str(e))
+                logger.error("Error in prospect lookup/create: {err}", err=str(e))
 
     # Load remaining context for outbound paths (reminder/prefetched).
     # Inbound path handles everything inline above via snapshot + parallel.

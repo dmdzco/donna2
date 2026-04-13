@@ -33,8 +33,8 @@ export default function SignInScreen() {
     strategy: "oauth_apple",
   });
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState(__DEV__ ? "facu.quirogaga@gmail.com" : "");
+  const [password, setPassword] = useState(__DEV__ ? "Peter14dt*" : "");
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<
     "google" | "apple" | null
@@ -45,17 +45,7 @@ export default function SignInScreen() {
   const passwordRef = useRef<TextInput>(null);
 
   async function navigateAfterAuth() {
-    const token = await getToken();
-    try {
-      const profile = await api.caregivers.me(token!);
-      if (profile.seniors?.length > 0) {
-        router.replace("/(tabs)");
-      } else {
-        router.replace("/(onboarding)/step1");
-      }
-    } catch {
-      router.replace("/(onboarding)/step1" as any);
-    }
+    router.replace("/(tabs)");
   }
 
   async function handleSignIn() {

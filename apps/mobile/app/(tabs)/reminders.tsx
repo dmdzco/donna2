@@ -5,6 +5,7 @@ import {
   Pressable,
   TextInput,
   FlatList,
+  ScrollView,
   RefreshControl,
   ActivityIndicator,
 } from "react-native";
@@ -112,12 +113,14 @@ export default function RemindersScreen() {
 
   const openAddModal = useCallback(() => {
     setEditingReminder(null);
+    setShowTimePicker(false);
     setForm(EMPTY_FORM);
     setFormModalVisible(true);
   }, []);
 
   const openEditModal = useCallback((reminder: Reminder) => {
     setEditingReminder(reminder);
+    setShowTimePicker(false);
     setForm({
       title: reminder.title,
       description: reminder.description ?? "",
@@ -130,6 +133,7 @@ export default function RemindersScreen() {
 
   const closeFormModal = useCallback(() => {
     setFormModalVisible(false);
+    setShowTimePicker(false);
     setEditingReminder(null);
     setForm(EMPTY_FORM);
   }, []);
@@ -190,7 +194,7 @@ export default function RemindersScreen() {
   }, [deletingReminder, deleteReminder, closeDeleteModal]);
 
   const isSaving = createReminder.isPending || updateReminder.isPending;
-  const canSave = form.title.trim().length > 0 && !isSaving;
+  const canSave = form.title.trim().length > 0 && !isSaving && !!seniorId;
 
   // --- Loading state ---
 
@@ -218,6 +222,15 @@ export default function RemindersScreen() {
         </Text>
       </View>
 
+      {/* Add New Reminder Button — fuera del FlatList para evitar problemas de touch */}
+      <View className="px-6 pt-2 pb-2">
+        <Button
+          title="Add New Reminder"
+          onPress={openAddModal}
+          icon={<Plus size={18} color={COLORS.white} />}
+        />
+      </View>
+
       {/* Reminder List */}
       {remindersLoading ? (
         <View className="flex-1 items-center justify-center">
@@ -227,7 +240,7 @@ export default function RemindersScreen() {
         <FlatList
           data={activeReminders}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 120 }}
+          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 120, paddingTop: 8 }}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
@@ -235,17 +248,6 @@ export default function RemindersScreen() {
               onRefresh={onRefresh}
               tintColor={COLORS.sage}
             />
-          }
-          ListHeaderComponent={
-            <View className="mt-4">
-              {/* Add New Reminder Button */}
-              <Button
-                title="Add New Reminder"
-                onPress={openAddModal}
-                icon={<Plus size={18} color={COLORS.white} />}
-                className="mb-4"
-              />
-            </View>
           }
           ListEmptyComponent={
             <View
@@ -276,8 +278,8 @@ export default function RemindersScreen() {
         title={editingReminder ? "Edit Reminder" : "Add Reminder"}
         variant="bottom-sheet"
       >
-        <View className="pb-6">
-          <View className="mb-4">
+        <View style={{ paddingBottom: 24 }}>
+          <View style={{ marginBottom: 16 }}>
             <Input
               label="Title"
               placeholder="e.g. Take blood pressure medicine"
@@ -285,21 +287,30 @@ export default function RemindersScreen() {
               onChangeText={(text) =>
                 setForm((prev) => ({ ...prev, title: text }))
               }
-              autoFocus
             />
           </View>
 
-          <View className="mb-4">
+          <View style={{ marginBottom: 16 }}>
             <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
               Description
             </Text>
             <TextInput
-              className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 text-[15px] text-charcoal"
+              style={{
+                width: "100%",
+                backgroundColor: "white",
+                paddingHorizontal: 16,
+                paddingVertical: 14,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: "rgba(0,0,0,0.08)",
+                fontSize: 15,
+                color: COLORS.charcoal,
+                minHeight: 80,
+                textAlignVertical: "top",
+              }}
               placeholder="Details Donna should know about this reminder"
               placeholderTextColor={COLORS.muted}
               multiline
-              textAlignVertical="top"
-              style={{ minHeight: 80 }}
               value={form.description}
               onChangeText={(text) =>
                 setForm((prev) => ({ ...prev, description: text }))
@@ -308,17 +319,27 @@ export default function RemindersScreen() {
             />
           </View>
 
-          <View className="mb-5">
+          <View style={{ marginBottom: 20 }}>
             <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
               FAQs (optional)
             </Text>
             <TextInput
-              className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 text-[15px] text-charcoal"
+              style={{
+                width: "100%",
+                backgroundColor: "white",
+                paddingHorizontal: 16,
+                paddingVertical: 14,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: "rgba(0,0,0,0.08)",
+                fontSize: 15,
+                color: COLORS.charcoal,
+                minHeight: 80,
+                textAlignVertical: "top",
+              }}
               placeholder="Common questions and answers about this reminder"
               placeholderTextColor={COLORS.muted}
               multiline
-              textAlignVertical="top"
-              style={{ minHeight: 80 }}
               value={form.faqs}
               onChangeText={(text) =>
                 setForm((prev) => ({ ...prev, faqs: text }))
@@ -328,53 +349,117 @@ export default function RemindersScreen() {
           </View>
 
           {/* Time picker */}
-          <View className="mb-4">
+          <View style={{ marginBottom: 16 }}>
             <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
               Time
             </Text>
             <Pressable
-              onPress={() => setShowTimePicker(true)}
-              className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
+              onPress={() => setShowTimePicker((prev) => !prev)}
+              style={{
+                width: "100%",
+                backgroundColor: "white",
+                paddingHorizontal: 16,
+                paddingVertical: 14,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: "rgba(0,0,0,0.08)",
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
               accessibilityRole="button"
               accessibilityLabel="Select reminder time"
             >
-              <View className="flex-row items-center">
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
                 <Clock size={16} color={COLORS.muted} style={{ marginRight: 8 }} />
-                <Text className="text-[15px] text-charcoal">{form.time}</Text>
+                <Text style={{ fontSize: 15, color: COLORS.charcoal }}>{form.time}</Text>
               </View>
               <ChevronDown size={18} color={COLORS.muted} />
             </Pressable>
+            {showTimePicker && (
+              <View
+                style={{
+                  backgroundColor: "white",
+                  borderRadius: 16,
+                  borderWidth: 1,
+                  borderColor: "rgba(0,0,0,0.08)",
+                  marginTop: 4,
+                  maxHeight: 200,
+                  overflow: "hidden",
+                }}
+              >
+                <ScrollView
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {TIME_OPTIONS.map((time) => (
+                    <Pressable
+                      key={time}
+                      onPress={() => {
+                        setForm((prev) => ({ ...prev, time }));
+                        setShowTimePicker(false);
+                      }}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={time}
+                    >
+                      <Text style={{ fontSize: 15, color: COLORS.charcoal }}>{time}</Text>
+                      {form.time === time && <Check size={18} color={COLORS.sage} />}
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
           </View>
 
           {/* Recurring toggle */}
-          <View className="mb-5">
+          <View style={{ marginBottom: 20 }}>
             <Text className="text-[13px] font-medium text-muted mb-2 uppercase tracking-wider">
               Frequency
             </Text>
-            <View className="flex-row gap-2">
+            <View style={{ flexDirection: "row", gap: 8 }}>
               <Pressable
                 onPress={() => setForm((prev) => ({ ...prev, isRecurring: true }))}
-                className={`flex-1 py-2.5 rounded-xl items-center border ${
-                  form.isRecurring ? "bg-sage border-sage" : "bg-white border-charcoal/10"
-                }`}
+                style={{
+                  flex: 1,
+                  paddingVertical: 10,
+                  borderRadius: 12,
+                  alignItems: "center",
+                  borderWidth: 1,
+                  backgroundColor: form.isRecurring ? COLORS.sage : "white",
+                  borderColor: form.isRecurring ? COLORS.sage : "rgba(0,0,0,0.08)",
+                }}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: form.isRecurring }}
                 accessibilityLabel="Daily"
               >
-                <Text className={`text-[13px] font-medium ${form.isRecurring ? "text-white" : "text-charcoal"}`}>
+                <Text style={{ fontSize: 13, fontWeight: "500", color: form.isRecurring ? "white" : COLORS.charcoal }}>
                   Daily
                 </Text>
               </Pressable>
               <Pressable
                 onPress={() => setForm((prev) => ({ ...prev, isRecurring: false }))}
-                className={`flex-1 py-2.5 rounded-xl items-center border ${
-                  !form.isRecurring ? "bg-sage border-sage" : "bg-white border-charcoal/10"
-                }`}
+                style={{
+                  flex: 1,
+                  paddingVertical: 10,
+                  borderRadius: 12,
+                  alignItems: "center",
+                  borderWidth: 1,
+                  backgroundColor: !form.isRecurring ? COLORS.sage : "white",
+                  borderColor: !form.isRecurring ? COLORS.sage : "rgba(0,0,0,0.08)",
+                }}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: !form.isRecurring }}
                 accessibilityLabel="One-time"
               >
-                <Text className={`text-[13px] font-medium ${!form.isRecurring ? "text-white" : "text-charcoal"}`}>
+                <Text style={{ fontSize: 13, fontWeight: "500", color: !form.isRecurring ? "white" : COLORS.charcoal }}>
                   One-Time
                 </Text>
               </Pressable>
@@ -382,9 +467,16 @@ export default function RemindersScreen() {
           </View>
 
           {/* Tip box */}
-          <View className="bg-beige rounded-2xl p-4 mb-5">
-            <Text className="text-muted text-[13px] leading-5">
-              Donna will weave this reminder naturally into the conversation --
+          <View
+            style={{
+              backgroundColor: COLORS.beige,
+              borderRadius: 16,
+              padding: 16,
+              marginBottom: 20,
+            }}
+          >
+            <Text style={{ color: COLORS.muted, fontSize: 13, lineHeight: 20 }}>
+              Donna will weave this reminder naturally into the conversation —
               no robotic announcements.
             </Text>
           </View>
@@ -397,35 +489,12 @@ export default function RemindersScreen() {
           />
 
           {(createReminder.isError || updateReminder.isError) && (
-            <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
+            <Text
+              style={{ fontSize: 13, textAlign: "center", marginTop: 12, color: COLORS.destructive }}
+            >
               Something went wrong. Please try again.
             </Text>
           )}
-        </View>
-      </Modal>
-
-      {/* Time Picker Modal */}
-      <Modal
-        visible={showTimePicker}
-        onClose={() => setShowTimePicker(false)}
-        title="Select Time"
-      >
-        <View className="gap-0.5 pb-4">
-          {TIME_OPTIONS.map((time) => (
-            <Pressable
-              key={time}
-              onPress={() => {
-                setForm((prev) => ({ ...prev, time }));
-                setShowTimePicker(false);
-              }}
-              className="flex-row items-center justify-between py-3 px-2 rounded-xl active:bg-beige"
-              accessibilityRole="button"
-              accessibilityLabel={time}
-            >
-              <Text className="text-[15px] text-charcoal">{time}</Text>
-              {form.time === time && <Check size={18} color={COLORS.sage} />}
-            </Pressable>
-          ))}
         </View>
       </Modal>
 

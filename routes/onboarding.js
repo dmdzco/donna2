@@ -48,9 +48,24 @@ router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardin
       },
     };
 
-    const senior = await seniorService.create(seniorCreateData);
+    let senior;
+    try {
+      senior = await seniorService.create(seniorCreateData);
+    } catch (createError) {
+      // DrizzleQueryError wraps the pg error in .cause
+      const pgCode = createError.code || createError.cause?.code;
+      const pgConstraint = createError.constraint || createError.cause?.constraint;
+      // If phone already exists, find and reuse the existing senior
+      if (pgCode === '23505' && pgConstraint?.includes('phone')) {
+        const existing = await seniorService.findByPhone(seniorCreateData.phone);
+        if (!existing) throw createError;
+        senior = existing;
+      } else {
+        throw createError;
+      }
+    }
 
-    // Link Clerk user to senior
+    // Link Clerk user to senior (idempotent — safe to call if already linked)
     await caregiverService.linkUserToSenior(clerkUserId, senior.id, 'caregiver');
 
     // Create reminders from strings

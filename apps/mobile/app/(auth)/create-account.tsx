@@ -18,6 +18,7 @@ import { Button } from "@/src/components/ui/Button";
 import { Input } from "@/src/components/ui/Input";
 import { api } from "@/src/lib/api";
 import { COLORS } from "@/src/constants/theme";
+import { useOnboardingStore } from "@/src/stores/onboarding";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -25,6 +26,7 @@ export default function CreateAccountScreen() {
   const router = useRouter();
   const { signUp, setActive, isLoaded } = useSignUp();
   const { getToken } = useAuth();
+  const setOnboardingField = useOnboardingStore((s) => s.setField);
   const { startOAuthFlow: startGoogleOAuth } = useOAuth({
     strategy: "oauth_google",
   });
@@ -41,6 +43,9 @@ export default function CreateAccountScreen() {
   const [errors, setErrors] = useState<{ email?: string; password?: string }>(
     {}
   );
+  const [pendingVerification, setPendingVerification] = useState(false);
+  const [verificationCode, setVerificationCode] = useState("");
+  const [verificationError, setVerificationError] = useState("");
 
   async function navigateAfterAuth() {
     const token = await getToken();
@@ -67,6 +72,7 @@ export default function CreateAccountScreen() {
 
     if (!isLoaded) return;
     setLoading(true);
+    setOnboardingField("email", email.trim());
 
     try {
       const result = await signUp.create({
@@ -78,19 +84,40 @@ export default function CreateAccountScreen() {
         await setActive({ session: result.createdSessionId });
         await navigateAfterAuth();
       } else {
-        // Email verification may be required
-        await signUp.prepareEmailAddressVerification({
-          strategy: "email_code",
-        });
-        Alert.alert(
-          "Verify your email",
-          "Please check your inbox and verify your email to continue."
-        );
+        await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+        setPendingVerification(true);
       }
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Could not create account";
       Alert.alert("Sign Up Failed", message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleVerifyCode() {
+    if (!verificationCode.trim()) {
+      setVerificationError("Please enter the verification code");
+      return;
+    }
+    setLoading(true);
+    setVerificationError("");
+    try {
+      const result = await signUp.attemptEmailAddressVerification({
+        code: verificationCode.trim(),
+      });
+      if (result.status === "complete") {
+        await setActive({ session: result.createdSessionId });
+        router.replace("/(onboarding)/step1" as any);
+      }
+    } catch (err: unknown) {
+      const clerkErr = err as any;
+      const message =
+        clerkErr?.errors?.[0]?.longMessage ??
+        clerkErr?.errors?.[0]?.message ??
+        (err instanceof Error ? err.message : "Invalid verification code");
+      setVerificationError(message);
     } finally {
       setLoading(false);
     }
@@ -115,6 +142,72 @@ export default function CreateAccountScreen() {
     } finally {
       setOauthLoading(null);
     }
+  }
+
+  if (pendingVerification) {
+    return (
+      <SafeAreaView className="flex-1 bg-cream">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          className="flex-1"
+        >
+          <ScrollView
+            contentContainerStyle={{ flexGrow: 1 }}
+            keyboardShouldPersistTaps="handled"
+            className="px-6"
+          >
+            <Pressable
+              onPress={() => setPendingVerification(false)}
+              className="mt-2 mb-6 min-h-[48px] justify-center self-start"
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <Text className="text-sage text-[16px] font-medium">{"<"} Back</Text>
+            </Pressable>
+
+            <Text className="text-[28px] font-semibold text-charcoal mb-2">
+              Verify your email
+            </Text>
+            <Text className="text-[15px] text-muted mb-8">
+              We sent a 6-digit code to {email}. Enter it below to continue.
+            </Text>
+
+            <View className="mb-6">
+              <Input
+                label="Verification Code"
+                placeholder="123456"
+                value={verificationCode}
+                onChangeText={setVerificationCode}
+                error={verificationError}
+                keyboardType="number-pad"
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType="oneTimeCode"
+              />
+            </View>
+
+            <Button
+              title="Verify"
+              onPress={handleVerifyCode}
+              loading={loading}
+              disabled={loading}
+              className="mb-4"
+            />
+
+            <Pressable
+              onPress={async () => {
+                await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+                Alert.alert("Code resent", "A new code has been sent to your email.");
+              }}
+              className="min-h-[48px] justify-center items-center"
+              accessibilityRole="button"
+            >
+              <Text className="text-sage text-[15px] font-medium">Resend code</Text>
+            </Pressable>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
   }
 
   return (

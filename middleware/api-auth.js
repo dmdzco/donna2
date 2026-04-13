@@ -8,15 +8,15 @@ import crypto from 'crypto';
  */
 // Route prefixes that use their own auth (JWT or Clerk) instead of API key
 const EXEMPT_PREFIXES = [
-  '/admin/',
-  '/observability/',
-  '/caregivers/',
-  '/seniors/',
-  '/reminders/',
+  '/admin',
+  '/observability',
+  '/caregivers',
+  '/seniors',
+  '/reminders',
   '/onboarding',
   '/call',
-  '/conversations/',
-  '/notifications/',
+  '/conversations',
+  '/notifications',
 ];
 
 export function requireApiKey(req, res, next) {

@@ -131,6 +131,9 @@ export default function DashboardScreen() {
   const seniorName = senior?.name ?? "your loved one";
   const seniorFirstName = seniorName.split(" ")[0];
 
+  console.log("[dashboard] senior:", JSON.stringify({ id: senior?.id, name: senior?.name, phone: senior?.phone }));
+  console.log("[dashboard] user:", JSON.stringify({ firstName: user?.firstName }));
+
   // Resolve schedule: try the schedule endpoint, fall back to senior.preferredCallTimes
   // Handles both legacy shape { days, time } and new ScheduleItem[] from schedule tab
   const resolvedSchedule = useMemo((): { days?: string[]; time?: string } | null => {

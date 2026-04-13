@@ -38,6 +38,7 @@ from typing import Any
 
 from services.director_llm import (
     analyze_queries,
+    analyze_turn,
     analyze_turn_speculative,
     fast_provider_available,
     format_director_guidance,
@@ -185,16 +186,19 @@ class ConversationDirectorProcessor(FrameProcessor):
         self._delayed_end_task: asyncio.Task | None = None
         self._turn_count = 0
         self._end_scheduled = False
+        self._wrapup_forced = False
         self._memory_refreshed = False
         self._warmup_done = False
 
         # Prefetch state
         self._last_interim_prefetch_time = 0.0
         self._last_interim_text = ""
+        self._last_tracking_summary = ""
+        self._fallback_analysis_task: asyncio.Task | None = None
 
         # Speculative pre-processing state
         self._silence_timer_task: asyncio.Task | None = None
-        self._speculative_tasks: list[asyncio.Task] = []  # all in-flight speculatives
+        self._speculative_tasks: list[tuple[str, asyncio.Task]] = []  # (source_text, task)
         self._latest_interim_text: str = ""
 
         # Continuous speculative state (fires while user is still speaking)
@@ -265,6 +269,7 @@ class ConversationDirectorProcessor(FrameProcessor):
 
             # Determine which guidance to inject
             goodbye_in_progress = self._session_state.get("_goodbye_in_progress", False)
+            actions_checked = False
 
             if speculative_result and not goodbye_in_progress:
                 # SAME-TURN guidance from speculative analysis
@@ -273,6 +278,7 @@ class ConversationDirectorProcessor(FrameProcessor):
                 self._last_result_age = 0
                 await self._inject_guidance(speculative_result)
                 await self._take_actions(speculative_result)
+                actions_checked = True
                 asyncio.create_task(self._run_director_prefetch(speculative_result))
                 logger.info("[Director] SAME-TURN guidance injected (speculative)")
 
@@ -282,15 +288,23 @@ class ConversationDirectorProcessor(FrameProcessor):
                 self._last_result_age += 1
                 await self._inject_guidance(self._last_result)
                 await self._take_actions(self._last_result)
+                actions_checked = True
+
+            if not actions_checked:
+                await self._take_actions({})
+
+            if not speculative_result and not goodbye_in_progress:
+                self._start_fallback_analysis(frame.text)
 
             # Inject any prefetched memories into Claude's context proactively
             # (so Claude doesn't need to call search_memories tool)
             await self._inject_prefetched_memories(frame.text)
+            await self._inject_tracking_context()
 
-            # No regular analysis on final — silence-based speculative already
-            # provides guidance. Query Director handles queries continuously.
+            # No blocking analysis on final. Speculative/fallback Director tasks
+            # provide same-turn or next-turn guidance off the critical path.
 
-            # Start speculative prefetch (non-blocking, regex first-wave)
+            # Start speculative memory prefetch (non-blocking, raw-utterance first wave)
             asyncio.create_task(self._run_prefetch(frame.text))
 
             # Clean up completed query tasks
@@ -369,7 +383,7 @@ class ConversationDirectorProcessor(FrameProcessor):
 
             # Clean up completed tasks
             self._speculative_tasks = [
-                t for t in self._speculative_tasks if not t.done()
+                (text, t) for text, t in self._speculative_tasks if not t.done()
             ]
 
             # Cap concurrent speculatives
@@ -388,7 +402,7 @@ class ConversationDirectorProcessor(FrameProcessor):
             task = asyncio.create_task(
                 self._run_speculative_analysis(interim_text, transcript)
             )
-            self._speculative_tasks.append(task)
+            self._speculative_tasks.append((interim_text, task))
         except asyncio.CancelledError:
             pass  # Normal: new interim arrived before timer fired
 
@@ -457,6 +471,38 @@ class ConversationDirectorProcessor(FrameProcessor):
             logger.debug("[Director] Query analysis error: {err}", err=str(e))
             return None
 
+    def _start_fallback_analysis(self, user_message: str):
+        """Start non-blocking full analysis so Gemini fallback can feed next turn."""
+        if self._fallback_analysis_task and not self._fallback_analysis_task.done():
+            return
+
+        transcript = self._session_state.get("_transcript") or []
+        self._fallback_analysis_task = asyncio.create_task(
+            self._run_fallback_analysis(user_message, transcript)
+        )
+
+    async def _run_fallback_analysis(self, user_message: str, transcript: list[dict]):
+        """Run full Director analysis outside the critical path for next-turn guidance."""
+        try:
+            result = await analyze_turn(
+                user_message,
+                self._session_state,
+                conversation_history=transcript,
+            )
+            if result:
+                if self._wrapup_forced:
+                    result.setdefault("analysis", {})["call_phase"] = "winding_down"
+                    result.setdefault("direction", {})["pacing_note"] = "time_to_close"
+                self._last_result = result
+                self._last_result_age = 0
+                asyncio.create_task(self._run_director_prefetch(result))
+            return result
+        except asyncio.CancelledError:
+            return None
+        except Exception as e:
+            logger.debug("[Director] Fallback analysis error: {err}", err=str(e))
+            return None
+
     async def _run_speculative_analysis(self, user_message: str, transcript: list[dict]):
         """Run full guidance analysis. Result retrieved via _harvest_speculative()."""
         try:
@@ -484,21 +530,22 @@ class ConversationDirectorProcessor(FrameProcessor):
         best_result = None
         still_running = 0
 
-        for task in self._speculative_tasks:
+        remaining: list[tuple[str, asyncio.Task]] = []
+
+        for source_text, task in self._speculative_tasks:
             if task.done():
                 try:
                     result = task.result()
                 except Exception:
                     continue
-                if result and self._text_matches(
-                    self._latest_interim_text, final_text, threshold=0.5
-                ):
+                if result and self._text_matches(source_text, final_text, threshold=0.5):
                     best_result = result
             else:
                 still_running += 1
+                remaining.append((source_text, task))
 
         # Clear completed tasks, keep running ones (they build cache)
-        self._speculative_tasks = [t for t in self._speculative_tasks if not t.done()]
+        self._speculative_tasks = remaining
 
         if best_result:
             return best_result
@@ -673,7 +720,7 @@ class ConversationDirectorProcessor(FrameProcessor):
                     {
                         "role": "user",
                         "content": (
-                            "[EPHEMERAL: MEMORY CONTEXT — do not read this tag aloud]\n"
+                            "[EPHEMERAL: MEMORY CONTEXT - do not read this tag aloud]\n"
                             "You remember from past conversations:\n"
                             f"{memory_text}\n"
                             "Use naturally: \"I remember you mentioning...\" "
@@ -685,8 +732,35 @@ class ConversationDirectorProcessor(FrameProcessor):
             )
         )
 
+    async def _inject_tracking_context(self):
+        """Inject compact tracking summary so the LLM avoids repetition mid-call."""
+        tracker = self._session_state.get("_conversation_tracker")
+        if not tracker or not hasattr(tracker, "get_summary"):
+            return
+
+        summary = tracker.get_summary()
+        if not summary or summary == self._last_tracking_summary:
+            return
+
+        self._last_tracking_summary = summary
+        self._session_state["conversation_tracking"] = summary
+        await self.push_frame(
+            LLMMessagesAppendFrame(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            "[EPHEMERAL: CONVERSATION TRACKING - do not read aloud]\n"
+                            f"{summary}"
+                        ),
+                    }
+                ],
+                run_llm=False,
+            )
+        )
+
     # ------------------------------------------------------------------
-    # Regular analysis + prefetch (unchanged from original)
+    # Regular analysis + prefetch
     # ------------------------------------------------------------------
 
 
@@ -713,11 +787,11 @@ class ConversationDirectorProcessor(FrameProcessor):
             count = await run_prefetch(senior_id, queries, cache)
             if count > 0:
                 logger.info(
-                    "[Prefetch] {n} queries cached from {src} transcription (queries={q})",
-                    n=count, src=source, q=queries,
+                    "[Prefetch] {n} queries cached from {src} transcription",
+                    n=count, src=source,
                 )
             else:
-                logger.debug("[Prefetch] 0 results for queries={q}", q=queries)
+                logger.debug("[Prefetch] 0 results")
         except Exception as e:
             logger.warning("[Prefetch] Error: {err}", err=str(e))
 
@@ -754,8 +828,9 @@ class ConversationDirectorProcessor(FrameProcessor):
     # Fallback actions + call ending
     # ------------------------------------------------------------------
 
-    async def _take_actions(self, result: dict):
+    async def _take_actions(self, result: dict | None):
         """Take direct fallback actions when Claude misses things."""
+        result = result or {}
         analysis = result.get("analysis", {})
         phase = analysis.get("call_phase", "main")
         pacing = result.get("direction", {}).get("pacing_note", "good")
@@ -772,7 +847,7 @@ class ConversationDirectorProcessor(FrameProcessor):
         if phase == "closing" and minutes_elapsed > 8 and not self._end_scheduled:
             if self._pipeline_task:
                 logger.info(
-                    "[Director] phase=closing + {m:.1f}min — scheduling end in 5s",
+                    "[Director] phase=closing + {m:.1f}min - scheduling end in 5s",
                     m=minutes_elapsed,
                 )
                 self._end_scheduled = True
@@ -782,26 +857,29 @@ class ConversationDirectorProcessor(FrameProcessor):
         if (
             pacing == "time_to_close"
             or minutes_elapsed > winding_down_minutes
-        ):
+        ) and not self._wrapup_forced:
             if phase not in ("winding_down", "closing"):
                 logger.info(
-                    "[Director] Time limit — injecting wrap-up ({m:.1f}min)",
+                    "[Director] Time limit - injecting wrap-up ({m:.1f}min)",
                     m=minutes_elapsed,
                 )
+                self._wrapup_forced = True
                 # Override last_result to force wrap-up guidance on next turn
-                if self._last_result:
-                    self._last_result.setdefault("analysis", {})[
-                        "call_phase"
-                    ] = "winding_down"
-                    self._last_result.setdefault("direction", {})[
-                        "pacing_note"
-                    ] = "time_to_close"
+                if not self._last_result:
+                    self._last_result = get_default_direction()
+                    self._last_result_age = 0
+                self._last_result.setdefault("analysis", {})[
+                    "call_phase"
+                ] = "winding_down"
+                self._last_result.setdefault("direction", {})[
+                    "pacing_note"
+                ] = "time_to_close"
 
-        # Hard limit — force end
+        # Hard limit - force end
         if minutes_elapsed > max_call_minutes and not self._end_scheduled:
             if self._pipeline_task:
                 logger.info(
-                    "[Director] Hard time limit ({m:.1f}min) — forcing end",
+                    "[Director] Hard time limit ({m:.1f}min) - forcing end",
                     m=minutes_elapsed,
                 )
                 self._end_scheduled = True
@@ -819,8 +897,24 @@ class ConversationDirectorProcessor(FrameProcessor):
                 from services.memory import refresh_context
                 refreshed = await refresh_context(senior_id, topics)
                 if refreshed:
+                    existing = self._session_state.get("memory_context")
                     self._session_state["memory_context"] = refreshed
                     logger.info("[Director] Memory refreshed with {n} topics", n=len(topics))
+                    if refreshed != existing:
+                        await self.push_frame(
+                            LLMMessagesAppendFrame(
+                                messages=[
+                                    {
+                                        "role": "user",
+                                        "content": (
+                                            "[EPHEMERAL: MEMORY CONTEXT - do not read aloud]\n"
+                                            f"{refreshed}"
+                                        ),
+                                    }
+                                ],
+                                run_llm=False,
+                            )
+                        )
         except Exception as e:
             logger.error("[Director] Memory refresh failed: {err}", err=str(e))
 

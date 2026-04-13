@@ -32,11 +32,13 @@ class TwilioStreamMock:
         call_sid: str | None = None,
         duration_seconds: float = 30.0,
         frame_interval: float = 0.02,  # 20ms
+        ws_token: str = "",
     ):
         self.call_sid = call_sid or f"CA{uuid.uuid4().hex[:32]}"
         self.stream_sid = f"MZ{uuid.uuid4().hex[:32]}"
         self.duration_seconds = duration_seconds
         self.frame_interval = frame_interval
+        self.ws_token = ws_token
         self._sequence_number = 0
 
     def _connected_msg(self) -> str:
@@ -65,6 +67,7 @@ class TwilioStreamMock:
                     "call_sid": self.call_sid,
                     "conversation_id": "",
                     "call_type": "check-in",
+                    "ws_token": self.ws_token,
                 },
             },
             "streamSid": self.stream_sid,

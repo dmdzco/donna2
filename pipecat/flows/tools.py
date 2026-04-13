@@ -137,14 +137,14 @@ def make_tool_handlers(session_state: dict) -> dict:
             return {"status": "success", "result": "No memories available right now. Continue naturally."}
 
         query = args.get("query", "")
-        logger.info("Tool: search_memories called")
+        logger.info("Tool: search_memories senior={sid}", sid=str(senior_id)[:8])
 
         # Check prefetch cache first (instant return on hit)
         cache = session_state.get("_prefetch_cache")
         if cache:
             cached = cache.get(query)
             if cached:
-                logger.info("Tool: search_memories cache hit")
+                logger.info("Tool: search_memories CACHE HIT")
                 formatted = "[MEMORY] " + "\n[MEMORY] ".join(
                     r["content"] for r in cached if r.get("content")
                 )
@@ -171,7 +171,7 @@ def make_tool_handlers(session_state: dict) -> dict:
             return {"status": "success", "result": "Search unavailable. Continue naturally."}
 
         query = args.get("query", "")
-        logger.info("Tool: web_search called")
+        logger.info("Tool: web_search CALLED query_chars={n}", n=len(query))
 
         if not query:
             return {"status": "success", "result": "No query provided."}
@@ -184,16 +184,16 @@ def make_tool_handlers(session_state: dict) -> dict:
             if not result:
                 logger.info("Tool: web_search empty result ({ms}ms)", ms=elapsed_ms)
                 return {"status": "success", "result": f"I couldn't find information about {query}."}
-            logger.info("Tool: web_search success ({ms}ms, {n} chars)", ms=elapsed_ms, n=len(result))
+            logger.info("Tool: web_search SUCCESS ({ms}ms, {n} chars)", ms=elapsed_ms, n=len(result))
             return {"status": "success", "result": f"[NEWS] {result}"}
         except asyncio.TimeoutError:
             elapsed_ms = round((_time.time() - start) * 1000)
-            logger.warning("Tool: web_search timeout ({ms}ms)", ms=elapsed_ms)
+            logger.warning("Tool: web_search TIMEOUT ({ms}ms)", ms=elapsed_ms)
             return {"status": "success", "result": "Search took too long. Continue naturally."}
         except Exception as e:
             import traceback
             elapsed_ms = round((_time.time() - start) * 1000)
-            logger.error("Tool: web_search error ({ms}ms): {err}\n{tb}", ms=elapsed_ms, err=str(e), tb=traceback.format_exc())
+            logger.error("Tool: web_search ERROR ({ms}ms): {err}\n{tb}", ms=elapsed_ms, err=str(e), tb=traceback.format_exc())
             return {"status": "success", "result": "Search unavailable. Continue naturally."}
 
     async def handle_mark_reminder(args: dict) -> dict:
@@ -202,10 +202,14 @@ def make_tool_handlers(session_state: dict) -> dict:
         user_response = args.get("user_response", "")
         logger.info("Tool: mark_reminder id={rid} status={s}", rid=reminder_id, s=status)
 
-        reminder_label = user_response or reminder_id
-
         # Local tracking is synchronous (critical for prompt context)
-        session_state.setdefault("reminders_delivered", set()).add(reminder_label)
+        delivered = session_state.setdefault("reminders_delivered", set())
+        if reminder_id:
+            delivered.add(reminder_id)
+        delivery = session_state.get("reminder_delivery") or {}
+        title = delivery.get("title")
+        if title:
+            delivered.add(title)
 
         # Fire-and-forget: DB write in background (don't block Claude's response)
         async def _background_ack():
@@ -228,7 +232,7 @@ def make_tool_handlers(session_state: dict) -> dict:
         detail = args.get("detail", "")
         category = args.get("category", "life_event")
         senior_id = session_state.get("senior_id")
-        logger.info("Tool: save_important_detail cat={c} detail={d}", c=category, d=detail[:50])
+        logger.info("Tool: save_important_detail cat={c} detail_chars={n}", c=category, n=len(detail))
 
         if not detail or not senior_id:
             return {"status": "success", "result": "Detail noted."}
@@ -252,7 +256,7 @@ def make_tool_handlers(session_state: dict) -> dict:
                     source="conversation",
                     importance=70,
                 )
-                logger.info("Background save_detail completed: {d}", d=detail[:50])
+                logger.info("Background save_detail completed")
             except Exception as e:
                 logger.error("Background save_detail failed: {err}", err=str(e))
 
@@ -302,14 +306,14 @@ def make_tool_handlers(session_state: dict) -> dict:
         async def tracked(args):
             if name not in tools_used:
                 tools_used.append(name)
-            logger.info("Tool CALL: {name}({args})", name=name, args=args)
+            logger.info("Tool CALL: {name}", name=name)
             result = await fn(args)
-            # Log truncated result to avoid flooding logs
-            result_str = str(result.get("result", ""))
-            if len(result_str) > 200:
-                result_str = result_str[:200] + "..."
-            logger.info("Tool RESULT: {name} → {status} | {result}",
-                        name=name, status=result.get("status", "?"), result=result_str)
+            logger.info(
+                "Tool RESULT: {name} -> {status} result_chars={n}",
+                name=name,
+                status=result.get("status", "?"),
+                n=len(str(result.get("result", ""))),
+            )
             return result
         return tracked
 

@@ -88,14 +88,14 @@ def _pipecat_adapter(name: str, handler):
     service, while still calling result_callback() to cancel Pipecat's timeout.
     """
     async def adapted(params: FunctionCallParams):
-        logger.info("Gemini tool CALL: {name}({args})", name=name, args=params.arguments)
+        logger.info("Gemini tool CALL: {name}", name=name)
         try:
             result = await handler(params.arguments or {})
             result_str = result.get("result", "ok") if isinstance(result, dict) else str(result)
         except Exception as e:
             logger.error("Gemini tool ERROR {name}: {err}", name=name, err=str(e))
             result_str = "Tool unavailable. Continue naturally."
-        logger.info("Gemini tool RESULT: {name} -> {r}", name=name, r=result_str[:100])
+        logger.info("Gemini tool RESULT: {name} result_chars={n}", name=name, n=len(result_str))
         await params.result_callback(result_str)  # cancels Pipecat's internal timeout
         await params.llm._tool_result(params.tool_call_id, params.function_name, {"value": result_str})
     return adapted

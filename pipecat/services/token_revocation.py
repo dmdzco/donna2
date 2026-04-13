@@ -32,7 +32,11 @@ async def revoke_token(token: str, revoked_by: str, reason: str = "") -> None:
         revoked_by,
         reason,
     )
-    logger.info("Revoked token by={who} reason={reason}", who=revoked_by, reason=reason or "(none)")
+    logger.info(
+        "Revoked token by={who} reason_chars={n}",
+        who=str(revoked_by)[:8],
+        n=len(reason or ""),
+    )
 
 
 async def revoke_all_for_admin(admin_id: str, revoked_by: str, reason: str = "") -> int:
@@ -55,7 +59,7 @@ async def revoke_all_for_admin(admin_id: str, revoked_by: str, reason: str = "")
         revoked_by,
         reason or f"revoke_all for admin {admin_id}",
     )
-    logger.info("Revoked all tokens for admin={aid}", aid=admin_id)
+    logger.info("Revoked all tokens for admin={aid}", aid=str(admin_id)[:8])
     return 1
 
 

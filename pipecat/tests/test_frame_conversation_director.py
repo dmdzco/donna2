@@ -122,6 +122,95 @@ class TestDirectorGoodbyeSuppression:
         assert len(guidance_frames) == 0
 
 
+class TestDirectorFallbackAnalysis:
+    """Verify final-turn fallback analysis stays off-path but still updates state."""
+
+    @pytest.mark.asyncio
+    async def test_fallback_analysis_updates_cached_guidance(self, session_state):
+        processor = ConversationDirectorProcessor(session_state=session_state)
+        result = get_default_direction()
+
+        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock_analyze, \
+             patch.object(processor, "_run_director_prefetch", new_callable=AsyncMock) as mock_prefetch:
+            mock_analyze.return_value = result
+
+            returned = await processor._run_fallback_analysis("I had lunch", [])
+            await asyncio.sleep(0)
+
+        assert returned is result
+        assert processor._last_result is result
+        assert processor._last_result_age == 0
+        mock_analyze.assert_awaited_once()
+        mock_prefetch.assert_called_once_with(result)
+
+    @pytest.mark.asyncio
+    async def test_fallback_analysis_preserves_forced_wrapup(self, session_state):
+        processor = ConversationDirectorProcessor(session_state=session_state)
+        processor._wrapup_forced = True
+        result = get_default_direction()
+        result["analysis"]["call_phase"] = "main"
+        result["direction"]["pacing_note"] = "good"
+
+        with patch("processors.conversation_director.analyze_turn", new_callable=AsyncMock) as mock_analyze, \
+             patch.object(processor, "_run_director_prefetch", new_callable=AsyncMock):
+            mock_analyze.return_value = result
+            returned = await processor._run_fallback_analysis("Tell me more", [])
+
+        assert returned["analysis"]["call_phase"] == "winding_down"
+        assert returned["direction"]["pacing_note"] == "time_to_close"
+
+
+class TestDirectorContextInjection:
+    """Verify non-guidance context is injected ephemerally and deduplicated."""
+
+    @pytest.mark.asyncio
+    async def test_tracking_context_injected_once_per_summary(self, session_state):
+        class Tracker:
+            def get_summary(self):
+                return "CONVERSATION SO FAR THIS CALL\n- Topics discussed: health"
+
+        frames = []
+
+        async def capture_frame(frame, direction=None):
+            frames.append(frame)
+
+        session_state["_conversation_tracker"] = Tracker()
+        processor = ConversationDirectorProcessor(session_state=session_state)
+        processor.push_frame = capture_frame
+
+        await processor._inject_tracking_context()
+        await processor._inject_tracking_context()
+
+        assert len(frames) == 1
+        assert isinstance(frames[0], LLMMessagesAppendFrame)
+        assert frames[0].messages[0]["content"].startswith("[EPHEMERAL: CONVERSATION TRACKING")
+        assert session_state["conversation_tracking"].startswith("CONVERSATION SO FAR")
+
+    @pytest.mark.asyncio
+    async def test_memory_refresh_injects_changed_context(self, session_state):
+        class Tracker:
+            def get_topics(self):
+                return ["lunch"]
+
+        frames = []
+
+        async def capture_frame(frame, direction=None):
+            frames.append(frame)
+
+        session_state["_conversation_tracker"] = Tracker()
+        processor = ConversationDirectorProcessor(session_state=session_state)
+        processor.push_frame = capture_frame
+
+        with patch("services.memory.refresh_context", new_callable=AsyncMock) as mock_refresh:
+            mock_refresh.return_value = "- Lunch is an important routine."
+            await processor._refresh_memory()
+
+        assert session_state["memory_context"] == "- Lunch is an important routine."
+        assert len(frames) == 1
+        assert isinstance(frames[0], LLMMessagesAppendFrame)
+        assert frames[0].messages[0]["content"].startswith("[EPHEMERAL: MEMORY CONTEXT")
+
+
 class TestDirectorSpeculativeAnalysis:
     """Verify speculative pre-processing behavior."""
 
@@ -157,7 +246,7 @@ class TestDirectorSpeculativeAnalysis:
 
         # Simulate a running speculative task
         long_task = asyncio.create_task(asyncio.sleep(10))
-        processor._speculative_tasks.append(long_task)
+        processor._speculative_tasks.append(("I went to the doctor", long_task))
 
         # New interim arrives — speculative should NOT be cancelled
         assert not long_task.cancelled()
@@ -174,12 +263,11 @@ class TestDirectorSpeculativeAnalysis:
     async def test_harvest_speculative_returns_best_match(self, session_state):
         """harvest_speculative returns best matching result from completed tasks."""
         processor = ConversationDirectorProcessor(session_state=session_state)
-        processor._latest_interim_text = "I went to the doctor yesterday and they told me"
 
         async def fake_result():
             return {"analysis": {"call_phase": "main", "engagement_level": "high"}}
         task = asyncio.create_task(fake_result())
-        processor._speculative_tasks.append(task)
+        processor._speculative_tasks.append(("I went to the doctor yesterday and they told me", task))
         await asyncio.sleep(0.01)
 
         result = processor._harvest_speculative("I went to the doctor yesterday and they told me everything is fine")
@@ -190,12 +278,26 @@ class TestDirectorSpeculativeAnalysis:
     async def test_harvest_speculative_discards_divergent_text(self, session_state):
         """harvest_speculative discards result when text diverges."""
         processor = ConversationDirectorProcessor(session_state=session_state)
-        processor._latest_interim_text = "I went to the"
 
         async def fake_result():
             return {"analysis": {"call_phase": "main"}}
         task = asyncio.create_task(fake_result())
-        processor._speculative_tasks.append(task)
+        processor._speculative_tasks.append(("I went to the", task))
+        await asyncio.sleep(0.01)
+
+        result = processor._harvest_speculative("Tell me about the weather today please")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_harvest_speculative_matches_each_task_source_text(self, session_state):
+        """A stale task must not be accepted just because the latest interim matches."""
+        processor = ConversationDirectorProcessor(session_state=session_state)
+        processor._latest_interim_text = "Tell me about the weather today please"
+
+        async def fake_result():
+            return {"analysis": {"call_phase": "main", "current_topic": "doctor"}}
+        task = asyncio.create_task(fake_result())
+        processor._speculative_tasks.append(("I went to the doctor", task))
         await asyncio.sleep(0.01)
 
         result = processor._harvest_speculative("Tell me about the weather today please")
@@ -207,7 +309,7 @@ class TestDirectorSpeculativeAnalysis:
         processor = ConversationDirectorProcessor(session_state=session_state)
 
         long_task = asyncio.create_task(asyncio.sleep(10))
-        processor._speculative_tasks.append(long_task)
+        processor._speculative_tasks.append(("Hello there", long_task))
 
         result = processor._harvest_speculative("Hello there")
         await asyncio.sleep(0)

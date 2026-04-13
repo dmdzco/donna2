@@ -103,10 +103,9 @@ async def add_interests_to_senior(
         from services.seniors import update
         await update(senior_id, {"interests": merged})
         logger.info(
-            "Added {n} interests for {sid}: {new}",
+            "Added {n} interests for senior_id={sid}",
             n=len(merged) - len(existing_interests),
-            sid=senior_id,
-            new=[i for i in merged if i not in existing_interests],
+            sid=str(senior_id)[:8],
         )
 
     return merged
@@ -180,4 +179,4 @@ async def update_interest_scores(senior_id: str, scores: dict[str, float]) -> No
     """Persist computed interest scores to the senior's profile."""
     from services.seniors import update
     await update(senior_id, {"interest_scores": scores})
-    logger.info("Updated interest scores")
+    logger.info("Updated interest scores for senior_id={sid} count={n}", sid=str(senior_id)[:8], n=len(scores))

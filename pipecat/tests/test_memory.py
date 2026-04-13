@@ -222,6 +222,38 @@ class TestBuildContext:
             mock_q.assert_called_once()
             assert mock_q.call_args[0][1] == "senior-123"
 
+    @pytest.mark.asyncio
+    async def test_ranks_wider_candidate_set_by_effective_importance(self):
+        now = datetime.now(timezone.utc)
+        memories = [
+            {
+                "id": "old-high",
+                "type": "fact",
+                "content": "Old high base importance",
+                "importance": 100,
+                "metadata": None,
+                "created_at": now - timedelta(days=120),
+                "last_accessed_at": None,
+            },
+            {
+                "id": "recent-medium",
+                "type": "fact",
+                "content": "Recent medium importance",
+                "importance": 60,
+                "metadata": None,
+                "created_at": now,
+                "last_accessed_at": now,
+            },
+        ]
+        with patch("db.query_many", new_callable=AsyncMock, return_value=memories) as mock_q:
+            from services.memory import build_context
+            result = await build_context("s1")
+
+        sql = mock_q.call_args[0][0]
+        assert "last_accessed_at" in sql
+        assert "LIMIT 50" in sql
+        assert result.index("Recent medium importance") < result.index("Old high base importance")
+
 
 class TestExtractFromConversation:
     @pytest.mark.asyncio

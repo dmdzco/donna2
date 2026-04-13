@@ -23,8 +23,25 @@ from config import assert_production_config, is_production_environment
 
 # Configure log level: INFO in production, DEBUG locally
 _log_level = os.getenv("LOG_LEVEL", "INFO" if is_production_environment() else "DEBUG")
+
+
+def _safe_log_filter(record) -> bool:
+    """Suppress third-party DEBUG logs that can include transcripts or credentials."""
+    name = record.get("name") or ""
+    if record["level"].no < logger.level("INFO").no and name.startswith("pipecat."):
+        return False
+
+    message = record.get("message") or ""
+    sensitive_patterns = (
+        "Generating chat from LLM-specific context",
+        "Generating TTS [",
+        "Parsed - Type:",
+    )
+    return not any(pattern in message for pattern in sensitive_patterns)
+
+
 logger.remove()
-logger.add(sys.stderr, level=_log_level)
+logger.add(sys.stderr, level=_log_level, filter=_safe_log_filter)
 
 # Route Python warnings through loguru instead of raw stderr.
 # This gives them a proper @level tag in Railway so they can be filtered.

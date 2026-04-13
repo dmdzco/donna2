@@ -46,7 +46,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
               │   (BLOCKING)         │  → patterns: health, goodbye,
               │   (regex patterns)   │    emotion, cognitive, activity
               │                      │  → Injects guidance for THIS turn
-              │   Goodbye detected → │  → EndFrame after 2s delay
+              │   Goodbye detected → │  → EndFrame after configurable delay
               └─────────┬───────────┘
                         │
                         ▼
@@ -145,7 +145,7 @@ Instant regex-based analysis across Quick Observer categories:
 | **Family** | 25+ relationship patterns including pets | Context enrichment |
 | **Safety** | Scams, strangers, emergencies | Safety concern flags |
 | **Engagement** | Response length analysis | Engagement level tracking |
-| **Goodbye** | Strong/weak goodbye detection | **EndFrame after 2s delay** |
+| **Goodbye** | Strong/weak goodbye detection | **EndFrame after configurable delay** |
 | **Factual/Curiosity** | Question patterns ("what year", "how tall") | Direct-answer guidance |
 | **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 
@@ -153,7 +153,7 @@ Instant regex-based analysis across Quick Observer categories:
 
 **Model recommendations**: Quick Observer also generates token budget recommendations based on signal priority (16 ordered rules). Crisis situations get 350 tokens; simple questions get 100. This data is available on the `AnalysisResult` but is not currently consumed by the pipeline — it's designed for future dynamic token routing.
 
-**Programmatic Goodbye**: When a strong goodbye signal is detected (e.g., "goodbye", "talk to you later"), Quick Observer schedules an `EndFrame` after 2 seconds via the pipeline task reference. This bypasses unreliable LLM tool-calling for call termination. It also sets `session_state["_goodbye_in_progress"] = True` to suppress Director guidance injection during the goodbye.
+**Programmatic Goodbye**: When a strong goodbye signal is detected (e.g., "goodbye", "talk to you later"), Quick Observer schedules an `EndFrame` after `call_settings.goodbye_delay_seconds` or the 5-second default via the pipeline task reference. This bypasses unreliable LLM tool-calling for call termination. It also sets `session_state["_goodbye_in_progress"] = True` to suppress Director guidance injection during the goodbye.
 
 ### Layer 2: Conversation Director (non-blocking, speculative pre-processing)
 
@@ -513,7 +513,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **LLM** | Claude (streaming, sentence-by-sentence) | AnthropicLLMService (Pipecat managed) |
 | **TTS** | ElevenLabs WebSocket (custom) | ElevenLabs via Pipecat |
 | **STT** | Deepgram (custom integration) | DeepgramSTTService (Pipecat managed) |
-| **Goodbye** | Custom timer in v1-advanced.js | Quick Observer → EndFrame (2s delay) |
+| **Goodbye** | Custom timer in v1-advanced.js | Quick Observer → EndFrame after configured delay |
 | **Scheduler** | Active (SCHEDULER_ENABLED=true) | Disabled (prevents dual-scheduler) |
 
 ## Tech Stack

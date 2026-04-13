@@ -1481,3 +1481,17 @@
   color: #666;
   font-size: 0.875rem;
 }
+
+/* Analysis section in ObserverPanel */
+.analysis-section { margin-top: 16px; }
+.analysis-details { display: flex; flex-direction: column; gap: 8px; }
+.analysis-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #333; }
+.analysis-row.analysis-list { flex-direction: column; align-items: flex-start; gap: 4px; }
+.analysis-label { color: #999; font-size: 0.85em; }
+.analysis-value { color: #e0e0e0; }
+.analysis-row ul { margin: 0; padding-left: 16px; }
+.analysis-row li { color: #a0d0a0; font-size: 0.85em; margin: 2px 0; }
+.rapport-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.8em; text-transform: capitalize; }
+.rapport-badge.rapport-strong { background: #166534; color: #86efac; }
+.rapport-badge.rapport-moderate { background: #854d0e; color: #fde047; }
+.rapport-badge.rapport-weak { background: #991b1b; color: #fca5a5; }

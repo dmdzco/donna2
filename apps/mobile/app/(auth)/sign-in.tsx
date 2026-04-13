@@ -14,7 +14,6 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Chrome } from "lucide-react-native";
 import { Button } from "@/src/components/ui/Button";
 import { Input } from "@/src/components/ui/Input";
 import { COLORS } from "@/src/constants/theme";
@@ -686,7 +685,13 @@ export default function SignInScreen() {
                   variant="secondary"
                   loading={oauthLoading === "google"}
                   disabled={loading || oauthLoading !== null}
-                  icon={<Chrome size={18} color={COLORS.charcoal} />}
+                  icon={
+                    <Ionicons
+                      name="logo-google"
+                      size={18}
+                      color={COLORS.charcoal}
+                    />
+                  }
                 />
               </View>
 

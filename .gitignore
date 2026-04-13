@@ -6,6 +6,16 @@ node_modules/
 .env.local
 .env.*.local
 
+# Mobile signing credentials
+apps/mobile/credentials.json
+apps/mobile/ios/certs/
+apps/mobile/**/*.p12
+apps/mobile/**/*.cer
+apps/mobile/**/*.mobileprovision
+apps/mobile/**/*.provisionprofile
+apps/mobile/**/*.certSigningRequest
+apps/mobile/**/*.p8
+
 # Build
 dist/
 .next/

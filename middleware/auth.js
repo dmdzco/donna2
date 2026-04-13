@@ -94,6 +94,7 @@ export async function requireAuth(req, res, next) {
       isCofounder: true,
       isAdmin: true,
       userId: 'cofounder',
+      provider: 'api_key',
     };
     return next();
   }
@@ -113,6 +114,7 @@ export async function requireAuth(req, res, next) {
         isCofounder: false,
         isAdmin: true,
         userId: decoded.adminId,
+        provider: 'admin_jwt',
       };
       return next();
     }
@@ -151,6 +153,7 @@ export async function requireAuth(req, res, next) {
       isCofounder: false,
       isAdmin,
       userId: auth.userId,
+      provider: 'clerk',
     };
 
     next();
@@ -181,6 +184,7 @@ export async function optionalAuth(req, res, next) {
       isCofounder: true,
       isAdmin: true,
       userId: 'cofounder',
+      provider: 'api_key',
     };
     return next();
   }
@@ -198,6 +202,7 @@ export async function optionalAuth(req, res, next) {
           isCofounder: false,
           isAdmin: true,
           userId: decoded.adminId,
+          provider: 'admin_jwt',
         };
         return next();
       }
@@ -218,6 +223,7 @@ export async function optionalAuth(req, res, next) {
         isCofounder: false,
         isAdmin,
         userId: auth.userId,
+        provider: 'clerk',
       };
     }
   } catch {

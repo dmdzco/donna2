@@ -75,6 +75,15 @@ export interface DonnaNotification {
   readAt?: string | null;
 }
 
+export interface AccountDeletionResult {
+  success: boolean;
+  clerkUserDeleted: boolean;
+  deletedSeniors: string[];
+  unlinkedSeniors: string[];
+  deletionCounts: Record<string, Record<string, number>>;
+  message?: string;
+}
+
 /**
  * Extract a user-facing error message from a React Query error.
  * Shows the API error message + status code for debugging.
@@ -90,6 +99,15 @@ export const api = {
   caregivers: {
     /** GET /api/caregivers/me -- returns current user's profile + linked seniors */
     me: (token: string) => fetchJson<CaregiverProfile>("/api/caregivers/me", { token }),
+  },
+
+  account: {
+    /** DELETE /api/caregivers/me/account -- deletes the current caregiver account */
+    delete: (token: string) =>
+      fetchJson<AccountDeletionResult>("/api/caregivers/me/account", {
+        method: "DELETE",
+        token,
+      }),
   },
 
   onboarding: {

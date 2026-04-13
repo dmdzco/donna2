@@ -8,6 +8,7 @@ import { writeLimiter } from '../middleware/rate-limit.js';
 import { validateBody } from '../middleware/validate.js';
 import { onboardingSchema } from '../validators/schemas.js';
 import { maskName } from '../lib/sanitize.js';
+import { cronExpressionFromTime, wallTimeTodayToUtcDate } from '../lib/timezone.js';
 
 const router = Router();
 
@@ -53,19 +54,10 @@ router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardin
     // Link Clerk user to senior
     await caregiverService.linkUserToSenior(clerkUserId, senior.id, 'caregiver');
 
-    // Create reminders from strings
-    // Build scheduledTime from callSchedule.time (HH:MM) or default to 10:00 AM.
-    // The scheduler matches on the hour/minute of scheduledTime in server-local (UTC) time,
-    // so we store the time as-is in UTC. Caregivers can adjust via the Reminders tab later.
-    let reminderScheduledTime = null;
-    if (callSchedule?.time) {
-      const [hours, minutes] = callSchedule.time.split(':').map(Number);
-      reminderScheduledTime = new Date();
-      reminderScheduledTime.setUTCHours(hours, minutes, 0, 0);
-    } else {
-      reminderScheduledTime = new Date();
-      reminderScheduledTime.setUTCHours(10, 0, 0, 0); // Default 10:00 AM UTC
-    }
+    // Create reminders from strings at the senior's local wall-clock time.
+    const reminderTime = callSchedule?.time || '10:00';
+    const reminderScheduledTime = wallTimeTodayToUtcDate(reminderTime, senior.timezone) || new Date();
+    const reminderCronExpression = cronExpressionFromTime(reminderTime);
 
     const createdReminders = [];
     if (reminderStrings && reminderStrings.length > 0) {
@@ -77,6 +69,7 @@ router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardin
             title: reminderTitle.trim(),
             isRecurring: true,
             scheduledTime: reminderScheduledTime,
+            cronExpression: reminderCronExpression,
           }).returning();
           createdReminders.push(reminder);
         }

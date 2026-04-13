@@ -39,7 +39,7 @@ import {
   isBefore,
   getDay,
 } from "date-fns";
-import { COLORS, TIME_OPTIONS } from "@/src/constants/theme";
+import { COLORS } from "@/src/constants/theme";
 import {
   useCurrentSenior,
   useSchedule,
@@ -47,7 +47,7 @@ import {
   useReminders,
   useConversations,
 } from "@/src/hooks";
-import { Button, Input, Modal } from "@/src/components/ui";
+import { Button, Input, Modal, TimePickerField } from "@/src/components/ui";
 import { getErrorMessage } from "@/src/lib/api";
 import type { Reminder, Conversation } from "@/src/types";
 
@@ -199,10 +199,10 @@ export default function ScheduleScreen() {
   const [formNotes, setFormNotes] = useState("");
   const [formReminderIds, setFormReminderIds] = useState<string[]>([]);
 
-  // Picker modals
-  const [showTimePicker, setShowTimePicker] = useState(false);
-
   const seniorFirstName = senior?.name?.split(" ")[0] ?? "your loved one";
+  const timeHelperText = senior?.name
+    ? `${seniorFirstName}'s local time`
+    : "Senior's local time";
 
   // ---------------------------------------------------------------------------
   // Data
@@ -787,21 +787,13 @@ export default function ScheduleScreen() {
 
           {/* Time picker */}
           <View className="mb-5">
-            <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-              Time
-            </Text>
-            <Pressable
-              onPress={() => setShowTimePicker(true)}
-              className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
-              accessibilityRole="button"
+            <TimePickerField
+              value={formTime}
+              onChange={setFormTime}
+              helperText={timeHelperText}
               accessibilityLabel="Select call time"
-            >
-              <View className="flex-row items-center">
-                <Clock size={16} color={COLORS.muted} style={{ marginRight: 8 }} />
-                <Text className="text-[15px] text-charcoal">{formTime}</Text>
-              </View>
-              <ChevronDown size={18} color={COLORS.muted} />
-            </Pressable>
+              testID="call-time-picker"
+            />
           </View>
 
           {/* Context notes */}
@@ -881,33 +873,6 @@ export default function ScheduleScreen() {
               {getErrorMessage(updateSchedule.error, "Failed to save")}
             </Text>
           )}
-        </View>
-      </Modal>
-
-      {/* ================================================================= */}
-      {/* TIME PICKER MODAL                                                 */}
-      {/* ================================================================= */}
-      <Modal
-        visible={showTimePicker}
-        onClose={() => setShowTimePicker(false)}
-        title="Select Time"
-      >
-        <View className="gap-0.5 pb-4">
-          {TIME_OPTIONS.map((time) => (
-            <Pressable
-              key={time}
-              onPress={() => {
-                setFormTime(time);
-                setShowTimePicker(false);
-              }}
-              className="flex-row items-center justify-between py-3 px-2 rounded-xl active:bg-beige"
-              accessibilityRole="button"
-              accessibilityLabel={time}
-            >
-              <Text className="text-[15px] text-charcoal">{time}</Text>
-              {formTime === time && <Check size={18} color={COLORS.sage} />}
-            </Pressable>
-          ))}
         </View>
       </Modal>
 

@@ -13,7 +13,7 @@ import { useRouter } from "expo-router";
 import { useUser } from "@clerk/clerk-expo";
 import { Phone, Calendar } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
-import { format, differenceInCalendarDays, isAfter } from "date-fns";
+import { format, differenceInCalendarDays } from "date-fns";
 import { COLORS } from "@/src/constants/theme";
 import {
   useCurrentSenior,
@@ -24,32 +24,38 @@ import {
 import { Button } from "@/src/components/ui";
 import { Modal } from "@/src/components/ui";
 import { getErrorMessage } from "@/src/lib/api";
+import {
+  formatTime12h,
+  getDatePartsInTimezone,
+  parseTimeString,
+  resolveSeniorTimezone,
+  zonedWallTimeToUtcDate,
+} from "@/src/lib/timezone";
 import type { Conversation } from "@/src/types";
 
 // --- Next-call computation ---
 
 const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-function parseTimeString(timeStr: string): { hours: number; minutes: number } | null {
-  // Handles "9:00 AM", "3:30 PM", "14:00", etc.
-  const matchAmPm = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (matchAmPm) {
-    let hours = parseInt(matchAmPm[1], 10);
-    const minutes = parseInt(matchAmPm[2], 10);
-    const period = matchAmPm[3].toUpperCase();
-    if (period === "PM" && hours !== 12) hours += 12;
-    if (period === "AM" && hours === 12) hours = 0;
-    return { hours, minutes };
-  }
-  const match24 = timeStr.match(/^(\d{1,2}):(\d{2})$/);
-  if (match24) {
-    return { hours: parseInt(match24[1], 10), minutes: parseInt(match24[2], 10) };
-  }
-  return null;
+function localDateForOffset(
+  base: { year: number; month: number; day: number },
+  offset: number,
+) {
+  const date = new Date(Date.UTC(base.year, base.month - 1, base.day + offset));
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+  };
+}
+
+function localDateMs(parts: { year: number; month: number; day: number }) {
+  return Date.UTC(parts.year, parts.month - 1, parts.day);
 }
 
 function getNextCallDate(
-  scheduleData: { days?: string[]; time?: string } | null | undefined
+  scheduleData: { days?: string[]; time?: string } | null | undefined,
+  timezone: string,
 ): Date | null {
   if (!scheduleData?.time) return null;
 
@@ -57,27 +63,25 @@ function getNextCallDate(
   if (!parsed) return null;
 
   const now = new Date();
+  const nowLocal = getDatePartsInTimezone(now, timezone);
   const days = scheduleData.days;
 
-  // If no specific days, treat as daily
-  if (!days || days.length === 0) {
-    const today = new Date();
-    today.setHours(parsed.hours, parsed.minutes, 0, 0);
-    if (isAfter(today, now)) return today;
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(parsed.hours, parsed.minutes, 0, 0);
-    return tomorrow;
-  }
-
   // Check the next 7 days for a matching day
-  for (let offset = 0; offset < 7; offset++) {
-    const candidate = new Date();
-    candidate.setDate(candidate.getDate() + offset);
-    candidate.setHours(parsed.hours, parsed.minutes, 0, 0);
+  for (let offset = 0; offset <= 7; offset++) {
+    const localDate = localDateForOffset(nowLocal, offset);
+    const localDayIndex = new Date(localDateMs(localDate)).getUTCDay();
+    const dayName = DAYS_SHORT[localDayIndex];
+    if (days?.length && !days.includes(dayName)) continue;
 
-    const dayName = DAYS_SHORT[candidate.getDay()];
-    if (days.includes(dayName) && isAfter(candidate, now)) {
+    const candidate = zonedWallTimeToUtcDate(
+      {
+        ...localDate,
+        hours: parsed.hours,
+        minutes: parsed.minutes,
+      },
+      timezone,
+    );
+    if (candidate.getTime() > now.getTime()) {
       return candidate;
     }
   }
@@ -85,12 +89,15 @@ function getNextCallDate(
   return null;
 }
 
-function formatNextCall(nextDate: Date | null): string {
+function formatNextCall(nextDate: Date | null, timezone: string): string {
   if (!nextDate) return "No calls scheduled";
 
-  const now = new Date();
-  const dayDiff = differenceInCalendarDays(nextDate, now);
-  const timeStr = format(nextDate, "h:mm a");
+  const nowLocal = getDatePartsInTimezone(new Date(), timezone);
+  const nextLocal = getDatePartsInTimezone(nextDate, timezone);
+  const dayDiff = Math.round(
+    (localDateMs(nextLocal) - localDateMs(nowLocal)) / (24 * 60 * 60 * 1000),
+  );
+  const timeStr = formatTime12h(nextLocal.hours, nextLocal.minutes);
 
   if (dayDiff === 0) return `Today at ${timeStr}`;
   if (dayDiff === 1) return `Tomorrow at ${timeStr}`;
@@ -131,6 +138,7 @@ export default function DashboardScreen() {
   const caregiverName = user?.firstName ?? "there";
   const seniorName = senior?.name ?? "your loved one";
   const seniorFirstName = seniorName.split(" ")[0];
+  const seniorTimezone = useMemo(() => resolveSeniorTimezone(senior), [senior]);
 
   // Resolve schedule: try the schedule endpoint, fall back to senior.preferredCallTimes
   // Handles both legacy shape { days, time } and new ScheduleItem[] from schedule tab
@@ -175,8 +183,14 @@ export default function DashboardScreen() {
     return null;
   }, [scheduleData, senior?.preferredCallTimes]);
 
-  const nextCallDate = useMemo(() => getNextCallDate(resolvedSchedule), [resolvedSchedule]);
-  const nextCallText = useMemo(() => formatNextCall(nextCallDate), [nextCallDate]);
+  const nextCallDate = useMemo(
+    () => getNextCallDate(resolvedSchedule, seniorTimezone),
+    [resolvedSchedule, seniorTimezone],
+  );
+  const nextCallText = useMemo(
+    () => formatNextCall(nextCallDate, seniorTimezone),
+    [nextCallDate, seniorTimezone],
+  );
 
   const recentConversations = useMemo(
     () => (conversations ?? []).slice(0, 5),

@@ -9,9 +9,15 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Edit2, Trash2, Plus, Bell, Clock, Check, ChevronDown } from "lucide-react-native";
-import { COLORS, TIME_OPTIONS } from "@/src/constants/theme";
+import { Edit2, Trash2, Plus, Bell } from "lucide-react-native";
+import { COLORS } from "@/src/constants/theme";
 import { getErrorMessage } from "@/src/lib/api";
+import {
+  cronExpressionFromTime,
+  getReminderTimeLabel,
+  resolveSeniorTimezone,
+  timeStringToUtcIso,
+} from "@/src/lib/timezone";
 import {
   useCurrentSenior,
   useReminders,
@@ -19,7 +25,7 @@ import {
   useUpdateReminder,
   useDeleteReminder,
 } from "@/src/hooks";
-import { Button, Input, Modal } from "@/src/components/ui";
+import { Button, Input, Modal, TimePickerField } from "@/src/components/ui";
 import type { Reminder } from "@/src/types";
 
 // --- Types ---
@@ -42,33 +48,9 @@ const EMPTY_FORM: ReminderFormData = {
 
 // --- Helpers ---
 
-/** Convert "9:00 AM" → UTC ISO string using device's local timezone */
-function timeToISO(timeStr: string): string {
-  const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (!match) return new Date().toISOString();
-  let h = parseInt(match[1]);
-  const m = parseInt(match[2]);
-  const period = match[3].toUpperCase();
-  if (period === "PM" && h !== 12) h += 12;
-  if (period === "AM" && h === 12) h = 0;
-  const d = new Date();
-  d.setHours(h, m, 0, 0);
-  return d.toISOString();
-}
-
-/** Convert UTC ISO string → local "9:00 AM" display string */
-function isoToTimeString(iso: string): string {
-  const d = new Date(iso);
-  const h = d.getHours();
-  const m = d.getMinutes();
-  const period = h < 12 ? "AM" : "PM";
-  const displayH = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${displayH}:${m.toString().padStart(2, "0")} ${period}`;
-}
-
-function getScheduleLabel(reminder: Reminder): string {
+function getScheduleLabel(reminder: Reminder, timezone: string): string {
   if (!reminder.scheduledTime) return "Not scheduled";
-  const timeStr = isoToTimeString(reminder.scheduledTime);
+  const timeStr = getReminderTimeLabel(reminder, timezone);
   return reminder.isRecurring ? `Daily · ${timeStr}` : timeStr;
 }
 
@@ -88,7 +70,6 @@ export default function RemindersScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [formModalVisible, setFormModalVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
   const [deletingReminder, setDeletingReminder] = useState<Reminder | null>(null);
   const [form, setForm] = useState<ReminderFormData>(EMPTY_FORM);
@@ -97,6 +78,10 @@ export default function RemindersScreen() {
     () => (senior?.name ?? "your loved one").split(" ")[0],
     [senior?.name],
   );
+  const seniorTimezone = useMemo(() => resolveSeniorTimezone(senior), [senior]);
+  const timeHelperText = senior?.name
+    ? `${seniorFirstName}'s local time`
+    : "Senior's local time";
 
   const activeReminders = useMemo(
     () => (reminders ?? []).filter((r) => r.isActive),
@@ -123,11 +108,13 @@ export default function RemindersScreen() {
       title: reminder.title,
       description: reminder.description ?? "",
       faqs: "",
-      time: reminder.scheduledTime ? isoToTimeString(reminder.scheduledTime) : "9:00 AM",
+      time: reminder.scheduledTime
+        ? getReminderTimeLabel(reminder, seniorTimezone)
+        : "9:00 AM",
       isRecurring: reminder.isRecurring ?? true,
     });
     setFormModalVisible(true);
-  }, []);
+  }, [seniorTimezone]);
 
   const closeFormModal = useCallback(() => {
     setFormModalVisible(false);
@@ -152,6 +139,10 @@ export default function RemindersScreen() {
     const description = [form.description.trim(), form.faqs.trim()]
       .filter(Boolean)
       .join("\n\nFAQs:\n");
+    const scheduledTime = timeStringToUtcIso(form.time, seniorTimezone);
+    const cronExpression = form.isRecurring
+      ? cronExpressionFromTime(form.time)
+      : undefined;
 
     try {
       if (editingReminder) {
@@ -161,7 +152,8 @@ export default function RemindersScreen() {
             title: trimmedTitle,
             description: description || undefined,
             isRecurring: form.isRecurring,
-            scheduledTime: timeToISO(form.time),
+            scheduledTime,
+            cronExpression,
           },
         });
       } else {
@@ -171,14 +163,15 @@ export default function RemindersScreen() {
           description: description || undefined,
           isRecurring: form.isRecurring,
           isActive: true,
-          scheduledTime: timeToISO(form.time),
+          scheduledTime,
+          cronExpression,
         });
       }
       closeFormModal();
     } catch {
       // Error handled by react-query
     }
-  }, [form, editingReminder, createReminder, updateReminder, closeFormModal]);
+  }, [form, seniorTimezone, editingReminder, createReminder, updateReminder, closeFormModal]);
 
   const handleDelete = useCallback(async () => {
     if (!deletingReminder) return;
@@ -263,6 +256,7 @@ export default function RemindersScreen() {
           renderItem={({ item }) => (
             <ReminderCard
               reminder={item}
+              timezone={seniorTimezone}
               onEdit={openEditModal}
               onDelete={openDeleteModal}
             />
@@ -330,21 +324,13 @@ export default function RemindersScreen() {
 
           {/* Time picker */}
           <View className="mb-4">
-            <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-              Time
-            </Text>
-            <Pressable
-              onPress={() => setShowTimePicker(true)}
-              className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
-              accessibilityRole="button"
+            <TimePickerField
+              value={form.time}
+              onChange={(time) => setForm((prev) => ({ ...prev, time }))}
+              helperText={timeHelperText}
               accessibilityLabel="Select reminder time"
-            >
-              <View className="flex-row items-center">
-                <Clock size={16} color={COLORS.muted} style={{ marginRight: 8 }} />
-                <Text className="text-[15px] text-charcoal">{form.time}</Text>
-              </View>
-              <ChevronDown size={18} color={COLORS.muted} />
-            </Pressable>
+              testID="reminder-time-picker"
+            />
           </View>
 
           {/* Recurring toggle */}
@@ -405,31 +391,6 @@ export default function RemindersScreen() {
         </View>
       </Modal>
 
-      {/* Time Picker Modal */}
-      <Modal
-        visible={showTimePicker}
-        onClose={() => setShowTimePicker(false)}
-        title="Select Time"
-      >
-        <View className="gap-0.5 pb-4">
-          {TIME_OPTIONS.map((time) => (
-            <Pressable
-              key={time}
-              onPress={() => {
-                setForm((prev) => ({ ...prev, time }));
-                setShowTimePicker(false);
-              }}
-              className="flex-row items-center justify-between py-3 px-2 rounded-xl active:bg-beige"
-              accessibilityRole="button"
-              accessibilityLabel={time}
-            >
-              <Text className="text-[15px] text-charcoal">{time}</Text>
-              {form.time === time && <Check size={18} color={COLORS.sage} />}
-            </Pressable>
-          ))}
-        </View>
-      </Modal>
-
       {/* Delete Confirmation Modal */}
       <Modal
         visible={deleteModalVisible}
@@ -473,14 +434,19 @@ export default function RemindersScreen() {
 
 function ReminderCard({
   reminder,
+  timezone,
   onEdit,
   onDelete,
 }: {
   reminder: Reminder;
+  timezone: string;
   onEdit: (r: Reminder) => void;
   onDelete: (r: Reminder) => void;
 }) {
-  const scheduleLabel = useMemo(() => getScheduleLabel(reminder), [reminder]);
+  const scheduleLabel = useMemo(
+    () => getScheduleLabel(reminder, timezone),
+    [reminder, timezone],
+  );
 
   return (
     <View

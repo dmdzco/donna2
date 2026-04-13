@@ -340,7 +340,7 @@ class QuickObserverProcessor(FrameProcessor):
 
         if isinstance(frame, TranscriptionFrame):
             text = frame.text
-            logger.debug("[QuickObserver] Transcription: {txt!r}", txt=text[:120])
+            logger.debug("[QuickObserver] Transcription received")
             analysis = quick_analyze(text, self._recent_history)
             self.last_analysis = analysis
 

@@ -180,4 +180,4 @@ async def update_interest_scores(senior_id: str, scores: dict[str, float]) -> No
     """Persist computed interest scores to the senior's profile."""
     from services.seniors import update
     await update(senior_id, {"interest_scores": scores})
-    logger.info("Updated interest scores for {sid}: {s}", sid=senior_id, s=scores)
+    logger.info("Updated interest scores")

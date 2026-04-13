@@ -49,7 +49,7 @@ async def save_call_context(senior_id: str, call_sid: str, data: dict) -> dict |
             json.dumps(data.get("key_moments", [])),
             data.get("summary"),
         )
-        logger.info("Saved call context for senior {sid}, call {cs}", sid=senior_id, cs=call_sid)
+        logger.info("Saved call context")
         return row
     except Exception as e:
         logger.error("Error saving call context: {err}", err=str(e))

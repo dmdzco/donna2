@@ -16,8 +16,8 @@ User speaks → [STT] → [Observer] → [Director] → [LLM] → [TTS] → Audi
 | Component | Latency | Type | Notes |
 |-----------|---------|------|-------|
 | Deepgram STT | ~200-300ms | Streaming | Nova 3, 8kHz mulaw, interim results |
-| Quick Observer | 0ms | Blocking | 268 regex patterns, inline |
-| Conversation Director | ~150ms | Non-blocking | `asyncio.create_task`, results cached for next turn |
+| Quick Observer | 0ms | Blocking | Regex pattern data, inline |
+| Conversation Director | Async | Non-blocking | Groq primary, Gemini fallback; speculative results can be injected same-turn |
 | Claude Sonnet 4.5 | ~500-1500ms | Streaming | Token-by-token via Pipecat |
 | ElevenLabs TTS | ~200-400ms | Streaming | turbo_v2_5, first chunk |
 | **Total perceived** | **~1-2s** | | First audio chunk to user |
@@ -38,27 +38,27 @@ Speculative memory prefetch that starts while the user is still speaking:
 User starts speaking
     │
     ├── Wave 1: Interim transcription arrives (~200ms)
-    │   └── Regex topic extraction → memory search starts
+    │   └── Raw utterance query → memory search starts
     │
-    └── Wave 2: Gemini Flash analysis (~350ms)
-        └── Semantic topic extraction → memory search starts
+    └── Wave 2: Query Director analysis (~200ms)
+        └── Memory query extraction → memory search starts
             │
             ▼
     Cache populated BEFORE user finishes speaking
     │
     ▼
-    search_memories tool call → cache HIT (~0ms)
+    Director memory injection → cache HIT (~0ms)
 ```
 
 ### Cache Design
 - **Jaccard fuzzy matching**: Query "tell me about his garden" matches cached "gardening interests" (similarity > 0.3)
 - **TTL**: 30 seconds per entry
 - **Max entries**: 10 (LRU eviction)
-- **Hit rate**: Reduces `search_memories` from ~200-300ms to ~0ms
+- **Hit rate**: Reduces repeated memory context lookups from ~200-300ms to ~0ms
 
 ### Impact
-Without prefetch: each `search_memories` call = embedding generation + pgvector query (~200-300ms)
-With prefetch: cache hit = dict lookup (~0ms), saving 4-8 embedding API calls per call
+Without prefetch: each live memory lookup = embedding generation + pgvector query (~200-300ms)
+With prefetch: cache hit = dict lookup (~0ms), avoiding repeated embedding API calls per call
 
 ---
 

@@ -48,6 +48,6 @@ async def save_snapshot(senior_id: str, snapshot: dict) -> None:
             json.dumps(snapshot),
             senior_id,
         )
-        logger.info("Saved call snapshot for senior {sid}", sid=str(senior_id)[:8])
+        logger.info("Saved call snapshot")
     except Exception as e:
         logger.error("Failed to save call snapshot: {err}", err=str(e))

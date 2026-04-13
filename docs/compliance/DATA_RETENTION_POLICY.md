@@ -84,7 +84,7 @@ This policy applies to all data stored in:
 | **Call recordings** | Twilio (if enabled) | Yes (CRITICAL) | **Do not enable call recording** unless required; if enabled, 30 days max | Twilio auto-delete or API deletion |
 | **Voice audio (real-time)** | Deepgram (transient) | Yes | Not retained by Deepgram (streaming STT) | Verify with Deepgram BAA; ensure no log retention |
 | **TTS requests** | ElevenLabs / Cartesia | Yes (text content) | Verify vendor policy | Request deletion or confirm no-retention via BAA |
-| **LLM request logs** | Anthropic, Google, Cerebras, Groq | Yes (conversation content) | Verify vendor policy (Anthropic: 30 days default) | Opt out of training data retention; confirm via BAA |
+| **LLM request logs** | Anthropic, Google, Groq (Cerebras legacy/not active) | Yes (conversation content) | Verify vendor policy (Anthropic: 30 days default) | Opt out of training data retention; confirm via BAA |
 | **Search queries** | Tavily, OpenAI | Possible | Verify vendor policy | Confirm via BAA or remove vendor |
 | **Dev/staging databases** | Neon (branches) | Yes (copies of production) | Refresh quarterly; purge unused branches | `neonctl branches delete` |
 
@@ -338,8 +338,8 @@ Donna sends PHI to multiple vendors. Each vendor's data retention policy must be
 | **Deepgram** | Audio stream | Streaming (not retained); confirm no log retention | Confirm via BAA |
 | **ElevenLabs** | TTS text input | Check vendor policy | Confirm via BAA or vendor inquiry |
 | **Cartesia** | TTS text input | Check vendor policy | Confirm via BAA or vendor inquiry |
-| **Cerebras** | Conversation turns | Check vendor policy | Confirm via vendor inquiry |
-| **Groq** | Conversation turns | Check vendor policy | Confirm via vendor inquiry |
+| **Groq** | Conversation turns | Check vendor policy | Confirm via vendor inquiry/BAA |
+| **Cerebras** | Legacy/not active; conversation turns only if re-enabled | Check vendor policy before any re-enable | Keep disabled/remove stale env references unless BAA is signed |
 | **OpenAI** | Memory text, search queries | API: not used for training (opt-out); check retention | Confirm via BAA |
 | **Tavily** | Search queries | Check vendor policy | Confirm via vendor inquiry |
 | **Twilio** | Audio, phone numbers, SMS | Configurable; default varies | Configure retention limits in Twilio console; confirm via BAA |

@@ -217,6 +217,6 @@ Track daily from the `conversations` table:
 - API error rates (failed calls still incur partial costs)
 - Circuit breaker open events (Groq failures = Gemini fallback at higher latency)
 - Prefetch cache hit rate (higher = fewer embedding calls)
-- Web search trigger rate (should be <10% of turns)
+- Web search tool-call rate (should be <10% of turns)
 
-*Last updated: March 2026 — v5.3*
+*Last updated: April 2026 — current Director/memory-prefetch architecture*

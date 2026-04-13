@@ -26,7 +26,7 @@ class TestToolSchemas:
 
 
 class TestToolHandlerFactory:
-    def test_make_tool_handlers_returns_active_handlers(self):
+    def test_make_tool_handlers_returns_active_and_retired_handlers(self):
         session_state = {"senior_id": "test-123", "senior": {"name": "Test"}}
         handlers = make_tool_handlers(session_state)
         assert "web_search" in handlers

@@ -223,24 +223,24 @@ class TestDirectorSpeculativeAnalysis:
         except asyncio.CancelledError:
             pass
 
-    def test_no_speculative_without_cerebras(self, session_state):
-        """No silence timer starts when Cerebras is not configured.
+    def test_no_speculative_without_fast_provider(self, session_state):
+        """No silence timer starts when the fast provider is not configured.
 
         Tests the condition directly since process_frame requires a started pipeline.
         """
         processor = ConversationDirectorProcessor(session_state=session_state)
         text = "I went to the doctor yesterday and they said"
 
-        # Cerebras not available → silence timer should NOT start
-        cerebras_check = False  # Simulating cerebras_available() == False
-        if len(text) >= processor.SPECULATIVE_MIN_LENGTH and cerebras_check:
+        # Fast provider not available → silence timer should NOT start
+        fast_provider_check = False
+        if len(text) >= processor.SPECULATIVE_MIN_LENGTH and fast_provider_check:
             processor._silence_timer_task = "would be set"
 
         assert processor._silence_timer_task is None
 
-        # Cerebras available → silence timer WOULD start
-        cerebras_check = True
-        if len(text) >= processor.SPECULATIVE_MIN_LENGTH and cerebras_check:
+        # Fast provider available → silence timer WOULD start
+        fast_provider_check = True
+        if len(text) >= processor.SPECULATIVE_MIN_LENGTH and fast_provider_check:
             processor._silence_timer_task = "would be set"
 
         assert processor._silence_timer_task is not None

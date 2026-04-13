@@ -476,10 +476,10 @@ async def analyze_turn_speculative(
     session_state: dict,
     conversation_history: list[dict] | None = None,
 ) -> dict | None:
-    """Run speculative analysis via fast provider (Groq primary, Cerebras fallback).
+    """Run speculative analysis via the fast provider (Groq).
 
     Uses the speculative circuit breaker (shorter timeout, lower threshold).
-    Does NOT fall back to Gemini — speculative uses fast providers only.
+    Does NOT fall back to Gemini — speculative uses the fast provider only.
     """
     if not fast_provider_available():
         return None

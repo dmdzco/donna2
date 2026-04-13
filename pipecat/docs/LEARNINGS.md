@@ -14,10 +14,10 @@ The Conversation Director must NEVER block the pipeline. It passes frames throug
 
 ### Two-Director Split: Query vs Guidance
 A single Director prompt doing everything (query extraction + guidance + phase detection + reminders) costs ~700ms. Splitting into two specialized calls halves the latency on the critical path:
-- **Query Director** (~200ms): Extracts `memory_queries` + `web_queries` only. Fires continuously on interims.
+- **Query Director** (~200ms): Extracts `memory_queries` only. Fires continuously on interims.
 - **Guidance Director** (~400ms): Conversation guidance, phase, reminders. Fires on silence-based speculative only.
 
-The key insight: query extraction needs to happen mid-speech for web search gating. Guidance can wait until a natural pause.
+The key insight: memory query extraction can happen mid-speech. Guidance can wait until a natural pause.
 
 ### Regular Analysis on Final Transcription Is Redundant
 The silence-based speculative already runs full guidance analysis during the 250ms pause before the final transcription arrives. Running another analysis on the final text doesn't help the current turn (Claude already started responding) and only marginally helps the next turn. Removing it simplifies the architecture with no quality loss.
@@ -33,7 +33,7 @@ Quick Observer (Layer 1) and Director (Layer 2) can inject contradictory guidanc
 ## Web Search
 
 ### Regex-Based Question Detection Fails on Conversational Speech
-Detecting factual questions via `?` character or regex patterns triggers on conversational speech: "How much? I'm about to..." and "from India. Remember?" both fired false web searches. Blocklist approaches (listing social questions to skip) can't cover all cases. **Solution:** Let the Query Director (Groq LLM) decide — it understands conversational context and only returns `web_queries` for genuine factual questions.
+Detecting factual questions via `?` character or regex patterns triggers on conversational speech: "How much? I'm about to..." and "from India. Remember?" both fired false web searches. Blocklist approaches (listing social questions to skip) can't cover all cases. **Current decision:** do not run Director-owned web search gating. In-call factual questions go through Claude's explicit `web_search` tool, while the Query Director only returns `memory_queries`.
 
 ### Web Search Caching Causes More Harm Than Good
 Caching web search results to prevent duplicate API calls seems smart but is dangerous: one wrong answer from Tavily poisons all subsequent similar queries for the entire call. The containment-matching algorithm also caused cross-topic false matches ("2026" appearing in both "Orlando Magic score 2026" and "Austin weather 2026"). **Decision:** Remove web search caching entirely. The in-flight dedup (`if task not done: return`) prevents rapid-fire duplicates without caching stale results.
@@ -44,8 +44,8 @@ Simple word overlap fails on shared generic tokens (years, dates). TF-IDF requir
 ### Tavily `include_answer` Hallucinates — Use Raw Results Only
 Tavily's `include_answer=True` parameter runs an LLM on top of search results to generate a synthesized answer. This answer hallucinated incorrect data in production (e.g., wrong NBA standings — "Lakers leading Western Conference" when they weren't). The raw `results` array contains real snippets from actual web pages and is accurate. **Decision:** Removed `include_answer`, return raw result snippets (title + content) to Claude. Claude already synthesizes the result into speech anyway, so the extra LLM layer adds hallucination risk with no benefit. Same speed (Tavily's answer generation actually adds latency), more accurate.
 
-### Web Search Gating Timeline
-The ideal flow: Query Director detects a factual question mid-speech → starts web search → final transcription arrives → search already in-flight → filler TTS plays → result injected → Claude responds with answer. This saves ~4.3s vs Claude calling the `web_search` tool (two LLM round trips). The gating only works if the Query Director completes before the final transcription, which requires the continuous speculative to fire early enough.
+### Web Search Path
+The active flow is simpler: Claude calls the `web_search` tool, the tool tells the senior it is checking, and `services.news.web_search_query()` uses Tavily raw snippets first with OpenAI web search as fallback. The previous Director-gating design was removed from the active pipeline because false positives and stale cached results created worse answers than an explicit tool call.
 
 ---
 
@@ -159,4 +159,4 @@ The Director's ephemeral context injection (via `LLMMessagesAppendFrame`) has no
 
 ---
 
-*Last updated: April 2026 — Gemini Live evaluation, Split Director architecture, ephemeral context, web search gating*
+*Last updated: April 2026 — Gemini Live evaluation, Split Director architecture, ephemeral context, active web_search tool path*

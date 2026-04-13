@@ -36,7 +36,7 @@ class TestHappyPathCall:
              patch("processors.conversation_director.format_director_guidance") as mock_format:
             from services.director_llm import get_default_direction
             mock_spec.return_value = get_default_direction()
-            mock_queries.return_value = {"memory_queries": [], "web_queries": []}
+            mock_queries.return_value = {"memory_queries": []}
             mock_format.return_value = "main/medium/warm"
 
             components = build_test_pipeline(
@@ -89,7 +89,7 @@ class TestGoodbyeScenarios:
              patch("processors.conversation_director.format_director_guidance") as mock_format:
             from services.director_llm import get_default_direction
             mock_spec.return_value = get_default_direction()
-            mock_queries.return_value = {"memory_queries": [], "web_queries": []}
+            mock_queries.return_value = {"memory_queries": []}
             mock_format.return_value = "main/medium/warm"
 
             components = build_test_pipeline(

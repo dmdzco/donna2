@@ -4,10 +4,10 @@ Sits in the pipeline after Quick Observer. Observes TranscriptionFrames,
 fires off async analysis (non-blocking), and injects guidance into the
 LLM context.
 
-Primary LLM: Cerebras (~3000 tok/s) with Gemini Flash fallback.
+Primary LLM: Groq (OpenAI-compatible) with Gemini Flash fallback.
 
 Speculative pre-processing: Detects silence onset via gaps in interim
-transcriptions (250ms threshold). Starts Cerebras analysis during the
+transcriptions (250ms threshold). Starts fast Groq analysis during the
 silence gap so guidance can be injected for the CURRENT turn instead
 of being one turn behind.
 
@@ -150,7 +150,7 @@ class ConversationDirectorProcessor(FrameProcessor):
 
     Speculative pre-processing:
     - Detects silence onset via 250ms gap in InterimTranscriptionFrames
-    - Starts Cerebras analysis during silence
+    - Starts Groq analysis during silence
     - If speculative completes before final TranscriptionFrame → same-turn guidance
     - Otherwise falls back to previous-turn guidance (existing behavior)
 
@@ -165,7 +165,6 @@ class ConversationDirectorProcessor(FrameProcessor):
 
     # Interim transcription debounce settings (for prefetch)
     INTERIM_DEBOUNCE_SECONDS = 1.0
-    INTERIM_MIN_LENGTH = 15
 
     # Speculative pre-processing settings
     SILENCE_ONSET_SECONDS = 0.250  # 250ms gap triggers speculative analysis
@@ -251,7 +250,7 @@ class ConversationDirectorProcessor(FrameProcessor):
                 await self.push_frame(frame, direction)
                 return
 
-            # Cerebras warmup on first transcription (warms TCP/TLS)
+            # Groq warmup on first transcription (warms TCP/TLS)
             if not self._warmup_done:
                 self._warmup_done = True
                 asyncio.create_task(warmup_fast_providers())
@@ -336,11 +335,11 @@ class ConversationDirectorProcessor(FrameProcessor):
             # has passed since the last fire, start analysis now.
             self._maybe_fire_continuous_speculative(text)
 
-            # Existing debounced prefetch (unchanged)
+            # Debounced prefetch. Source-specific text thresholds live in
+            # extract_prefetch_queries(), so the Director only handles timing.
             now = time.time()
             if (
-                len(text) >= self.INTERIM_MIN_LENGTH
-                and now - self._last_interim_prefetch_time >= self.INTERIM_DEBOUNCE_SECONDS
+                now - self._last_interim_prefetch_time >= self.INTERIM_DEBOUNCE_SECONDS
                 and text != self._last_interim_text
             ):
                 self._last_interim_prefetch_time = now
@@ -380,9 +379,8 @@ class ConversationDirectorProcessor(FrameProcessor):
 
             # Timer fired — silence confirmed
             logger.debug(
-                "[Director] Silence onset ({ms}ms), starting speculative on: {t!r}",
+                "[Director] Silence onset ({ms}ms), starting speculative",
                 ms=round(self.SILENCE_ONSET_SECONDS * 1000),
-                t=interim_text[:60],
             )
             self._speculative_attempts += 1
 
@@ -435,10 +433,7 @@ class ConversationDirectorProcessor(FrameProcessor):
             self._run_query_analysis(text, transcript)
         )
         self._prefetch_tasks.append(task)
-        logger.debug(
-            "[Director] Continuous query on: {t!r}",
-            t=text[:60],
-        )
+        logger.debug("[Director] Continuous query started")
 
     async def _run_query_analysis(self, user_message: str, transcript: list[dict]):
         """Run query-only analysis (memory_queries extraction).
@@ -668,8 +663,8 @@ class ConversationDirectorProcessor(FrameProcessor):
 
         memory_text = "\n".join(f"- {line}" for line in memory_lines)
         logger.info(
-            "[Director] Proactive memory injection: {n} memories for {t!r}",
-            n=len(memory_lines), t=user_text[:50],
+            "[Director] Proactive memory injection: {n} memories",
+            n=len(memory_lines),
         )
 
         await self.push_frame(
@@ -707,7 +702,7 @@ class ConversationDirectorProcessor(FrameProcessor):
 
             queries = extract_prefetch_queries(text, self._session_state, source=source)
             if not queries:
-                logger.info("[Prefetch] No queries extracted from {src}: {t!r}", src=source, t=text[:80])
+                logger.info("[Prefetch] No queries extracted from {src}", src=source)
                 return
 
             senior_id = self._session_state.get("senior_id")

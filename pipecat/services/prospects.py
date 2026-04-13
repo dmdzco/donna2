@@ -36,8 +36,7 @@ async def create(phone: str) -> dict:
            RETURNING *""",
         normalized,
     )
-    logger.info("Created/found prospect: {id} phone=...{last4}",
-                id=str(row["id"])[:8], last4=normalized[-4:])
+    logger.info("Created/found prospect")
     return row
 
 
@@ -72,7 +71,7 @@ async def update_after_call(prospect_id: str, data: dict) -> None:
     values.append(prospect_id)
     sql = f"UPDATE prospects SET {', '.join(fields)} WHERE id = ${idx}"
     await execute(sql, *values)
-    logger.info("Updated prospect {id} after call", id=str(prospect_id)[:8])
+    logger.info("Updated prospect after call")
 
 
 def _clean_extracted_list(value) -> list[str]:

@@ -7,8 +7,8 @@ Stores learned info across calls so return callers can be recognized.
 from __future__ import annotations
 
 import json
+import os
 import re
-from datetime import datetime, timezone
 
 from loguru import logger
 from db import query_one, execute
@@ -37,7 +37,7 @@ async def create(phone: str) -> dict:
         normalized,
     )
     logger.info("Created/found prospect: {id} phone=...{last4}",
-                id=row["id"], last4=normalized[-4:])
+                id=str(row["id"])[:8], last4=normalized[-4:])
     return row
 
 
@@ -72,7 +72,90 @@ async def update_after_call(prospect_id: str, data: dict) -> None:
     values.append(prospect_id)
     sql = f"UPDATE prospects SET {', '.join(fields)} WHERE id = ${idx}"
     await execute(sql, *values)
-    logger.info("Updated prospect {id} after call", id=prospect_id)
+    logger.info("Updated prospect {id} after call", id=str(prospect_id)[:8])
+
+
+def _clean_extracted_list(value) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    cleaned = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        text = item.strip()
+        if text:
+            cleaned.append(text[:300])
+    return cleaned[:10]
+
+
+def _clean_extracted_details(data: dict) -> dict:
+    """Keep only expected prospect fields and compact non-empty values."""
+    cleaned: dict = {}
+
+    for key in ("learned_name", "relationship", "loved_one_name"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            cleaned[key] = value.strip()[:120]
+
+    caller_context = data.get("caller_context")
+    if isinstance(caller_context, dict):
+        ctx = {}
+        for key in ("interests", "concerns", "context"):
+            values = _clean_extracted_list(caller_context.get(key))
+            if values:
+                ctx[key] = values
+        if ctx:
+            cleaned["caller_context"] = ctx
+
+    return cleaned
+
+
+async def extract_prospect_details(transcript: str) -> dict:
+    """Extract structured prospect details from an onboarding transcript."""
+    if not transcript or len(transcript.strip()) < 50:
+        return {}
+
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        logger.warning("extract_prospect_details: OPENAI_API_KEY not set")
+        return {}
+
+    try:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=api_key)
+        prompt = (
+            "Analyze this onboarding phone conversation between Donna, an AI "
+            "companion service for seniors, and a prospective caller. Extract "
+            "only details clearly stated in the conversation.\n\n"
+            f"Conversation:\n{transcript}\n\n"
+            "Return JSON with this shape:\n"
+            "{\n"
+            '  "learned_name": "caller first name, or null",\n'
+            '  "relationship": "relationship to the senior, or null",\n'
+            '  "loved_one_name": "senior name, or null",\n'
+            '  "caller_context": {\n'
+            '    "interests": ["senior interests or hobbies"],\n'
+            '    "concerns": ["caller concerns about the senior"],\n'
+            '    "context": ["other concise useful details"]\n'
+            "  }\n"
+            "}\n\n"
+            "Use null or empty arrays for anything not mentioned. Keep values concise."
+        )
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content or "{}"
+        result = json.loads(content)
+        if not isinstance(result, dict):
+            return {}
+        return _clean_extracted_details(result)
+    except Exception as e:
+        logger.error("extract_prospect_details failed: {err}", err=str(e))
+        return {}
 
 
 def build_context_for_prompt(prospect: dict) -> str:

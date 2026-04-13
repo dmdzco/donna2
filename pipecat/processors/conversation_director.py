@@ -333,8 +333,7 @@ class ConversationDirectorProcessor(FrameProcessor):
 
             # Continuous speculative: fire Groq while user is still speaking.
             # Don't wait for silence — if we have enough text and enough time
-            # has passed since the last fire, start analysis now. This lets
-            # Groq detect web_queries mid-speech for faster web search gating.
+            # has passed since the last fire, start analysis now.
             self._maybe_fire_continuous_speculative(text)
 
             # Existing debounced prefetch (unchanged)
@@ -442,9 +441,9 @@ class ConversationDirectorProcessor(FrameProcessor):
         )
 
     async def _run_query_analysis(self, user_message: str, transcript: list[dict]):
-        """Run query-only analysis (memory_queries + web_queries extraction).
+        """Run query-only analysis (memory_queries extraction).
 
-        Fast (~200ms). Feeds memory prefetch and web search gating.
+        Fast (~200ms). Feeds memory prefetch.
         Does NOT produce guidance — cannot be harvested for same-turn injection.
         """
         try:
@@ -728,10 +727,7 @@ class ConversationDirectorProcessor(FrameProcessor):
             logger.warning("[Prefetch] Error: {err}", err=str(e))
 
     async def _run_director_prefetch(self, direction: dict):
-        """Second-wave prefetch using Director's analysis output (memory only).
-
-        Web searches are handled separately via _maybe_start_director_web_search.
-        """
+        """Second-wave prefetch using Director's analysis output (memory only)."""
         try:
             from services.prefetch import (
                 PrefetchCache,

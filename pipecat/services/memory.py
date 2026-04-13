@@ -147,7 +147,13 @@ async def store(
         emb_str,
         json.dumps(metadata) if metadata else None,
     )
-    logger.info("Stored memory for {col}={sid}: {c}", col=owner_col, sid=owner_id, c=content)
+    logger.info(
+        "Stored memory for {col}={sid} type={type} chars={chars}",
+        col=owner_col,
+        sid=str(owner_id)[:8],
+        type=type_,
+        chars=len(content),
+    )
     return row
 
 

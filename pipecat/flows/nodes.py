@@ -467,7 +467,7 @@ def build_onboarding_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     """Build the onboarding node for unsubscribed callers.
 
     Single node covers all 6 conversation stages via prompt instructions.
-    Tools: save_prospect_detail, web_search, transition_to_closing.
+    Tools: web_search, transition_to_closing.
     """
     prospect = session_state.get("prospect") or {}
     prospect_ctx = _build_prospect_context(session_state)

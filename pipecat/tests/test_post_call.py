@@ -154,3 +154,54 @@ class TestPostCallProcessing:
             from services.post_call import run_post_call
             # Should not raise
             await run_post_call(session_state, tracker, duration_seconds=10)
+
+    @pytest.mark.asyncio
+    async def test_onboarding_post_call_extracts_prospect_details_once(self, session_state):
+        """Onboarding calls extract prospect details post-call and update once."""
+        session_state.update({
+            "call_type": "onboarding",
+            "senior_id": None,
+            "senior": None,
+            "prospect_id": "prospect-001",
+            "_transcript": [
+                {"role": "user", "content": "Hi, I'm Lisa. I'm calling about my mom, Maria."},
+                {"role": "assistant", "content": "Nice to meet you, Lisa. What is Maria like?"},
+                {"role": "user", "content": "She loves gardening, and I worry she gets lonely."},
+            ],
+        })
+
+        tracker = ConversationTrackerProcessor(session_state=session_state)
+
+        with patch("services.conversations.complete", new_callable=AsyncMock) as mock_complete, \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock) as mock_memory, \
+             patch("services.post_call._summarize_onboarding_call", new_callable=AsyncMock) as mock_summary, \
+             patch("services.prospects.extract_prospect_details", new_callable=AsyncMock) as mock_details, \
+             patch("services.prospects.update_after_call", new_callable=AsyncMock) as mock_update:
+
+            mock_summary.return_value = "Lisa called about her mom Maria, who loves gardening."
+            mock_details.return_value = {
+                "learned_name": "Lisa",
+                "relationship": "daughter",
+                "loved_one_name": "Maria",
+                "caller_context": {
+                    "interests": ["gardening"],
+                    "concerns": ["loneliness"],
+                },
+            }
+
+            from services.post_call import run_post_call
+            await run_post_call(session_state, tracker, duration_seconds=90)
+
+            mock_complete.assert_awaited_once()
+            mock_memory.assert_awaited_once()
+            mock_details.assert_awaited_once()
+            mock_update.assert_awaited_once()
+
+            prospect_id, update_data = mock_update.await_args.args
+            assert prospect_id == "prospect-001"
+            assert update_data["learned_name"] == "Lisa"
+            assert update_data["relationship"] == "daughter"
+            assert update_data["loved_one_name"] == "Maria"
+            assert update_data["caller_context"]["call_summary"].startswith("Lisa called")
+            assert update_data["caller_context"]["interests"] == ["gardening"]
+            assert update_data["caller_context"]["concerns"] == ["loneliness"]

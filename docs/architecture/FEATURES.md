@@ -21,7 +21,7 @@
 ### Onboarding Calls
 - Unrecognized callers get a warm onboarding conversation
 - Learns caller name, relationship to senior, senior's name, interests, concerns
-- Saves details progressively via `save_prospect_detail` tool
+- Extracts and saves prospect details after the call to avoid in-call tool latency
 - Return callers recognized and greeted by name with prior context
 
 ---

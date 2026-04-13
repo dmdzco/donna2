@@ -368,7 +368,7 @@ async def _summarize_onboarding_call(transcript: list | str, call_sid: str) -> s
             ),
         )
         summary = response.text.strip()
-        logger.info("[{cs}] Onboarding summary: {s}", cs=call_sid, s=summary[:100])
+        logger.info("[{cs}] Onboarding summary generated ({n} chars)", cs=call_sid, n=len(summary))
         return summary
     except Exception as e:
         logger.error("[{cs}] Onboarding summary failed: {err}", cs=call_sid, err=str(e))
@@ -406,24 +406,81 @@ async def _run_onboarding_post_call(
         logger.error("[{cs}] Onboarding post-call step 1 (complete conversation) failed: {err}",
                      cs=call_sid, err=str(e))
 
-    # 2. Summarize conversation and store on prospect record
-    try:
-        if transcript and prospect_id:
-            summary = await _summarize_onboarding_call(transcript, call_sid)
-            if summary:
-                from services.prospects import update_after_call
-                await update_after_call(prospect_id, {
-                    "caller_context": {"call_summary": summary},
-                })
-                logger.info("[{cs}] Stored onboarding call summary ({n} chars)",
-                            cs=call_sid, n=len(summary))
-            else:
-                # Still increment call_count even without summary
-                from services.prospects import update_after_call
-                await update_after_call(prospect_id, {})
-    except Exception as e:
-        logger.error("[{cs}] Onboarding post-call step 2 (summary + update) failed: {err}",
-                     cs=call_sid, err=str(e))
+    formatted_transcript = _format_transcript(transcript)
+
+    async def _step2_memory():
+        if not (formatted_transcript and prospect_id):
+            return
+        from services.memory import extract_from_conversation
+        await extract_from_conversation(
+            None,
+            formatted_transcript,
+            conversation_id or "unknown",
+            prospect_id=prospect_id,
+        )
+
+    async def _step3_prospect_update():
+        if not prospect_id:
+            return
+
+        from services.prospects import extract_prospect_details, update_after_call
+
+        update_data: dict = {}
+        if formatted_transcript:
+            summary_result, details_result = await asyncio.gather(
+                _summarize_onboarding_call(transcript, call_sid),
+                extract_prospect_details(formatted_transcript),
+                return_exceptions=True,
+            )
+
+            if isinstance(summary_result, Exception):
+                logger.error(
+                    "[{cs}] Onboarding summary failed: {err}",
+                    cs=call_sid,
+                    err=str(summary_result),
+                )
+            elif summary_result:
+                update_data.setdefault("caller_context", {})["call_summary"] = summary_result
+                logger.info(
+                    "[{cs}] Stored onboarding call summary ({n} chars)",
+                    cs=call_sid,
+                    n=len(summary_result),
+                )
+
+            if isinstance(details_result, Exception):
+                logger.error(
+                    "[{cs}] Prospect detail extraction failed: {err}",
+                    cs=call_sid,
+                    err=str(details_result),
+                )
+            elif details_result:
+                extracted_keys = list(details_result.keys())
+                detail_context = details_result.pop("caller_context", None)
+                update_data.update(details_result)
+                if detail_context:
+                    update_data.setdefault("caller_context", {}).update(detail_context)
+                logger.info(
+                    "[{cs}] Extracted prospect detail fields: {keys}",
+                    cs=call_sid,
+                    keys=extracted_keys,
+                )
+
+        # update_after_call increments call_count once, even if no transcript/details.
+        await update_after_call(prospect_id, update_data)
+
+    results = await asyncio.gather(
+        _step2_memory(),
+        _step3_prospect_update(),
+        return_exceptions=True,
+    )
+    for step_name, result in zip(["memory extraction", "prospect update"], results):
+        if isinstance(result, Exception):
+            logger.error(
+                "[{cs}] Onboarding post-call ({step}) failed: {err}",
+                cs=call_sid,
+                step=step_name,
+                err=str(result),
+            )
 
     logger.info("[{cs}] Onboarding post-call processing complete", cs=call_sid)
 

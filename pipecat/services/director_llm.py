@@ -521,8 +521,8 @@ async def analyze_queries(
 ) -> dict | None:
     """Run query-only analysis via Groq (fast, minimal prompt).
 
-    Extracts memory_queries and web_queries for prefetch and web search.
-    Returns {"memory_queries": [...], "web_queries": [...]} or None.
+    Extracts memory_queries for prefetch.
+    Returns {"memory_queries": [...]} or None.
     No fallback — purely opportunistic.
     """
     if not fast_provider_available():
@@ -557,10 +557,9 @@ async def analyze_queries(
 
     elapsed_ms = round((time.time() - start) * 1000)
     logger.debug(
-        "[Director] Query analysis {ms}ms: mem={m} web={w}",
+        "[Director] Query analysis {ms}ms: mem={m}",
         ms=elapsed_ms,
         m=len(result.get("memory_queries", [])),
-        w=len(result.get("web_queries", [])),
     )
     return result
 

@@ -249,7 +249,7 @@ A formal risk assessment per 45 CFR 164.308(a)(1)(ii)(A) has not yet been conduc
 | No data retention policy | High | Medium | **HIGH** | Implement automated purge (see [Data Retention](DATA_RETENTION_POLICY.md)) |
 | No breach notification procedures | Medium | High | **HIGH** | Document and drill procedures (see [Breach Notification](BREACH_NOTIFICATION.md)) |
 | No workforce training | High | Medium | **MEDIUM** | Develop and deliver HIPAA training |
-| Insecure Clerk token verification | Medium | High | **HIGH** | Currently `verify_signature=False` in Python auth middleware; must verify Clerk JWT signatures properly |
+| Clerk JWKS configuration drift | Low | High | **MEDIUM** | Python auth now verifies Clerk RS256 tokens with JWKS when `CLERK_JWKS_URL` or `CLERK_PUBLISHABLE_KEY` is configured; monitor env coverage in all deployments |
 
 ---
 
@@ -260,14 +260,14 @@ A formal risk assessment per 45 CFR 164.308(a)(1)(ii)(A) has not yet been conduc
 1. **Sign BAAs with tier-1 vendors** (Twilio, Anthropic, Neon, Deepgram, Google, OpenAI, Sentry) -- these all offer BAAs on enterprise/business plans.
 2. **Designate a HIPAA Security Officer** (can be a co-founder initially).
 3. **Document breach notification procedures** -- see [Breach Notification](BREACH_NOTIFICATION.md).
-4. **Implement HIPAA audit logging** -- new `audit_logs` table, middleware integration.
-5. **Fix Clerk JWT signature verification** in `pipecat/api/middleware/auth.py` (currently `verify_signature=False`).
+4. **Verify HIPAA audit logging coverage** across Node and Pipecat routes (`audit_logs` table exists; confirm every PHI access path writes an audit event).
+5. **Verify Clerk JWKS env configuration** in every deployment. `pipecat/api/middleware/auth.py` now verifies Clerk JWT signatures, but it rejects Clerk tokens if JWKS cannot be derived from env.
 
 ### Phase 2: Data Protection (Weeks 5-8) -- HIGH
 
 6. **Implement field-level encryption** for PHI columns (`medical_notes`, `transcript`, `memories.content`, `summary`, `concerns`).
 7. **Implement data retention policies** with automated purge jobs -- see [Data Retention](DATA_RETENTION_POLICY.md).
-8. **Evaluate and replace non-compliant vendors** (Cerebras, Cartesia, Tavily) -- see [Vendor Security](VENDOR_SECURITY_EVALUATION.md).
+8. **Evaluate and replace non-compliant vendors** (Groq, Cartesia, Tavily; Cerebras is legacy/not active in current Director code) -- see [Vendor Security](VENDOR_SECURITY_EVALUATION.md).
 9. **Restrict developer access to production data** -- synthetic data for dev/staging environments.
 
 ### Phase 3: Organizational (Weeks 9-12) -- MEDIUM

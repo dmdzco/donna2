@@ -290,7 +290,7 @@ The ~700ms at 500 users includes network round-trip from macOS to us-east-1 Neon
 
 ---
 
-## External Provider Capacity Audit (March 2026)
+## External Provider Capacity Audit (April 2026)
 
 ### Current Limits vs. 500 Concurrent Calls
 
@@ -301,8 +301,8 @@ The ~700ms at 500 users includes network round-trip from macOS to us-east-1 Neon
 | **Deepgram** | STT Streaming (Nova 3) | Unknown (pay-as-you-go) | 500 concurrent streams | **VERIFY** — contact Deepgram |
 | **Twilio** | Voice Calls | Full account, active | 500 concurrent | **LIKELY OK** — verify account capacity |
 | **OpenAI** | Embeddings | 3,000 RPM / 1M TPM | ~2,000-4,000 RPM | **AT RISK** — prefetch cache mitigates |
-| **Gemini** | Director fallback + Analysis | 1,500 RPM (free tier) | ~500 RPM (Director) + ~500 post-call burst | **OK if Cerebras is primary** |
-| **Cerebras** | Director primary | **NOT SET in production** | 500 concurrent Director calls | **BLOCKER** — key not configured |
+| **Groq** | Director primary | Verify account limits | 500 concurrent Director calls | **VERIFY** — current primary Director provider |
+| **Gemini** | Director fallback + Analysis | 1,500 RPM (free tier) | Fallback Director + ~500 post-call burst | **AT RISK** — post-call bursts can contend with fallback Director |
 
 ### Anthropic — HARD BLOCKER
 
@@ -334,11 +334,11 @@ Current plan: Creator ($22/mo)
 
 **Fix**: Upgrade to Enterprise plan. Even Scale tier (25 concurrent) is insufficient. Need custom agreement for 500 concurrent WebSocket streams.
 
-### Cerebras — CONFIGURATION GAP
+### Groq/Gemini Director Capacity — VERIFY
 
-`CEREBRAS_API_KEY` is not set in production. The Director falls back to Gemini for all calls, which works but is slower (~150ms vs ~50ms) and will hit Gemini rate limits at scale.
+Groq is the current primary Director provider (`GROQ_API_KEY`, `GROQ_DIRECTOR_MODEL`). Gemini remains the fallback for full guidance analysis and is also used for post-call analysis, so fallback Director traffic can contend with post-call bursts.
 
-**Fix**: Set `CEREBRAS_API_KEY` in Railway production environment.
+**Fix**: Verify Groq RPM/concurrency limits for the Director workload and ensure Gemini limits cover fallback plus post-call analysis, or move Director fallback to a HIPAA-eligible paid tier.
 
 ### OpenAI Embeddings — AT RISK
 
@@ -355,7 +355,7 @@ Mitigated by predictive prefetch cache (most `search_memories` calls hit cache a
 |--------|----------|-----|----------------|
 | Upgrade Anthropic tier to Build/Scale | **P0** | Account admin | ~$1,000-5,000/mo |
 | Upgrade ElevenLabs to Enterprise | **P0** | Account admin | Custom pricing |
-| Set `CEREBRAS_API_KEY` in production | **P0** | DevOps | $0 (free tier or paid) |
+| Verify Groq Director limits and Gemini fallback/post-call headroom | **P0** | DevOps | Depends on plan |
 | Verify Deepgram concurrent stream limit | **P1** | Account admin | Contact sales |
 | Verify Twilio concurrent call capacity | **P1** | Account admin | Check dashboard |
 | Set Railway instance to 8GB+ RAM | **P1** | DevOps | ~$20-40/mo |

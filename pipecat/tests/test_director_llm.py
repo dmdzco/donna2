@@ -1,4 +1,4 @@
-"""Tests for services/director_llm.py — Director LLM analysis (Cerebras + Gemini)."""
+"""Tests for services/director_llm.py — Director LLM analysis (Groq + Gemini)."""
 
 import json
 import time

@@ -2,14 +2,14 @@
 
 Runs Haiku (synthetic caller) against the real Donna pipeline with:
 - Real Claude Sonnet (LLM responses)
-- Real Director (Groq/Cerebras speculative analysis)
+- Real Director (Groq speculative analysis, Gemini fallback)
 - Real Quick Observer (268 regex patterns, goodbye detection)
 - Real tool handlers (web_search -> Tavily, mark_reminder -> DB)
 - Real post-call processing (analysis, memory extraction, daily context)
 - Real Neon dev database
 
 Requires: ANTHROPIC_API_KEY, DATABASE_URL
-Optional: CEREBRAS_API_KEY (Director), TAVILY_API_KEY (web search)
+Optional: GROQ_API_KEY (Director), TAVILY_API_KEY (web search)
 
 Run: cd pipecat && python -m pytest tests/test_live_simulation.py -v -m llm_simulation
 """
@@ -66,21 +66,14 @@ async def test_senior():
 
 
 class TestWebSearch:
-    """Tests that web search is triggered via tool call or Director gating."""
+    """Tests that web search is triggered via the active tool path."""
 
     @pytest.mark.asyncio
     async def test_web_search_triggered(self, test_senior: TestSenior):
         """Run the web_search_scenario and verify search activity.
 
-        The pipeline can satisfy a web search request through three paths:
+        The pipeline should satisfy a web search request through the tool path:
         1. Claude calls the ``web_search`` tool directly.
-        2. The Director's Query Director extracts ``web_queries``, runs
-           Tavily in the background, and injects ``[WEB RESULT]`` into
-           context (captured in ``result.web_search_results``).
-        3. The Director pushes a filler TTS frame while the search is
-           in-flight (captured in ``result.fillers``).
-
-        Any one of these paths counts as success.
         """
         scenario = web_search_scenario()
         result = await run_simulated_call(
@@ -89,12 +82,10 @@ class TestWebSearch:
             run_post_call_processing=False,
         )
 
-        # At least one of the three search indicators should fire
+        # The active search indicator should fire
         web_search_via_tool = "web_search" in result.tool_calls_made
-        web_search_via_director = len(result.web_search_results) > 0
-        web_search_via_filler = len(result.fillers) > 0
 
-        assert web_search_via_tool or web_search_via_director or web_search_via_filler, (
+        assert web_search_via_tool, (
             f"Expected web search activity but found none. "
             f"tool_calls={result.tool_calls_made}, "
             f"web_results={len(result.web_search_results)}, "

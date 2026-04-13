@@ -28,18 +28,18 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         │ TranscriptionFrame
                         ▼
               ┌─────────────────────┐
-              │   Quick Observer     │  Layer 1 (0ms): 268 regex patterns
+              │   Quick Observer     │  Layer 1 (0ms): regex patterns
               │   (BLOCKING)         │  Injects guidance via LLMMessagesAppendFrame
               │                      │  Strong goodbye → EndFrame in 2s
               └─────────┬───────────┘
                         ▼
               ┌─────────────────────┐   ┌─────────────────────────┐
               │ Conversation         │──►│ Background Analysis      │
-              │ Director             │   │ Groq/Cerebras (~70ms)   │
-              │ (PASS-THROUGH)       │   │ Gemini fallback (~150ms)│
-              │                      │   │ + Predictive prefetch   │
-              │ Injects guidance +   │   │ + Web search prefetch   │
-              │ dynamic news context │   │ + Force end at 9/12min  │
+              │ Director             │   │ Groq primary            │
+              │ (PASS-THROUGH)       │   │ Gemini fallback         │
+              │                      │   │ + Memory prefetch       │
+              │ Injects guidance +   │   │ + Force end at 9/12min  │
+              │ dynamic news context │   │                         │
               └─────────┬───────────┘   └─────────────────────────┘
                         ▼ (no delay)
               Context Aggregator (user) ← builds LLM context from transcriptions
@@ -66,13 +66,13 @@ Twilio Audio ──► FastAPIWebsocketTransport
 
 ### Layer 1: Quick Observer (`processors/quick_observer.py`)
 - **Latency**: 0ms (blocking, inline)
-- **Method**: 268 regex patterns across 19 categories (health, goodbye, emotion, cognitive, activity, etc.)
+- **Method**: regex patterns across health, goodbye, emotion, cognitive, activity, and other categories
 - **Output**: Injects guidance for the current turn
 - **Goodbye detection**: Strong goodbye → programmatic EndFrame after 2s delay (bypasses unreliable LLM tool calls)
 
 ### Layer 2: Conversation Director (`processors/conversation_director.py`)
 - **Latency**: ~70ms primary / ~150ms fallback (non-blocking via `asyncio.create_task`)
-- **Providers**: Groq (`gpt-oss-20b`) / Cerebras (`gpt-oss-120b`) primary (random selection), Gemini Flash fallback
+- **Providers**: Groq (`gpt-oss-20b`) primary, Gemini Flash fallback for full guidance analysis
 - **Speculative analysis**: Detects silence onset (250ms gap in interims), starts analysis during silence for same-turn injection
 - **Output**: Same-turn guidance (speculative hit) or previous-turn cached guidance (fallback)
 - **Dynamic news**: Injects news context when `should_mention_news` is signaled (one-shot per call)
@@ -83,21 +83,20 @@ Twilio Audio ──► FastAPIWebsocketTransport
 
 ## Call Phase State Machine (Pipecat Flows)
 
-4 phases managed by `FlowManager` with `NodeConfig` definitions:
+Conditional reminder, main, winding_down, and closing phases are managed by `FlowManager` with `NodeConfig` definitions:
 
 | Phase | Tools Available | Context Strategy | Transition |
 |-------|----------------|-----------------|------------|
-| **Reminder** *(conditional)* | mark_reminder_acknowledged, save_important_detail, transition_to_main | APPEND, respond_immediately | After reminders delivered |
-| **Main** | search_memories, web_search, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes, transition_to_winding_down | APPEND | Natural wind-down or 9min Director force |
-| **Winding Down** | mark_reminder_acknowledged, save_important_detail, web_search, check_caregiver_notes, transition_to_closing | APPEND | Closing cue or 12min force |
+| **Reminder** *(conditional)* | mark_reminder_acknowledged, transition_to_main | APPEND, respond_immediately | After reminders delivered |
+| **Main** | web_search, mark_reminder_acknowledged, transition_to_winding_down | APPEND | Natural wind-down or Director force |
+| **Winding Down** | web_search, mark_reminder_acknowledged, transition_to_closing | APPEND | Closing cue or Director force |
 | **Closing** | *(none — post_action: end_conversation)* | APPEND | Auto-end |
 
-### LLM Tools (5 total)
-1. **search_memories** — Semantic search via pgvector (cache-first: prefetch → live fallback)
-2. **web_search** — OpenAI web search (cache-first: web prefetch → live fallback via `asyncio.to_thread`)
-3. **save_important_detail** — Store new memory with deduplication
-4. **mark_reminder_acknowledged** — Track reminder delivery status
-5. **check_caregiver_notes** — Retrieve and deliver pending notes from caregivers
+### LLM Tools (2 active)
+1. **web_search** — In-call factual search via Tavily first, OpenAI fallback.
+2. **mark_reminder_acknowledged** — Track reminder delivery status.
+
+Retired handlers remain in `pipecat/flows/tools.py` for Gemini/future work, but `make_flows_tools()` exposes only the two active tools above. Memory and caregiver-note context is prefetched/injected instead of exposed as Claude tools.
 
 ---
 
@@ -147,14 +146,14 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 | Voice Pipeline | Pipecat | v0.0.101+ |
 | Call State Machine | Pipecat Flows | v0.0.22+ |
 | Primary LLM | Anthropic Claude Sonnet 4.5 | claude-sonnet-4-5-20250929 |
-| Director LLM (primary) | Groq / Cerebras | gpt-oss-20b / gpt-oss-120b (~70ms) |
-| Director LLM (fallback) | Google Gemini Flash | gemini-3-flash-preview (~150ms) |
+| Director LLM (primary) | Groq | gpt-oss-20b |
+| Director LLM (fallback) | Google Gemini Flash | gemini-3-flash-preview |
 | Post-Call Analysis | Google Gemini Flash | gemini-3-flash-preview |
 | STT | Deepgram Nova 3 | 8kHz mulaw |
-| TTS | ElevenLabs | eleven_turbo_v2_5 |
+| TTS | ElevenLabs by default; Cartesia behind provider flag | eleven_turbo_v2_5 |
 | VAD | Silero | confidence=0.6, stop_secs=1.2 |
 | Embeddings | OpenAI | text-embedding-3-small |
-| News / Web Search | OpenAI GPT-4o-mini | web_search_preview tool, 1hr cache |
+| News / Web Search | OpenAI GPT-4o-mini + Tavily | OpenAI cached news; Tavily first/OpenAI fallback for in-call web search |
 | Telephony | Twilio | Media Streams WebSocket |
 | Database | Neon PostgreSQL | pgvector extension |
 | Server (Python) | FastAPI + uvicorn | v0.115+ |
@@ -175,21 +174,21 @@ pipecat/
 ├── prompts.py                  ← System prompts + phase task instructions
 ├── flows/
 │   ├── nodes.py                ← 4 call phase NodeConfigs
-│   └── tools.py                ← 5 LLM tool schemas + handlers (cache-first)
+│   └── tools.py                ← 2 active LLM tool schemas + retired handlers
 ├── processors/
-│   ├── patterns.py             ← 268 regex patterns, 19 categories
+│   ├── patterns.py             ← Quick Observer regex pattern data
 │   ├── quick_observer.py       ← Layer 1: regex analysis + goodbye EndFrame
-│   ├── conversation_director.py← Layer 2: Groq/Cerebras/Gemini non-blocking + news injection
+│   ├── conversation_director.py← Layer 2: Groq/Gemini non-blocking + news injection
 │   ├── conversation_tracker.py ← Topic/question/advice tracking
 │   ├── guidance_stripper.py    ← Strip <guidance> tags from output
 │   └── metrics_logger.py       ← Call metrics logging
 ├── services/
 │   ├── scheduler.py            ← Reminder polling + outbound calls
 │   ├── post_call.py            ← Post-call: analysis, memory, cleanup, snapshot rebuild
-│   ├── director_llm.py         ← Multi-provider Director analysis (Groq/Cerebras/Gemini)
+│   ├── director_llm.py         ← Director analysis (Groq/Gemini)
 │   ├── memory.py               ← Semantic memory (pgvector, decay, dedup)
-│   ├── prefetch.py             ← Predictive Context Engine (memory + web prefetch)
-│   ├── news.py                 ← OpenAI web search (async, 1hr cache)
+│   ├── prefetch.py             ← Predictive Context Engine (memory prefetch)
+│   ├── news.py                 ← OpenAI cached news; Tavily/OpenAI web search
 │   ├── call_snapshot.py        ← Pre-computed call context snapshot
 │   ├── context_cache.py        ← Pre-cache at 5 AM local + news persistence
 │   └── ...                     ← 8+ additional service modules

@@ -33,7 +33,7 @@ class TestToolHandlerIntegration:
         result = await handlers["web_search"]({"query": ""})
         assert result["status"] == "success"
 
-    def test_only_active_tools_returned(self, session_state):
-        """All 5 tools should be in handlers."""
+    def test_handler_factory_keeps_active_and_retired_handlers(self, session_state):
+        """Handler factory keeps active tool handlers plus retired future-use handlers."""
         handlers = make_tool_handlers(session_state)
         assert set(handlers.keys()) == {"web_search", "mark_reminder_acknowledged", "search_memories", "save_important_detail", "check_caregiver_notes"}

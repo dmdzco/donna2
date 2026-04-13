@@ -6,20 +6,19 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ### Voice Pipeline (Pipecat)
 - **2-Layer Conversation Director Architecture**
-  - Layer 1: Quick Observer (0ms) — 268 regex patterns for health, emotion, safety, goodbye
-  - Layer 2: Conversation Director — Multi-provider non-blocking call guidance (Groq/Cerebras primary, Gemini fallback)
+  - Layer 1: Quick Observer (0ms) — regex patterns for health, emotion, safety, goodbye
+  - Layer 2: Conversation Director — non-blocking call guidance (Groq primary, Gemini fallback)
   - Post-Call Analysis — Summary, concerns, engagement score (Gemini Flash)
-- **Pipecat Flows** — 4-phase call state machine (opening → main → winding_down → closing)
-- **2 LLM Tools** — web_search (fallback, Director handles most searches), mark_reminder_acknowledged (fire-and-forget)
-- **Director-First Architecture** — Memory search, caregiver notes, and web search moved from Claude tool calls to Director injection (saves ~14s/call)
+- **Pipecat Flows** — conditional reminder phase, main, winding_down, closing, plus onboarding flows
+- **2 Active LLM Tools** — web_search and mark_reminder_acknowledged
+- **Director-First Memory Architecture** — Memory search and caregiver notes moved from Claude tool calls to prefetch/context injection
 - **Programmatic Call Ending** — Goodbye detection → EndFrame after 2s delay (bypasses unreliable LLM tool calls)
 - **Director Fallback Actions** — Force winding-down at 9min, force call end at 12min
-- **Predictive Context Engine** — Speculative prefetch with 2-wave pipeline:
-  - 1st wave: Regex topic/entity extraction → background memory search (~0ms added latency)
-  - 2nd wave: Director analysis → anticipatory prefetch (next_topic, reminders, web queries)
-  - Web search prefetch: Director predicts questions with location/date context → pre-fetched via OpenAI
+- **Predictive Context Engine** — Speculative memory prefetch with 2-wave pipeline:
+  - 1st wave: raw/interim utterance extraction → background memory search (~0ms added latency)
+  - 2nd wave: Query Director analysis → anticipatory memory prefetch
   - Interim transcription prefetch while user speaks (debounced)
-  - Cache-first tool handlers (~0ms hit vs 200-300ms memory search, ~0ms vs 4-10s web search)
+  - Proactive memory injection (~0ms hit vs 200-300ms memory search)
 - **Director-Driven News Injection** — News context injected dynamically when Director signals relevance (saves ~300 tokens/turn vs static system prompt)
 - **Barge-in support** — Interrupt detection via Silero VAD
 
@@ -27,7 +26,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3)
 - LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
-- Text-to-speech (ElevenLabs via Pipecat)
+- Text-to-speech (ElevenLabs by default; Cartesia available behind provider flag)
 - Semantic memory with decay + deduplication (pgvector + HNSW index)
 - Full in-call context retention (APPEND strategy, no summary truncation)
 - Cross-call turn history (recent turns from previous calls in system prompt)
@@ -36,17 +35,17 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Same-day cross-call memory (timezone-aware daily context + call summaries)
 - Sentiment-aware greetings (uses last call's engagement/rapport for tone)
 - News via OpenAI web search (1hr cache, Director-driven injection)
-- Web search via OpenAI (async, prefetch-accelerated)
+- In-call web search via Claude `web_search` tool (Tavily first, OpenAI fallback)
 - Scheduled reminder calls with delivery tracking
 - Call context snapshot (pre-computed JSONB, eliminates 6 DB queries per call)
 - Context + news pre-caching at 5 AM local time
 - Caregiver notes delivery (family can leave notes read during calls)
 - Per-senior call settings (configurable time limits, greeting style, memory decay)
-- 2 LLM tools: web_search (Claude fallback), mark_reminder_acknowledged (fire-and-forget)
+- 2 active LLM tools: web_search and mark_reminder_acknowledged (fire-and-forget)
 - Ephemeral context model (Director injections stripped each turn, prevents prompt bloat)
 
 ### Infrastructure & Reliability
-- Circuit breakers for external services (Groq, Cerebras, Gemini, OpenAI embeddings, news)
+- Circuit breakers for external services (Groq, Gemini, OpenAI embeddings/news, Tavily)
 - DB-backed feature flags with 5-minute cache
 - Graceful shutdown with active call tracking (7s drain on SIGTERM)
 - Enhanced /health endpoint (database + circuit breaker states)
@@ -124,7 +123,7 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                                        ▼
                              ┌─────────────────────┐
                              │   Quick Observer     │  Layer 1 (0ms, BLOCKING)
-                             │   268 regex patterns │  Injects guidance for THIS turn
+                             │   regex patterns     │  Injects guidance for THIS turn
                              │                      │  Goodbye → EndFrame (2s)
                              └─────────┬───────────┘
                                        │
@@ -134,14 +133,13 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                              │   Director           │   │                        │
                              │   (PASS-THROUGH)     │   │ 1. Query Director      │
                              │                      │   │    (~200ms, continuous) │
-                             │ • Strips ephemeral   │   │    memory + web queries│
+                             │ • Strips ephemeral   │   │    memory queries      │
                              │   context each turn  │   │                        │
                              │ • Injects guidance   │   │ 2. Guidance Director   │
                              │ • Injects memories   │   │    (~400ms, on silence)│
-                             │ • Web search gating  │   │    same-turn guidance  │
-                             │   (filler + inject)  │   │                        │
-                             │                      │   │ + Predictive prefetch  │
-                             │                      │   │ + Web search gating    │
+                             │                      │   │    same-turn guidance  │
+                             │                      │   │                        │
+                             │                      │   │ + Memory prefetch      │
                              │                      │   └───────────────────────┘
                              └─────────┬───────────┘
                                        │ (no delay)
@@ -165,20 +163,20 @@ The Director is split into two specialized Groq calls for optimal latency:
 
 | Director | Latency | Fires | Purpose |
 |----------|---------|-------|---------|
-| **Query Director** | ~200ms | Continuously on interims (45 chars first, 60+25 re-fire) | Extract `memory_queries` + `web_queries` |
+| **Query Director** | ~200ms | Continuously on interims (45 chars first, 60+25 re-fire) | Extract `memory_queries` |
 | **Guidance Director** | ~400ms | On 250ms silence (speculative) | Phase, engagement, reminders, guidance |
 
-Both run non-blocking via `asyncio.create_task()`. The Query Director enables web search gating: it detects factual questions mid-speech, starts the search before the user finishes, and injects the result into Claude's context with filler TTS.
+Both run non-blocking via `asyncio.create_task()`. The Query Director currently feeds memory prefetch only; in-call factual questions go through Claude's active `web_search` tool.
 
 | Feature | Description |
 |---------|-------------|
 | **Ephemeral Context** | All injections tagged `[EPHEMERAL:`, stripped each turn (prevents prompt bloat) |
-| **Web Search Gating** | Query Director → Tavily search → filler TTS → inject result (saves ~4.3s vs tool call) |
+| **Web Search** | Claude `web_search` tool → Tavily raw snippets → OpenAI fallback |
 | **Memory Injection** | Prefetched memories injected as ephemeral context (500ms gate) |
 | **Same-Turn Guidance** | Silence-based speculative enables guidance before Claude responds |
 | **Goodbye Suppression** | `_goodbye_in_progress` flag skips all Director injection during goodbye |
 | **Time-Based Fallbacks** | Force winding-down at 9min, force end at 12min |
-| **Predictive Prefetch** | Regex first-wave + Query Director second-wave memory prefetch |
+| **Predictive Prefetch** | Utterance first-wave + Query Director second-wave memory prefetch |
 
 See [`pipecat/docs/LEARNINGS.md`](pipecat/docs/LEARNINGS.md) for engineering learnings and debugging insights.
 
@@ -201,11 +199,11 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 ├── prompts.py                          # System prompts + phase instructions
 ├── flows/
 │   ├── nodes.py                        # 4 call phase NodeConfigs
-│   └── tools.py                        # 5 LLM tool schemas + async handlers
+│   └── tools.py                        # 2 active LLM tool schemas + retired handlers
 ├── processors/
-│   ├── patterns.py                     # 268 regex patterns, 19 categories
+│   ├── patterns.py                     # Regex pattern data
 │   ├── quick_observer.py               # Layer 1: analysis + goodbye EndFrame
-│   ├── conversation_director.py        # Layer 2: Gemini Flash non-blocking
+│   ├── conversation_director.py        # Layer 2: Groq/Gemini non-blocking
 │   ├── conversation_tracker.py         # Topic/question/advice tracking
 │   ├── metrics_logger.py              # Call metrics logging
 │   ├── goodbye_gate.py                 # False-goodbye grace period (not in active pipeline)
@@ -213,8 +211,8 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 ├── services/
 │   ├── post_call.py                    # Post-call orchestration + snapshot rebuild
 │   ├── call_analysis.py                # Post-call analysis (Gemini Flash)
-│   ├── prefetch.py                     # Predictive Context Engine (speculative prefetch)
-│   ├── director_llm.py                 # Gemini Flash analysis for Director
+│   ├── prefetch.py                     # Predictive Context Engine (memory prefetch)
+│   ├── director_llm.py                 # Groq Director + Gemini fallback
 │   ├── memory.py                       # Semantic memory (pgvector, decay)
 │   ├── scheduler.py                    # Reminder scheduling + outbound calls
 │   ├── reminder_delivery.py            # Delivery CRUD + prompt formatting
@@ -226,7 +224,7 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── interest_discovery.py           # Interest extraction from conversations
 │   ├── seniors.py                      # Senior profile CRUD
 │   ├── caregivers.py                   # Caregiver-senior relationships
-│   └── news.py                         # OpenAI web search (1hr cache)
+│   └── news.py                         # OpenAI cached news + Tavily/OpenAI web search
 ├── api/
 │   ├── routes/                         # voice.py, calls.py
 │   ├── middleware/                      # auth, api_auth, rate_limit, security, twilio
@@ -275,6 +273,7 @@ GOOGLE_API_KEY=...                      # Gemini 3 Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...                    # STT (Nova 3)
 ELEVENLABS_API_KEY=...                  # TTS
 OPENAI_API_KEY=...                      # Embeddings + news search
+TAVILY_API_KEY=...                      # Optional fast in-call web search
 
 # Auth
 JWT_SECRET=...                          # Admin JWT signing
@@ -286,8 +285,8 @@ SCHEDULER_ENABLED=false                 # Must be false (Node.js runs scheduler)
 # Optional
 FAST_OBSERVER_MODEL=gemini-3-flash-preview  # Director fallback model
 GROQ_API_KEY=...                        # Groq (primary Director provider)
-CEREBRAS_API_KEY=...                    # Cerebras (primary Director provider)
 ELEVENLABS_VOICE_ID=...                 # Voice ID (has default)
+TTS_PROVIDER=elevenlabs                 # Optional: cartesia when enabled/configured
 ```
 
 ## API Endpoints (Pipecat)

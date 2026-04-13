@@ -187,7 +187,7 @@ async def web_search_query(query: str) -> str | None:
         return cached["news"]
 
     try:
-        logger.info("Web search query: {q}", q=query)
+        logger.info("Web search requested")
 
         # Try Tavily first (fast)
         content = await _tavily_search(query)

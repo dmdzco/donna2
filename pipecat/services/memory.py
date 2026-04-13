@@ -396,8 +396,7 @@ async def transfer_to_senior(prospect_id: str, senior_id: str) -> int:
         senior_id,
         prospect_id,
     )
-    logger.info("Transferred {n} memories from prospect {pid} to senior {sid}",
-                n=len(rows), pid=prospect_id, sid=senior_id)
+    logger.info("Transferred {n} prospect memories to senior", n=len(rows))
     return len(rows)
 
 
@@ -407,7 +406,7 @@ async def extract_from_conversation(
 ) -> None:
     """Extract and store memories from a conversation transcript via OpenAI."""
     owner_id = senior_id or prospect_id
-    logger.info("extract_from_conversation({sid}): transcript_len={n}", sid=str(owner_id)[:8] if owner_id else "none", n=len(transcript) if transcript else 0)
+    logger.info("extract_from_conversation: transcript_len={n}", n=len(transcript) if transcript else 0)
     client = _get_openai()
     if client is None:
         logger.warning("Skipping extraction — OPENAI_API_KEY not set")

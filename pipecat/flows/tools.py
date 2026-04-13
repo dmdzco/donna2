@@ -137,14 +137,14 @@ def make_tool_handlers(session_state: dict) -> dict:
             return {"status": "success", "result": "No memories available right now. Continue naturally."}
 
         query = args.get("query", "")
-        logger.info("Tool: search_memories query={q} senior={sid}", q=query, sid=senior_id)
+        logger.info("Tool: search_memories called")
 
         # Check prefetch cache first (instant return on hit)
         cache = session_state.get("_prefetch_cache")
         if cache:
             cached = cache.get(query)
             if cached:
-                logger.info("Tool: search_memories CACHE HIT query={q}", q=query)
+                logger.info("Tool: search_memories cache hit")
                 formatted = "[MEMORY] " + "\n[MEMORY] ".join(
                     r["content"] for r in cached if r.get("content")
                 )
@@ -171,7 +171,7 @@ def make_tool_handlers(session_state: dict) -> dict:
             return {"status": "success", "result": "Search unavailable. Continue naturally."}
 
         query = args.get("query", "")
-        logger.info("Tool: web_search CALLED query={q}", q=query)
+        logger.info("Tool: web_search called")
 
         if not query:
             return {"status": "success", "result": "No query provided."}
@@ -182,18 +182,18 @@ def make_tool_handlers(session_state: dict) -> dict:
             result = await asyncio.wait_for(web_search_query(query), timeout=15.0)
             elapsed_ms = round((_time.time() - start) * 1000)
             if not result:
-                logger.info("Tool: web_search empty result ({ms}ms) query={q}", ms=elapsed_ms, q=query)
+                logger.info("Tool: web_search empty result ({ms}ms)", ms=elapsed_ms)
                 return {"status": "success", "result": f"I couldn't find information about {query}."}
-            logger.info("Tool: web_search SUCCESS ({ms}ms, {n} chars) query={q}", ms=elapsed_ms, n=len(result), q=query)
+            logger.info("Tool: web_search success ({ms}ms, {n} chars)", ms=elapsed_ms, n=len(result))
             return {"status": "success", "result": f"[NEWS] {result}"}
         except asyncio.TimeoutError:
             elapsed_ms = round((_time.time() - start) * 1000)
-            logger.warning("Tool: web_search TIMEOUT ({ms}ms) query={q}", ms=elapsed_ms, q=query)
+            logger.warning("Tool: web_search timeout ({ms}ms)", ms=elapsed_ms)
             return {"status": "success", "result": "Search took too long. Continue naturally."}
         except Exception as e:
             import traceback
             elapsed_ms = round((_time.time() - start) * 1000)
-            logger.error("Tool: web_search ERROR ({ms}ms) query={q}: {err}\n{tb}", ms=elapsed_ms, q=query, err=str(e), tb=traceback.format_exc())
+            logger.error("Tool: web_search error ({ms}ms): {err}\n{tb}", ms=elapsed_ms, err=str(e), tb=traceback.format_exc())
             return {"status": "success", "result": "Search unavailable. Continue naturally."}
 
     async def handle_mark_reminder(args: dict) -> dict:

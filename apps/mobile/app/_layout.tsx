@@ -55,7 +55,6 @@ function AuthGuard() {
 
     registerForPushNotifications().then((token) => {
       if (token) {
-        console.log("Push token:", token);
         // TODO: Send token to backend when endpoint exists
         // api.notifications.registerPushToken(token);
       }

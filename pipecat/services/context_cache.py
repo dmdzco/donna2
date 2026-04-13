@@ -268,7 +268,7 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
 
         senior = await get_by_id(senior_id)
         if not senior:
-            logger.info("Senior {sid} not found, skipping", sid=senior_id)
+            logger.info("Senior not found, skipping")
             return None
 
         # Consolidated fetches: 2 queries instead of 5
@@ -304,7 +304,7 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
                     )
                     logger.info("Persisted cached news for {name}", name=mask_name(senior.get("name")))
                 except Exception as e:
-                    logger.error("Failed to persist news for {sid}: {err}", sid=senior_id, err=str(e))
+                    logger.error("Failed to persist news: {err}", err=str(e))
 
         # Generate greeting using the greeting rotation service
         greeting_result = get_greeting(
@@ -319,11 +319,10 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
         )
 
         logger.info(
-            "Generated greeting for {name}: period={p}, template={t}, interest={i}",
-            name=senior.get("name"),
+            "Generated greeting for {name}: period={p}, template={t}",
+            name=mask_name(senior.get("name")),
             p=greeting_result["period"],
             t=greeting_result["template_index"],
-            i=greeting_result.get("selected_interest") or "none",
         )
 
         # Build memory context string
@@ -374,7 +373,7 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
         return cached
 
     except Exception as e:
-        logger.error("Error pre-caching {sid}: {err}", sid=senior_id, err=str(e))
+        logger.error("Error pre-caching context: {err}", err=str(e))
         return None
 
 
@@ -386,11 +385,11 @@ def get_cache(senior_id: str) -> dict | None:
 
     if time.time() > cached["expires_at"]:
         del _cache[senior_id]
-        logger.info("Cache expired for {sid}", sid=senior_id)
+        logger.info("Cache expired")
         return None
 
     age_min = round((time.time() - cached["cached_at"]) / 60)
-    logger.info("Cache hit for {sid} (age: {age} min)", sid=senior_id, age=age_min)
+    logger.info("Cache hit (age: {age} min)", age=age_min)
     return cached
 
 
@@ -398,7 +397,7 @@ def clear_cache(senior_id: str) -> None:
     """Clear cache for a senior (e.g., after call ends and new memories stored)."""
     if senior_id in _cache:
         del _cache[senior_id]
-        logger.info("Cleared cache for {sid}", sid=senior_id)
+        logger.info("Cleared cache")
 
 
 def clear_all() -> None:

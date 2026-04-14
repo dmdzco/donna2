@@ -89,7 +89,12 @@ function getLocalHour(timezone) {
     });
     return parseInt(formatter.format(now), 10);
   } catch {
-    return new Date().getUTCHours() - 5;
+    const fallbackFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour: 'numeric',
+      hour12: false,
+    });
+    return parseInt(fallbackFormatter.format(new Date()), 10);
   }
 }
 

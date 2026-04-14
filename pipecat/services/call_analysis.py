@@ -56,10 +56,12 @@ def _repair_json(json_text: str) -> str:
     return repaired
 
 
-def _format_transcript(history: list[dict] | None) -> str:
+def _format_transcript(history: list[dict] | str | None) -> str:
     """Format transcript for analysis prompt."""
     if not history:
         return "No transcript available"
+    if isinstance(history, str):
+        return history
     return "\n\n".join(
         f"{'DONNA' if m.get('role') == 'assistant' else 'SENIOR'}: {m.get('content', '')}"
         for m in history
@@ -87,7 +89,7 @@ def _get_default_analysis() -> dict:
 
 
 async def analyze_completed_call(
-    transcript: list[dict], senior_context: dict | None
+    transcript: list[dict] | str, senior_context: dict | None
 ) -> dict:
     """Analyze a completed call using Gemini Flash."""
     turn_content = (

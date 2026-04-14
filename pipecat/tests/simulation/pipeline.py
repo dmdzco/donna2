@@ -30,7 +30,7 @@ from pipecat_flows import FlowManager
 from flows.nodes import build_initial_node
 from flows.tools import make_flows_tools
 from processors.conversation_director import ConversationDirectorProcessor
-from processors.conversation_tracker import ConversationTrackerProcessor
+from processors.conversation_tracker import ConversationState, ConversationTrackerProcessor
 from processors.guidance_stripper import GuidanceStripperProcessor
 from processors.metrics_logger import MetricsLoggerProcessor
 from processors.quick_observer import QuickObserverProcessor
@@ -58,8 +58,9 @@ class LiveSimComponents:
         response_collector: ``ResponseCollector`` capturing LLM text output.
         caller_transport: ``TextCallerTransport`` for injecting utterances.
         quick_observer: Layer 1 regex observer (268 patterns).
+        user_conversation_tracker: User-side transcript/topic tracker.
         conversation_director: Layer 2 Groq speculative analysis.
-        conversation_tracker: Topic/question/advice tracking.
+        conversation_tracker: Assistant-side question/advice tracking.
         flow_manager: 4-phase call state machine.
         llm: Real ``AnthropicLLMService`` (Claude Sonnet with prompt caching).
         tts: ``MockTTSProcessor`` that captures text without audio.
@@ -74,6 +75,7 @@ class LiveSimComponents:
     response_collector: ResponseCollector
     caller_transport: TextCallerTransport
     quick_observer: QuickObserverProcessor
+    user_conversation_tracker: ConversationTrackerProcessor
     conversation_director: ConversationDirectorProcessor
     conversation_tracker: ConversationTrackerProcessor
     flow_manager: FlowManager
@@ -147,7 +149,17 @@ def build_live_sim_pipeline(session_state: dict) -> LiveSimComponents:
     # -----------------------------------------------------------------
     quick_observer = QuickObserverProcessor(session_state=session_state)
     conversation_director = ConversationDirectorProcessor(session_state=session_state)
-    conversation_tracker = ConversationTrackerProcessor(session_state=session_state)
+    conversation_state = ConversationState()
+    user_conversation_tracker = ConversationTrackerProcessor(
+        session_state=session_state,
+        state=conversation_state,
+        track_assistant=False,
+    )
+    conversation_tracker = ConversationTrackerProcessor(
+        session_state=session_state,
+        state=conversation_state,
+        track_user=False,
+    )
     guidance_stripper = GuidanceStripperProcessor()
     metrics_logger = MetricsLoggerProcessor(session_state=session_state)
 
@@ -176,8 +188,8 @@ def build_live_sim_pipeline(session_state: dict) -> LiveSimComponents:
     # -----------------------------------------------------------------
     # Pipeline assembly (matches bot.py layout)
     #
-    # input_transport -> quick_observer -> conversation_director ->
-    # context_aggregator.user() -> llm -> conversation_tracker ->
+    # input_transport -> quick_observer -> user_conversation_tracker ->
+    # conversation_director -> context_aggregator.user() -> llm -> conversation_tracker ->
     # guidance_stripper -> response_collector -> tts -> output_transport ->
     # context_aggregator.assistant() -> metrics_logger
     # -----------------------------------------------------------------
@@ -185,6 +197,7 @@ def build_live_sim_pipeline(session_state: dict) -> LiveSimComponents:
         [
             input_transport,
             quick_observer,
+            user_conversation_tracker,
             conversation_director,
             context_aggregator.user(),
             llm,
@@ -259,6 +272,7 @@ def build_live_sim_pipeline(session_state: dict) -> LiveSimComponents:
         response_collector=response_collector,
         caller_transport=caller_transport,
         quick_observer=quick_observer,
+        user_conversation_tracker=user_conversation_tracker,
         conversation_director=conversation_director,
         conversation_tracker=conversation_tracker,
         flow_manager=flow_manager,

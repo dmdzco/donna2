@@ -33,6 +33,7 @@ export default function Step5Screen() {
     callIndex: number;
   } | null>(null);
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
+  const [scheduleErrors, setScheduleErrors] = useState<Record<number, string>>({});
 
   function toggleDay(callIndex: number, day: number) {
     const current = calls[callIndex].selectedDays;
@@ -51,6 +52,16 @@ export default function Step5Screen() {
   }
 
   function handleCreateProfile() {
+    const nextErrors: Record<number, string> = {};
+    calls.forEach((call, index) => {
+      if (call.frequency === "recurring" && call.selectedDays.length === 0) {
+        nextErrors[index] = "Choose at least one day for this recurring call.";
+      }
+    });
+
+    setScheduleErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
     router.push("/(onboarding)/success");
   }
 
@@ -148,7 +159,16 @@ export default function Step5Screen() {
                     ).map(({ key, label }) => (
                       <Pressable
                         key={key}
-                        onPress={() => updateCall(index, "frequency", key)}
+                        onPress={() => {
+                          updateCall(index, "frequency", key);
+                          if (key !== "recurring" && scheduleErrors[index]) {
+                            setScheduleErrors((current) => {
+                              const next = { ...current };
+                              delete next[index];
+                              return next;
+                            });
+                          }
+                        }}
                         className={`flex-1 py-2.5 rounded-xl items-center border ${
                           call.frequency === key
                             ? "bg-sage border-sage"
@@ -182,7 +202,16 @@ export default function Step5Screen() {
                       {DAY_LABELS.map((day, dayIndex) => (
                         <Pressable
                           key={day}
-                          onPress={() => toggleDay(index, dayIndex)}
+                          onPress={() => {
+                            toggleDay(index, dayIndex);
+                            if (scheduleErrors[index]) {
+                              setScheduleErrors((current) => {
+                                const next = { ...current };
+                                delete next[index];
+                                return next;
+                              });
+                            }
+                          }}
                           className={`flex-1 py-2.5 rounded-xl items-center ${
                             call.selectedDays.includes(dayIndex)
                               ? "bg-sage"
@@ -206,6 +235,11 @@ export default function Step5Screen() {
                         </Pressable>
                       ))}
                     </View>
+                    {scheduleErrors[index] && (
+                      <Text className="text-red-500 text-[13px] mt-2">
+                        {scheduleErrors[index]}
+                      </Text>
+                    )}
                   </View>
                 )}
 

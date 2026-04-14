@@ -154,10 +154,10 @@
 
 Runs automatically after every call disconnect:
 
-1. **Conversation completion** — Duration, status, transcript saved to DB
+1. **Conversation completion** — Duration, status, encrypted transcript saved to DB
 2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions
 3. **Caregiver notification** — Alerts sent for completed calls and detected concerns
-4. **Summary persistence** — Enables cross-call context
+4. **Summary persistence** — Encrypted at rest; enables cross-call context and caregiver call summaries
 5. **Interest discovery** — Extracts new interests, computes engagement scores
 6. **Memory extraction** — OpenAI extracts facts/preferences/events, stores with embeddings
 7. **Daily context save** — Topics, advice, reminders for same-day cross-call memory

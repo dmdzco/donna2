@@ -12,6 +12,7 @@ from loguru import logger
 
 from api.middleware.auth import require_auth, AuthContext
 from db.client import query_one, query_many
+from lib.encryption import decrypt, decrypt_json
 
 router = APIRouter()
 
@@ -62,6 +63,24 @@ def _clean_rows(rows: list[dict]) -> list[dict]:
     return cleaned
 
 
+def _decrypt_conversations(rows: list[dict]) -> list[dict]:
+    """Decrypt conversation PHI for authorized export responses."""
+    exported = []
+    for row in rows:
+        clean = dict(row)
+        if clean.get("summary_encrypted"):
+            clean["summary"] = decrypt(clean["summary_encrypted"])
+        if clean.get("transcript_encrypted"):
+            clean["transcript"] = decrypt_json(clean["transcript_encrypted"])
+        if clean.get("transcript_text_encrypted"):
+            clean["transcript_text"] = decrypt(clean["transcript_text_encrypted"])
+        clean.pop("summary_encrypted", None)
+        clean.pop("transcript_encrypted", None)
+        clean.pop("transcript_text_encrypted", None)
+        exported.append(clean)
+    return exported
+
+
 @router.get("/api/seniors/{senior_id}/export")
 async def export_senior_data(
     senior_id: str,
@@ -83,7 +102,9 @@ async def export_senior_data(
     # Fetch all data in parallel via individual queries
     conversations = await query_many(
         """SELECT id, senior_id, call_sid, started_at, ended_at,
-                  duration_seconds, status, summary, sentiment, concerns, transcript, call_metrics
+                  duration_seconds, status, summary, summary_encrypted,
+                  sentiment, concerns, transcript, transcript_encrypted,
+                  transcript_text_encrypted, call_metrics
            FROM conversations WHERE senior_id = $1 ORDER BY started_at DESC""",
         senior_id,
     )
@@ -136,7 +157,7 @@ async def export_senior_data(
     return {
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "senior": _clean_rows([clean_senior])[0] if clean_senior else None,
-        "conversations": _clean_rows(conversations),
+        "conversations": _clean_rows(_decrypt_conversations(conversations)),
         "memories": _clean_rows(memories),
         "reminders": _clean_rows(reminders),
         "call_analyses": _clean_rows(call_analyses),

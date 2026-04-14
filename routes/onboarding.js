@@ -1,16 +1,18 @@
 import { Router } from 'express';
 import { db } from '../db/client.js';
-import { reminders } from '../db/schema.js';
-import { seniorService } from '../services/seniors.js';
-import { caregiverService } from '../services/caregivers.js';
+import { caregivers, reminders, seniors } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
 import { validateBody } from '../middleware/validate.js';
 import { onboardingSchema } from '../validators/schemas.js';
 import { maskName } from '../lib/sanitize.js';
-import { cronExpressionFromTime, wallTimeTodayToUtcDate } from '../lib/timezone.js';
+import { cronExpressionFromTime, resolveTimezoneFromProfile, wallTimeTodayToUtcDate } from '../lib/timezone.js';
 
 const router = Router();
+
+function normalizePhone(phone) {
+  return String(phone || '').replace(/\D/g, '').slice(-10);
+}
 
 // Complete onboarding - creates senior + links to Clerk user + creates reminders
 router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardingSchema), async (req, res) => {
@@ -49,32 +51,43 @@ router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardin
       },
     };
 
-    const senior = await seniorService.create(seniorCreateData);
+    const { senior, createdReminders } = await db.transaction(async (tx) => {
+      const [senior] = await tx.insert(seniors).values({
+        ...seniorCreateData,
+        phone: normalizePhone(seniorCreateData.phone),
+        timezone: resolveTimezoneFromProfile(seniorCreateData),
+      }).returning();
 
-    // Link Clerk user to senior
-    await caregiverService.linkUserToSenior(clerkUserId, senior.id, 'caregiver');
+      await tx.insert(caregivers).values({
+        clerkUserId,
+        seniorId: senior.id,
+        role: 'caregiver',
+      });
 
-    // Create reminders from strings at the senior's local wall-clock time.
-    const reminderTime = callSchedule?.time || '10:00';
-    const reminderScheduledTime = wallTimeTodayToUtcDate(reminderTime, senior.timezone) || new Date();
-    const reminderCronExpression = cronExpressionFromTime(reminderTime);
+      // Create reminders from strings at the senior's local wall-clock time.
+      const reminderTime = callSchedule?.time || '10:00';
+      const reminderScheduledTime = wallTimeTodayToUtcDate(reminderTime, senior.timezone) || new Date();
+      const reminderCronExpression = cronExpressionFromTime(reminderTime);
 
-    const createdReminders = [];
-    if (reminderStrings && reminderStrings.length > 0) {
-      for (const reminderTitle of reminderStrings) {
-        if (reminderTitle.trim()) {
-          const [reminder] = await db.insert(reminders).values({
-            seniorId: senior.id,
-            type: 'custom',
-            title: reminderTitle.trim(),
-            isRecurring: true,
-            scheduledTime: reminderScheduledTime,
-            cronExpression: reminderCronExpression,
-          }).returning();
-          createdReminders.push(reminder);
+      const createdReminders = [];
+      if (reminderStrings && reminderStrings.length > 0) {
+        for (const reminderTitle of reminderStrings) {
+          if (reminderTitle.trim()) {
+            const [reminder] = await tx.insert(reminders).values({
+              seniorId: senior.id,
+              type: 'custom',
+              title: reminderTitle.trim(),
+              isRecurring: true,
+              scheduledTime: reminderScheduledTime,
+              cronExpression: reminderCronExpression,
+            }).returning();
+            createdReminders.push(reminder);
+          }
         }
       }
-    }
+
+      return { senior, createdReminders };
+    });
 
     console.log(`[Onboarding] Completed: user=${clerkUserId}, senior=${maskName(senior.name)}, reminders=${createdReminders.length}`);
 
@@ -84,6 +97,10 @@ router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardin
     });
   } catch (error) {
     console.error('Onboarding failed:', error);
+
+    if (error.code === '23505' && error.constraint?.includes('phone')) {
+      return res.status(409).json({ error: 'This phone number is already registered for another senior' });
+    }
 
     // Pass through service-level errors with status codes (e.g. duplicate phone 409)
     const status = error.status || 500;

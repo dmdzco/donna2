@@ -159,8 +159,8 @@ async def run_post_call(
             from services.context_cache import clear_cache
             clear_cache(senior_id)
         if call_sid:
-            from services.scheduler import clear_reminder_context
-            clear_reminder_context(call_sid)
+            from services.scheduler import clear_reminder_context_async
+            await clear_reminder_context_async(call_sid)
 
     results = await asyncio.gather(
         _step2_analysis(),

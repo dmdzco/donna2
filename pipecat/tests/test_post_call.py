@@ -34,7 +34,7 @@ class TestPostCallProcessing:
              patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock) as mock_update_scores, \
              patch("services.daily_context.save_call_context", new_callable=AsyncMock) as mock_daily, \
              patch("services.context_cache.clear_cache") as mock_cache_clear, \
-             patch("services.scheduler.clear_reminder_context") as mock_sched_clear:
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock) as mock_sched_clear:
 
             mock_analyze.return_value = {
                     "mood": "positive",
@@ -82,7 +82,7 @@ class TestPostCallProcessing:
              patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
              patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
              patch("services.context_cache.clear_cache"), \
-             patch("services.scheduler.clear_reminder_context"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
              patch("services.reminder_delivery.mark_call_ended_without_acknowledgment", new_callable=AsyncMock) as mock_no_ack:
 
             mock_analyze.return_value = {
@@ -119,7 +119,7 @@ class TestPostCallProcessing:
              patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock) as mock_update_scores, \
              patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
              patch("services.context_cache.clear_cache"), \
-             patch("services.scheduler.clear_reminder_context"):
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock):
 
             mock_analyze.return_value = {
                 "topics_discussed": ["painting"],
@@ -162,7 +162,7 @@ class TestPostCallProcessing:
              patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
              patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
              patch("services.context_cache.clear_cache"), \
-             patch("services.scheduler.clear_reminder_context"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
              patch("services.post_call._trigger_caregiver_notification", new_callable=AsyncMock), \
              patch("lib.growthbook.is_on", return_value=True):
 
@@ -196,7 +196,7 @@ class TestPostCallProcessing:
              patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
              patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
              patch("services.context_cache.clear_cache"), \
-             patch("services.scheduler.clear_reminder_context"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
              patch("services.post_call._trigger_caregiver_notification", new_callable=AsyncMock), \
              patch("lib.growthbook.is_on", return_value=True):
 

@@ -137,9 +137,9 @@ async def voice_answer(request: Request):
     previous_calls_summary = None
     todays_context = None
 
-    # 1. Check for reminder call (in-memory first, then DB fallback)
-    from services.scheduler import get_reminder_context, get_prefetched_context
-    reminder_context = get_reminder_context(call_sid)
+    # 1. Check for reminder call (local/Redis prefetch first, then DB fallback)
+    from services.scheduler import get_reminder_context_async, get_prefetched_context
+    reminder_context = await get_reminder_context_async(call_sid)
     prefetched = get_prefetched_context(target_phone)
 
     if reminder_context:
@@ -147,7 +147,7 @@ async def voice_answer(request: Request):
         memory_context = reminder_context.get("memory_context")
         reminder_prompt = reminder_context.get("reminder_prompt")
         call_type = "reminder"
-        logger.info("[{cs}] Reminder call (in-memory)", cs=call_sid)
+        logger.info("[{cs}] Reminder call (prefetched context)", cs=call_sid)
     elif is_outbound:
         # Outbound call — check DB for reminder delivery (Node.js scheduler)
         from services.reminder_delivery import get_reminder_by_call_sid, format_reminder_prompt as fmt_prompt
@@ -479,8 +479,8 @@ async def voice_status(request: Request):
         metadata = await _cleanup_metadata(call_sid)
 
         # Clear reminder context
-        from services.scheduler import clear_reminder_context
-        clear_reminder_context(call_sid)
+        from services.scheduler import clear_reminder_context_async
+        await clear_reminder_context_async(call_sid)
 
         if metadata:
             logger.info("[{cs}] Cleaned up call metadata", cs=call_sid)

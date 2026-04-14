@@ -1,0 +1,127 @@
+"""Tests for shared-state backend selection and Upstash REST commands."""
+
+import json
+import time
+
+import httpx
+import pytest
+
+from lib.redis_client import InMemoryState, RedisState, UpstashRestState, create_shared_state
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+class _FakeClient:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.commands = []
+        self.closed = False
+
+    async def post(self, path, json):
+        self.commands.append((path, json))
+        return _FakeResponse(self.responses.pop(0))
+
+    async def aclose(self):
+        self.closed = True
+
+
+class _FailingClient:
+    async def post(self, path, json):
+        raise httpx.ConnectError("DNS failure")
+
+
+def test_create_shared_state_prefers_redis_url():
+    state = create_shared_state(
+        redis_url="redis://localhost:6379",
+        upstash_url="https://example.upstash.io",
+        upstash_token="token",
+    )
+    assert isinstance(state, RedisState)
+    assert state.is_shared is True
+
+
+def test_create_shared_state_uses_upstash_when_redis_url_missing():
+    state = create_shared_state(
+        upstash_url="https://example.upstash.io",
+        upstash_token="token",
+    )
+    assert isinstance(state, UpstashRestState)
+    assert state.is_shared is True
+
+
+def test_create_shared_state_falls_back_to_memory():
+    state = create_shared_state()
+    assert isinstance(state, InMemoryState)
+    assert state.is_shared is False
+
+
+def test_upstash_rest_state_adds_https_scheme_when_missing():
+    state = UpstashRestState("example.upstash.io/", "token")
+
+    assert state._url == "https://example.upstash.io"
+
+
+@pytest.mark.asyncio
+async def test_upstash_rest_state_set_and_get_json_with_ttl():
+    client = _FakeClient([
+        {"result": "OK"},
+        {"result": json.dumps({"call_type": "check-in"})},
+    ])
+    state = UpstashRestState("https://example.upstash.io/", "token")
+    state._client = client
+
+    await state.set("call_metadata:CA123", {"call_type": "check-in"}, ttl=1800)
+    result = await state.get("call_metadata:CA123")
+
+    assert result == {"call_type": "check-in"}
+    assert client.commands[0][1] == [
+        "SET",
+        "call_metadata:CA123",
+        json.dumps({"call_type": "check-in"}),
+        "EX",
+        1800,
+    ]
+    assert client.commands[1][1] == ["GET", "call_metadata:CA123"]
+
+
+@pytest.mark.asyncio
+async def test_upstash_rest_state_hash_roundtrip_shape():
+    client = _FakeClient([
+        {"result": 2},
+        {"result": 1},
+        {"result": ["field", json.dumps({"ok": True})]},
+        {"result": 1},
+    ])
+    state = UpstashRestState("https://example.upstash.io", "token")
+    state._client = client
+
+    await state.set_hash("hash", {"field": {"ok": True}}, ttl=30)
+    result = await state.get_hash("hash")
+    await state.delete_hash_field("hash", "field")
+
+    assert result == {"field": {"ok": True}}
+    assert client.commands[0][1] == ["HSET", "hash", "field", json.dumps({"ok": True})]
+    assert client.commands[1][1] == ["EXPIRE", "hash", 30]
+    assert client.commands[2][1] == ["HGETALL", "hash"]
+    assert client.commands[3][1] == ["HDEL", "hash", "field"]
+
+
+@pytest.mark.asyncio
+async def test_upstash_rest_state_temporarily_disables_after_http_failure():
+    state = UpstashRestState("https://example.upstash.io", "token")
+    state._client = _FailingClient()
+
+    with pytest.raises(httpx.ConnectError):
+        await state.set("key", {"value": True})
+
+    assert state.is_shared is False
+    assert state._disabled_until > time.monotonic()

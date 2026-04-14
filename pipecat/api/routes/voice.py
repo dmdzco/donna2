@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import secrets
 from xml.sax.saxutils import escape as xml_escape
 
 from fastapi import APIRouter, Request, Response
 from loguru import logger
+from lib.sanitize import mask_phone
 
 router = APIRouter()
 
@@ -28,7 +30,7 @@ async def _persist_metadata(call_sid: str, data: dict) -> None:
     try:
         from lib.redis_client import get_shared_state
         state = get_shared_state()
-        if hasattr(state, '_url'):  # RedisState, not InMemoryState
+        if getattr(state, "is_shared", False):
             await state.set(f"call_metadata:{call_sid}", data, ttl=1800)
     except Exception:
         pass  # Redis is optional — failure is non-fatal
@@ -40,7 +42,7 @@ async def _cleanup_metadata(call_sid: str) -> dict | None:
     try:
         from lib.redis_client import get_shared_state
         state = get_shared_state()
-        if hasattr(state, '_url'):
+        if getattr(state, "is_shared", False):
             if metadata is None:
                 # May be on a different instance — try Redis
                 metadata = await state.get(f"call_metadata:{call_sid}")
@@ -78,11 +80,17 @@ async def voice_answer(request: Request):
         "[{cs}] Call answered ({dir}) target={phone}",
         cs=call_sid,
         dir="outbound" if is_outbound else "inbound",
-        phone=target_phone[-4:] if target_phone else "?",
+        phone=mask_phone(target_phone),
     )
     logger.debug(
         "[{cs}] Phone debug: From={frm} To={to} Direction={d} TWILIO_PHONE_NUMBER={tw} is_outbound={ob} target_phone={tp}",
-        cs=call_sid, frm=from_number, to=to_number, d=direction, tw=twilio_number, ob=is_outbound, tp=target_phone,
+        cs=call_sid,
+        frm=mask_phone(from_number),
+        to=mask_phone(to_number),
+        d=direction,
+        tw=mask_phone(twilio_number),
+        ob=is_outbound,
+        tp=mask_phone(target_phone),
     )
 
     senior = None
@@ -110,7 +118,7 @@ async def voice_answer(request: Request):
         memory_context = reminder_context.get("memory_context")
         reminder_prompt = reminder_context.get("reminder_prompt")
         call_type = "reminder"
-        logger.info("[{cs}] Reminder call (in-memory): {title}", cs=call_sid, title=reminder_context["reminder"].get("title"))
+        logger.info("[{cs}] Reminder call (in-memory)", cs=call_sid)
     elif is_outbound:
         # Outbound call — check DB for reminder delivery (Node.js scheduler)
         from services.reminder_delivery import get_reminder_by_call_sid, format_reminder_prompt as fmt_prompt
@@ -146,7 +154,7 @@ async def voice_answer(request: Request):
                     "attempt_count": reminder_row.get("attempt_count"),
                 },
             }
-            logger.info("[{cs}] Reminder call (DB lookup): {title}", cs=call_sid, title=reminder_row.get("title"))
+            logger.info("[{cs}] Reminder call (DB lookup)", cs=call_sid)
         elif prefetched:
             senior = prefetched.get("senior")
             memory_context = prefetched.get("memory_context")
@@ -160,13 +168,15 @@ async def voice_answer(request: Request):
     else:
         # Inbound — look up senior by phone
         from services.seniors import find_by_phone
-        logger.info("[{cs}] Looking up senior by phone: target={tp}, normalized={norm}",
-                     cs=call_sid, tp=target_phone, norm=target_phone[-10:] if target_phone else "?")
+        logger.info(
+            "[{cs}] Looking up senior by phone: target={tp}",
+            cs=call_sid,
+            tp=mask_phone(target_phone),
+        )
         senior = await find_by_phone(target_phone)
-        logger.info("[{cs}] Senior lookup result: {found}", cs=call_sid,
-                     found=senior.get("name") if senior else "NOT FOUND")
+        logger.info("[{cs}] Senior lookup result: found={found}", cs=call_sid, found=bool(senior))
         if senior:
-            logger.info("[{cs}] Inbound from {name}", cs=call_sid, name=senior.get("name", "?"))
+            logger.info("[{cs}] Inbound senior matched", cs=call_sid)
 
             # --- Parallel fetch: memory + caregiver notes (only dynamic queries) ---
             import asyncio
@@ -270,7 +280,8 @@ async def voice_answer(request: Request):
                 prospect = await find_prospect(target_phone)
                 if not prospect:
                     prospect = await create_prospect(target_phone)
-                logger.info("Onboarding caller matched: call_count={n}",
+                logger.info("[{cs}] Onboarding: prospect={pid} call_count={n}",
+                            cs=call_sid, pid=str(prospect["id"])[:8],
                             n=prospect.get("call_count", 0))
                 # For return callers, load prospect memory context
                 if prospect.get("call_count", 0) > 0:
@@ -285,9 +296,11 @@ async def voice_answer(request: Request):
                                 f"- {r['content']}" for r in results
                             )
                     except Exception as e:
-                        logger.error("Error loading prospect memories: {err}", err=str(e))
+                        logger.error("[{cs}] Error loading prospect memories: {err}",
+                                     cs=call_sid, err=str(e))
             except Exception as e:
-                logger.error("Error in prospect lookup/create: {err}", err=str(e))
+                logger.error("[{cs}] Error in prospect lookup/create: {err}",
+                             cs=call_sid, err=str(e))
 
     # Load remaining context for outbound paths (reminder/prefetched).
     # Inbound path handles everything inline above via snapshot + parallel.
@@ -358,6 +371,7 @@ async def voice_answer(request: Request):
     )
 
     # 3. Store metadata for WebSocket handler (locked for concurrent writes)
+    ws_token = secrets.token_urlsafe(32)
     async with _metadata_lock:
         call_metadata[call_sid] = {
             "senior": senior,
@@ -379,6 +393,7 @@ async def voice_answer(request: Request):
             "has_caregiver_notes": has_caregiver_notes,
             "caregiver_notes_content": caregiver_notes_content if senior and not prospect else [],
             "call_settings": call_settings,
+            "ws_token": ws_token,
         }
 
     # Also persist to Redis for multi-instance routing
@@ -409,6 +424,7 @@ async def voice_answer(request: Request):
             <Parameter name="call_sid" value="{xml_escape(str(call_sid), {'"': '&quot;'})}" />
             <Parameter name="conversation_id" value="{xml_escape(str(conversation_id or ''), {'"': '&quot;'})}" />
             <Parameter name="call_type" value="{xml_escape(str(call_type), {'"': '&quot;'})}" />
+            <Parameter name="ws_token" value="{xml_escape(str(ws_token), {'"': '&quot;'})}" />
         </Stream>
     </Connect>
 </Response>"""

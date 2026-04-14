@@ -85,6 +85,54 @@ class TestVoiceAnswerEndpoint:
         assert response.status_code == 200
         assert "call_sid" in response.text
         assert "CA456test" in response.text
+        assert "ws_token" in response.text
+
+    @pytest.mark.asyncio
+    async def test_bot_loads_metadata_from_local_state_first(self):
+        """WebSocket setup should use local metadata before shared state."""
+        from bot import _load_call_metadata
+
+        metadata = {"ws_token": "local-token", "call_type": "check-in"}
+        session_state = {"_call_metadata": {"CAlocal": metadata}}
+
+        with patch("lib.redis_client.get_shared_state") as mock_shared:
+            loaded = await _load_call_metadata("CAlocal", session_state)
+
+        assert loaded is metadata
+        mock_shared.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_bot_loads_metadata_from_shared_state(self):
+        """WebSocket setup should recover metadata when local call map misses."""
+        from bot import _load_call_metadata
+
+        class FakeRedisState:
+            is_shared = True
+
+            async def get(self, key):
+                assert key == "call_metadata:CAredis"
+                return {"ws_token": "token-123", "call_type": "check-in"}
+
+        session_state = {"_call_metadata": {}}
+        with patch("lib.redis_client.get_shared_state", return_value=FakeRedisState()):
+            metadata = await _load_call_metadata("CAredis", session_state)
+
+        assert metadata["ws_token"] == "token-123"
+        assert session_state["_call_metadata"]["CAredis"] == metadata
+
+    @pytest.mark.asyncio
+    async def test_bot_metadata_missing_without_shared_state(self):
+        """Missing metadata should stay missing when Redis is not configured."""
+        from bot import _load_call_metadata
+
+        class FakeInMemoryState:
+            pass
+
+        session_state = {"_call_metadata": {}}
+        with patch("lib.redis_client.get_shared_state", return_value=FakeInMemoryState()):
+            metadata = await _load_call_metadata("CAmissing", session_state)
+
+        assert metadata == {}
 
 
 class TestVoiceStatusEndpoint:

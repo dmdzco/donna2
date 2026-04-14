@@ -189,8 +189,8 @@ def build_live_sim_pipeline(session_state: dict) -> LiveSimComponents:
     # Pipeline assembly (matches bot.py layout)
     #
     # input_transport -> quick_observer -> user_conversation_tracker ->
-    # conversation_director -> context_aggregator.user() -> llm -> conversation_tracker ->
-    # guidance_stripper -> response_collector -> tts -> output_transport ->
+    # conversation_director -> context_aggregator.user() -> llm -> guidance_stripper ->
+    # conversation_tracker -> response_collector -> tts -> output_transport ->
     # context_aggregator.assistant() -> metrics_logger
     # -----------------------------------------------------------------
     pipeline = Pipeline(
@@ -201,8 +201,8 @@ def build_live_sim_pipeline(session_state: dict) -> LiveSimComponents:
             conversation_director,
             context_aggregator.user(),
             llm,
-            conversation_tracker,
             guidance_stripper,
+            conversation_tracker,
             response_collector,
             tts,
             output_transport,

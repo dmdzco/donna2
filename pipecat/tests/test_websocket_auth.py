@@ -81,3 +81,26 @@ async def test_websocket_auth_accepts_valid_token_once():
 
     assert metadata["ws_token_consumed"] is True
     assert metadata["ws_token_consumed_at"] <= time.time()
+
+
+@pytest.mark.asyncio
+async def test_websocket_auth_can_validate_without_consuming_token():
+    call_metadata["CA123"] = {
+        "ws_token": "expected-token",
+        "ws_token_expires_at": time.time() + 300,
+        "ws_token_consumed": False,
+    }
+
+    metadata = await authenticate_websocket_call(
+        {"call_id": "CA123", "body": {"ws_token": "expected-token"}},
+        {},
+        consume_token=False,
+    )
+
+    assert metadata["ws_token_consumed"] is False
+
+    consumed = await authenticate_websocket_call(
+        {"call_id": "CA123", "body": {"ws_token": "expected-token"}},
+        {},
+    )
+    assert consumed["ws_token_consumed"] is True

@@ -81,6 +81,188 @@ async def _cleanup_metadata(call_sid: str) -> dict | None:
     return metadata
 
 
+def _no_phi_unavailable_twiml() -> Response:
+    """Return a safe TwiML hangup without revealing account or senior state."""
+    twiml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="Polly.Joanna">I'm sorry, Donna is not available for this number right now. Goodbye.</Say>
+    <Hangup/>
+</Response>"""
+    return Response(content=twiml, media_type="text/xml")
+
+
+def _json_dict(value) -> dict:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            import json
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _senior_is_inactive(senior: dict | None) -> bool:
+    if not senior:
+        return False
+    return senior.get("is_active") is False or senior.get("isActive") is False
+
+
+async def _hydrate_senior_call_context(
+    *,
+    senior: dict,
+    call_sid: str,
+    is_outbound: bool,
+    memory_context=None,
+    pre_generated_greeting=None,
+    news_context=None,
+    recent_turns=None,
+    previous_calls_summary=None,
+    todays_context=None,
+    last_call_analysis=None,
+    call_settings=None,
+    caregiver_notes_content=None,
+) -> dict:
+    """Load PHI-bearing call context for any active known senior.
+
+    Node-created outbound calls cross a process boundary before Pipecat answers
+    Twilio. Hydrating here makes manual and welfare calls independent of Node's
+    in-memory prefetch maps.
+    """
+    senior_id = senior["id"]
+
+    tasks: list[tuple[str, object]] = []
+    if memory_context is None:
+        from services.memory import build_context
+        tasks.append(("memory_context", build_context(senior_id, None, senior)))
+    if caregiver_notes_content is None:
+        from services.caregivers import get_pending_notes
+        tasks.append(("caregiver_notes_content", get_pending_notes(senior_id)))
+
+    if tasks:
+        results = await asyncio.gather(*(task for _, task in tasks), return_exceptions=True)
+        for (name, _), result in zip(tasks, results):
+            if isinstance(result, Exception):
+                logger.error("[{cs}] Context fetch failed: {name}: {err}", cs=call_sid, name=name, err=str(result))
+                if name == "caregiver_notes_content":
+                    caregiver_notes_content = []
+            elif name == "memory_context":
+                memory_context = result
+            elif name == "caregiver_notes_content":
+                caregiver_notes_content = result or []
+
+    raw_cached_news = senior.get("cached_news")
+    if news_context is None and raw_cached_news:
+        try:
+            from services.news import select_stories_for_call
+            news_context = select_stories_for_call(
+                raw_cached_news,
+                interests=senior.get("interests"),
+                interest_scores=senior.get("interest_scores"),
+                count=3,
+            )
+        except Exception:
+            news_context = raw_cached_news
+
+    snapshot = senior.get("call_context_snapshot")
+    if isinstance(snapshot, str):
+        try:
+            import json
+            snapshot = json.loads(snapshot)
+        except Exception:
+            snapshot = None
+
+    if snapshot:
+        last_call_analysis = last_call_analysis if last_call_analysis is not None else snapshot.get("last_call_analysis")
+        previous_calls_summary = previous_calls_summary if previous_calls_summary is not None else snapshot.get("recent_summaries")
+        recent_turns = recent_turns if recent_turns is not None else snapshot.get("recent_turns")
+        todays_context = todays_context if todays_context is not None else snapshot.get("todays_context")
+        logger.info(
+            "[{cs}] Using senior call snapshot (updated {ts})",
+            cs=call_sid,
+            ts=snapshot.get("snapshot_updated_at", "?"),
+        )
+    elif (
+        last_call_analysis is None
+        and previous_calls_summary is None
+        and recent_turns is None
+        and todays_context is None
+    ):
+        logger.info("[{cs}] No senior snapshot, fetching call history individually", cs=call_sid)
+        from services.call_analysis import get_latest_analysis
+        from services.conversations import get_recent_summaries, get_recent_turns
+        from services.daily_context import get_todays_context, format_todays_context
+
+        analysis_result, summaries_result, turns_result, today_result = await asyncio.gather(
+            get_latest_analysis(senior_id),
+            get_recent_summaries(senior_id, 3),
+            get_recent_turns(senior_id),
+            get_todays_context(senior_id, senior.get("timezone", "America/New_York")),
+            return_exceptions=True,
+        )
+        if not isinstance(analysis_result, Exception):
+            last_call_analysis = analysis_result
+        if not isinstance(summaries_result, Exception):
+            previous_calls_summary = summaries_result
+        if not isinstance(turns_result, Exception):
+            recent_turns = turns_result
+        if not isinstance(today_result, Exception):
+            todays_context = format_todays_context(today_result)
+
+    if call_settings is None:
+        from services.seniors import DEFAULT_CALL_SETTINGS
+        call_settings = {
+            **DEFAULT_CALL_SETTINGS,
+            **_json_dict(senior.get("call_settings") or {}),
+        }
+
+    if not pre_generated_greeting:
+        try:
+            analysis_data = _json_dict(last_call_analysis or {})
+            call_quality = _json_dict(analysis_data.get("call_quality") or {})
+            if is_outbound:
+                from services.greetings import get_greeting
+                greeting_result = get_greeting(
+                    senior_name=senior.get("name", ""),
+                    timezone=senior.get("timezone"),
+                    interests=senior.get("interests"),
+                    last_call_summary=analysis_data.get("summary"),
+                    senior_id=senior_id,
+                    news_context=news_context,
+                    interest_scores=senior.get("interest_scores"),
+                    last_call_sentiment=call_quality.get("rapport"),
+                    last_call_engagement=analysis_data.get("engagement_score"),
+                    followup_chance=(call_settings or {}).get("greeting_followup_chance", 0.6),
+                )
+                pre_generated_greeting = greeting_result.get("greeting", "")
+            else:
+                from services.greetings import get_inbound_greeting
+                greeting_result = get_inbound_greeting(
+                    senior_name=senior.get("name", ""),
+                    senior_id=senior_id,
+                )
+                pre_generated_greeting = greeting_result.get("greeting", "")
+        except Exception as e:
+            logger.error("[{cs}] Greeting generation failed: {err}", cs=call_sid, err=str(e))
+
+    caregiver_notes_content = caregiver_notes_content or []
+
+    return {
+        "memory_context": memory_context,
+        "pre_generated_greeting": pre_generated_greeting,
+        "news_context": news_context,
+        "recent_turns": recent_turns,
+        "previous_calls_summary": previous_calls_summary,
+        "todays_context": todays_context,
+        "last_call_analysis": last_call_analysis,
+        "call_settings": call_settings,
+        "has_caregiver_notes": bool(caregiver_notes_content),
+        "caregiver_notes_content": caregiver_notes_content,
+    }
+
+
 @router.post("/voice/answer", dependencies=[Depends(verify_twilio_signature)])
 async def voice_answer(request: Request):
     """Twilio calls this when a call is answered — returns TwiML pointing to WebSocket."""
@@ -133,7 +315,7 @@ async def voice_answer(request: Request):
     last_call_analysis = None
     call_settings = None
     has_caregiver_notes = False
-    caregiver_notes_content = []
+    caregiver_notes_content = None
     previous_calls_summary = None
     todays_context = None
 
@@ -196,7 +378,7 @@ async def voice_answer(request: Request):
             logger.info("[{cs}] Generic outbound call", cs=call_sid)
     else:
         # Inbound — look up senior by phone
-        from services.seniors import find_by_phone
+        from services.seniors import find_any_by_phone, find_by_phone
         logger.info(
             "[{cs}] Looking up senior by phone: target={tp}",
             cs=call_sid,
@@ -302,6 +484,11 @@ async def voice_answer(request: Request):
             )
             pre_generated_greeting = greeting_result.get("greeting", "")
         else:
+            inactive_match = await find_any_by_phone(target_phone)
+            if _senior_is_inactive(inactive_match):
+                logger.warning("[{cs}] Inactive senior phone matched; using no-PHI unavailable path", cs=call_sid)
+                return _no_phi_unavailable_twiml()
+
             # Unknown caller — onboarding flow
             call_type = "onboarding"
             try:
@@ -331,8 +518,16 @@ async def voice_answer(request: Request):
                 logger.error("[{cs}] Error in prospect lookup/create: {err}",
                              cs=call_sid, err=str(e))
 
+    if is_outbound and senior is None and prospect is None:
+        logger.warning("[{cs}] Outbound call has no active senior match; using no-PHI unavailable path", cs=call_sid)
+        return _no_phi_unavailable_twiml()
+
+    if _senior_is_inactive(senior):
+        logger.warning("[{cs}] Inactive senior context rejected; using no-PHI unavailable path", cs=call_sid)
+        return _no_phi_unavailable_twiml()
+
     # Load remaining context for outbound paths (reminder/prefetched).
-    # Inbound path handles everything inline above via snapshot + parallel.
+    # A common hydration pass below fills generic outbound calls too.
     if senior and (reminder_context or prefetched):
         import json as _json
 
@@ -370,6 +565,32 @@ async def voice_answer(request: Request):
             caregiver_notes_content = caregiver_notes if caregiver_notes else []
         except Exception as e:
             logger.error("[{cs}] Error fetching caregiver notes: {err}", cs=call_sid, err=str(e))
+
+    if senior and not prospect:
+        hydrated = await _hydrate_senior_call_context(
+            senior=senior,
+            call_sid=call_sid,
+            is_outbound=is_outbound,
+            memory_context=memory_context,
+            pre_generated_greeting=pre_generated_greeting,
+            news_context=news_context,
+            recent_turns=recent_turns,
+            previous_calls_summary=previous_calls_summary,
+            todays_context=todays_context,
+            last_call_analysis=last_call_analysis,
+            call_settings=call_settings,
+            caregiver_notes_content=caregiver_notes_content,
+        )
+        memory_context = hydrated["memory_context"]
+        pre_generated_greeting = hydrated["pre_generated_greeting"]
+        news_context = hydrated["news_context"]
+        recent_turns = hydrated["recent_turns"]
+        previous_calls_summary = hydrated["previous_calls_summary"]
+        todays_context = hydrated["todays_context"]
+        last_call_analysis = hydrated["last_call_analysis"]
+        call_settings = hydrated["call_settings"]
+        has_caregiver_notes = hydrated["has_caregiver_notes"]
+        caregiver_notes_content = hydrated["caregiver_notes_content"]
 
     # 2. Create conversation record
     conversation_id = None

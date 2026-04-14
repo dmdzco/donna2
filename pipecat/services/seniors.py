@@ -18,18 +18,28 @@ def _normalize_phone(phone: str) -> str:
     return digits[-10:]
 
 
-async def find_by_phone(phone: str) -> dict | None:
-    """Find a senior by phone number (normalized to last 10 digits)."""
+async def find_by_phone(phone: str, *, active_only: bool = True) -> dict | None:
+    """Find a senior by phone number (normalized to last 10 digits).
+
+    Active-only is the safe default for voice calls because matched senior rows
+    unlock PHI-bearing context.
+    """
     normalized = _normalize_phone(phone)
+    active_clause = " AND is_active = true" if active_only else ""
     return await query_one(
         """SELECT id, name, phone, timezone, interests, family_info,
                   medical_notes, preferred_call_times, is_active,
                   city, state, zip_code, additional_info,
                   call_context_snapshot, cached_news, call_settings,
                   interest_scores
-           FROM seniors WHERE phone = $1""",
+           FROM seniors WHERE phone = $1""" + active_clause,
         normalized,
     )
+
+
+async def find_any_by_phone(phone: str) -> dict | None:
+    """Find a senior by phone regardless of active state."""
+    return await find_by_phone(phone, active_only=False)
 
 
 async def create(data: dict) -> dict:

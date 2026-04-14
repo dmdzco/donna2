@@ -13,19 +13,24 @@ from flows.tools import make_tool_handlers
 class TestToolHandlerIntegration:
     @pytest.mark.asyncio
     async def test_mark_reminder_updates_session(self, reminder_session_state):
-        """mark_reminder_acknowledged should update session (fire-and-forget DB write)."""
+        """mark_reminder_acknowledged should update session and schedule DB persistence."""
         handlers = make_tool_handlers(reminder_session_state)
 
-        result = await handlers["mark_reminder_acknowledged"]({
-            "reminder_id": "rem-001",
-            "status": "acknowledged",
-            "user_response": "I'll take it now",
-        })
+        with patch("services.reminder_delivery.mark_reminder_acknowledged", new_callable=AsyncMock) as mock_ack:
+            mock_ack.return_value = {"id": "delivery-001", "status": "acknowledged"}
+            result = await handlers["mark_reminder_acknowledged"]({
+                "reminder_id": "rem-001",
+                "status": "acknowledged",
+                "user_response": "I'll take it now",
+            })
+            await reminder_session_state["_reminder_ack_task"]
 
         assert result["status"] == "success"
         delivered = reminder_session_state.get("reminders_delivered", set())
         assert "rem-001" in delivered
         assert "Take metformin" in delivered
+        assert reminder_session_state["_reminder_ack_persisted"] is True
+        mock_ack.assert_awaited_once_with("delivery-001", "acknowledged", "I'll take it now")
 
     @pytest.mark.asyncio
     async def test_web_search_handles_empty_query(self, session_state):

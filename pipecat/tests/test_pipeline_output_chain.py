@@ -1,7 +1,7 @@
 """Level 2: Output chain integration.
 
-Tests frame flow through: (LLM output) -> ConversationTracker -> GuidanceStripper -> (TTS)
-Verifies that guidance tags are stripped before TTS and topics are tracked.
+Tests frame flow through: (LLM output) -> GuidanceStripper -> ConversationTracker -> (TTS)
+Verifies that guidance tags are stripped before TTS and before transcript tracking.
 """
 
 import pytest
@@ -23,7 +23,7 @@ class TestOutputChain:
         tts = MockTTSProcessor()
 
         await run_processor_test(
-            processors=[tracker, stripper, tts],
+            processors=[stripper, tracker, tts],
             frames_to_inject=[
                 TextFrame(text="<guidance>Be empathetic</guidance>I understand how you feel.")
             ],
@@ -41,7 +41,7 @@ class TestOutputChain:
         tts = MockTTSProcessor()
 
         await run_processor_test(
-            processors=[tracker, stripper, tts],
+            processors=[stripper, tracker, tts],
             frames_to_inject=[
                 make_transcription("I was gardening this morning"),
                 TextFrame(text="[ACTIVITY] How is your garden growing?"),
@@ -56,3 +56,11 @@ class TestOutputChain:
         # TTS should not see bracketed directive
         spoken = tts.full_text
         assert "[ACTIVITY]" not in spoken
+
+        # Transcript tracking should also receive cleaned assistant text.
+        assistant_turns = [
+            turn for turn in session_state.get("_full_transcript", [])
+            if turn.get("role") == "assistant"
+        ]
+        assert assistant_turns
+        assert "[ACTIVITY]" not in assistant_turns[-1]["content"]

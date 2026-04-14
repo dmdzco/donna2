@@ -72,7 +72,8 @@ All `/voice/*` endpoints verify Twilio's `X-Twilio-Signature` header:
 Twilio Media Stream WebSockets are gated separately:
 
 - `/voice/answer` generates a random single-use `ws_token` and includes it in TwiML `<Stream>` parameters
-- `/ws` rejects unknown `call_sid`, missing/invalid/expired/reused tokens before constructing STT/LLM/TTS services
+- `/ws` parses the Twilio start frame with a short timeout and validates `call_sid` + `ws_token` before consuming active-call capacity
+- After capacity is reserved, `/ws` consumes the single-use token before constructing STT/LLM/TTS services
 - Tokens expire after five minutes only if unused; active calls are not disconnected by token expiry
 - Redis-backed metadata is used when configured so multi-instance Pipecat can validate call state
 
@@ -152,7 +153,7 @@ Used across all service modules for Railway log output.
 
 Donna stores newly persisted conversation transcripts and call summaries in AES-256-GCM encrypted companion columns:
 
-- `conversations.transcript_encrypted` stores the structured turn list for authorized admin/export/post-call use.
+- `conversations.transcript_encrypted` stores the structured turn list for authorized admin/export/post-call use. Assistant turns are recorded after internal guidance stripping so `<guidance>` tags and bracketed directives are not persisted.
 - `conversations.transcript_text_encrypted` stores a plain-text transcript rendering for future retrieval and analysis.
 - `conversations.summary_encrypted` stores call summaries used by caregiver and admin views.
 

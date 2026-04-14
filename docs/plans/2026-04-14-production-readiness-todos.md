@@ -1,8 +1,9 @@
 # Production Readiness TODOs
 
 > Status: Not ready for real PHI-bearing production users.
-> Baseline audited: `origin/main` at `dfa5956` with branch drift checked against `origin/zuludev` at `82da8d3`.
+> Baseline audited: `origin/main` at `dfa5956`; branch drift checked against `origin/zuludev` through `6073629`, with voice TODO fixes staged on `codex/voice-pipeline-todos`.
 > Created: April 14, 2026.
+> Updated: April 14, 2026 after `codex/voice-pipeline-todos` implementation.
 
 This document tracks the remaining work to take Donna from technical beta to production with real users. It focuses on compliance, PHI security, call reliability, horizontal scaling, operational safety, and launch controls.
 
@@ -18,6 +19,22 @@ Donna's core voice architecture is strong enough to continue controlled testing:
 - Pipecat non-integration unit tests passed in the audit worktree: `700 passed, 3 skipped, 21 deselected`.
 
 Donna is not ready for real production users discussing health, medications, medical appointments, or caregiver-linked senior data until the P0 items below are closed.
+
+## Updates From Voice Pipeline TODO Work
+
+The `codex/voice-pipeline-todos` branch closed several runtime issues that were part of the production-readiness backlog:
+
+- Pipecat now rejects inactive senior phone matches through a no-PHI hangup path.
+- Pipecat hydrates known manual/welfare outbound calls itself, so Node process-local prefetch maps are no longer required for correct call context.
+- Node-scheduled reminder context can be recovered through shared Redis/DB paths already present on `zuludev`.
+- `/ws` validates the Twilio start frame and `ws_token` before consuming active-call capacity, then consumes the token after capacity is reserved.
+- Reminder acknowledgments remain low-latency during the call, but post-call waits briefly and re-reads `reminder_deliveries.status` before retry decisions.
+- Caregiver notes are marked delivered only after assistant transcript evidence.
+- Assistant turns are persisted after guidance stripping.
+- Gemini Live now mirrors the Claude post-call start-once/await lifecycle.
+- Live in-call web search no longer caches arbitrary query results.
+
+Remaining production blockers below are still real, especially BAAs/vendor gating, encrypted-only PHI storage, retention, audit coverage, log redaction, shared rate limits, and deployment gates.
 
 ## P0: Production Launch Blockers
 
@@ -115,18 +132,19 @@ Relevant files:
 
 ### 3. Move all outbound call context handoff to shared state
 
-- [ ] Remove Node process-local call context maps from the critical path.
-- [ ] Store manual outbound context in Redis or Postgres keyed by `callSid`.
-- [ ] Store Node-scheduled reminder context in the same shared handoff format Pipecat already reads.
-- [ ] Make Pipecat hydrate generic outbound calls with senior context, memory context, caregiver notes, settings, greeting, recent turns, and daily context when a senior is known.
+- [x] Remove Node process-local call context maps from the correctness-critical path for manual/welfare calls. The maps still exist as optional prefetch, but Pipecat no longer depends on them to build the call.
+- [ ] Store manual outbound prefetch context in Redis or Postgres keyed by `callSid` if we want to preserve Node's precomputed context instead of rehydrating in Pipecat.
+- [x] Store Node-scheduled reminder context in shared state/DB paths Pipecat can read. Redis reminder context and DB `call_sid` fallback are present.
+- [x] Make Pipecat hydrate generic outbound calls with senior context, memory context, caregiver notes, settings, greeting, recent turns, and daily context when a senior is known.
 - [ ] Add retry/backoff in Pipecat `/voice/answer` for just-created reminder delivery rows to avoid a race between Twilio answer and DB delivery persistence.
-- [ ] Add tests for inbound, manual outbound, Node-scheduled reminder, Pipecat-scheduled reminder, and missing-context fallback.
+- [ ] Add remaining tests for manual outbound, Node-scheduled reminder race, Pipecat-scheduled reminder, and missing-context fallback. This branch added coverage for inactive senior handling and the affected WebSocket/reminder/post-call paths.
 
 Acceptance criteria:
 
-- Any Pipecat instance can answer any outbound call and recover the intended context by `callSid`.
-- Manual admin/caregiver calls are not downgraded to generic outbound calls when Node and Pipecat run on different instances.
+- Any Pipecat instance can answer known manual/welfare outbound calls and hydrate intended context from the database, even when Node and Pipecat run on different instances.
+- Manual admin/caregiver calls are not downgraded to empty generic outbound calls when Node and Pipecat run on different instances.
 - Reminder calls do not depend on same-process memory.
+- Still open: retry/backoff for a just-created reminder delivery row race, and optional shared manual prefetch if we want to avoid Pipecat duplicate context-building work.
 
 Relevant files:
 
@@ -216,6 +234,8 @@ Relevant files:
 - [ ] Remove or gate raw `console.*` usage in backend services.
 - [ ] Add log redaction tests for Node and Pipecat.
 - [ ] Validate Sentry configuration and scrubbers with production-like error events.
+- [x] Pipecat WebSocket auth path does not log raw `ws_token` values or Twilio start-frame bodies.
+- [x] Assistant transcript persistence now receives guidance-stripped text.
 
 Acceptance criteria:
 
@@ -284,6 +304,7 @@ Relevant files:
   - [ ] database pool saturation
   - [ ] spend anomalies
 - [ ] Keep `main` and the actual deployed production branch reconciled before release.
+- [x] Document WebSocket token/capacity behavior and stripped transcript persistence in `docs/architecture/SECURITY.md`.
 
 Acceptance criteria:
 
@@ -327,10 +348,10 @@ Acceptance criteria:
 
 - [ ] Reconcile `origin/main` and `origin/zuludev` before mobile or caregiver release.
 - [ ] Confirm whether `origin/zuludev` fixes are required for launch:
-  - [ ] timezone-aware fallback for call timing
-  - [ ] mobile signup password autofill
-  - [ ] iOS TestFlight submit app ID
-  - [ ] recent docs and package lock changes
+  - [x] timezone-aware fallback for call timing is on `zuludev`
+  - [x] mobile signup password autofill is on `zuludev`
+  - [x] iOS TestFlight submit app ID is on `zuludev`
+  - [ ] recent docs and package lock changes still need final release review before main/prod promotion
 - [ ] Run caregiver dashboard E2E tests against staging with real auth.
 - [ ] Run admin dashboard E2E tests against staging with real API.
 - [ ] Run mobile signup/onboarding/call summary flows on simulator and physical device.

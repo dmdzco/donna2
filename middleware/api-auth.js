@@ -1,34 +1,42 @@
-import crypto from 'crypto';
+import { isProductionEnv, matchServiceApiKey, parseServiceApiKeys } from '../lib/security-config.js';
 
 /**
  * API key authentication middleware.
- * Reads DONNA_API_KEY from environment. If set, all /api/* routes
+ * Reads DONNA_API_KEYS from environment. If set, all /api/* routes
  * require Authorization: Bearer <key> header.
- * If DONNA_API_KEY is not set, auth is disabled (development mode).
+ * If no service API keys are set, auth is disabled outside production only.
  */
-// Route prefixes that use their own auth (JWT or Clerk) instead of API key
-const EXEMPT_PREFIXES = [
-  '/admin/',
-  '/observability/',
-  '/caregivers/',
-  '/seniors/',
-  '/reminders/',
+// Route prefixes that use their own auth (JWT or Clerk) instead of API key.
+// Express mounts this middleware at /api, so req.path is the path after /api.
+const EXEMPT_PATHS = [
+  '/admin',
+  '/observability',
+  '/caregivers',
+  '/seniors',
+  '/reminders',
   '/onboarding',
   '/call',
-  '/conversations/',
-  '/notifications/',
+  '/calls',
+  '/conversations',
+  '/notifications',
+  '/stats',
+  '/call-analyses',
+  '/daily-context',
 ];
 
 export function requireApiKey(req, res, next) {
-  const apiKey = process.env.DONNA_API_KEY;
+  const configuredKeys = parseServiceApiKeys();
 
-  // If no API key configured, skip auth (dev mode)
-  if (!apiKey) {
+  // If no API key configured, skip auth outside production only.
+  if (configuredKeys.size === 0) {
+    if (isProductionEnv()) {
+      return res.status(503).json({ error: 'Service API key auth is not configured' });
+    }
     return next();
   }
 
   // Skip API key for routes that handle their own auth (JWT-based)
-  if (EXEMPT_PREFIXES.some(prefix => req.path.startsWith(prefix))) {
+  if (isApiKeyExemptPath(req.path)) {
     return next();
   }
 
@@ -38,28 +46,26 @@ export function requireApiKey(req, res, next) {
   }
 
   const token = authHeader.slice(7);
-
-  // Constant-time comparison to prevent timing attacks
-  if (!timingSafeEqual(token, apiKey)) {
+  const keyLabel = matchServiceApiKey(token);
+  if (!keyLabel) {
     return res.status(403).json({ error: 'Invalid API key' });
   }
 
+  req.serviceApiKeyLabel = keyLabel;
   next();
 }
 
-/**
- * Constant-time string comparison to prevent timing attacks.
- * Handles different-length strings safely (timingSafeEqual throws on length mismatch).
- */
-function timingSafeEqual(a, b) {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
+export function isApiKeyExemptPath(path) {
+  const normalizedPath = normalizeApiPath(path);
 
-  if (bufA.length !== bufB.length) {
-    // Still perform a comparison to avoid leaking length info via timing
-    crypto.timingSafeEqual(bufA, bufA);
-    return false;
-  }
+  return EXEMPT_PATHS.some(
+    exemptPath =>
+      normalizedPath === exemptPath ||
+      normalizedPath.startsWith(`${exemptPath}/`),
+  );
+}
 
-  return crypto.timingSafeEqual(bufA, bufB);
+function normalizeApiPath(path) {
+  if (!path || path === '/') return '/';
+  return path.replace(/\/+$/, '') || '/';
 }

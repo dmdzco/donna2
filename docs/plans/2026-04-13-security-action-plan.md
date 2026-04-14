@@ -50,16 +50,16 @@ Validation:
 
 ### P0: Production secrets and internal API keys still fail open in places
 
-Impact: a missing `DONNA_API_KEY` disables service-to-service auth for Node `/api` middleware and `/api/notifications/trigger`; a missing `FIELD_ENCRYPTION_KEY` silently stores plaintext in fields that are supposed to be encrypted.
+Impact: a missing or legacy-only service API key configuration can disable service-to-service auth for Node `/api` middleware and `/api/notifications/trigger`; a missing `FIELD_ENCRYPTION_KEY` silently stores plaintext in fields that are supposed to be encrypted.
 
 Evidence:
-- `middleware/api-auth.js` skips API key auth when `DONNA_API_KEY` is unset.
-- `routes/notifications.js` allows `/api/notifications/trigger` without `X-API-Key` when `DONNA_API_KEY` is unset.
+- `middleware/api-auth.js` skipped API key auth when `DONNA_API_KEY` was unset.
+- `routes/notifications.js` allowed `/api/notifications/trigger` without `X-API-Key` when `DONNA_API_KEY` was unset.
 - `lib/encryption.js` and `pipecat/lib/encryption.py` return plaintext when `FIELD_ENCRYPTION_KEY` is unset.
 - `pipecat/api/middleware/twilio.py` warns but allows unsigned webhooks when `TWILIO_AUTH_TOKEN` is missing.
 
 Remediation:
-- Add production startup validation in both Node and Pipecat for `DONNA_API_KEY`, `FIELD_ENCRYPTION_KEY`, `JWT_SECRET`, `TWILIO_AUTH_TOKEN`, and Clerk JWKS configuration.
+- Add production startup validation in both Node and Pipecat for `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `JWT_SECRET`, `TWILIO_AUTH_TOKEN`, `PIPECAT_PUBLIC_URL`, and Clerk configuration where applicable.
 - Keep local/dev bypasses explicit with dev/test environment flags only.
 - Use constant-time comparison for cofounder API keys too.
 - Add a boot-time security health check that reports configuration categories without exposing secret values.
@@ -153,9 +153,9 @@ Validation:
 
 1. Hotfix Pipecat voice ingress: Twilio signatures, production fail-closed behavior, WebSocket token admission.
 2. Hotfix call initiation: require known authorized senior for caregiver calls; define admin override if needed.
-3. Add production config guards for `DONNA_API_KEY`, `FIELD_ENCRYPTION_KEY`, `TWILIO_AUTH_TOKEN`, and Clerk JWKS.
+3. Add production config guards for `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `TWILIO_AUTH_TOKEN`, `PIPECAT_PUBLIC_URL`, and Clerk configuration.
 4. Add regression tests for P0 fixes and deploy Pipecat/Node dev services.
-5. Implement PHI encryption backfill and stop plaintext dual-writes for the highest-risk fields.
+5. Implement PHI encryption backfill and stop plaintext dual-writes for the highest-risk fields as a separate PR/action item.
 6. Restrict or replace non-BAA vendor paths and add third-party request minimization.
 7. Repair retention/audit controls and reconcile compliance docs with runtime behavior.
 8. Add frontend XSS guardrails and E2E malicious-content tests.
@@ -248,12 +248,13 @@ Implementation shape:
 - Add a single Pipecat startup validation helper for required production secrets.
 - Required in production:
   - `JWT_SECRET` not default
-  - `DONNA_API_KEY`
+  - labeled `DONNA_API_KEYS`
   - `FIELD_ENCRYPTION_KEY` decodes to 32 bytes
   - `TWILIO_AUTH_TOKEN`
+  - `PIPECAT_PUBLIC_URL` is an `https://` URL
   - Clerk JWKS config for Clerk-authenticated routes
 - Keep local/test behavior explicit. For example, fail-open encryption can remain in unit tests only when production detection is false.
-- Change `routes/notifications.js` so `/api/notifications/trigger` never skips auth in production when `DONNA_API_KEY` is missing.
+- Change `routes/notifications.js` so `/api/notifications/trigger` never skips auth in production when labeled service keys are missing.
 - Change cofounder API key checks to use constant-time comparison.
 
 Tests to add:
@@ -263,11 +264,15 @@ Tests to add:
 - notification trigger rejects missing `X-API-Key` in production.
 
 Questions before implementation:
-- Should `DONNA_API_KEY` protect only service-to-service endpoints, or should the current broad `/api` middleware behavior stay as-is?
+- Should `DONNA_API_KEYS` protect only service-to-service endpoints, or should the current broad `/api` middleware behavior stay as-is?
 - Do we have a formal environment variable for staging/dev/prod, or should the implementation introduce one?
 - Should missing encryption key crash the whole service in production, or only block routes/jobs that write PHI?
 
 ### P1 Build Scope: PHI Encryption Backfill
+
+Status: **separate action item, not part of the current ingress/auth hardening PR.**
+
+Reason: this needs schema changes, coordinated Node/Pipecat read/write updates, export behavior, and a backfill/release window. Keeping it separate makes the current P0/P2 security patch easier to review and safer to deploy.
 
 Target files:
 - `db/schema.js`
@@ -279,12 +284,13 @@ Target files:
 
 Implementation shape:
 - Start with a PHI inventory migration plan rather than changing all fields in one risky patch.
-- Add encrypted companion columns for the highest-risk unencrypted fields.
+- Add encrypted companion columns for the highest-risk unencrypted fields: `seniors.medical_notes`, `seniors.family_info`, `seniors.additional_info`, `seniors.call_context_snapshot`, reminders, daily context, notifications, and caregiver notes.
 - Backfill encrypted values in batches, logging counts only.
-- Update reads to prefer encrypted columns.
-- Update writes to write encrypted columns.
+- Update reads to prefer encrypted columns and fall back to plaintext only during the migration window.
+- Update writes to write encrypted columns first.
+- Update export routes to decrypt at the authorized boundary and fail on decryption errors rather than silently using stale plaintext.
 - After backfill verification, stop writing plaintext or null the plaintext columns for selected fields.
-- Update export routes to decrypt at the authorized boundary.
+- Plan key rotation and recovery runbook after encrypted-first reads are deployed.
 
 Questions before implementation:
 - Are we allowed to add companion encrypted columns now, or do you want a separate schema design review first?
@@ -311,4 +317,14 @@ Questions before implementation:
 - Should admins/cofounders be allowed to place arbitrary phone calls, or should all calls require a known senior?
 - Is `BASE_URL` guaranteed to be Pipecat's public URL in every Pipecat deployment? If not, WebSocket token fixes should also harden URL construction.
 - Which vendors have current signed BAAs as of the production environment, if any? The docs currently say none.
-- Are production logs ever run with `LOG_LEVEL=DEBUG`? If yes, phone-debug logging in the voice answer path needs immediate redaction.
+
+## Operational Lesson From Security Dev Smoke
+
+Railway dev validation on April 14, 2026 proved the security + Redis call path worked end to end, but also showed that Pipecat `LOG_LEVEL=DEBUG` can emit sensitive prompt context and Twilio WebSocket parameters, including one-time `ws_token` values.
+
+Before promoting security work to `main` or production:
+
+- Set Pipecat `LOG_LEVEL=INFO` in Railway dev/staging/prod unless a short-lived incident explicitly requires debug logs.
+- Treat any debug log mode on Pipecat as PHI-bearing and time-bound.
+- Verify smoke-call logs do not include prompt context, transcripts, medical notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
+- Patch or suppress third-party/Pipecat debug emitters before relying on `DEBUG` in a shared Railway environment.

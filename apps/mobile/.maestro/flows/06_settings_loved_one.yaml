@@ -9,6 +9,8 @@ env:
 
 ---
 
+- evalScript: ${output.lovedOnePhone = "555" + String(Date.now()).slice(-7)}
+
 - runFlow: ../subflows/sign_in.yaml
 - runFlow: ../subflows/navigate_to_settings.yaml
 - tapOn: "Loved One Profile"
@@ -20,24 +22,29 @@ env:
 - assertVisible: "State"
 
 # Edit name field
-- tapOn: "Name"
+- tapOn:
+    id: "loved-one-name-input"
 - eraseText: 50
 - inputText: "E2E Test Senior"
 
 # Edit phone
-- tapOn: "Phone Number"
+- tapOn:
+    id: "loved-one-phone-input"
 - eraseText: 50
-- inputText: "5551234567"
+- inputText: ${output.lovedOnePhone}
 
 # Edit city
-- tapOn: "City"
+- tapOn:
+    id: "loved-one-city-input"
 - eraseText: 50
 - inputText: "Dallas"
 
 # Edit state
-- tapOn: "State"
+- tapOn:
+    id: "loved-one-state-input"
 - eraseText: 50
 - inputText: "TX"
+- pressKey: enter
 
 # Scroll to interests section
 - scrollUntilVisible:
@@ -55,17 +62,9 @@ env:
     direction: DOWN
 - tapOn: "Save Changes"
 
-# Wait for save confirmation alert (OK button triggers router.back())
-- extendedWaitUntil:
-    visible: "Saved|Profile updated|OK"
-    timeout: 10000
-- tapOn:
-    text: "OK"
-    optional: true
-
-# Tapping OK auto-navigates back via router.back(), verify we're on settings root
+# Successful save navigates back to settings root.
 - extendedWaitUntil:
     visible: "Manage your account and preferences"
-    timeout: 5000
+    timeout: 10000
 
 - takeScreenshot: 06_loved_one

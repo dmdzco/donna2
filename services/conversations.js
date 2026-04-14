@@ -3,8 +3,22 @@ import { conversations, seniors } from '../db/schema.js';
 import { eq, desc, and, sql } from 'drizzle-orm';
 import { createLogger } from '../lib/logger.js';
 import { encrypt, decrypt, encryptJson, decryptJson } from '../lib/encryption.js';
+import { callAnalysisService } from './call-analyses.js';
 
 const log = createLogger('Conversation');
+
+function decryptConversationFields(row) {
+  const summary = row.summaryEncrypted ? decrypt(row.summaryEncrypted) : row.summary;
+  const transcript = row.transcriptEncrypted ? decryptJson(row.transcriptEncrypted) : row.transcript;
+
+  return {
+    ...row,
+    summary,
+    transcript,
+    summaryEncrypted: undefined,
+    transcriptEncrypted: undefined,
+  };
+}
 
 export const conversationService = {
   // Create a new conversation record
@@ -53,10 +67,22 @@ export const conversationService = {
 
   // Get recent conversations for a senior
   async getForSenior(seniorId, limit = 10) {
-    return db.select().from(conversations)
+    const rows = await db.select().from(conversations)
       .where(eq(conversations.seniorId, seniorId))
       .orderBy(desc(conversations.startedAt))
       .limit(limit);
+
+    const analyses = await callAnalysisService.getLatestByConversationIds(rows.map(row => row.id));
+
+    return rows.map(row => {
+      const conversation = decryptConversationFields(row);
+      const analysis = analyses.get(row.id) || null;
+      return {
+        ...conversation,
+        summary: conversation.summary || analysis?.summary || null,
+        analysis,
+      };
+    });
   },
 
   // Update conversation summary (called after post-call analysis)
@@ -185,11 +211,7 @@ export const conversationService = {
 
     // Decrypt PHI fields for admin view
     return results.map(r => ({
-      ...r,
-      summary: r.summaryEncrypted ? decrypt(r.summaryEncrypted) : r.summary,
-      transcript: r.transcriptEncrypted ? decryptJson(r.transcriptEncrypted) : r.transcript,
-      summaryEncrypted: undefined,
-      transcriptEncrypted: undefined,
+      ...decryptConversationFields(r),
     }));
   }
 };

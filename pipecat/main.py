@@ -19,11 +19,29 @@ import time
 import warnings
 
 from loguru import logger
+from config import assert_production_config, is_production_environment
 
 # Configure log level: INFO in production, DEBUG locally
-_log_level = os.getenv("LOG_LEVEL", "INFO" if os.getenv("RAILWAY_PUBLIC_DOMAIN") else "DEBUG")
+_log_level = os.getenv("LOG_LEVEL", "INFO" if is_production_environment() else "DEBUG")
+
+
+def _safe_log_filter(record) -> bool:
+    """Suppress third-party DEBUG logs that can include transcripts or credentials."""
+    name = record.get("name") or ""
+    if record["level"].no < logger.level("INFO").no and name.startswith("pipecat."):
+        return False
+
+    message = record.get("message") or ""
+    sensitive_patterns = (
+        "Generating chat from LLM-specific context",
+        "Generating TTS [",
+        "Parsed - Type:",
+    )
+    return not any(pattern in message for pattern in sensitive_patterns)
+
+
 logger.remove()
-logger.add(sys.stderr, level=_log_level)
+logger.add(sys.stderr, level=_log_level, filter=_safe_log_filter)
 
 # Route Python warnings through loguru instead of raw stderr.
 # This gives them a proper @level tag in Railway so they can be filtered.
@@ -62,7 +80,7 @@ try:
             traces_sample_rate=0,
             send_default_pii=False,
             before_send=_sentry_before_send,
-            environment="production" if os.getenv("RAILWAY_PUBLIC_DOMAIN") else "development",
+            environment="production" if is_production_environment() else "development",
         )
         logger.info("Sentry initialized")
 except ImportError:
@@ -125,7 +143,7 @@ ALLOWED_ORIGINS = [
     "https://admin-v2-liart.vercel.app",
     os.getenv("ADMIN_URL", ""),
 ]
-if not os.getenv("RAILWAY_PUBLIC_DOMAIN"):
+if not is_production_environment():
     ALLOWED_ORIGINS.extend(["http://localhost:5173", "http://localhost:3000"])
 
 app.add_middleware(
@@ -237,7 +255,6 @@ async def websocket_endpoint(websocket: WebSocket):
         "todays_context": None,
         "_transcript": [],
         "_call_metadata": call_metadata,
-        "_register_task": register_call_task,
     }
 
     try:
@@ -276,6 +293,8 @@ async def websocket_endpoint(websocket: WebSocket):
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup():
+    assert_production_config()
+
     port = os.getenv("PORT", "7860")
     logger.info(
         "Donna Pipecat starting on port {port} (max_concurrent_calls={max})",

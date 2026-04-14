@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mobile Auth E2E"
+  short_description: "Keep Donna mobile auth and Maestro tests user-visible"
+  default_prompt: "Use $mobile-auth-e2e when changing Donna mobile auth or Maestro auth tests."

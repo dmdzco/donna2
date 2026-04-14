@@ -70,6 +70,10 @@ export const createSeniorSchema = z.object({
   medicalNotes: z.string().max(10000).optional(),
   preferredCallTimes: z.record(z.unknown()).optional(),
   isActive: z.boolean().default(true),
+  city: z.string().max(100).optional(),
+  state: z.string().max(50).optional(),
+  zipCode: z.string().max(20).optional(),
+  additionalInfo: z.string().max(5000).optional(),
 });
 
 export const updateSeniorSchema = z.object({
@@ -160,7 +164,7 @@ export const updateReminderSchema = z.object({
 // =============================================================================
 
 export const initiateCallSchema = z.object({
-  phoneNumber: phoneSchema,
+  seniorId: uuidSchema,
 });
 
 // =============================================================================

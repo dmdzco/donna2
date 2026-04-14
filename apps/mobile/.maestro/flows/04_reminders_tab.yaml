@@ -38,6 +38,14 @@ env:
 - inputText: "E2E Test Reminder"
 - pressKey: enter
 
+# Time picker regression: the native picker should open from the reminder sheet
+# instead of getting stuck behind the modal.
+- tapOn: "Select reminder time"
+- extendedWaitUntil:
+    visible: "Done selecting time"
+    timeout: 5000
+- tapOn: "Done selecting time"
+
 # Save (index 1: skip modal title "Add Reminder", hit save button)
 - tapOn:
     text: "Add Reminder"

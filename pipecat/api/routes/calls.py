@@ -15,6 +15,7 @@ from api.middleware.auth import require_auth, require_admin, AuthContext
 from api.routes.voice import call_metadata
 from api.validators.schemas import InitiateCallRequest
 from services.audit import fire_and_forget_audit, auth_to_role
+from config import get_pipecat_public_url
 
 router = APIRouter()
 
@@ -33,17 +34,30 @@ def _get_twilio() -> TwilioClient:
     return _twilio_client
 
 
+def _format_phone_for_call(phone: str) -> str:
+    digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
+    if not digits:
+        return ""
+    if len(digits) == 10:
+        return f"+1{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    if str(phone or "").startswith("+"):
+        return str(phone)
+    return f"+{digits}"
+
+
 @router.post("/api/call")
 async def initiate_call(
     request: Request,
     body: InitiateCallRequest,
     auth: AuthContext = Depends(require_auth),
 ):
-    """Initiate an outbound call to a phone number.
+    """Initiate an outbound call for an authorized senior.
 
     Pre-fetches senior context before triggering the Twilio call.
     """
-    phone = body.phone_number
+    senior_id = body.senior_id
 
     fire_and_forget_audit(
         user_id=auth.user_id,
@@ -52,24 +66,34 @@ async def initiate_call(
         resource_type="call",
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
-        metadata={"phone_last4": phone[-4:] if phone else None},
+        metadata={"senior_id": senior_id},
     )
-    base_url = os.getenv("BASE_URL", "")
+    base_url = get_pipecat_public_url()
 
     try:
         # Pre-fetch: look up senior and build context
-        from services.seniors import find_by_phone
+        from services.seniors import get_by_id
         from services.scheduler import prefetch_for_phone
 
-        senior = await find_by_phone(phone)
-        if senior:
-            # Access control for non-cofounder users
-            if not auth.is_cofounder and auth.clerk_user_id:
-                from services.caregivers import can_access_senior
-                has_access = await can_access_senior(auth.clerk_user_id, senior["id"])
-                if not has_access:
-                    raise HTTPException(status_code=403, detail="Access denied to this senior")
-            await prefetch_for_phone(phone, senior)
+        senior = await get_by_id(senior_id)
+        if not senior:
+            raise HTTPException(status_code=404, detail="Senior not found")
+        if not senior.get("is_active", True):
+            raise HTTPException(status_code=400, detail="Senior is not active")
+
+        # Access control for non-admin users
+        if not auth.is_admin:
+            if not auth.clerk_user_id:
+                raise HTTPException(status_code=403, detail="Access denied to this senior")
+            from services.caregivers import can_access_senior
+            has_access = await can_access_senior(auth.clerk_user_id, senior["id"])
+            if not has_access:
+                raise HTTPException(status_code=403, detail="Access denied to this senior")
+
+        phone = _format_phone_for_call(senior["phone"])
+        if not phone:
+            raise HTTPException(status_code=400, detail="Senior phone is not callable")
+        await prefetch_for_phone(phone, senior)
 
         client = _get_twilio()
         call = client.calls.create(
@@ -80,8 +104,8 @@ async def initiate_call(
             status_callback_event=["initiated", "ringing", "answered", "completed"],
         )
 
-        logger.info("Initiated call {sid} to ***{last4}", sid=call.sid, last4=phone[-4:])
-        return {"success": True, "call_sid": call.sid}
+        logger.info("Initiated call {sid} for senior {senior_id}", sid=call.sid, senior_id=senior["id"])
+        return {"success": True, "call_sid": call.sid, "senior_id": senior["id"]}
 
     except HTTPException:
         raise

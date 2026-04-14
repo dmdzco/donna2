@@ -9,7 +9,7 @@ import json
 import re
 from loguru import logger
 from db import query_one, query_many, execute
-from lib.sanitize import mask_name, mask_phone
+from lib.sanitize import mask_phone
 
 
 def _normalize_phone(phone: str) -> str:
@@ -52,7 +52,7 @@ async def create(data: dict) -> dict:
         data.get("zipCode"),
         data.get("additionalInfo"),
     )
-    logger.info("Created senior: {name} {phone}", name=mask_name(row["name"]), phone=mask_phone(phone))
+    logger.info("Created senior: phone={phone}", phone=mask_phone(phone))
     return row
 
 

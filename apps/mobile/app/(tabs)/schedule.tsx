@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -39,7 +39,7 @@ import {
   isBefore,
   getDay,
 } from "date-fns";
-import { COLORS, TIME_OPTIONS } from "@/src/constants/theme";
+import { COLORS } from "@/src/constants/theme";
 import {
   useCurrentSenior,
   useSchedule,
@@ -47,7 +47,7 @@ import {
   useReminders,
   useConversations,
 } from "@/src/hooks";
-import { Button, Input, Modal } from "@/src/components/ui";
+import { Button, Input, Modal, TimePickerField } from "@/src/components/ui";
 import { getErrorMessage } from "@/src/lib/api";
 import type { Reminder, Conversation } from "@/src/types";
 
@@ -198,11 +198,13 @@ export default function ScheduleScreen() {
   const [formTime, setFormTime] = useState("9:00 AM");
   const [formNotes, setFormNotes] = useState("");
   const [formReminderIds, setFormReminderIds] = useState<string[]>([]);
-
-  // Picker modals
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [recentlySavedTitle, setRecentlySavedTitle] = useState<string | null>(null);
+  const listRef = useRef<FlatList<CallCardData>>(null);
 
   const seniorFirstName = senior?.name?.split(" ")[0] ?? "your loved one";
+  const timeHelperText = senior?.name
+    ? `${seniorFirstName}'s local time`
+    : "Senior's local time";
 
   // ---------------------------------------------------------------------------
   // Data
@@ -233,6 +235,26 @@ export default function ScheduleScreen() {
       conversation: convo,
     }));
   }, [dailyItems, selectedDate, scheduleItems, conversations]);
+
+  useEffect(() => {
+    if (!recentlySavedTitle) return;
+
+    const savedIndex = cardData.findIndex(
+      (item) => item.schedule.title === recentlySavedTitle,
+    );
+    if (savedIndex < 0) return;
+
+    const scrollTimeout = setTimeout(() => {
+      listRef.current?.scrollToIndex({
+        index: savedIndex,
+        animated: true,
+        viewPosition: 0.5,
+      });
+      setRecentlySavedTitle(null);
+    }, 100);
+
+    return () => clearTimeout(scrollTimeout);
+  }, [cardData, recentlySavedTitle]);
 
   // ---------------------------------------------------------------------------
   // Week navigation
@@ -337,6 +359,7 @@ export default function ScheduleScreen() {
     try {
       await updateSchedule.mutateAsync({ schedule: updated });
       setModalVisible(false);
+      setRecentlySavedTitle(newItem.title);
     } catch {
       // Error handled by react-query
     }
@@ -649,10 +672,14 @@ export default function ScheduleScreen() {
           </View>
         ) : (
           <FlatList
+            ref={listRef}
             data={cardData}
             keyExtractor={(item, i) => `${item.schedule.title}-${i}`}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: 120 }}
+            onScrollToIndexFailed={() => {
+              listRef.current?.scrollToEnd({ animated: true });
+            }}
             renderItem={({ item }) => (
               <ScheduleCallCard
                 data={item}
@@ -787,21 +814,13 @@ export default function ScheduleScreen() {
 
           {/* Time picker */}
           <View className="mb-5">
-            <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-              Time
-            </Text>
-            <Pressable
-              onPress={() => setShowTimePicker(true)}
-              className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
-              accessibilityRole="button"
+            <TimePickerField
+              value={formTime}
+              onChange={setFormTime}
+              helperText={timeHelperText}
               accessibilityLabel="Select call time"
-            >
-              <View className="flex-row items-center">
-                <Clock size={16} color={COLORS.muted} style={{ marginRight: 8 }} />
-                <Text className="text-[15px] text-charcoal">{formTime}</Text>
-              </View>
-              <ChevronDown size={18} color={COLORS.muted} />
-            </Pressable>
+              testID="call-time-picker"
+            />
           </View>
 
           {/* Context notes */}
@@ -818,6 +837,9 @@ export default function ScheduleScreen() {
               value={formNotes}
               onChangeText={setFormNotes}
               accessibilityLabel="Context notes"
+              testID="call-context-notes-input"
+              returnKeyType="done"
+              blurOnSubmit
             />
           </View>
 
@@ -869,7 +891,10 @@ export default function ScheduleScreen() {
             {editingIndex !== null && (
               <Button
                 title="Delete Call"
-                onPress={() => setDeleteConfirmIndex(editingIndex)}
+                onPress={() => {
+                  setModalVisible(false);
+                  setDeleteConfirmIndex(editingIndex);
+                }}
                 variant="destructive"
                 disabled={updateSchedule.isPending}
               />
@@ -881,33 +906,6 @@ export default function ScheduleScreen() {
               {getErrorMessage(updateSchedule.error, "Failed to save")}
             </Text>
           )}
-        </View>
-      </Modal>
-
-      {/* ================================================================= */}
-      {/* TIME PICKER MODAL                                                 */}
-      {/* ================================================================= */}
-      <Modal
-        visible={showTimePicker}
-        onClose={() => setShowTimePicker(false)}
-        title="Select Time"
-      >
-        <View className="gap-0.5 pb-4">
-          {TIME_OPTIONS.map((time) => (
-            <Pressable
-              key={time}
-              onPress={() => {
-                setFormTime(time);
-                setShowTimePicker(false);
-              }}
-              className="flex-row items-center justify-between py-3 px-2 rounded-xl active:bg-beige"
-              accessibilityRole="button"
-              accessibilityLabel={time}
-            >
-              <Text className="text-[15px] text-charcoal">{time}</Text>
-              {formTime === time && <Check size={18} color={COLORS.sage} />}
-            </Pressable>
-          ))}
         </View>
       </Modal>
 

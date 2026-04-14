@@ -2,7 +2,7 @@
 
 Runs Haiku (synthetic caller) against the real Donna pipeline with:
 - Real Claude Sonnet (LLM responses)
-- Real Director (Groq speculative analysis, Gemini fallback)
+- Real Director (Groq speculative analysis)
 - Real Quick Observer (268 regex patterns, goodbye detection)
 - Real tool handlers (web_search -> Tavily, mark_reminder -> DB)
 - Real post-call processing (analysis, memory extraction, daily context)

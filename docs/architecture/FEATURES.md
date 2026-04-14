@@ -21,7 +21,7 @@
 ### Onboarding Calls
 - Unrecognized callers get a warm onboarding conversation
 - Learns caller name, relationship to senior, senior's name, interests, concerns
-- Saves details progressively via `save_prospect_detail` tool
+- Extracts and saves prospect details after the call to avoid in-call tool latency
 - Return callers recognized and greeted by name with prior context
 
 ---
@@ -54,7 +54,7 @@
   - Family/relationship pattern matching
   - Safety concern flagging (scams, strangers, emergencies)
   - Cognitive signal detection (confusion, repetition)
-  - Goodbye detection → programmatic call end (2s EndFrame)
+  - Goodbye detection → programmatic call end after configured delay
 - **Layer 2: Conversation Director** — Groq primary, Gemini fallback LLM analysis (non-blocking)
   - Call phase tracking and pacing guidance
   - Topic management (stay, transition, or wrap up)
@@ -252,7 +252,7 @@ Starts Director analysis before the user finishes speaking:
 
 ### Programmatic Call Ending
 - LLM tool calls for ending calls are unreliable (Claude says "goodbye" but doesn't call transition tools)
-- Quick Observer detects strong goodbye patterns via regex → queues EndFrame after 2s delay
+- Quick Observer detects strong goodbye patterns via regex → queues EndFrame after the configured goodbye delay
 - Bypasses the LLM entirely for call termination
 - `_goodbye_in_progress` flag suppresses stale Director guidance during goodbye sequence
 

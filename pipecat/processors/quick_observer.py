@@ -340,13 +340,16 @@ class QuickObserverProcessor(FrameProcessor):
 
         if isinstance(frame, TranscriptionFrame):
             text = frame.text
-            logger.debug("[QuickObserver] Transcription received")
+            logger.debug("[QuickObserver] Transcription received chars={n}", n=len(text or ""))
             analysis = quick_analyze(text, self._recent_history)
             self.last_analysis = analysis
 
             # Expose analysis to session_state for prefetch engine
             if self._session_state is not None:
                 self._session_state["_last_quick_analysis"] = analysis
+                tracker = self._session_state.get("_conversation_tracker")
+                if tracker and hasattr(tracker, "record_quick_observer_signals"):
+                    tracker.record_quick_observer_signals(analysis)
 
             # Store token recommendation in session_state for Director
             if self._session_state is not None and analysis.model_recommendation:
@@ -374,11 +377,12 @@ class QuickObserverProcessor(FrameProcessor):
             if analysis.goodbye_signals and self._goodbye_task is None:
                 has_strong = any(g["strength"] == "strong" for g in analysis.goodbye_signals)
                 if has_strong:
+                    settings = (self._session_state or {}).get("call_settings") or {}
+                    delay = settings.get("goodbye_delay_seconds", self.GOODBYE_DELAY_SECONDS)
                     logger.info(
-                        "[QuickObserver] Strong goodbye detected on text={txt!r} signals={sig} — scheduling forced end in {d}s",
-                        txt=text[:80],
-                        sig=analysis.goodbye_signals,
-                        d=self.GOODBYE_DELAY_SECONDS,
+                        "[QuickObserver] Strong goodbye detected signals={n} - scheduling forced end in {d}s",
+                        n=len(analysis.goodbye_signals),
+                        d=delay,
                     )
                     self._goodbye_task = asyncio.create_task(self._force_end_call())
                     # Signal to Director to suppress stale guidance

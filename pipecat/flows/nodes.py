@@ -380,7 +380,6 @@ def build_winding_down_node(session_state: dict, flows_tools: dict) -> NodeConfi
     Tools: mark_reminder, save_detail, transition_to_closing.
     Context strategy: APPEND.
     """
-    senior_ctx = _build_senior_context(session_state)
     reminder_ctx = _build_reminder_context(session_state)
 
     winding_task = WINDING_DOWN_TASK
@@ -400,11 +399,9 @@ def build_winding_down_node(session_state: dict, flows_tools: dict) -> NodeConfi
         handler=_make_transition_to_closing(session_state),
     ))
 
-    system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
-
     return NodeConfig(
         name="winding_down",
-        role_messages=[{"role": "system", "content": system_content}],
+        role_messages=[],
         task_messages=[{"role": "user", "content": winding_task}],
         functions=functions,
         context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
@@ -423,12 +420,9 @@ def build_closing_node(session_state: dict) -> NodeConfig:
 
     closing_task = CLOSING_TASK_TEMPLATE.format(first_name=first_name)
 
-    senior_ctx = _build_senior_context(session_state)
-    system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
-
     return NodeConfig(
         name="closing",
-        role_messages=[{"role": "system", "content": system_content}],
+        role_messages=[],
         task_messages=[{"role": "user", "content": closing_task}],
         functions=[],
         post_actions=[{"type": "end_conversation"}],
@@ -467,7 +461,7 @@ def build_onboarding_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     """Build the onboarding node for unsubscribed callers.
 
     Single node covers all 6 conversation stages via prompt instructions.
-    Tools: save_prospect_detail, web_search, transition_to_closing.
+    Tools: web_search, transition_to_closing.
     """
     prospect = session_state.get("prospect") or {}
     prospect_ctx = _build_prospect_context(session_state)
@@ -520,13 +514,9 @@ def build_onboarding_node(session_state: dict, flows_tools: dict) -> NodeConfig:
 
 def build_onboarding_closing_node(session_state: dict) -> NodeConfig:
     """Build the closing node for onboarding calls."""
-    prospect = session_state.get("prospect") or {}
-    prospect_ctx = _build_prospect_context(session_state)
-    system_content = ONBOARDING_SYSTEM_PROMPT + "\n\n" + prospect_ctx
-
     return NodeConfig(
         name="onboarding_closing",
-        role_messages=[{"role": "system", "content": system_content}],
+        role_messages=[],
         task_messages=[{"role": "user", "content": ONBOARDING_CLOSING_TASK}],
         functions=[],
         post_actions=[{"type": "end_conversation"}],

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Donna",
+    "name": "Donna Companion",
     "slug": "donna-caregiver",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -51,11 +51,12 @@
       "typedRoutes": true
     },
     "extra": {
-      "_note": "Replace eas.projectId with your real EAS project ID from 'eas project:init'",
+      "apiUrl": "https://donna-api-production-2450.up.railway.app",
+      "router": {},
       "eas": {
-        "projectId": "donna-caregiver"
-      },
-      "apiUrl": "https://donna-api-production-2450.up.railway.app"
-    }
+        "projectId": "aa482a04-3f14-4373-a654-42e51f1bd7b0"
+      }
+    },
+    "owner": "dmdzco"
   }
 }

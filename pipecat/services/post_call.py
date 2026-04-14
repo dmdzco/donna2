@@ -68,43 +68,6 @@ async def run_post_call(
             from services.conversations import update_summary
             await update_summary(call_sid, summary)
             logger.info("[{cs}] Persisted call summary ({n} chars)", cs=call_sid, n=len(summary))
-
-        # Persist sentiment and concerns to conversations for dashboard
-        try:
-            sentiment = None
-            if result.get("call_quality", {}).get("rapport"):
-                sentiment = result["call_quality"]["rapport"]
-
-            concerns_list = []
-            for c in (result.get("concerns") or []):
-                if isinstance(c, dict):
-                    desc = c.get("description", c.get("type", ""))
-                    if desc:
-                        concerns_list.append(desc)
-                elif isinstance(c, str):
-                    concerns_list.append(c)
-
-            if sentiment or concerns_list:
-                from db.client import execute as db_execute
-                await db_execute(
-                    """UPDATE conversations
-                       SET sentiment = COALESCE($1, sentiment),
-                           concerns = COALESCE($2, concerns)
-                       WHERE call_sid = $3""",
-                    sentiment,
-                    concerns_list or None,
-                    call_sid,
-                )
-                logger.info(
-                    "[{cs}] Persisted sentiment={s}, concerns={n}",
-                    cs=call_sid, s=sentiment, n=len(concerns_list),
-                )
-        except Exception as e:
-            logger.error(
-                "[{cs}] Sentiment/concerns update failed: {err}",
-                cs=call_sid, err=str(e),
-            )
-
         return result
 
     async def _step3_memory():
@@ -148,15 +111,11 @@ async def run_post_call(
             from services.scheduler import clear_reminder_context
             clear_reminder_context(call_sid)
 
-    async def _step8_metrics():
-        await _persist_call_metrics(session_state, duration_seconds, conversation_tracker)
-
     results = await asyncio.gather(
         _step2_analysis(),
         _step3_memory(),
         _step5_reminder(),
         _step6_cache(),
-        _step8_metrics(),
         return_exceptions=True,
     )
 
@@ -167,7 +126,7 @@ async def run_post_call(
     else:
         analysis = analysis_result
     for i, (step_name, r) in enumerate(zip(
-        ["call analysis", "memory extraction", "reminder cleanup", "cache clearing", "call metrics"],
+        ["call analysis", "memory extraction", "reminder cleanup", "cache clearing"],
         results,
     )):
         if isinstance(r, Exception) and i > 0:  # step 2 already logged above
@@ -250,6 +209,12 @@ async def run_post_call(
             await save_snapshot(senior_id, snapshot)
     except Exception as e:
         logger.error("[{cs}] Post-call step 7 (call snapshot) failed: {err}", cs=call_sid, err=str(e))
+
+    # 8. Persist call metrics for observability
+    try:
+        await _persist_call_metrics(session_state, duration_seconds, conversation_tracker)
+    except Exception as e:
+        logger.error("[{cs}] Post-call step 8 (call metrics) failed: {err}", cs=call_sid, err=str(e))
 
     logger.info("[{cs}] Post-call processing complete", cs=call_sid)
 
@@ -441,24 +406,81 @@ async def _run_onboarding_post_call(
         logger.error("[{cs}] Onboarding post-call step 1 (complete conversation) failed: {err}",
                      cs=call_sid, err=str(e))
 
-    # 2. Summarize conversation and store on prospect record
-    try:
-        if transcript and prospect_id:
-            summary = await _summarize_onboarding_call(transcript, call_sid)
-            if summary:
-                from services.prospects import update_after_call
-                await update_after_call(prospect_id, {
-                    "caller_context": {"call_summary": summary},
-                })
-                logger.info("[{cs}] Stored onboarding call summary ({n} chars)",
-                            cs=call_sid, n=len(summary))
-            else:
-                # Still increment call_count even without summary
-                from services.prospects import update_after_call
-                await update_after_call(prospect_id, {})
-    except Exception as e:
-        logger.error("[{cs}] Onboarding post-call step 2 (summary + update) failed: {err}",
-                     cs=call_sid, err=str(e))
+    formatted_transcript = _format_transcript(transcript)
+
+    async def _step2_memory():
+        if not (formatted_transcript and prospect_id):
+            return
+        from services.memory import extract_from_conversation
+        await extract_from_conversation(
+            None,
+            formatted_transcript,
+            conversation_id or "unknown",
+            prospect_id=prospect_id,
+        )
+
+    async def _step3_prospect_update():
+        if not prospect_id:
+            return
+
+        from services.prospects import extract_prospect_details, update_after_call
+
+        update_data: dict = {}
+        if formatted_transcript:
+            summary_result, details_result = await asyncio.gather(
+                _summarize_onboarding_call(transcript, call_sid),
+                extract_prospect_details(formatted_transcript),
+                return_exceptions=True,
+            )
+
+            if isinstance(summary_result, Exception):
+                logger.error(
+                    "[{cs}] Onboarding summary failed: {err}",
+                    cs=call_sid,
+                    err=str(summary_result),
+                )
+            elif summary_result:
+                update_data.setdefault("caller_context", {})["call_summary"] = summary_result
+                logger.info(
+                    "[{cs}] Stored onboarding call summary ({n} chars)",
+                    cs=call_sid,
+                    n=len(summary_result),
+                )
+
+            if isinstance(details_result, Exception):
+                logger.error(
+                    "[{cs}] Prospect detail extraction failed: {err}",
+                    cs=call_sid,
+                    err=str(details_result),
+                )
+            elif details_result:
+                extracted_keys = list(details_result.keys())
+                detail_context = details_result.pop("caller_context", None)
+                update_data.update(details_result)
+                if detail_context:
+                    update_data.setdefault("caller_context", {}).update(detail_context)
+                logger.info(
+                    "[{cs}] Extracted prospect detail fields: {keys}",
+                    cs=call_sid,
+                    keys=extracted_keys,
+                )
+
+        # update_after_call increments call_count once, even if no transcript/details.
+        await update_after_call(prospect_id, update_data)
+
+    results = await asyncio.gather(
+        _step2_memory(),
+        _step3_prospect_update(),
+        return_exceptions=True,
+    )
+    for step_name, result in zip(["memory extraction", "prospect update"], results):
+        if isinstance(result, Exception):
+            logger.error(
+                "[{cs}] Onboarding post-call ({step}) failed: {err}",
+                cs=call_sid,
+                step=step_name,
+                err=str(result),
+            )
 
     logger.info("[{cs}] Onboarding post-call processing complete", cs=call_sid)
 
@@ -476,10 +498,12 @@ async def _trigger_caregiver_notification(
     node_url = os.environ.get(
         "NODE_API_URL", "https://donna-api-production-2450.up.railway.app"
     )
-    api_key = os.environ.get("DONNA_API_KEY", "")
+    from config import get_service_api_key
+
+    api_key = get_service_api_key("pipecat") or get_service_api_key("notifications") or ""
 
     if not api_key:
-        logger.warning("DONNA_API_KEY not set, skipping caregiver notification")
+        logger.warning("DONNA_API_KEYS has no pipecat/notifications key, skipping caregiver notification")
         return
 
     headers = {"X-API-Key": api_key, "Content-Type": "application/json"}

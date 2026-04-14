@@ -6,7 +6,8 @@ using TWILIO_AUTH_TOKEN.
 
 Implemented as a FastAPI Depends() callable, consistent with auth.py.
 
-Set SKIP_TWILIO_VALIDATION=true to bypass in dev/test environments.
+Set ALLOW_UNSIGNED_TWILIO_WEBHOOKS=true to bypass in local/test environments.
+The legacy SKIP_TWILIO_VALIDATION flag is honored outside production only.
 """
 
 from __future__ import annotations
@@ -16,22 +17,28 @@ import os
 from fastapi import HTTPException, Request
 from loguru import logger
 from twilio.request_validator import RequestValidator
+from config import get_pipecat_public_url, is_production_environment
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
-SKIP_VALIDATION = os.getenv("SKIP_TWILIO_VALIDATION", "false").lower() == "true"
+def _truthy(value: str | None) -> bool:
+    return str(value or "").lower() in {"1", "true", "yes", "on"}
 
-if not TWILIO_AUTH_TOKEN and os.getenv("RAILWAY_PUBLIC_DOMAIN") and not SKIP_VALIDATION:
-    logger.warning(
-        "TWILIO_AUTH_TOKEN not set in production — webhook signature validation disabled"
+
+def _allow_unsigned_webhooks() -> bool:
+    if is_production_environment():
+        return False
+    return (
+        _truthy(os.getenv("ALLOW_UNSIGNED_TWILIO_WEBHOOKS"))
+        or _truthy(os.getenv("SKIP_TWILIO_VALIDATION"))
     )
 
-_validator: RequestValidator | None = (
-    RequestValidator(TWILIO_AUTH_TOKEN) if TWILIO_AUTH_TOKEN else None
-)
+
+def _get_validator() -> RequestValidator | None:
+    token = os.getenv("TWILIO_AUTH_TOKEN", "")
+    return RequestValidator(token) if token else None
 
 
 def _reconstruct_url(request: Request) -> str:
@@ -41,12 +48,18 @@ def _reconstruct_url(request: Request) -> str:
     over HTTP internally.  Twilio signs the original public URL (https),
     so we must reconstruct it from the X-Forwarded-* headers.
     """
-    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
     path = request.url.path
     # Include query string if present (Twilio includes it in the signature)
     query = str(request.url.query) if request.url.query else ""
-    url = f"{proto}://{host}{path}"
+
+    public_url = get_pipecat_public_url()
+    if public_url:
+        url = f"{public_url.rstrip('/')}{path}"
+    else:
+        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+        url = f"{proto}://{host}{path}"
+
     if query:
         url = f"{url}?{query}"
     return url
@@ -62,14 +75,15 @@ async def verify_twilio_signature(request: Request) -> None:
     Raises HTTPException 403 if the signature is missing or invalid.
     Passes through silently when validation succeeds or is skipped.
     """
-    # Allow bypassing in dev/test
-    if SKIP_VALIDATION:
+    # Allow bypassing in local/test only.
+    if _allow_unsigned_webhooks():
         return
 
     # No auth token configured — can't validate
-    if _validator is None:
-        logger.warning("Twilio signature check skipped — no TWILIO_AUTH_TOKEN configured")
-        return
+    validator = _get_validator()
+    if validator is None:
+        logger.error("Twilio webhook rejected — TWILIO_AUTH_TOKEN is not configured")
+        raise HTTPException(status_code=500, detail="Twilio webhook validation is not configured")
 
     signature = request.headers.get("x-twilio-signature", "")
     if not signature:
@@ -87,7 +101,7 @@ async def verify_twilio_signature(request: Request) -> None:
 
     url = _reconstruct_url(request)
 
-    is_valid = _validator.validate(url, params, signature)
+    is_valid = validator.validate(url, params, signature)
 
     if not is_valid:
         logger.warning(

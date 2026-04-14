@@ -10,10 +10,13 @@ from __future__ import annotations
 import asyncio
 import os
 import secrets
+import time
 from xml.sax.saxutils import escape as xml_escape
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from loguru import logger
+from api.middleware.twilio import verify_twilio_signature
+from config import get_pipecat_public_url
 from lib.sanitize import mask_phone
 
 router = APIRouter()
@@ -36,6 +39,32 @@ async def _persist_metadata(call_sid: str, data: dict) -> None:
         pass  # Redis is optional — failure is non-fatal
 
 
+async def get_call_metadata(call_sid: str) -> dict | None:
+    """Load call metadata from local memory, then Redis fallback."""
+    metadata = call_metadata.get(call_sid)
+    if metadata is not None:
+        return metadata
+    try:
+        from lib.redis_client import get_shared_state
+        state = get_shared_state()
+        if hasattr(state, '_url'):
+            metadata = await state.get(f"call_metadata:{call_sid}")
+            if metadata is not None:
+                call_metadata[call_sid] = metadata
+            return metadata
+    except Exception as exc:
+        logger.warning("[{cs}] Redis metadata lookup failed: {err}", cs=call_sid, err=str(exc))
+    return None
+
+
+async def mark_ws_token_consumed(call_sid: str, metadata: dict) -> None:
+    """Mark the WebSocket admission token as consumed without expiring the call."""
+    metadata["ws_token_consumed"] = True
+    metadata["ws_token_consumed_at"] = time.time()
+    call_metadata[call_sid] = metadata
+    await _persist_metadata(call_sid, metadata)
+
+
 async def _cleanup_metadata(call_sid: str) -> dict | None:
     """Remove metadata from local dict and Redis."""
     metadata = call_metadata.pop(call_sid, None)
@@ -52,7 +81,7 @@ async def _cleanup_metadata(call_sid: str) -> dict | None:
     return metadata
 
 
-@router.post("/voice/answer")
+@router.post("/voice/answer", dependencies=[Depends(verify_twilio_signature)])
 async def voice_answer(request: Request):
     """Twilio calls this when a call is answered — returns TwiML pointing to WebSocket."""
     # Check capacity before doing any work
@@ -372,6 +401,7 @@ async def voice_answer(request: Request):
 
     # 3. Store metadata for WebSocket handler (locked for concurrent writes)
     ws_token = secrets.token_urlsafe(32)
+    ws_token_expires_at = time.time() + 300
     async with _metadata_lock:
         call_metadata[call_sid] = {
             "senior": senior,
@@ -394,6 +424,8 @@ async def voice_answer(request: Request):
             "caregiver_notes_content": caregiver_notes_content if senior and not prospect else [],
             "call_settings": call_settings,
             "ws_token": ws_token,
+            "ws_token_expires_at": ws_token_expires_at,
+            "ws_token_consumed": False,
         }
 
     # Also persist to Redis for multi-instance routing
@@ -412,7 +444,7 @@ async def voice_answer(request: Request):
         )
 
     # 4. Return TwiML
-    base_url = os.getenv("BASE_URL", "")
+    base_url = get_pipecat_public_url()
     ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://")
     senior_id = senior["id"] if senior else ""
 
@@ -432,7 +464,7 @@ async def voice_answer(request: Request):
     return Response(content=twiml, media_type="text/xml")
 
 
-@router.post("/voice/status")
+@router.post("/voice/status", dependencies=[Depends(verify_twilio_signature)])
 async def voice_status(request: Request):
     """Twilio status callback — handle call completion."""
     form = await request.form()

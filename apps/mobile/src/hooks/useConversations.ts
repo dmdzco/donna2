@@ -19,9 +19,9 @@ export function useInitiateCall() {
   const { getToken } = useAuth();
 
   return useMutation({
-    mutationFn: async (phoneNumber: string) => {
+    mutationFn: async (seniorId: string) => {
       const token = await getToken();
-      return api.calls.initiate(phoneNumber, token!);
+      return api.calls.initiate(seniorId, token!);
     },
   });
 }

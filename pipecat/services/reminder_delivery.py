@@ -102,7 +102,7 @@ async def get_reminder_by_call_sid(call_sid: str) -> dict | None:
         call_sid,
     )
     if row:
-        logger.info("Found reminder for call {cs}: {title}", cs=call_sid, title=row.get("title"))
+        logger.info("Found reminder for call {cs}", cs=call_sid)
     return row
 
 

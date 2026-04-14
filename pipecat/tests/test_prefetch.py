@@ -126,6 +126,14 @@ class TestPrefetchCache:
         got = cache.get("Jake grandson")
         assert got is not None
 
+    def test_normalized_key_ignores_punctuation_and_stopwords(self):
+        cache = PrefetchCache()
+        cache.put("my grandson, Jake!", [{"content": "Jake plays baseball"}])
+
+        got = cache.get("Jake grandson")
+        assert got is not None
+        assert got[0]["content"] == "Jake plays baseball"
+
     def test_empty_query_returns_none(self):
         cache = PrefetchCache()
         cache.put("gardening", [{"content": "test"}])

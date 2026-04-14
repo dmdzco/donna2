@@ -1,0 +1,74 @@
+# Manual Flow: Auth 2FA Visible Code Entry
+# Requires TEST_EMAIL / TEST_PASSWORD to be a Clerk test user that returns needs_second_factor.
+
+appId: com.donna.caregiver
+
+env:
+  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_PASSWORD: "Maestro2026!"
+
+---
+
+- stopApp
+- launchApp:
+    clearKeychain: true
+
+- extendedWaitUntil:
+    visible: "Sign In"
+    timeout: 15000
+- tapOn: "Sign In"
+- tapOn: "Sign In"
+
+- extendedWaitUntil:
+    visible: "Welcome Back"
+    timeout: 10000
+
+- tapOn:
+    id: "sign-in-email"
+- eraseText: 50
+- inputText: ${TEST_EMAIL}
+
+- tapOn:
+    id: "sign-in-password"
+- inputText: ${TEST_PASSWORD}
+
+- tapOn:
+    id: "sign-in-submit"
+
+# This flow is intentionally stricter than the reusable sign-in helper:
+# it must see the user-facing 2FA UI before entering the test code.
+- extendedWaitUntil:
+    visible: "Save Password\\?|Choose Verification Method|Verification Code"
+    timeout: 90000
+
+- runFlow:
+    when:
+      visible: "Save Password\\?"
+    commands:
+      - tapOn: "Not Now"
+      - extendedWaitUntil:
+          visible: "Choose Verification Method|Verification Code"
+          timeout: 15000
+
+- runFlow:
+    when:
+      visible: "Choose Verification Method"
+    commands:
+      - tapOn:
+          text: "Email code.*"
+          optional: true
+      - extendedWaitUntil:
+          visible: "Verification Code"
+          timeout: 15000
+
+- assertVisible:
+    id: "auth-verification-code"
+- tapOn:
+    id: "auth-verification-code"
+- inputText: "424242"
+- tapOn:
+    id: "auth-verification-submit"
+
+- extendedWaitUntil:
+    visible: "Hello.*|About You"
+    timeout: 90000

@@ -8,7 +8,7 @@ if (process.env.SENTRY_DSN) {
     dsn: process.env.SENTRY_DSN,
     tracesSampleRate: 0,
     sendDefaultPii: false,
-    environment: process.env.RAILWAY_PUBLIC_DOMAIN ? 'production' : 'development',
+    environment: isProductionEnv() ? 'production' : 'development',
     beforeSend(event) {
       // Hash senior_id tags to prevent direct identification
       const sid = event.tags?.senior_id;
@@ -35,6 +35,7 @@ import { clerkMiddleware } from './middleware/auth.js';
 import { mountRoutes } from './routes/index.js';
 import { startScheduler } from './services/scheduler.js';
 import { initGrowthBook, closeGrowthBook } from './lib/growthbook.js';
+import { assertNodeSecurityConfig, getPipecatPublicUrl, isProductionEnv } from './lib/security-config.js';
 
 // Security middleware
 import { securityHeaders, requestId } from './middleware/security.js';
@@ -60,8 +61,8 @@ const CORS_ORIGINS = [
   'https://www.call-donna.com',
   'https://call-donna.com',
 ];
-// Only allow localhost origins in non-deployed environments (no RAILWAY_PUBLIC_DOMAIN)
-if (!process.env.RAILWAY_PUBLIC_DOMAIN) {
+// Only allow localhost origins in non-production environments.
+if (!isProductionEnv()) {
   CORS_ORIGINS.push(
     'http://localhost:3000',
     'http://localhost:3001',
@@ -88,8 +89,9 @@ app.use(clerkMiddleware());
 const PORT = process.env.PORT || 3001;
 
 // Pipecat handles all voice calls — webhook URLs must point there
-const PIPECAT_BASE_URL = process.env.PIPECAT_BASE_URL || (
-  process.env.RAILWAY_PUBLIC_DOMAIN
+assertNodeSecurityConfig();
+const PIPECAT_BASE_URL = getPipecatPublicUrl() || (
+  isProductionEnv()
     ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
     : `http://localhost:7860`
 );

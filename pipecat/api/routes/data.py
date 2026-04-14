@@ -54,7 +54,7 @@ async def delete_senior_data(
     logger.info(
         "Hard-delete requested for senior {sid} by {by}",
         sid=sid[:8],
-        by=deleted_by,
+        by=str(deleted_by)[:8],
     )
 
     counts = await hard_delete_senior(sid, deleted_by, reason)
@@ -75,7 +75,7 @@ async def delete_prospect_data(
     logger.info(
         "Hard-delete requested for prospect {pid} by {by}",
         pid=pid[:8],
-        by=deleted_by,
+        by=str(deleted_by)[:8],
     )
 
     counts = await hard_delete_prospect(pid, deleted_by, "admin_request")

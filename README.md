@@ -258,6 +258,8 @@ apps/                                   # Frontend apps (Vercel)
 ```bash
 # Server
 PORT=7860
+ENVIRONMENT=production                  # Required in production; enables fail-closed security checks
+PIPECAT_PUBLIC_URL=https://...          # Public Pipecat URL used for Twilio webhooks and wss:// streams
 
 # Twilio
 TWILIO_ACCOUNT_SID=...
@@ -277,7 +279,13 @@ TAVILY_API_KEY=...                      # Optional fast in-call web search
 
 # Auth
 JWT_SECRET=...                          # Admin JWT signing
-DONNA_API_KEY=...                       # API key auth
+JWT_SECRET_PREVIOUS=...                 # Optional old JWT secret during rotation
+DONNA_API_KEYS=pipecat:...,scheduler:... # Labeled service-to-service API keys
+CLERK_SECRET_KEY=...                    # Required for Clerk-authenticated routes in production
+
+# HIPAA / PHI
+FIELD_ENCRYPTION_KEY=...                # 32-byte base64url key for AES-256-GCM PHI encryption
+RETENTION_AUDIT_LOGS_DAYS=2190          # 6 years by default
 
 # Scheduler
 SCHEDULER_ENABLED=false                 # Must be false (Node.js runs scheduler)
@@ -287,7 +295,11 @@ FAST_OBSERVER_MODEL=gemini-3-flash-preview  # Director fallback model
 GROQ_API_KEY=...                        # Groq (primary Director provider)
 ELEVENLABS_VOICE_ID=...                 # Voice ID (has default)
 TTS_PROVIDER=elevenlabs                 # Optional: cartesia when enabled/configured
+REDIS_URL=redis://...                   # Required before running multiple Pipecat instances
+PIPECAT_REQUIRE_REDIS=true              # Set true when Pipecat is scaled horizontally
 ```
+
+Production boot is intentionally fail-closed. Node and Pipecat refuse to start if required production secrets are missing or unsafe. `DONNA_API_KEY` is a local/test compatibility fallback only; production must use labeled `DONNA_API_KEYS`.
 
 ## API Endpoints (Pipecat)
 
@@ -312,6 +324,29 @@ make deploy-prod             # Both services to production
 ```
 
 > **Do NOT test voice/call features locally.** Deploy to Railway dev and test with real Twilio calls.
+
+Before promoting this security branch, verify production-like env readiness in Railway:
+
+- `ENVIRONMENT=production`
+- `PIPECAT_PUBLIC_URL=https://...`
+- `JWT_SECRET` is non-default
+- `DONNA_API_KEYS` contains labeled keys, including a Pipecat/notification key
+- `FIELD_ENCRYPTION_KEY` decodes to 32 bytes
+- `TWILIO_AUTH_TOKEN` is present on Pipecat and Node
+- `CLERK_SECRET_KEY` is present on Node
+- `REDIS_URL` is present before scaling Pipecat beyond one instance
+- Pipecat `LOG_LEVEL=INFO` is set before Railway dev/staging/prod smoke tests
+
+Live Twilio smoke test checklist:
+
+- Unsigned `/voice/answer` and `/voice/status` requests are rejected.
+- A valid Twilio-signed `/voice/answer` returns TwiML containing a `ws_token`.
+- `/ws` rejects missing, invalid, expired, and reused tokens.
+- A normal call lasting longer than five minutes does not drop because the token only gates connection startup.
+- Manual call initiation uses `seniorId`; the server resolves the phone number after authorization.
+- Railway logs from the smoke call do not include prompt context, transcripts, medical notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
+
+Security follow-up: the staged PHI encryption/export migration remains a separate action item. It should add encrypted companion columns for the highest-risk remaining plaintext fields, backfill in batches, switch reads to encrypted-first, update exports to decrypt only at the authorized boundary, and only then stop writing/null plaintext after verification.
 
 **CI/CD:** PRs to main → tests → staging deploy → smoke tests. Push to main → production deploy.
 

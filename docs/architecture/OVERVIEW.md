@@ -62,7 +62,7 @@ This document describes the current Donna system architecture with the **Pipecat
 │   │         │  Layer 1: Quick       │  0ms — BLOCKING                    │   │
 │   │         │  Observer             │  regex pattern data                │   │
 │   │         │                       │  Injects guidance for THIS turn    │   │
-│   │         │                       │  Goodbye → EndFrame (2s)           │   │
+│   │         │                       │  Goodbye → EndFrame delay          │   │
 │   │         └───────────┬───────────┘                                    │   │
 │   │                     ▼                                                │   │
 │   │         ┌───────────────────────┐  ┌─────────────────────────┐      │   │
@@ -138,8 +138,8 @@ This document describes the current Donna system architecture with the **Pipecat
 
 | Layer | File | Model | Latency | Purpose |
 |-------|------|-------|---------|---------|
-| **1** | `processors/quick_observer.py` + `processors/patterns.py` | Regex | 0ms | Health, goodbye, emotion, safety + programmatic call end (2s EndFrame) |
-| **2** | `processors/conversation_director.py` + `services/director_llm.py` | Groq (Gemini fallback) | ~70ms primary | Non-blocking call guidance, speculative analysis, memory prefetch, news injection |
+| **1** | `processors/quick_observer.py` + `processors/patterns.py` | Regex | 0ms | Health, goodbye, emotion, safety + programmatic call end after configured delay |
+| **2** | `processors/conversation_director.py` + `services/director_llm.py` | Groq (Gemini fallback) | Fast provider plus off-path fallback | Non-blocking call guidance, speculative analysis, memory prefetch, news injection |
 
 ### Post-Call Analysis (Async)
 

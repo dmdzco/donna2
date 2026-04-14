@@ -76,7 +76,7 @@ async def get_news_for_senior(interests: list[str], limit: int = 3) -> str | Non
 
     try:
         interest_list = ", ".join(interests[:5])
-        logger.info("Fetching news for interests: {il}", il=interest_list)
+        logger.info("Fetching news for {n} interests", n=min(len(interests), 5))
 
         async def _news_call():
             return await asyncio.to_thread(
@@ -187,7 +187,7 @@ async def web_search_query(query: str) -> str | None:
         return cached["news"]
 
     try:
-        logger.info("Web search requested")
+        logger.info("Web search query requested (query_chars={n})", n=len(query))
 
         # Try Tavily first (fast)
         content = await _tavily_search(query)

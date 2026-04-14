@@ -242,7 +242,19 @@ User: "Bye Donna!"
 
 ## Performance Monitoring
 
-### Health Endpoint (`/health`)
+### Liveness Endpoint (`/live`)
+
+Railway deploy health checks use Pipecat's lightweight `/live` endpoint. It
+only verifies that the FastAPI process is serving requests and does not touch
+Postgres, Redis, LLM providers, or other external dependencies. This keeps
+deploys from failing during a short staging cold-start window before the
+readiness smoke test can run.
+
+### Readiness Endpoint (`/health`)
+
+`/health` remains the readiness endpoint for CI smoke tests and monitoring. It
+verifies database reachability and reports pool, cache, circuit breaker, and
+call metrics.
 
 ```json
 {

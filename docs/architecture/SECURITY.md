@@ -195,7 +195,7 @@ Global exception handlers prevent internal details from leaking:
 
 - All env vars centralized in a `frozen=True` dataclass (immutable after load)
 - `lru_cache(maxsize=1)` ensures single-load behavior
-- `ENVIRONMENT=production` or `RAILWAY_PUBLIC_DOMAIN` enables production fail-closed behavior
+- `ENVIRONMENT=production` or `RAILWAY_PUBLIC_DOMAIN` enables production fail-closed behavior. This applies to Railway staging too, because staging has a public Railway domain.
 - `JWT_SECRET`, `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `TWILIO_AUTH_TOKEN`, and `PIPECAT_PUBLIC_URL` are required in production
 - Node also requires `CLERK_SECRET_KEY` for Clerk-authenticated routes in production
 - `PIPECAT_REQUIRE_REDIS=true` requires `REDIS_URL` before horizontal scaling
@@ -204,7 +204,7 @@ Global exception handlers prevent internal details from leaking:
 
 ### Deployment Checklist
 
-Before promoting a production deployment:
+Before deploying any public Railway environment, including staging and production:
 
 - Set `ENVIRONMENT=production` on Railway services.
 - Set `PIPECAT_PUBLIC_URL=https://...` to the public Pipecat service URL.

@@ -211,6 +211,27 @@ async def health():
     return JSONResponse(content=body, status_code=status_code)
 
 
+@app.get("/live")
+async def live():
+    """Lightweight liveness check for Railway deploy health checks.
+
+    Keep this endpoint free of database and vendor calls. `/health` remains the
+    readiness endpoint for CI smoke tests and monitoring.
+    """
+    status_code = 503 if _shutting_down else 200
+    return JSONResponse(
+        content={
+            "status": "draining" if _shutting_down else "ok",
+            "service": "donna-pipecat",
+            "active_calls": _active_calls,
+            "max_calls": MAX_CALLS,
+            "uptime_seconds": round(time.monotonic() - _startup_time),
+            "shutting_down": _shutting_down,
+        },
+        status_code=status_code,
+    )
+
+
 # ---------------------------------------------------------------------------
 # WebSocket — Pipecat voice pipeline
 # ---------------------------------------------------------------------------

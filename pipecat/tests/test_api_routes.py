@@ -23,6 +23,17 @@ def client():
 
 
 class TestHealthEndpoint:
+    @patch("db.check_health", side_effect=AssertionError("/live must not call database readiness"))
+    def test_live_returns_ok_without_database_check(self, mock_db_health, client):
+        response = client.get("/live")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["service"] == "donna-pipecat"
+        assert "active_calls" in data
+        assert "database" not in data
+        mock_db_health.assert_not_called()
+
     @patch("db.check_health", new_callable=AsyncMock, return_value=True)
     @patch("db.client.get_pool_stats", new_callable=AsyncMock, return_value={"size": 5, "idle": 3, "max": 50, "min": 5})
     def test_health_returns_ok(self, mock_pool_stats, mock_db_health, client):

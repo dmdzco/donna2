@@ -178,9 +178,13 @@ Optional Redis layer for multi-instance deployment. Activated by setting `REDIS_
 | `RedisState` | Redis asyncio | When `REDIS_URL` is set |
 | `UpstashRestState` | Upstash Redis REST API | When `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set |
 
-Dev is currently wired to Railway Redis via `REDIS_URL=${{Redis.REDIS_URL}}`. That URL resolves on Railway private networking, so local `railway run` commands cannot use it directly from a developer machine. Use `railway ssh --service donna-pipecat --environment dev ...` for Redis smoke tests that need to run inside the Railway network.
+Dev and production are wired to Railway Redis through `REDIS_URL` service references:
+- dev: `REDIS_URL=${{Redis.REDIS_URL}}`
+- production: `REDIS_URL=${{Redis-sJE8.REDIS_URL}}`
 
-`UpstashRestState` requires a resolvable REST endpoint. If the endpoint returns an HTTP/DNS error, it marks itself temporarily unavailable and callers continue on local state until the retry window passes. That keeps a single-replica deployment functional, but multi-replica routing still requires a valid Redis or Upstash endpoint.
+Those URLs resolve on Railway private networking, so local `railway run` commands cannot use them directly from a developer machine. Use `railway ssh --service donna-pipecat --environment <env> ...` for Redis smoke tests that need to run inside the Railway network.
+
+`UpstashRestState` remains available as a code-level fallback for non-Railway deployments. It is not the active dev or production path. If an Upstash endpoint returns an HTTP/DNS error, it marks itself temporarily unavailable and callers continue on local state until the retry window passes. That keeps a single-replica deployment functional, but multi-replica routing still requires a valid Redis or Upstash endpoint.
 
 Both implement the same async interface:
 - `set(key, value, ttl)` / `get(key)` / `delete(key)`
@@ -189,7 +193,8 @@ Both implement the same async interface:
 
 ### What's Stored in Redis
 - `call_metadata:{call_sid}` — Call context for WebSocket handler (TTL: 30 min)
-- `pending_reminder:{call_sid}` — Reminder context for outbound calls (TTL: 30 min)
+
+Reminder context is still initially stored in Pipecat process memory. `clear_reminder_context()` attempts to delete a `reminder_ctx:{call_sid}` Redis key for forward compatibility, but the scheduler does not yet write reminder context to Redis. Persist that initial reminder context before scaling reminder-triggered calls across multiple Pipecat replicas.
 
 ### Cross-Instance Flow
 1. `/voice/answer` stores call metadata in local dict + Redis
@@ -203,6 +208,7 @@ Both implement the same async interface:
 | Requirement | Status | How |
 |-------------|--------|-----|
 | Shared call metadata | Ready | Redis client module |
+| Shared reminder context | Needed | Scheduler initial reminder context is still local-only |
 | Scheduler deduplication | Ready | PostgreSQL advisory locks |
 | Connection pool per instance | Ready | Each instance creates own pool |
 | Health monitoring | Ready | Per-instance `/health` endpoint |
@@ -251,9 +257,9 @@ Each cohort transition:
 | `MAX_CONCURRENT_CALLS` | 50 | Semaphore limit for concurrent WebSocket sessions |
 | `DB_POOL_MIN` | 5 | Minimum warm database connections |
 | `DB_POOL_MAX` | 50 | Maximum database connections |
-| `REDIS_URL` | *(empty)* | Optional — enables Redis protocol shared state. Dev uses `REDIS_URL=${{Redis.REDIS_URL}}`. |
-| `UPSTASH_REDIS_REST_URL` | *(empty)* | Optional fallback — enables Upstash REST shared state when paired with token |
-| `UPSTASH_REDIS_REST_TOKEN` | *(empty)* | Optional fallback — Upstash REST bearer token |
+| `REDIS_URL` | *(empty)* | Optional — enables Redis protocol shared state. Dev and production use Railway Redis service references. |
+| `UPSTASH_REDIS_REST_URL` | *(empty)* | Optional fallback for non-Railway deployments — enables Upstash REST shared state when paired with token |
+| `UPSTASH_REDIS_REST_TOKEN` | *(empty)* | Optional fallback for non-Railway deployments — Upstash REST bearer token |
 | `SCHEDULER_ENABLED` | false | Only one instance should run the scheduler |
 
 ---

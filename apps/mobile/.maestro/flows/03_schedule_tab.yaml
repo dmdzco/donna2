@@ -19,6 +19,8 @@ env:
 
 ---
 
+- evalScript: ${output.scheduleCallTitle = "E2E Test Call " + Date.now()}
+
 - runFlow: ../subflows/sign_in.yaml
 
 # Navigate to Schedule tab
@@ -44,7 +46,7 @@ env:
 - tapOn:
     id: "call-title-input"
 - eraseText: 30
-- inputText: "E2E Test Call"
+- inputText: ${output.scheduleCallTitle}
 - pressKey: enter
 
 # Save the call (index 1: skip modal title "Add Call", hit save button)
@@ -54,17 +56,18 @@ env:
 
 # Verify new call card appears in the schedule list
 - extendedWaitUntil:
-    visible: "E2E Test Call"
+    visible: ${output.scheduleCallTitle}
     timeout: 10000
 
 # --- Edit the call ---
-- tapOn: "Edit E2E Test Call"
+- tapOn: ${"Edit " + output.scheduleCallTitle}
 - extendedWaitUntil:
     visible: "Edit Call"
     timeout: 5000
 
 # Change context notes (unique accessibilityLabel — no index issue)
-- tapOn: "Context notes"
+- tapOn:
+    id: "call-context-notes-input"
 - inputText: "Updated E2E context"
 - pressKey: enter
 
@@ -73,11 +76,14 @@ env:
 
 # Wait for modal to close
 - extendedWaitUntil:
-    visible: "E2E Test Call"
+    notVisible: "Edit Call"
+    timeout: 5000
+- extendedWaitUntil:
+    visible: ${output.scheduleCallTitle}
     timeout: 5000
 
 # --- Delete the test call (cleanup) ---
-- tapOn: "Edit E2E Test Call"
+- tapOn: ${"Edit " + output.scheduleCallTitle}
 - extendedWaitUntil:
     visible: "Edit Call"
     timeout: 5000
@@ -91,7 +97,7 @@ env:
 
 # Verify the card is gone
 - extendedWaitUntil:
-    notVisible: "E2E Test Call"
+    notVisible: ${output.scheduleCallTitle}
     timeout: 5000
 
 - takeScreenshot: 03_schedule

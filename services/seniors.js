@@ -42,37 +42,46 @@ export const seniorService = {
 
   // Update a senior
   async update(id, data) {
-    const updateData = { ...data, updatedAt: new Date() };
+    try {
+      const updateData = { ...data, updatedAt: new Date() };
 
-    if (data.phone) {
-      updateData.phone = data.phone.replace(/\D/g, '').slice(-10);
+      if (data.phone) {
+        updateData.phone = data.phone.replace(/\D/g, '').slice(-10);
+      }
+
+      if (
+        data.timezone !== undefined ||
+        data.city !== undefined ||
+        data.state !== undefined ||
+        data.zipCode !== undefined
+      ) {
+        const [existing] = await db.select({
+          timezone: seniors.timezone,
+          city: seniors.city,
+          state: seniors.state,
+          zipCode: seniors.zipCode,
+        }).from(seniors).where(eq(seniors.id, id)).limit(1);
+
+        updateData.timezone = resolveTimezoneFromProfile({
+          ...(existing || {}),
+          ...data,
+        });
+      }
+
+      const [senior] = await db.update(seniors)
+        .set(updateData)
+        .where(eq(seniors.id, id))
+        .returning();
+
+      return senior;
+    } catch (error) {
+      if (error.code === '23505' && error.constraint?.includes('phone')) {
+        const err = new Error('This phone number is already registered for another senior');
+        err.status = 409;
+        throw err;
+      }
+      throw error;
     }
-
-    if (
-      data.timezone !== undefined ||
-      data.city !== undefined ||
-      data.state !== undefined ||
-      data.zipCode !== undefined
-    ) {
-      const [existing] = await db.select({
-        timezone: seniors.timezone,
-        city: seniors.city,
-        state: seniors.state,
-        zipCode: seniors.zipCode,
-      }).from(seniors).where(eq(seniors.id, id)).limit(1);
-
-      updateData.timezone = resolveTimezoneFromProfile({
-        ...(existing || {}),
-        ...data,
-      });
-    }
-
-    const [senior] = await db.update(seniors)
-      .set(updateData)
-      .where(eq(seniors.id, id))
-      .returning();
-
-    return senior;
   },
 
   // List all active seniors

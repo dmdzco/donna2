@@ -17,6 +17,7 @@ import { INTERESTS } from "@/src/constants/interests";
 import { Input } from "@/src/components/ui/Input";
 import { Button } from "@/src/components/ui/Button";
 import { useCurrentSenior, useSenior, useUpdateSenior } from "@/src/hooks";
+import { getErrorMessage } from "@/src/lib/api";
 
 export default function LovedOneProfileScreen() {
   const router = useRouter();
@@ -82,11 +83,12 @@ export default function LovedOneProfileScreen() {
           topicsToAvoid: topicsToAvoid.trim(),
         } as unknown as Record<string, string>,
       });
-      Alert.alert("Saved", "Profile updated successfully.", [
-        { text: "OK", onPress: () => router.back() },
-      ]);
-    } catch {
-      Alert.alert("Error", "Failed to update profile. Please try again.");
+      router.replace("/(tabs)/settings");
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        getErrorMessage(error, "Failed to update profile. Please try again."),
+      );
     }
   };
 
@@ -135,6 +137,7 @@ export default function LovedOneProfileScreen() {
               value={name}
               onChangeText={setName}
               placeholder="Their full name"
+              testID="loved-one-name-input"
             />
             <Input
               label="Phone Number"
@@ -142,6 +145,7 @@ export default function LovedOneProfileScreen() {
               onChangeText={setPhone}
               placeholder="+1 (555) 000-0000"
               keyboardType="phone-pad"
+              testID="loved-one-phone-input"
             />
             <View className="flex-row gap-3">
               <View className="flex-1">
@@ -150,6 +154,7 @@ export default function LovedOneProfileScreen() {
                   value={city}
                   onChangeText={setCity}
                   placeholder="City"
+                  testID="loved-one-city-input"
                 />
               </View>
               <View className="w-20">
@@ -160,6 +165,7 @@ export default function LovedOneProfileScreen() {
                   placeholder="TX"
                   maxLength={2}
                   autoCapitalize="characters"
+                  testID="loved-one-state-input"
                 />
               </View>
               <View className="w-24">
@@ -170,6 +176,7 @@ export default function LovedOneProfileScreen() {
                   placeholder="75001"
                   keyboardType="number-pad"
                   maxLength={5}
+                  testID="loved-one-zip-input"
                 />
               </View>
             </View>

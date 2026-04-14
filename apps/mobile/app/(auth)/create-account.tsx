@@ -276,8 +276,8 @@ export default function CreateAccountScreen() {
                   }}
                   error={errors.password}
                   secureTextEntry
-                  textContentType="newPassword"
-                  autoComplete="new-password"
+                  textContentType="oneTimeCode"
+                  autoComplete="off"
                   testID="create-account-password"
                 />
               </View>

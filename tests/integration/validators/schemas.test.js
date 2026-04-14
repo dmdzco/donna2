@@ -832,13 +832,20 @@ describe('createMemorySchema', () => {
 // =============================================================================
 
 describe('initiateCallSchema', () => {
-  it('accepts valid phone number', () => {
-    const result = initiateCallSchema.safeParse({ phoneNumber: '5551234567' });
+  const validUuid = '550e8400-e29b-41d4-a716-446655440000';
+
+  it('accepts valid senior ID', () => {
+    const result = initiateCallSchema.safeParse({ seniorId: validUuid });
     expect(result.success).toBe(true);
-    expect(result.data.phoneNumber).toBe('+15551234567');
+    expect(result.data.seniorId).toBe(validUuid);
   });
 
-  it('rejects missing phone', () => {
+  it('rejects raw phone number calls', () => {
+    const result = initiateCallSchema.safeParse({ phoneNumber: '5551234567' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing senior ID', () => {
     const result = initiateCallSchema.safeParse({});
     expect(result.success).toBe(false);
   });

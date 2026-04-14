@@ -11,18 +11,21 @@ from api.validators.schemas import (
 
 
 class TestInitiateCallRequest:
-    def test_valid_phone(self):
-        req = InitiateCallRequest(phone_number="+15551234567")
-        assert req.phone_number == "+15551234567"
+    def test_valid_senior_id_alias(self):
+        req = InitiateCallRequest(seniorId="senior-123")
+        assert req.senior_id == "senior-123"
 
-    def test_normalizes_phone(self):
-        req = InitiateCallRequest(phone_number="5551234567")
-        # Should normalize to include +1 or similar
-        assert req.phone_number is not None
+    def test_valid_senior_id_field_name(self):
+        req = InitiateCallRequest(senior_id="senior-123")
+        assert req.senior_id == "senior-123"
 
     def test_rejects_empty(self):
         with pytest.raises(ValidationError):
-            InitiateCallRequest(phone_number="")
+            InitiateCallRequest(seniorId="")
+
+    def test_rejects_phone_number_only(self):
+        with pytest.raises(ValidationError):
+            InitiateCallRequest(phone_number="+15551234567")
 
 
 class TestAdminLoginRequest:

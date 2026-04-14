@@ -498,10 +498,12 @@ async def _trigger_caregiver_notification(
     node_url = os.environ.get(
         "NODE_API_URL", "https://donna-api-production-2450.up.railway.app"
     )
-    api_key = os.environ.get("DONNA_API_KEY", "")
+    from config import get_service_api_key
+
+    api_key = get_service_api_key("pipecat") or get_service_api_key("notifications") or ""
 
     if not api_key:
-        logger.warning("DONNA_API_KEY not set, skipping caregiver notification")
+        logger.warning("DONNA_API_KEYS has no pipecat/notifications key, skipping caregiver notification")
         return
 
     headers = {"X-API-Key": api_key, "Content-Type": "application/json"}

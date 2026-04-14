@@ -6,7 +6,7 @@
  * deletes data older than the configured retention period for each table.
  *
  * Retention periods are configurable via environment variables.
- * Purges use batched DELETEs (LIMIT 5000) to avoid long-running transactions.
+ * Purges use batched deletes via CTEs to avoid long-running transactions.
  */
 
 import { db } from '../db/client.js';
@@ -32,7 +32,7 @@ const RETENTION_DAYS = {
   daily_call_context:   parseInt(process.env.RETENTION_DAILY_CONTEXT_DAYS        || '90',  10),
   call_metrics:         parseInt(process.env.RETENTION_CALL_METRICS_DAYS         || '180', 10),
   reminder_deliveries:  parseInt(process.env.RETENTION_REMINDER_DELIVERIES_DAYS  || '90',  10),
-  audit_logs:           parseInt(process.env.RETENTION_AUDIT_LOGS_DAYS           || '730', 10),
+  audit_logs:           parseInt(process.env.RETENTION_AUDIT_LOGS_DAYS           || '2190', 10),
 };
 
 /**
@@ -73,12 +73,20 @@ async function purgeTable(table, dateColumn, days) {
     // The table and column names come from our own hardcoded config (not user
     // input), so embedding them in the query string is safe.
     const result = await db.execute(sql`
-      WITH deleted AS (
-        DELETE FROM ${sql.raw(table)}
+      WITH batch AS (
+        SELECT ctid
+        FROM ${sql.raw(table)}
         WHERE ${sql.raw(dateColumn)} < NOW() - make_interval(days => ${days})
+        ORDER BY ${sql.raw(dateColumn)}
         LIMIT ${BATCH_SIZE}
+      ),
+      deleted AS (
+        DELETE FROM ${sql.raw(table)} AS target
+        USING batch
+        WHERE target.ctid = batch.ctid
         RETURNING 1
-      ) SELECT count(*)::int AS count FROM deleted
+      )
+      SELECT count(*)::int AS count FROM deleted
     `);
 
     const batchCount = result.rows?.[0]?.count ?? 0;

@@ -249,7 +249,7 @@ export default function Dashboard() {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ phoneNumber: activeSenior.phone }),
+        body: JSON.stringify({ seniorId: activeSenior.id }),
       });
       alert('Call initiated! Donna will call shortly.');
     } catch (err) {

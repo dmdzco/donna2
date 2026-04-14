@@ -164,7 +164,7 @@ export const updateReminderSchema = z.object({
 // =============================================================================
 
 export const initiateCallSchema = z.object({
-  phoneNumber: phoneSchema,
+  seniorId: uuidSchema,
 });
 
 // =============================================================================

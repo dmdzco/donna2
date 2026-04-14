@@ -5,7 +5,7 @@ This service runs daily as a background asyncio loop and deletes data older
 than the configured retention period for each table.
 
 Retention periods are configurable via environment variables (see config.py).
-Purges use batched DELETEs (LIMIT 5000) to avoid long-running transactions
+Purges use batched deletes via CTEs to avoid long-running transactions
 and excessive lock contention on production.
 """
 
@@ -57,10 +57,16 @@ async def _purge_table(table: str, date_column: str, retention_days: int) -> int
         # The table and column names come from our own hardcoded config, not
         # user input, so the f-string is safe here.
         result = await query_one(
-            f"WITH deleted AS ("
-            f"  DELETE FROM {table}"
+            f"WITH batch AS ("
+            f"  SELECT ctid"
+            f"  FROM {table}"
             f"  WHERE {date_column} < NOW() - make_interval(days => $1)"
+            f"  ORDER BY {date_column}"
             f"  LIMIT {BATCH_SIZE}"
+            f"), deleted AS ("
+            f"  DELETE FROM {table} AS target"
+            f"  USING batch"
+            f"  WHERE target.ctid = batch.ctid"
             f"  RETURNING 1"
             f") SELECT count(*) AS count FROM deleted",
             retention_days,

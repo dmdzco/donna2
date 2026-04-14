@@ -80,10 +80,10 @@ export const api = {
 
   // Calls
   calls: {
-    initiate: (phoneNumber: string) =>
+    initiate: (seniorId: string) =>
       fetchJson<any>(`/api/call`, {
         method: 'POST',
-        body: JSON.stringify({ phoneNumber }),
+        body: JSON.stringify({ seniorId }),
       }),
   },
 };

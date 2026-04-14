@@ -195,11 +195,11 @@ export const api = {
   },
 
   calls: {
-    /** POST /api/call -- initiate an outbound call to a phone number */
-    initiate: (phoneNumber: string, token: string) =>
+    /** POST /api/call -- initiate an outbound call for an authorized senior */
+    initiate: (seniorId: string, token: string) =>
       fetchJson<{ success: boolean; callSid: string }>("/api/call", {
         method: "POST",
-        body: JSON.stringify({ phoneNumber }),
+        body: JSON.stringify({ seniorId }),
         token,
       }),
   },

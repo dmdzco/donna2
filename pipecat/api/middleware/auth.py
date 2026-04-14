@@ -12,6 +12,7 @@ Implemented as FastAPI Depends() callables.
 from __future__ import annotations
 
 import base64
+import hmac
 import os
 from dataclasses import dataclass
 
@@ -19,18 +20,18 @@ import jwt
 from jwt import PyJWKClient
 from fastapi import HTTPException, Request
 from loguru import logger
+from config import DEFAULT_JWT_SECRET, is_production_environment
 
 # JWT secrets — required in production.
 # JWT_SECRET_PREVIOUS enables zero-downtime credential rotation:
 # set the new secret as JWT_SECRET, move the old one to JWT_SECRET_PREVIOUS,
 # and remove JWT_SECRET_PREVIOUS after all old tokens expire (7 days).
-_DEFAULT_SECRET = "donna-admin-secret-change-me"
-if os.getenv("RAILWAY_PUBLIC_DOMAIN") and (
-    not os.getenv("JWT_SECRET") or os.getenv("JWT_SECRET") == _DEFAULT_SECRET
+if is_production_environment() and (
+    not os.getenv("JWT_SECRET") or os.getenv("JWT_SECRET") == DEFAULT_JWT_SECRET
 ):
     raise RuntimeError("JWT_SECRET environment variable is required in production (do not use the default)")
 
-JWT_SECRET = os.getenv("JWT_SECRET", _DEFAULT_SECRET)
+JWT_SECRET = os.getenv("JWT_SECRET", DEFAULT_JWT_SECRET)
 JWT_SECRET_PREVIOUS = os.getenv("JWT_SECRET_PREVIOUS", "")
 
 # Cofounder API keys (comma-separated env vars)
@@ -150,7 +151,7 @@ async def require_auth(request: Request) -> AuthContext:
     """
     # 1. Cofounder API key
     api_key = request.headers.get("x-api-key", "")
-    if api_key and api_key in COFOUNDER_API_KEYS:
+    if api_key and any(hmac.compare_digest(api_key, key) for key in COFOUNDER_API_KEYS):
         return AuthContext(is_cofounder=True, is_admin=True, user_id="cofounder")
 
     # 2. Admin JWT Bearer token (dual-key for rotation)

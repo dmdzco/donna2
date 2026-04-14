@@ -25,6 +25,9 @@ async def test_purge_table_single_batch():
     assert "conversations" in sql
     assert "created_at" in sql
     assert "make_interval" in sql
+    assert "DELETE FROM conversations AS target" in sql
+    assert "USING batch" in sql
+    assert "DELETE FROM conversations  WHERE" not in sql
 
 
 @pytest.mark.asyncio
@@ -188,7 +191,7 @@ def test_default_retention_periods():
     assert s.retention_daily_context_days == 90
     assert s.retention_call_metrics_days == 180
     assert s.retention_reminder_deliveries_days == 90
-    assert s.retention_audit_logs_days == 730
+    assert s.retention_audit_logs_days == 2190
 
 
 # ---------------------------------------------------------------------------

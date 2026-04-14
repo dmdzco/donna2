@@ -111,6 +111,67 @@ class TestVoiceAnswerEndpoint:
         assert "CA456test" in response.text
         assert "ws_token" in response.text
 
+    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
+    @patch("services.scheduler.get_prefetched_context", return_value=None)
+    @patch("services.reminder_delivery.wait_for_reminder_by_call_sid", new_callable=AsyncMock)
+    @patch("services.conversations.create", new_callable=AsyncMock, return_value={"id": "conv-reminder"})
+    @patch("api.routes.voice._hydrate_senior_call_context", new_callable=AsyncMock)
+    @patch("services.seniors.find_by_phone", new_callable=AsyncMock)
+    def test_voice_answer_waits_for_reminder_delivery_when_tagged(
+        self,
+        mock_find,
+        mock_hydrate,
+        mock_create,
+        mock_wait_reminder_db,
+        mock_prefetch,
+        mock_reminder,
+        client,
+    ):
+        """Tagged reminder calls wait for Node's reminder_deliveries row."""
+        mock_wait_reminder_db.return_value = {
+            "delivery_id": "delivery-123",
+            "reminder_id": "reminder-123",
+            "delivery_status": "delivered",
+            "attempt_count": 1,
+            "title": "Take metformin",
+            "description": "With dinner",
+            "reminder_type": "medication",
+        }
+        mock_find.return_value = {
+            "id": "senior-789",
+            "name": "Margaret",
+            "phone": "5559876543",
+            "timezone": "America/New_York",
+            "is_active": True,
+        }
+        mock_hydrate.return_value = {
+            "memory_context": "memory",
+            "pre_generated_greeting": "Hello Margaret",
+            "news_context": None,
+            "recent_turns": None,
+            "previous_calls_summary": None,
+            "todays_context": None,
+            "last_call_analysis": None,
+            "call_settings": {},
+            "has_caregiver_notes": False,
+            "caregiver_notes_content": [],
+        }
+
+        response = client.post(
+            "/voice/answer?call_type=reminder",
+            data={
+                "CallSid": "CAremindertest",
+                "From": "+15551234567",
+                "To": "+15559876543",
+                "Direction": "outbound-api",
+            },
+        )
+
+        assert response.status_code == 200
+        assert 'name="call_type" value="reminder"' in response.text
+        mock_wait_reminder_db.assert_awaited_once_with("CAremindertest")
+        mock_create.assert_awaited_once()
+
     @pytest.mark.asyncio
     async def test_bot_loads_metadata_from_local_state_first(self):
         """WebSocket setup should use local metadata before shared state."""

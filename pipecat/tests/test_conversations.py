@@ -52,10 +52,12 @@ class TestComplete:
             await complete("CA-1", {"transcript": transcript})
             args = mock_q.call_args[0]
             sql = args[0]
-            assert "transcript_encrypted = $8" in sql
-            assert "transcript_text_encrypted = $9" in sql
+            assert "summary = NULL" in sql
+            assert "concerns = NULL" in sql
+            assert "transcript_encrypted = $6" in sql
+            assert "transcript_text_encrypted = $7" in sql
             assert "transcript = $" not in sql
-            assert json.loads(args[8]) == transcript
+            assert json.loads(args[6]) == transcript
 
     @pytest.mark.asyncio
     async def test_writes_encrypted_text_transcript(self):
@@ -67,7 +69,7 @@ class TestComplete:
             ]
             await complete("CA-1", {"transcript": transcript})
             args = mock_q.call_args[0]
-            assert args[9] == "Senior: hello\nDonna: Hi there"
+            assert args[7] == "Senior: hello\nDonna: Hi there"
 
 
 class TestTranscriptPersistence:

@@ -157,7 +157,9 @@ Donna stores newly persisted conversation transcripts and call summaries in AES-
 - `conversations.transcript_text_encrypted` stores a plain-text transcript rendering for future retrieval and analysis.
 - `conversations.summary_encrypted` stores call summaries used by caregiver and admin views.
 
-The legacy plaintext `conversations.transcript` and `conversations.summary` columns remain read fallbacks for rows created before the encrypted migration and are included in retention purges. New transcript writes should not populate `conversations.transcript`.
+The legacy plaintext `conversations.transcript`, `conversations.summary`, and `conversations.concerns` columns remain read fallbacks for rows created before the encrypted migration and are included in retention purges. New transcript, summary, and concern writes should not populate those plaintext columns.
+
+New semantic memory writes store the memory body in `memories.content_encrypted` and use a non-PHI placeholder in the legacy non-null `memories.content` column. New call analysis writes store PHI-bearing analysis details in `call_analyses.analysis_encrypted`; legacy plaintext analysis columns remain read fallbacks for older rows.
 
 Caregiver clients do not receive encrypted blobs or decryption keys. The Node API authenticates the caregiver, verifies per-senior access, decrypts the summary server-side, and returns summary-only call records via `/api/seniors/:id/calls`. Admin conversation routes may return decrypted transcripts for the admin transcript viewer.
 
@@ -222,6 +224,7 @@ The staged PHI encryption/export migration is intentionally separate from ingres
 Scope for that follow-up:
 
 - Add encrypted companion columns for highest-risk plaintext PHI fields that are not yet covered, starting with senior medical notes, family info, additional info, call context snapshots, reminders, daily context, notifications, and caregiver notes.
+- Conversation summaries/transcripts, semantic memories, and call analyses now stop writing new plaintext when encrypted companion columns exist. Existing plaintext rows still need backfill/nulling under the retention/migration plan.
 - Backfill encrypted values in batches and log counts only.
 - Change reads to prefer encrypted columns and fall back to plaintext only during the migration window.
 - Update exports to decrypt only at the authorized boundary and fail on decryption errors rather than silently falling back to stale plaintext.

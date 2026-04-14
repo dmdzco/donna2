@@ -13,7 +13,7 @@ import {
   seniorIdParamSchema,
 } from '../validators/schemas.js';
 import { getAccessibleSeniorIds, canAccessSenior, routeError } from './helpers.js';
-import { logAudit, authToRole } from '../services/audit.js';
+import { logAudit, writeAudit, authToRole } from '../services/audit.js';
 import { decrypt, decryptJson } from '../lib/encryption.js';
 
 const router = Router();
@@ -36,6 +36,17 @@ function decryptExportConversation(row) {
   };
 }
 
+function decryptExportMemory(row) {
+  const {
+    contentEncrypted,
+    ...rest
+  } = row;
+  return {
+    ...rest,
+    content: contentEncrypted ? decrypt(contentEncrypted) : row.content,
+  };
+}
+
 // Create a senior profile (admin only)
 router.post('/api/seniors', requireAdmin, writeLimiter, validateBody(createSeniorSchema), async (req, res) => {
   try {
@@ -51,10 +62,7 @@ router.post('/api/seniors', requireAdmin, writeLimiter, validateBody(createSenio
     });
     res.json(senior);
   } catch (error) {
-    console.error('Failed to create senior:', error);
-    const status = error.status || 500;
-    const message = status < 500 ? error.message : 'Failed to create senior';
-    res.status(status).json({ error: message });
+    routeError(res, error, 'POST /api/seniors');
   }
 });
 
@@ -216,8 +224,7 @@ router.delete('/api/seniors/:id/data', requireAuth, writeLimiter, validateParams
     });
     res.json({ success: true, deleted_counts: counts });
   } catch (error) {
-    console.error('Failed to hard-delete senior:', error);
-    res.status(500).json({ error: 'Failed to delete senior data' });
+    routeError(res, error, 'DELETE /api/seniors/:id/data');
   }
 });
 
@@ -264,6 +271,7 @@ router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamS
         seniorId: memories.seniorId,
         type: memories.type,
         content: memories.content,
+        contentEncrypted: memories.contentEncrypted,
         source: memories.source,
         importance: memories.importance,
         metadata: memories.metadata,
@@ -295,7 +303,7 @@ router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamS
       return res.status(404).json({ error: 'Senior not found' });
     }
 
-    logAudit({
+    await writeAudit({
       userId: req.auth.userId,
       userRole: authToRole(req.auth),
       action: 'export',
@@ -309,15 +317,14 @@ router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamS
       exportedAt: new Date().toISOString(),
       senior,
       conversations: seniorConversations.map(decryptExportConversation),
-      memories: seniorMemories,
+      memories: seniorMemories.map(decryptExportMemory),
       reminders: seniorReminders,
       callAnalyses: seniorAnalyses,
       dailyContext: seniorDailyContext,
       caregiverLinks: seniorCaregiverLinks,
     });
   } catch (error) {
-    console.error('[Export] Data export failed:', error);
-    res.status(500).json({ error: 'Export failed' });
+    routeError(res, error, 'GET /api/seniors/:id/export');
   }
 });
 

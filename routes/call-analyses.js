@@ -5,6 +5,7 @@ import { eq, desc } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
 import { routeError } from './helpers.js';
 import { normalizeCallAnalysis } from '../services/call-analyses.js';
+import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
 
@@ -30,6 +31,16 @@ router.get('/api/call-analyses', requireAdmin, async (req, res) => {
     .leftJoin(seniors, eq(callAnalyses.seniorId, seniors.id))
     .orderBy(desc(callAnalyses.createdAt))
     .limit(100);
+
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'read',
+      resourceType: 'call_analysis',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { count: analyses.length },
+    });
 
     res.json(analyses.map(analysis => ({
       ...normalizeCallAnalysis(analysis),

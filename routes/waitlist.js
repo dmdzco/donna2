@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/client.js';
 import { waitlist } from '../db/schema.js';
+import { routeError } from './helpers.js';
 
 const router = Router();
 
@@ -41,9 +42,8 @@ router.post('/waitlist', async (req, res) => {
     });
 
     res.json({ success: true });
-  } catch (err) {
-    console.error('Waitlist signup error:', err);
-    res.status(500).json({ error: 'Something went wrong' });
+  } catch (error) {
+    routeError(res, error, 'POST /waitlist');
   }
 });
 

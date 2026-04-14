@@ -161,7 +161,8 @@ async def save_call_analysis(
 ) -> dict | None:
     """Save call analysis to database.
 
-    Writes both original columns (backward compat) and analysis_encrypted.
+    Writes analysis_encrypted for PHI-bearing details. Legacy plaintext
+    columns remain read-only fallback for rows written before encryption.
     """
     try:
         row = await query_one(
@@ -173,13 +174,13 @@ async def save_call_analysis(
                RETURNING *""",
             conversation_id,
             senior_id,
-            analysis.get("summary"),
-            analysis.get("topics_discussed"),
+            None,
+            None,
             analysis.get("engagement_score"),
-            json.dumps(analysis.get("concerns")),
-            analysis.get("positive_observations"),
-            analysis.get("follow_up_suggestions"),
-            json.dumps(analysis.get("call_quality")),
+            None,
+            None,
+            None,
+            None,
             encrypt_json(analysis),
         )
         logger.info("Saved analysis for conversation {cid}", cid=conversation_id)

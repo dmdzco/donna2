@@ -49,21 +49,19 @@ async def complete(call_sid: str, data: dict) -> dict | None:
              ended_at = NOW(),
              duration_seconds = $1,
              status = $2,
-             summary = $3,
-             call_metrics = $4,
-             sentiment = $5,
-             concerns = $6,
-             summary_encrypted = $7,
-             transcript_encrypted = $8,
-             transcript_text_encrypted = $9
-           WHERE call_sid = $10
+             summary = NULL,
+             call_metrics = $3,
+             sentiment = $4,
+             concerns = NULL,
+             summary_encrypted = $5,
+             transcript_encrypted = $6,
+             transcript_text_encrypted = $7
+           WHERE call_sid = $8
            RETURNING *""",
         data.get("duration_seconds"),
         data.get("status", "completed"),
-        summary_raw,
         json.dumps(data["call_metrics"]) if data.get("call_metrics") else None,
         data.get("sentiment"),
-        data.get("concerns"),
         encrypt(summary_raw),
         encrypt_json(transcript) if transcript else None,
         encrypt(transcript_text),
@@ -232,10 +230,9 @@ async def update_summary(call_sid: str, summary: str) -> dict | None:
     try:
         row = await query_one(
             """UPDATE conversations
-               SET summary = $1, summary_encrypted = $2
-               WHERE call_sid = $3
+               SET summary = NULL, summary_encrypted = $1
+               WHERE call_sid = $2
                RETURNING *""",
-            summary,
             encrypt(summary),
             call_sid,
         )
@@ -255,7 +252,7 @@ async def get_recent_summaries(senior_id: str, limit: int = 3) -> str | None:
            WHERE senior_id = $1
              AND status = 'completed'
              AND (summary IS NOT NULL OR summary_encrypted IS NOT NULL)
-             AND (summary != '' OR summary_encrypted IS NOT NULL)
+             AND (COALESCE(summary, '') != '' OR summary_encrypted IS NOT NULL)
            ORDER BY started_at DESC
            LIMIT $2""",
         senior_id,

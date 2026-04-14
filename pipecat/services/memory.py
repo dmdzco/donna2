@@ -140,7 +140,7 @@ async def store(
            RETURNING *""",
         owner_id,
         type_,
-        content,
+        "[encrypted]",
         encrypt(content),
         source,
         importance,

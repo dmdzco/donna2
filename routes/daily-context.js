@@ -4,6 +4,7 @@ import { dailyCallContext, seniors } from '../db/schema.js';
 import { eq, and, gte, lt, desc } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
 import { routeError } from './helpers.js';
+import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
 
@@ -45,6 +46,16 @@ router.get('/api/daily-context', requireAdmin, async (req, res) => {
     const results = conditions.length > 0
       ? await query.where(and(...conditions))
       : await query;
+
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'read',
+      resourceType: 'daily_context',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { seniorId: seniorId || null, date: date || null, count: results.length },
+    });
 
     res.json(results);
   } catch (error) {

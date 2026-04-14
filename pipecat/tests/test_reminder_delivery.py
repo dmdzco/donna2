@@ -104,6 +104,34 @@ class TestMarkCallEndedWithoutAcknowledgment:
             mock_exec.assert_not_called()
 
 
+class TestWaitForReminderByCallSid:
+    @pytest.mark.asyncio
+    async def test_returns_delayed_row(self):
+        row = {"delivery_id": "d1", "reminder_id": "r1", "title": "Take pills"}
+        with patch("services.reminder_delivery.query_one", new_callable=AsyncMock, side_effect=[None, row]) as mock_query:
+            from services.reminder_delivery import wait_for_reminder_by_call_sid
+
+            result = await wait_for_reminder_by_call_sid(
+                "CA-delayed",
+                timeout_seconds=0.1,
+                initial_delay_seconds=0,
+                max_delay_seconds=0,
+            )
+
+            assert result == row
+            assert mock_query.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_timeout_expires(self):
+        with patch("services.reminder_delivery.query_one", new_callable=AsyncMock, return_value=None) as mock_query:
+            from services.reminder_delivery import wait_for_reminder_by_call_sid
+
+            result = await wait_for_reminder_by_call_sid("CA-missing", timeout_seconds=0)
+
+            assert result is None
+            assert mock_query.await_count == 1
+
+
 class TestFormatReminderPrompt:
     def test_basic_reminder(self):
         from services.reminder_delivery import format_reminder_prompt

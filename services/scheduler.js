@@ -343,7 +343,7 @@ export const schedulerService = {
     const call = await retryTwilioCall(client, {
       to: senior.phone,
       from: process.env.TWILIO_PHONE_NUMBER,
-      url: `${baseUrl}/voice/answer`,
+      url: `${baseUrl}/voice/answer?call_type=reminder`,
       statusCallback: `${baseUrl}/voice/status`,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
     });

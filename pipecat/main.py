@@ -359,13 +359,18 @@ async def startup():
     from lib.cache_cleanup import start_cleanup_loop
     asyncio.create_task(start_cleanup_loop())
 
-    # Start data retention background loop (HIPAA compliance)
-    try:
-        from services.data_retention import start_retention_loop
-        asyncio.create_task(start_retention_loop())
-        logger.info("Data retention loop started")
-    except Exception as e:
-        logger.warning("Data retention init failed: {err}", err=str(e))
+    # Node is the authoritative scheduler/retention worker. Keep Pipecat's
+    # worker opt-in only to avoid two services purging the same PHI tables.
+    retention_enabled = os.getenv("PIPECAT_RETENTION_ENABLED", "false").lower() == "true"
+    if retention_enabled:
+        try:
+            from services.data_retention import start_retention_loop
+            asyncio.create_task(start_retention_loop())
+            logger.info("Data retention loop started")
+        except Exception as e:
+            logger.warning("Data retention init failed: {err}", err=str(e))
+    else:
+        logger.info("Pipecat data retention loop disabled; Node owns retention")
 
     # Start scheduler ONLY if explicitly enabled (prevents dual-scheduler conflict)
     scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "false").lower() == "true"

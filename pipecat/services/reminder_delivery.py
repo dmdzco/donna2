@@ -10,6 +10,9 @@ tools.py) from the polling loop and call triggering (used by main.py).
 
 from __future__ import annotations
 
+import asyncio
+import time
+
 from loguru import logger
 from db import query_one, execute
 
@@ -119,6 +122,51 @@ async def get_reminder_by_call_sid(call_sid: str) -> dict | None:
     if row:
         logger.info("Found reminder for call {cs}", cs=call_sid)
     return row
+
+
+async def wait_for_reminder_by_call_sid(
+    call_sid: str,
+    *,
+    timeout_seconds: float = 2.0,
+    initial_delay_seconds: float = 0.1,
+    max_delay_seconds: float = 0.5,
+) -> dict | None:
+    """Look up a reminder delivery, waiting briefly for scheduler DB writes.
+
+    Twilio can request /voice/answer before the Node scheduler has committed the
+    reminder_deliveries row containing call_sid. Waiting here keeps the call on
+    the reminder path instead of incorrectly falling through to a generic call.
+    """
+    if not call_sid:
+        return None
+
+    deadline = time.monotonic() + timeout_seconds
+    delay = initial_delay_seconds
+    attempts = 0
+
+    while True:
+        attempts += 1
+        row = await get_reminder_by_call_sid(call_sid)
+        if row:
+            if attempts > 1:
+                logger.info(
+                    "Found reminder for call {cs} after {attempts} attempts",
+                    cs=call_sid,
+                    attempts=attempts,
+                )
+            return row
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            logger.warning(
+                "Reminder delivery not found for call {cs} after {attempts} attempts",
+                cs=call_sid,
+                attempts=attempts,
+            )
+            return None
+
+        await asyncio.sleep(min(delay, remaining))
+        delay = min(delay * 2, max_delay_seconds)
 
 
 def format_reminder_prompt(reminder: dict) -> str:

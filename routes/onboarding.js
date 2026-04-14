@@ -7,6 +7,7 @@ import { validateBody } from '../middleware/validate.js';
 import { onboardingSchema } from '../validators/schemas.js';
 import { maskName } from '../lib/sanitize.js';
 import { cronExpressionFromTime, resolveTimezoneFromProfile, wallTimeTodayToUtcDate } from '../lib/timezone.js';
+import { routeError } from './helpers.js';
 
 const router = Router();
 
@@ -96,16 +97,11 @@ router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardin
       reminders: createdReminders,
     });
   } catch (error) {
-    console.error('Onboarding failed:', error);
-
     if (error.code === '23505' && error.constraint?.includes('phone')) {
       return res.status(409).json({ error: 'This phone number is already registered for another senior' });
     }
 
-    // Pass through service-level errors with status codes (e.g. duplicate phone 409)
-    const status = error.status || 500;
-    const message = status < 500 ? error.message : 'Failed to complete onboarding. Please try again.';
-    res.status(status).json({ error: message });
+    routeError(res, error, 'POST /api/onboarding');
   }
 });
 

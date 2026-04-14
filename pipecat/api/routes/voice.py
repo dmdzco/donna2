@@ -282,6 +282,7 @@ async def voice_answer(request: Request):
     from_number = form.get("From", "")
     to_number = form.get("To", "")
     direction = form.get("Direction", "")
+    call_type_hint = (request.query_params.get("call_type") or "").lower()
 
     twilio_number = os.getenv("TWILIO_PHONE_NUMBER", "")
     is_outbound = from_number == twilio_number or direction == "outbound-api"
@@ -332,9 +333,16 @@ async def voice_answer(request: Request):
         logger.info("[{cs}] Reminder call (prefetched context)", cs=call_sid)
     elif is_outbound:
         # Outbound call — check DB for reminder delivery (Node.js scheduler)
-        from services.reminder_delivery import get_reminder_by_call_sid, format_reminder_prompt as fmt_prompt
+        from services.reminder_delivery import (
+            get_reminder_by_call_sid,
+            wait_for_reminder_by_call_sid,
+            format_reminder_prompt as fmt_prompt,
+        )
         from services.seniors import find_by_phone
-        reminder_row = await get_reminder_by_call_sid(call_sid)
+        if call_type_hint == "reminder":
+            reminder_row = await wait_for_reminder_by_call_sid(call_sid)
+        else:
+            reminder_row = await get_reminder_by_call_sid(call_sid)
         if reminder_row:
             reminder_prompt = fmt_prompt({
                 "title": reminder_row.get("title"),

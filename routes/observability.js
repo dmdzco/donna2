@@ -5,6 +5,8 @@ import { eq, desc, and, sql } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
 import { decrypt, decryptJson } from '../lib/encryption.js';
 import { callAnalysisService } from '../services/call-analyses.js';
+import { routeError } from './helpers.js';
+import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
 
@@ -20,6 +22,19 @@ function readTranscript(call) {
 function readConcerns(call, analysis = null) {
   if (Array.isArray(call.concerns) && call.concerns.length > 0) return call.concerns;
   return Array.isArray(analysis?.concerns) ? analysis.concerns : [];
+}
+
+function auditObservabilityRead(req, resourceId = null, metadata = {}) {
+  logAudit({
+    userId: req.auth.userId,
+    userRole: authToRole(req.auth),
+    action: 'read',
+    resourceType: 'conversation',
+    resourceId,
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent'),
+    metadata: { surface: 'observability', ...metadata },
+  });
 }
 
 // One-time cleanup: mark stale in_progress calls (older than 1 hour) as completed
@@ -88,10 +103,10 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
       };
     });
 
+    auditObservabilityRead(req, null, { endpoint: 'calls', limit, count: formattedCalls.length });
     res.json({ calls: formattedCalls });
   } catch (error) {
-    console.error('Error fetching calls:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls');
   }
 });
 
@@ -132,6 +147,11 @@ router.get('/api/observability/calls/:id', requireAdmin, async (req, res) => {
     const analysis = analyses.get(call.id) || null;
     const transcript = readTranscript(call);
 
+    auditObservabilityRead(req, call.id, {
+      endpoint: 'call_detail',
+      seniorId: call.seniorId,
+      includesTranscript: Boolean(transcript),
+    });
     res.json({
       id: call.id,
       call_sid: call.callSid,
@@ -149,8 +169,7 @@ router.get('/api/observability/calls/:id', requireAdmin, async (req, res) => {
       analysis,
     });
   } catch (error) {
-    console.error('Error fetching call:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id');
   }
 });
 
@@ -222,6 +241,11 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
       });
     }
 
+    auditObservabilityRead(req, call.id, {
+      endpoint: 'timeline',
+      seniorId: call.seniorId,
+      eventCount: timeline.length,
+    });
     res.json({
       callId: call.id,
       callSid: call.callSid,
@@ -232,8 +256,7 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
       timeline,
     });
   } catch (error) {
-    console.error('Error fetching timeline:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/timeline');
   }
 });
 
@@ -259,10 +282,13 @@ router.get('/api/observability/calls/:id/turns', requireAdmin, async (req, res) 
       timestamp: turn.timestamp,
     }));
 
+    auditObservabilityRead(req, req.params.id, {
+      endpoint: 'turns',
+      turnCount: turns.length,
+    });
     res.json({ turns });
   } catch (error) {
-    console.error('Error fetching turns:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/turns');
   }
 });
 
@@ -323,6 +349,10 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
 
     const uniqueConcerns = [...new Set([...allConcerns, ...(call.concerns || [])])];
 
+    auditObservabilityRead(req, req.params.id, {
+      endpoint: 'observer',
+      signalCount: signals.length,
+    });
     res.json({
       signals,
       count: signals.length,
@@ -335,8 +365,7 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
       },
     });
   } catch (error) {
-    console.error('Error fetching observer data:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/observer');
   }
 });
 
@@ -371,14 +400,17 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
       });
     }
 
+    auditObservabilityRead(req, req.params.id, {
+      endpoint: 'call_metrics',
+      metricTurnCount: turnMetrics.length,
+    });
     res.json({
       turnMetrics,
       callMetrics: call.callMetrics || null,
       durationSeconds: call.durationSeconds,
     });
   } catch (error) {
-    console.error('Error fetching metrics:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/metrics');
   }
 });
 
@@ -405,8 +437,7 @@ router.get('/api/observability/metrics/calls', requireAdmin, async (req, res) =>
 
     res.json({ metrics: rows.rows, hours });
   } catch (error) {
-    console.error('Error fetching call metrics:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/metrics');
   }
 });
 
@@ -442,8 +473,7 @@ router.get('/api/observability/metrics/summary', requireAdmin, async (req, res) 
       hours,
     });
   } catch (error) {
-    console.error('Error fetching metrics summary:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/metrics/summary');
   }
 });
 
@@ -469,8 +499,7 @@ router.get('/api/observability/metrics/latency', requireAdmin, async (req, res) 
 
     res.json({ latency: rows.rows, hours });
   } catch (error) {
-    console.error('Error fetching latency trends:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/metrics/latency-trends');
   }
 });
 

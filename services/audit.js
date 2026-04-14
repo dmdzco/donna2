@@ -2,7 +2,8 @@
  * HIPAA Audit Logging Service
  *
  * Logs all access to Protected Health Information (PHI) for compliance.
- * All writes are fire-and-forget — they never block the request path.
+ * Most writes are fire-and-forget, but high-risk exports/PHI reads can await
+ * writeAudit() so audit durability is part of the request contract.
  */
 
 import { db } from '../db/client.js';
@@ -21,9 +22,8 @@ import { auditLogs } from '../db/schema.js';
  * @param {string|null} [params.userAgent]
  * @param {Object|null} [params.metadata] - extra context (e.g., query params, filters)
  */
-export function logAudit({ userId, userRole, action, resourceType, resourceId = null, ipAddress = null, userAgent = null, metadata = null }) {
-  // Fire-and-forget: don't await, don't block
-  db.insert(auditLogs).values({
+export async function writeAudit({ userId, userRole, action, resourceType, resourceId = null, ipAddress = null, userAgent = null, metadata = null }) {
+  await db.insert(auditLogs).values({
     userId,
     userRole,
     action,
@@ -32,7 +32,12 @@ export function logAudit({ userId, userRole, action, resourceType, resourceId = 
     ipAddress,
     userAgent,
     metadata: metadata || {},
-  }).then(() => {}).catch((err) => {
+  });
+}
+
+export function logAudit(params) {
+  // Fire-and-forget: don't await, don't block
+  writeAudit(params).then(() => {}).catch((err) => {
     console.error('[Audit] Log insert failed:', err.message);
   });
 }

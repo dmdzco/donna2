@@ -278,7 +278,7 @@ async def trigger_reminder_call(
             return client.calls.create(
                 to=senior["phone"],
                 from_=os.environ["TWILIO_PHONE_NUMBER"],
-                url=f"{base_url}/voice/answer",
+                url=f"{base_url}/voice/answer?call_type=reminder",
                 status_callback=f"{base_url}/voice/status",
                 status_callback_event=["initiated", "ringing", "answered", "completed"],
             )

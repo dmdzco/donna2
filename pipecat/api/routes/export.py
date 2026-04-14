@@ -7,12 +7,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 
 from api.middleware.auth import require_auth, AuthContext
 from db.client import query_one, query_many
 from lib.encryption import decrypt, decrypt_json
+from services.audit import write_audit, auth_to_role
 
 router = APIRouter()
 
@@ -81,9 +82,22 @@ def _decrypt_conversations(rows: list[dict]) -> list[dict]:
     return exported
 
 
+def _decrypt_memories(rows: list[dict]) -> list[dict]:
+    """Decrypt memory PHI for authorized export responses."""
+    exported = []
+    for row in rows:
+        clean = dict(row)
+        if clean.get("content_encrypted"):
+            clean["content"] = decrypt(clean["content_encrypted"])
+        clean.pop("content_encrypted", None)
+        exported.append(clean)
+    return exported
+
+
 @router.get("/api/seniors/{senior_id}/export")
 async def export_senior_data(
     senior_id: str,
+    request: Request,
     auth: AuthContext = Depends(require_auth),
 ):
     """Export all data for a senior (HIPAA right-to-access).
@@ -110,7 +124,7 @@ async def export_senior_data(
     )
 
     memories = await query_many(
-        """SELECT id, senior_id, type, content, source, importance, metadata,
+        """SELECT id, senior_id, type, content, content_encrypted, source, importance, metadata,
                   created_at, last_accessed_at
            FROM memories WHERE senior_id = $1 ORDER BY created_at DESC""",
         senior_id,
@@ -151,6 +165,22 @@ async def export_senior_data(
         r=len(reminders),
     )
 
+    await write_audit(
+        user_id=auth.user_id,
+        user_role=auth_to_role(auth),
+        action="export",
+        resource_type="senior",
+        resource_id=senior_id,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        metadata={
+            "conversations": len(conversations),
+            "memories": len(memories),
+            "reminders": len(reminders),
+            "surface": "pipecat_export",
+        },
+    )
+
     # Strip embedding vectors from senior (if call_context_snapshot has any)
     clean_senior = {k: v for k, v in senior.items() if k != "embedding"}
 
@@ -158,7 +188,7 @@ async def export_senior_data(
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "senior": _clean_rows([clean_senior])[0] if clean_senior else None,
         "conversations": _clean_rows(_decrypt_conversations(conversations)),
-        "memories": _clean_rows(memories),
+        "memories": _clean_rows(_decrypt_memories(memories)),
         "reminders": _clean_rows(reminders),
         "call_analyses": _clean_rows(call_analyses),
         "daily_context": _clean_rows(daily_context),

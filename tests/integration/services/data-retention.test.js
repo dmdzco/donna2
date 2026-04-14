@@ -16,6 +16,13 @@ describe('data retention purge SQL', () => {
   });
 
   it('defaults audit log retention to six years', () => {
-    expect(source).toContain("RETENTION_AUDIT_LOGS_DAYS           || '2190'");
+    expect(source).toContain("RETENTION_AUDIT_LOGS_DAYS                 || '2190'");
+  });
+
+  it('redacts conversation PHI before deleting metadata', () => {
+    expect(source).toContain('conversation_phi');
+    expect(source).toContain('RETENTION_CONVERSATION_METADATA_DAYS');
+    expect(source).toContain('summary = NULL');
+    expect(source).toContain('transcript_encrypted = NULL');
   });
 });

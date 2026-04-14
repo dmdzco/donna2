@@ -92,11 +92,14 @@ class Settings:
 
     # ---- Data Retention (HIPAA) ----
     retention_conversations_days: int = 365
+    retention_conversation_metadata_days: int = 1095
     retention_memories_days: int = 730
     retention_call_analyses_days: int = 365
     retention_daily_context_days: int = 90
     retention_call_metrics_days: int = 180
     retention_reminder_deliveries_days: int = 90
+    retention_notifications_days: int = 180
+    retention_waitlist_days: int = 365
     retention_audit_logs_days: int = 2190
 
     @property
@@ -258,11 +261,14 @@ def _load_settings() -> Settings:
         scheduler_enabled=_env("SCHEDULER_ENABLED", "false").lower() == "true",
         # Data Retention (HIPAA)
         retention_conversations_days=int(_env("RETENTION_CONVERSATIONS_DAYS", "365")),
+        retention_conversation_metadata_days=int(_env("RETENTION_CONVERSATION_METADATA_DAYS", "1095")),
         retention_memories_days=int(_env("RETENTION_MEMORIES_DAYS", "730")),
         retention_call_analyses_days=int(_env("RETENTION_CALL_ANALYSES_DAYS", "365")),
         retention_daily_context_days=int(_env("RETENTION_DAILY_CONTEXT_DAYS", "90")),
         retention_call_metrics_days=int(_env("RETENTION_CALL_METRICS_DAYS", "180")),
         retention_reminder_deliveries_days=int(_env("RETENTION_REMINDER_DELIVERIES_DAYS", "90")),
+        retention_notifications_days=int(_env("RETENTION_NOTIFICATIONS_DAYS", "180")),
+        retention_waitlist_days=int(_env("RETENTION_WAITLIST_DAYS", "365")),
         retention_audit_logs_days=int(_env("RETENTION_AUDIT_LOGS_DAYS", "2190")),
     )
 

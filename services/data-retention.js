@@ -26,13 +26,16 @@ const BATCH_SIZE = 5000;
  * Set a value to 0 to disable purge for that table.
  */
 const RETENTION_DAYS = {
-  conversations:        parseInt(process.env.RETENTION_CONVERSATIONS_DAYS        || '365', 10),
-  memories:             parseInt(process.env.RETENTION_MEMORIES_DAYS             || '730', 10),
-  call_analyses:        parseInt(process.env.RETENTION_CALL_ANALYSES_DAYS        || '365', 10),
-  daily_call_context:   parseInt(process.env.RETENTION_DAILY_CONTEXT_DAYS        || '90',  10),
-  call_metrics:         parseInt(process.env.RETENTION_CALL_METRICS_DAYS         || '180', 10),
-  reminder_deliveries:  parseInt(process.env.RETENTION_REMINDER_DELIVERIES_DAYS  || '90',  10),
-  audit_logs:           parseInt(process.env.RETENTION_AUDIT_LOGS_DAYS           || '2190', 10),
+  conversation_phi:      parseInt(process.env.RETENTION_CONVERSATIONS_DAYS              || '365', 10),
+  conversations:         parseInt(process.env.RETENTION_CONVERSATION_METADATA_DAYS      || '1095', 10),
+  memories:              parseInt(process.env.RETENTION_MEMORIES_DAYS                   || '730', 10),
+  call_analyses:         parseInt(process.env.RETENTION_CALL_ANALYSES_DAYS              || '365', 10),
+  daily_call_context:    parseInt(process.env.RETENTION_DAILY_CONTEXT_DAYS              || '90',  10),
+  call_metrics:          parseInt(process.env.RETENTION_CALL_METRICS_DAYS               || '180', 10),
+  reminder_deliveries:   parseInt(process.env.RETENTION_REMINDER_DELIVERIES_DAYS        || '90',  10),
+  notifications:         parseInt(process.env.RETENTION_NOTIFICATIONS_DAYS              || '180', 10),
+  waitlist:              parseInt(process.env.RETENTION_WAITLIST_DAYS                   || '365', 10),
+  audit_logs:            parseInt(process.env.RETENTION_AUDIT_LOGS_DAYS                 || '2190', 10),
 };
 
 /**
@@ -40,12 +43,14 @@ const RETENTION_DAYS = {
  * Only tables listed here will be purged.
  */
 const TABLE_DATE_COLUMNS = {
-  conversations:        'created_at',
+  conversations:        'started_at',
   memories:             'created_at',
   call_analyses:        'created_at',
-  daily_call_context:   'created_at',
+  daily_call_context:   'call_date',
   call_metrics:         'created_at',
   reminder_deliveries:  'created_at',
+  notifications:        'sent_at',
+  waitlist:             'created_at',
   audit_logs:           'created_at',
 };
 
@@ -103,6 +108,54 @@ async function purgeTable(table, dateColumn, days) {
 }
 
 /**
+ * Null PHI-bearing conversation fields older than the transcript retention
+ * period while preserving non-PHI metadata for longer analytics/compliance.
+ */
+async function redactConversationPhi(days) {
+  let totalRedacted = 0;
+
+  while (true) {
+    const result = await db.execute(sql`
+      WITH batch AS (
+        SELECT ctid
+        FROM conversations
+        WHERE started_at < NOW() - make_interval(days => ${days})
+          AND (
+            summary IS NOT NULL
+            OR summary_encrypted IS NOT NULL
+            OR transcript IS NOT NULL
+            OR transcript_encrypted IS NOT NULL
+            OR transcript_text_encrypted IS NOT NULL
+            OR concerns IS NOT NULL
+          )
+        ORDER BY started_at
+        LIMIT ${BATCH_SIZE}
+      ),
+      redacted AS (
+        UPDATE conversations AS target
+        SET summary = NULL,
+            summary_encrypted = NULL,
+            transcript = NULL,
+            transcript_encrypted = NULL,
+            transcript_text_encrypted = NULL,
+            concerns = NULL
+        FROM batch
+        WHERE target.ctid = batch.ctid
+        RETURNING 1
+      )
+      SELECT count(*)::int AS count FROM redacted
+    `);
+
+    const batchCount = result.rows?.[0]?.count ?? 0;
+    totalRedacted += batchCount;
+    if (batchCount < BATCH_SIZE) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  return totalRedacted;
+}
+
+/**
  * Delete rows older than their retention period from all PHI tables.
  * @returns {Promise<Object>} Map of table name -> number of rows deleted
  */
@@ -112,12 +165,16 @@ export async function purgeExpiredData() {
   for (const [table, days] of Object.entries(RETENTION_DAYS)) {
     if (days <= 0) continue; // 0 = disabled
 
-    const dateColumn = TABLE_DATE_COLUMNS[table];
-    if (!dateColumn) continue;
-
     try {
-      const deleted = await purgeTable(table, dateColumn, days);
-      results[table] = deleted;
+      if (table === 'conversation_phi') {
+        results[table] = await redactConversationPhi(days);
+        continue;
+      }
+
+      const dateColumn = TABLE_DATE_COLUMNS[table];
+      if (!dateColumn) continue;
+
+      results[table] = await purgeTable(table, dateColumn, days);
     } catch (err) {
       // Log the error but continue with remaining tables so a single
       // missing table (e.g. audit_logs not yet created) doesn't block

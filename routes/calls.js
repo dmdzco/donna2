@@ -63,12 +63,10 @@ router.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSche
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
     });
 
-    console.log(`Initiated call ${call.sid} for senior ${senior.id}`);
     res.json({ success: true, callSid: call.sid, seniorId: senior.id });
 
   } catch (error) {
-    console.error('Failed to initiate call:', error.message);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'POST /api/call');
   }
 });
 

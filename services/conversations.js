@@ -109,13 +109,13 @@ export const conversationService = {
         endedAt: new Date(),
         durationSeconds: data.durationSeconds,
         status: data.status || 'completed',
-        summary: data.summary,
+        summary: null,
         summaryEncrypted: encrypt(data.summary),
         transcriptEncrypted: encryptJson(data.transcript),
         transcriptTextEncrypted: encrypt(formatTranscriptText(data.transcript)),
         callMetrics: data.callMetrics,
         sentiment: data.sentiment,
-        concerns: data.concerns,
+        concerns: null,
       })
       .where(eq(conversations.callSid, callSid))
       .returning();
@@ -178,7 +178,7 @@ export const conversationService = {
   async updateSummary(callSid, summary) {
     try {
       const [conversation] = await db.update(conversations)
-        .set({ summary, summaryEncrypted: encrypt(summary) })
+        .set({ summary: null, summaryEncrypted: encrypt(summary) })
         .where(eq(conversations.callSid, callSid))
         .returning();
 
@@ -205,7 +205,7 @@ export const conversationService = {
       eq(conversations.seniorId, seniorId),
       eq(conversations.status, 'completed'),
       sql`(summary IS NOT NULL OR summary_encrypted IS NOT NULL)`,
-      sql`(summary != '' OR summary_encrypted IS NOT NULL)`
+      sql`(COALESCE(summary, '') != '' OR summary_encrypted IS NOT NULL)`
     ))
     .orderBy(desc(conversations.startedAt))
     .limit(limit);

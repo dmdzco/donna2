@@ -111,7 +111,7 @@ async def initiate_call(
         raise
     except Exception as e:
         logger.error("Failed to initiate call: {err}", err=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to initiate call")
 
 
 @router.get("/api/calls")
@@ -140,4 +140,4 @@ async def end_call(call_sid: str, auth: AuthContext = Depends(require_admin)):
         return {"success": True}
     except Exception as e:
         logger.error("Failed to end call {sid}: {err}", sid=call_sid, err=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to end call")

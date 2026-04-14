@@ -2,7 +2,7 @@
 
 > AI companion that makes daily phone calls to elderly people. Companionship, reminders, and peace of mind for caregivers.
 
-*Last updated: March 2026*
+*Last updated: April 2026*
 
 ---
 
@@ -91,7 +91,7 @@ The **senior** sells the product to the **caregiver**. No ads, no hard sell. "Mo
 
 | Service | Cost |
 |---------|------|
-| TTS (Cartesia Sonic 3) | $0.16 |
+| TTS (ElevenLabs default; Cartesia optional) | ~$0.16 |
 | Voice carrier (Twilio → Telnyx) | $0.22 → $0.02 |
 | Voice LLM (Claude Sonnet 4.5) | $0.07 |
 | STT (Deepgram Nova 3) | $0.04 |
@@ -103,7 +103,7 @@ The **senior** sells the product to the **caregiver**. No ads, no hard sell. "Mo
 
 | Stack | COGS/user/mo | Gross margin at $29 |
 |-------|-------------|-------------------|
-| Current (Twilio + Cartesia) | ~$25 | 14% |
+| Current (Twilio + default TTS) | ~$25 | 14% |
 | With Telnyx | ~$15 | 48% |
 | With Telnyx + cheaper TTS | ~$9 | 69% |
 | Target (optimized) | ~$8-9 | **70%+** |
@@ -222,17 +222,17 @@ Real-time voice pipeline built on Pipecat (open source):
 
 ```
 Phone call → Deepgram STT → Quick Observer (regex) → Conversation Director (Groq)
-  → Claude Sonnet 4.5 → Cartesia TTS → Phone call
+  → Claude Sonnet 4.5 → ElevenLabs TTS by default (Cartesia optional) → Phone call
 
-Background: Memory search, web search, call analysis, caregiver notifications
+Background: Memory prefetch, Claude web_search tool when needed, call analysis, caregiver notifications
 ```
 
-- **4 LLM tools** available to Claude during calls (search_memories, web_search, mark_reminder, check_caregiver_notes)
+- **2 active LLM tools** available to Claude during subscribed calls (`web_search`, `mark_reminder_acknowledged`); memories and caregiver notes are prefetched/injected outside Claude tool calls
 - **Semantic memory** with pgvector — Donna remembers across calls
 - **2-layer observer architecture** — instant regex patterns + background LLM analysis
 - **Post-call pipeline** — analysis, memory extraction, caregiver SMS, snapshot rebuild
 
-Full technical docs: [pipecat/docs/ARCHITECTURE.md](pipecat/docs/ARCHITECTURE.md) and [CLAUDE.md](CLAUDE.md)
+Full technical docs: [pipecat/docs/ARCHITECTURE.md](../pipecat/docs/ARCHITECTURE.md) and [CLAUDE.md](../CLAUDE.md)
 
 ---
 

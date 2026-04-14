@@ -6,13 +6,13 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ### Voice Pipeline (Pipecat)
 - **2-Layer Conversation Director Architecture**
-  - Layer 1: Quick Observer (0ms) — regex patterns for health, emotion, safety, goodbye
-  - Layer 2: Conversation Director — non-blocking call guidance (Groq primary, Gemini fallback)
+  - Layer 1: Quick Observer (0ms) — 250+ regex patterns across health, emotion, safety, goodbye, and other categories
+  - Layer 2: Conversation Director — non-blocking Groq fast path with Gemini fallback for non-speculative analysis
   - Post-Call Analysis — Summary, concerns, engagement score (Gemini Flash)
 - **Pipecat Flows** — conditional reminder phase, main, winding_down, closing, plus onboarding flows
 - **2 Active LLM Tools** — web_search and mark_reminder_acknowledged
 - **Director-First Memory Architecture** — Memory search and caregiver notes moved from Claude tool calls to prefetch/context injection
-- **Programmatic Call Ending** — Goodbye detection → EndFrame after 2s delay (bypasses unreliable LLM tool calls)
+- **Programmatic Call Ending** — Goodbye detection → EndFrame after configured delay, 5s by default (bypasses unreliable LLM tool calls)
 - **Director Fallback Actions** — Force winding-down at 9min, force call end at 12min
 - **Predictive Context Engine** — Speculative memory prefetch with 2-wave pipeline:
   - 1st wave: raw/interim utterance extraction → background memory search (~0ms added latency)
@@ -46,7 +46,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ### Infrastructure & Reliability
 - Circuit breakers for external services (Groq, Gemini, OpenAI embeddings/news, Tavily)
-- DB-backed feature flags with 5-minute cache
+- GrowthBook feature flags with default fallback behavior
 - Graceful shutdown with active call tracking (7s drain on SIGTERM)
 - Enhanced /health endpoint (database + circuit breaker states)
 - Multi-environment workflow (dev/staging/production with Neon branching)
@@ -58,11 +58,11 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ### Security
 - JWT admin authentication + Cofounder API keys
-- API key authentication (DONNA_API_KEY)
+- Labeled service API key authentication (`DONNA_API_KEYS`; legacy `DONNA_API_KEY` only outside production)
 - Twilio webhook signature verification
-- Rate limiting (slowapi)
+- Rate limiting in Node and Pipecat middleware
 - Security headers (HSTS, X-Frame-Options)
-- Pydantic input validation
+- Zod/Pydantic input validation
 
 ## Quick Start
 
@@ -123,8 +123,8 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                                        ▼
                              ┌─────────────────────┐
                              │   Quick Observer     │  Layer 1 (0ms, BLOCKING)
-                             │   regex patterns     │  Injects guidance for THIS turn
-                             │                      │  Goodbye → EndFrame (2s)
+                             │   250+ regex patterns│  Injects guidance for THIS turn
+                             │                      │  Goodbye → EndFrame
                              └─────────┬───────────┘
                                        │
                                        ▼
@@ -166,7 +166,7 @@ The Director is split into two specialized Groq calls for optimal latency:
 | **Query Director** | ~200ms | Continuously on interims (45 chars first, 60+25 re-fire) | Extract `memory_queries` |
 | **Guidance Director** | ~400ms | On 250ms silence (speculative) | Phase, engagement, reminders, guidance |
 
-Both run non-blocking via `asyncio.create_task()`. The Query Director currently feeds memory prefetch only; in-call factual questions go through Claude's active `web_search` tool.
+Both run non-blocking via `asyncio.create_task()`. The Query Director feeds memory prefetch only; in-call factual questions go through Claude's active `web_search` tool.
 
 | Feature | Description |
 |---------|-------------|
@@ -176,7 +176,7 @@ Both run non-blocking via `asyncio.create_task()`. The Query Director currently 
 | **Same-Turn Guidance** | Silence-based speculative enables guidance before Claude responds |
 | **Goodbye Suppression** | `_goodbye_in_progress` flag skips all Director injection during goodbye |
 | **Time-Based Fallbacks** | Force winding-down at 9min, force end at 12min |
-| **Predictive Prefetch** | Utterance first-wave + Query Director second-wave memory prefetch |
+| **Predictive Prefetch** | Raw utterance first-wave + Query Director second-wave memory prefetch |
 
 See [`pipecat/docs/LEARNINGS.md`](pipecat/docs/LEARNINGS.md) for engineering learnings and debugging insights.
 
@@ -199,11 +199,11 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 ├── prompts.py                          # System prompts + phase instructions
 ├── flows/
 │   ├── nodes.py                        # 4 call phase NodeConfigs
-│   └── tools.py                        # 2 active LLM tool schemas + retired handlers
+│   └── tools.py                        # 2 active Claude tools + retired handlers
 ├── processors/
-│   ├── patterns.py                     # Regex pattern data
+│   ├── patterns.py                     # 250+ regex patterns, 19 categories
 │   ├── quick_observer.py               # Layer 1: analysis + goodbye EndFrame
-│   ├── conversation_director.py        # Layer 2: Groq/Gemini non-blocking
+│   ├── conversation_director.py        # Layer 2: Groq speculative guidance + memory/news injection
 │   ├── conversation_tracker.py         # Topic/question/advice tracking
 │   ├── metrics_logger.py              # Call metrics logging
 │   ├── goodbye_gate.py                 # False-goodbye grace period (not in active pipeline)
@@ -211,10 +211,10 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 ├── services/
 │   ├── post_call.py                    # Post-call orchestration + snapshot rebuild
 │   ├── call_analysis.py                # Post-call analysis (Gemini Flash)
-│   ├── prefetch.py                     # Predictive Context Engine (memory prefetch)
-│   ├── director_llm.py                 # Groq Director + Gemini fallback
+│   ├── prefetch.py                     # Predictive Context Engine (speculative prefetch)
+│   ├── director_llm.py                 # Groq Director analysis with Gemini fallback helper
 │   ├── memory.py                       # Semantic memory (pgvector, decay)
-│   ├── scheduler.py                    # Reminder scheduling + outbound calls
+│   ├── scheduler.py                    # Pipecat-side scheduling helpers; Node scheduler is active
 │   ├── reminder_delivery.py            # Delivery CRUD + prompt formatting
 │   ├── call_snapshot.py                # Pre-computed call context snapshot
 │   ├── context_cache.py                # Pre-cache at 5 AM local + news persistence
@@ -224,17 +224,17 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── interest_discovery.py           # Interest extraction from conversations
 │   ├── seniors.py                      # Senior profile CRUD
 │   ├── caregivers.py                   # Caregiver-senior relationships
-│   └── news.py                         # OpenAI cached news + Tavily/OpenAI web search
+│   └── news.py                         # OpenAI cached news + Tavily/OpenAI web_search
 ├── api/
-│   ├── routes/                         # voice.py, calls.py
+│   ├── routes/                         # voice.py, calls.py, auth.py, metrics.py, export.py, data.py
 │   ├── middleware/                      # auth, api_auth, rate_limit, security, twilio
 │   └── validators/schemas.py           # Pydantic input validation
 ├── db/
 │   ├── client.py                       # asyncpg pool + query helpers + health check
-│   └── migrations/                     # SQL migrations (HNSW index, feature_flags, call_context_snapshot)
+│   └── migrations/                     # SQL migrations (HNSW index, snapshots, metrics, audit, encryption)
 ├── lib/
 │   ├── circuit_breaker.py              # Async circuit breaker for external services
-│   ├── feature_flags.py                # DB-backed feature flags (5-min cache)
+│   ├── growthbook.py                   # GrowthBook feature flags
 │   └── sanitize.py                     # PII-safe logging
 ├── tests/                              # 61 test files + helpers/mocks/scenarios
 ├── pyproject.toml                      # Python 3.12, Pipecat v0.0.101+
@@ -242,9 +242,9 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 
 /                                       # Node.js admin API (Express, Railway port 3001)
 ├── index.js                            # Express server entry
-├── routes/                             # 16 route modules (all /api/* endpoints)
-├── services/                           # 9 service files (DB access for admin APIs)
-├── middleware/                          # auth, rate-limit, security, twilio
+├── routes/                             # 17 route modules (frontend APIs, health, waitlist)
+├── services/                           # DB access and scheduler services for admin/consumer APIs
+├── middleware/                          # auth, api-auth, rate-limit, security, validation
 └── db/                                 # Drizzle ORM schema + client
 
 apps/                                   # Frontend apps (Vercel)
@@ -292,9 +292,11 @@ SCHEDULER_ENABLED=false                 # Must be false (Node.js runs scheduler)
 
 # Optional
 FAST_OBSERVER_MODEL=gemini-3-flash-preview  # Director fallback model
-GROQ_API_KEY=...                        # Groq (primary Director provider)
+GROQ_API_KEY=...                        # Groq active fast Director provider
 ELEVENLABS_VOICE_ID=...                 # Voice ID (has default)
 TTS_PROVIDER=elevenlabs                 # Optional: cartesia when enabled/configured
+GROWTHBOOK_API_HOST=...                 # Optional GrowthBook feature flag host
+GROWTHBOOK_CLIENT_KEY=...               # Optional GrowthBook client key
 REDIS_URL=redis://...                   # Required before running multiple Pipecat instances
 PIPECAT_REQUIRE_REDIS=true              # Set true when Pipecat is scaled horizontally
 ```
@@ -325,7 +327,7 @@ make deploy-prod             # Both services to production
 
 > **Do NOT test voice/call features locally.** Deploy to Railway dev and test with real Twilio calls.
 
-Before promoting this security branch, verify production-like env readiness in Railway:
+Before promoting to production, verify production-like env readiness in Railway:
 
 - `ENVIRONMENT=production`
 - `PIPECAT_PUBLIC_URL=https://...`

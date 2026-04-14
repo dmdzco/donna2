@@ -101,6 +101,27 @@ async def _safe_post_call(session_state: dict, conversation_tracker, elapsed: in
         logger.error("[{cs}] Gemini post-call failed: {err}", cs=call_sid, err=str(e))
 
 
+def _start_post_call_once(
+    session_state: dict,
+    conversation_tracker,
+    elapsed: int,
+    call_sid: str,
+    trigger: str,
+) -> asyncio.Task:
+    """Start Gemini post-call exactly once across disconnect/tool/pipeline endings."""
+    existing = session_state.get("_post_call_task")
+    if existing is not None:
+        return existing
+
+    conversation_tracker.flush()
+    logger.info("[{cs}] Gemini: scheduling post-call processing ({trigger})", cs=call_sid, trigger=trigger)
+    task = asyncio.create_task(
+        _safe_post_call(session_state, conversation_tracker, elapsed, call_sid)
+    )
+    session_state["_post_call_task"] = task
+    return task
+
+
 async def run_gemini_pipeline(
     session_state: dict,
     transport,
@@ -164,9 +185,14 @@ async def run_gemini_pipeline(
         elapsed = round(time.time() - start_time)
         logger.info("[{cs}] Gemini: client disconnected after {s}s", cs=call_sid, s=elapsed)
         session_state.setdefault("_end_reason", "user_hangup")
-        conversation_tracker.flush()
         await task.queue_frame(EndFrame())
-        asyncio.create_task(_safe_post_call(session_state, conversation_tracker, elapsed, call_sid))
+        _start_post_call_once(
+            session_state,
+            conversation_tracker,
+            elapsed,
+            call_sid,
+            "client_disconnected",
+        )
 
     # Trigger Gemini to speak first (outbound calls — no user audio yet)
     async def _trigger_greeting():
@@ -180,3 +206,14 @@ async def run_gemini_pipeline(
     logger.info("[{cs}] Gemini pipeline ready, running...", cs=call_sid)
     await runner.run(task)
     logger.info("[{cs}] Gemini pipeline ended", cs=call_sid)
+
+    elapsed = round(time.time() - start_time)
+    session_state.setdefault("_end_reason", "pipeline_ended")
+    post_call_task = _start_post_call_once(
+        session_state,
+        conversation_tracker,
+        elapsed,
+        call_sid,
+        "pipeline_ended",
+    )
+    await post_call_task

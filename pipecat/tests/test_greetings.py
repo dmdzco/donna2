@@ -1,5 +1,8 @@
 """Tests for greeting rotation service."""
 
+from datetime import datetime
+from unittest.mock import patch
+
 from services.greetings import (
     get_greeting,
     get_inbound_greeting,
@@ -75,6 +78,22 @@ class TestGetGreeting:
     def test_result_has_period(self):
         result = get_greeting(senior_name="Margaret")
         assert result["period"] in ("morning", "afternoon", "evening")
+
+    def test_invalid_timezone_falls_back_to_new_york_not_server_local(self):
+        class FakeZoneInfo:
+            def __init__(self, name):
+                if name == "Invalid/Timezone":
+                    raise ValueError("invalid timezone")
+                self.name = name
+
+        class FakeDateTime:
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 7, 1, 8 if tz else 12, 0)
+
+        with patch("services.greetings.ZoneInfo", FakeZoneInfo), \
+             patch("services.greetings.datetime", FakeDateTime):
+            assert get_local_hour("Invalid/Timezone") == 8
 
     def test_accepts_news_context(self):
         result = get_greeting(

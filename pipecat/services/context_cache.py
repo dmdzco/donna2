@@ -54,7 +54,7 @@ def _get_local_hour(tz_name: str | None) -> int:
         tz = ZoneInfo(tz_name or "America/New_York")
         return datetime.now(tz).hour
     except Exception:
-        return datetime.utcnow().hour - 5
+        return datetime.now(ZoneInfo("America/New_York")).hour
 
 
 def _select_interest(

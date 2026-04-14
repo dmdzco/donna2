@@ -5,7 +5,7 @@ to prevent repetition. Port of extractConversationElements(),
 trackTopicsFromSignals(), and getConversationTrackingSummary() from
 pipelines/v1-advanced.js.
 
-Sits in the pipeline after the LLM and reads both:
+Sits in the pipeline after guidance stripping and reads both:
 - TranscriptionFrame (user messages) → extract topic keywords
 - TextFrame (LLM output) → extract questions and advice phrases
 """
@@ -161,8 +161,8 @@ class ConversationState:
 class ConversationTrackerProcessor(FrameProcessor):
     """Track conversation elements from both user and LLM frames.
 
-    Place after the LLM and before the guidance stripper:
-        ... → llm → conversation_tracker → guidance_stripper → tts → ...
+    Place after the guidance stripper:
+        ... → llm → guidance_stripper → conversation_tracker → tts → ...
 
     All frames pass through unchanged — this processor only observes.
     The tracked state is available via .state and .get_summary().

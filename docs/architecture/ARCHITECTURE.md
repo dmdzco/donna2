@@ -47,9 +47,9 @@ Twilio Audio ──► FastAPIWebsocketTransport
               Claude Sonnet 4.5 + FlowManager (4-phase state machine)
                         │ TextFrame
                         ▼
-              Conversation Tracker (topics, questions, advice + shared transcript)
-                        ▼
               Guidance Stripper (strips <guidance> tags + [BRACKETED] directives)
+                        ▼
+              Conversation Tracker (topics, questions, advice + stripped transcript)
                         ▼
               ElevenLabs TTS (eleven_turbo_v2_5)
                         ▼

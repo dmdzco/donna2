@@ -24,6 +24,12 @@ function dailyCronFromScheduledTime(scheduledTime, senior) {
   return `${parts.minutes} ${parts.hours} * * *`;
 }
 
+function dateFromScheduledTime(scheduledTime) {
+  if (!scheduledTime) return null;
+  const date = new Date(scheduledTime);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 async function getSeniorTimezoneProfile(seniorId) {
   const [senior] = await db.select({
     id: seniors.id,
@@ -89,12 +95,13 @@ router.post('/api/reminders', requireAuth, writeLimiter, validateBody(createRemi
     const seniorProfile = await getSeniorTimezoneProfile(seniorId);
     const reminderCronExpression = cronExpression ||
       (isRecurring ? dailyCronFromScheduledTime(scheduledTime, seniorProfile) : undefined);
+    const reminderScheduledTime = dateFromScheduledTime(scheduledTime);
     const [reminder] = await db.insert(reminders).values({
       seniorId,
       type,
       title,
       description,
-      scheduledTime: scheduledTime || null,
+      scheduledTime: reminderScheduledTime,
       isRecurring,
       cronExpression: reminderCronExpression,
     }).returning();
@@ -135,7 +142,7 @@ router.patch('/api/reminders/:id', requireAuth, writeLimiter, validateParams(rem
     const updateData = {};
     if (title !== undefined) updateData.title = title;
     if (description !== undefined) updateData.description = description;
-    if (scheduledTime !== undefined) updateData.scheduledTime = scheduledTime;
+    if (scheduledTime !== undefined) updateData.scheduledTime = dateFromScheduledTime(scheduledTime);
     if (isRecurring !== undefined) updateData.isRecurring = isRecurring;
     if (cronExpression !== undefined) {
       updateData.cronExpression = cronExpression;

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -198,6 +198,8 @@ export default function ScheduleScreen() {
   const [formTime, setFormTime] = useState("9:00 AM");
   const [formNotes, setFormNotes] = useState("");
   const [formReminderIds, setFormReminderIds] = useState<string[]>([]);
+  const [recentlySavedTitle, setRecentlySavedTitle] = useState<string | null>(null);
+  const listRef = useRef<FlatList<CallCardData>>(null);
 
   const seniorFirstName = senior?.name?.split(" ")[0] ?? "your loved one";
   const timeHelperText = senior?.name
@@ -233,6 +235,26 @@ export default function ScheduleScreen() {
       conversation: convo,
     }));
   }, [dailyItems, selectedDate, scheduleItems, conversations]);
+
+  useEffect(() => {
+    if (!recentlySavedTitle) return;
+
+    const savedIndex = cardData.findIndex(
+      (item) => item.schedule.title === recentlySavedTitle,
+    );
+    if (savedIndex < 0) return;
+
+    const scrollTimeout = setTimeout(() => {
+      listRef.current?.scrollToIndex({
+        index: savedIndex,
+        animated: true,
+        viewPosition: 0.5,
+      });
+      setRecentlySavedTitle(null);
+    }, 100);
+
+    return () => clearTimeout(scrollTimeout);
+  }, [cardData, recentlySavedTitle]);
 
   // ---------------------------------------------------------------------------
   // Week navigation
@@ -337,6 +359,7 @@ export default function ScheduleScreen() {
     try {
       await updateSchedule.mutateAsync({ schedule: updated });
       setModalVisible(false);
+      setRecentlySavedTitle(newItem.title);
     } catch {
       // Error handled by react-query
     }
@@ -649,10 +672,14 @@ export default function ScheduleScreen() {
           </View>
         ) : (
           <FlatList
+            ref={listRef}
             data={cardData}
             keyExtractor={(item, i) => `${item.schedule.title}-${i}`}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: 120 }}
+            onScrollToIndexFailed={() => {
+              listRef.current?.scrollToEnd({ animated: true });
+            }}
             renderItem={({ item }) => (
               <ScheduleCallCard
                 data={item}
@@ -810,6 +837,9 @@ export default function ScheduleScreen() {
               value={formNotes}
               onChangeText={setFormNotes}
               accessibilityLabel="Context notes"
+              testID="call-context-notes-input"
+              returnKeyType="done"
+              blurOnSubmit
             />
           </View>
 
@@ -861,7 +891,10 @@ export default function ScheduleScreen() {
             {editingIndex !== null && (
               <Button
                 title="Delete Call"
-                onPress={() => setDeleteConfirmIndex(editingIndex)}
+                onPress={() => {
+                  setModalVisible(false);
+                  setDeleteConfirmIndex(editingIndex);
+                }}
                 variant="destructive"
                 disabled={updateSchedule.isPending}
               />

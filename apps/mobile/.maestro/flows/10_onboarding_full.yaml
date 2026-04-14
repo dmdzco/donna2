@@ -1,5 +1,5 @@
 # Flow 10: Full Onboarding (Fresh User)
-# Signs in with fresh clerk_test account → completes all 5 onboarding steps → dashboard
+# Creates a unique Clerk test account → completes all 5 onboarding steps → dashboard
 # NOTE: This flow creates a new senior — run separately or last
 #
 # KEY LEARNINGS:
@@ -13,13 +13,130 @@
 appId: com.donna.caregiver
 
 env:
-  TEST_EMAIL: "maestro-fresh+clerk_test@getdonna.ai"
-  TEST_PASSWORD: "MaestroFresh2026"
+  TEST_CREATE_PASSWORD: "MaestroFresh2026"
 
 ---
 
-# Sign in (reuse subflow — handles stopApp, clearKeychain, double-tap, 2FA)
-- runFlow: ../subflows/sign_in.yaml
+- evalScript: ${output.freshOnboardingEmail = "maestro-fresh-" + Date.now() + "+clerk_test@getdonna.ai"}
+- evalScript: ${output.onboardingSeniorPhone = "555" + String(Date.now()).slice(-7)}
+
+- stopApp
+- launchApp:
+    clearKeychain: true
+
+- extendedWaitUntil:
+    visible: "Get Started"
+    timeout: 15000
+
+# First tap can wake GestureHandlerRootView in dev builds; second navigates.
+- tapOn:
+    id: "landing-get-started"
+- tapOn:
+    id: "landing-get-started"
+    optional: true
+
+- extendedWaitUntil:
+    visible: "Create Account"
+    timeout: 10000
+
+- tapOn:
+    id: "create-account-email"
+- eraseText: 50
+- inputText: ${output.freshOnboardingEmail}
+
+- tapOn:
+    id: "create-account-password"
+- runFlow:
+    when:
+      visible: "Automatic Strong Password.*"
+    commands:
+      - tapOn: "Automatic Strong Password.*"
+      - runFlow:
+          when:
+            visible: "Choose My Own Password"
+          commands:
+            - tapOn: "Choose My Own Password"
+- runFlow:
+    when:
+      visible: "Automatic Strong Password|Use Strong Password|Choose My Own Password"
+    commands:
+      - tapOn: "Choose My Own Password"
+- tapOn:
+    id: "create-account-password"
+- eraseText: 80
+- inputText: ${TEST_CREATE_PASSWORD}
+- runFlow:
+    when:
+      visible: "Automatic Strong Password.*"
+    commands:
+      - tapOn: "Automatic Strong Password.*"
+      - runFlow:
+          when:
+            visible: "Choose My Own Password"
+          commands:
+            - tapOn: "Choose My Own Password"
+      - tapOn:
+          id: "create-account-password"
+      - eraseText: 80
+      - inputText: ${TEST_CREATE_PASSWORD}
+
+- tapOn:
+    id: "create-account-submit"
+
+- extendedWaitUntil:
+    visible: "Save Password\\?|Verify Your Email|About You|Automatic Strong Password.*|Password must be at least 8 characters"
+    timeout: 90000
+
+- runFlow:
+    when:
+      visible: "Automatic Strong Password.*|Password must be at least 8 characters"
+    commands:
+      - tapOn:
+          text: "Automatic Strong Password.*"
+          optional: true
+      - tapOn:
+          point: "50%,41%"
+      - runFlow:
+          when:
+            visible: "Choose My Own Password"
+          commands:
+            - tapOn: "Choose My Own Password"
+      - tapOn:
+          id: "create-account-password"
+      - eraseText: 80
+      - inputText: ${TEST_CREATE_PASSWORD}
+      - tapOn:
+          id: "create-account-submit"
+      - extendedWaitUntil:
+          visible: "Save Password\\?|Verify Your Email|About You"
+          timeout: 90000
+
+- runFlow:
+    when:
+      visible: "Save Password\\?"
+    commands:
+      - tapOn: "Not Now"
+      - extendedWaitUntil:
+          visible: "Verify Your Email|About You"
+          timeout: 15000
+
+- runFlow:
+    when:
+      visible: "Verify Your Email"
+    commands:
+      - tapOn:
+          id: "create-account-verification-code"
+      - inputText: "424242"
+      - tapOn:
+          id: "create-account-verify-submit"
+      - extendedWaitUntil:
+          visible: "Save Password\\?|About You"
+          timeout: 90000
+      - runFlow:
+          when:
+            visible: "Save Password\\?"
+          commands:
+            - tapOn: "Not Now"
 
 # ── Step 1: About You (Caregiver) ──
 - extendedWaitUntil:
@@ -56,7 +173,7 @@ env:
 - inputText: "Margaret"
 - tapOn:
     id: "input-their-phone"
-- inputText: "5559876543"
+- inputText: ${output.onboardingSeniorPhone}
 
 # Relationship picker
 - tapOn: "Select relationship"
@@ -104,6 +221,9 @@ env:
     timeout: 3000
 - tapOn: "e.g., jazz, Frank Sinatra, classical..."
 - inputText: "Loves Frank Sinatra and jazz"
+- tapOn:
+    text: "Interests"
+    index: 0
 - tapOn: "Done"
 
 - tapOn: "Gardening"
@@ -112,6 +232,9 @@ env:
     timeout: 3000
 - tapOn: "e.g., roses, vegetable garden..."
 - inputText: "Grows tomatoes and roses"
+- tapOn:
+    text: "Interests"
+    index: 0
 - tapOn: "Done"
 
 # Scroll to Continue button

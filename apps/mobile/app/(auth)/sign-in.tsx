@@ -228,24 +228,27 @@ export default function SignInScreen() {
   async function prepareSecondFactorCode(factor: AuthFactor) {
     if (!isLoaded) return;
 
+    setAuthStep({ type: "second_factor_code", factor });
+    setVerificationCode("");
     setLoading(true);
     setVerificationError(undefined);
 
     try {
-      if (factor.strategy === "email_code" && factor.emailAddressId) {
+      if (factor.strategy === "email_code") {
         await signIn.prepareSecondFactor({
           strategy: factor.strategy as any,
-          emailAddressId: factor.emailAddressId,
+          ...(factor.emailAddressId
+            ? { emailAddressId: factor.emailAddressId }
+            : {}),
         } as any);
-      } else if (factor.strategy === "phone_code" && factor.phoneNumberId) {
+      } else if (factor.strategy === "phone_code") {
         await signIn.prepareSecondFactor({
           strategy: factor.strategy as any,
-          phoneNumberId: factor.phoneNumberId,
+          ...(factor.phoneNumberId
+            ? { phoneNumberId: factor.phoneNumberId }
+            : {}),
         } as any);
       }
-
-      setVerificationCode("");
-      setAuthStep({ type: "second_factor_code", factor });
     } catch (err: unknown) {
       setVerificationError(
         getClerkErrorMessage(err, "Could not prepare that verification method")
@@ -629,7 +632,7 @@ export default function SignInScreen() {
                     }
                   }}
                   error={errors.password}
-                  secureTextEntry={!__DEV__}
+                  secureTextEntry
                   textContentType="none"
                   autoComplete="off"
                   testID="sign-in-password"

@@ -6,17 +6,22 @@ import crypto from 'crypto';
  * require Authorization: Bearer <key> header.
  * If DONNA_API_KEY is not set, auth is disabled (development mode).
  */
-// Route prefixes that use their own auth (JWT or Clerk) instead of API key
-const EXEMPT_PREFIXES = [
-  '/admin/',
-  '/observability/',
-  '/caregivers/',
-  '/seniors/',
-  '/reminders/',
+// Route prefixes that use their own auth (JWT or Clerk) instead of API key.
+// Express mounts this middleware at /api, so req.path is the path after /api.
+const EXEMPT_PATHS = [
+  '/admin',
+  '/observability',
+  '/caregivers',
+  '/seniors',
+  '/reminders',
   '/onboarding',
   '/call',
-  '/conversations/',
-  '/notifications/',
+  '/calls',
+  '/conversations',
+  '/notifications',
+  '/stats',
+  '/call-analyses',
+  '/daily-context',
 ];
 
 export function requireApiKey(req, res, next) {
@@ -28,7 +33,7 @@ export function requireApiKey(req, res, next) {
   }
 
   // Skip API key for routes that handle their own auth (JWT-based)
-  if (EXEMPT_PREFIXES.some(prefix => req.path.startsWith(prefix))) {
+  if (isApiKeyExemptPath(req.path)) {
     return next();
   }
 
@@ -45,6 +50,21 @@ export function requireApiKey(req, res, next) {
   }
 
   next();
+}
+
+export function isApiKeyExemptPath(path) {
+  const normalizedPath = normalizeApiPath(path);
+
+  return EXEMPT_PATHS.some(
+    exemptPath =>
+      normalizedPath === exemptPath ||
+      normalizedPath.startsWith(`${exemptPath}/`),
+  );
+}
+
+function normalizeApiPath(path) {
+  if (!path || path === '/') return '/';
+  return path.replace(/\/+$/, '') || '/';
 }
 
 /**

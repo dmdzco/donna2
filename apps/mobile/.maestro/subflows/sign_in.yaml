@@ -4,7 +4,7 @@
 # Ends at: Dashboard (tabs) or Onboarding step 1
 #
 # Clerk test mode: +clerk_test emails auto-verify with code 424242
-# The app's sign-in screen handles needs_second_factor in __DEV__ mode
+# Maestro must enter any second-factor code through the same visible field users see.
 
 appId: com.donna.caregiver
 
@@ -21,9 +21,12 @@ appId: com.donna.caregiver
     visible: "Sign In"
     timeout: 15000
 
-# After relaunch, first tap "wakes" GestureHandlerRootView, second navigates
-- tapOn: "Sign In"
-- tapOn: "Sign In"
+# After relaunch, first tap can "wake" GestureHandlerRootView, second navigates.
+- tapOn:
+    id: "landing-sign-in"
+- tapOn:
+    id: "landing-sign-in"
+    optional: true
 
 # Wait for sign-in screen to render
 - extendedWaitUntil:
@@ -41,7 +44,7 @@ appId: com.donna.caregiver
 - eraseText: 50
 - inputText: ${TEST_EMAIL}
 
-# Password — secureTextEntry disabled in __DEV__ so inputText works
+# Password
 - tapOn:
     id: "sign-in-password"
 - inputText: ${TEST_PASSWORD}
@@ -51,9 +54,41 @@ appId: com.donna.caregiver
 - tapOn:
     id: "sign-in-submit"
 
-# Wait for Clerk auth + 2FA auto-verify + API call + navigation
-# Landing destinations: "Hello" greeting (returning user) or "About You" (fresh user)
-# 2FA chain: signIn.create + prepareSecondFactor + attemptSecondFactor + setActive + API = ~50-60s
+# Wait for Clerk auth to either complete or ask for a visible second factor.
+- extendedWaitUntil:
+    visible: "Save Password\\?|Hello.*|About You|Choose Verification Method|Verification Code"
+    timeout: 90000
+
+# If iOS asks to save the test password, dismiss the system prompt.
+- runFlow:
+    when:
+      visible: "Save Password\\?"
+    commands:
+      - tapOn: "Not Now"
+
+# If Clerk offers multiple factors, choose the test-account email code path.
+- runFlow:
+    when:
+      visible: "Choose Verification Method"
+    commands:
+      - tapOn:
+          text: "Email code.*"
+      - extendedWaitUntil:
+          visible: "Verification Code"
+          timeout: 15000
+
+# If a second factor is required, enter the Clerk test code through the visible input.
+- runFlow:
+    when:
+      visible: "Verification Code"
+    commands:
+      - tapOn:
+          id: "auth-verification-code"
+      - inputText: "424242"
+      - tapOn:
+          id: "auth-verification-submit"
+
+# Landing destinations: "Hello" greeting (returning user) or "About You" (fresh user).
 - extendedWaitUntil:
     visible: "Hello.*|About You"
     timeout: 90000

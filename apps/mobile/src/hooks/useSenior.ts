@@ -25,7 +25,8 @@ export function useUpdateSenior(seniorId: string | undefined) {
       const token = await getToken();
       return api.seniors.update(seniorId!, data, token!);
     },
-    onSuccess: () => {
+    onSuccess: (updatedSenior) => {
+      queryClient.setQueryData(["senior", seniorId], updatedSenior);
       queryClient.invalidateQueries({ queryKey: ["senior", seniorId] });
       queryClient.invalidateQueries({ queryKey: ["profile"] });
     },
@@ -54,7 +55,8 @@ export function useUpdateSchedule(seniorId: string | undefined) {
       const token = await getToken();
       return api.seniors.updateSchedule(seniorId!, data, token!);
     },
-    onSuccess: () => {
+    onSuccess: (updatedSchedule) => {
+      queryClient.setQueryData(["schedule", seniorId], updatedSchedule);
       queryClient.invalidateQueries({ queryKey: ["schedule", seniorId] });
     },
   });

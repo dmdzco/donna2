@@ -116,6 +116,27 @@ async def _safe_post_call(session_state: dict, conversation_tracker, elapsed: in
         logger.error("[{cs}] Background post-call failed: {err}", cs=call_sid, err=str(e))
 
 
+def _start_post_call_once(
+    session_state: dict,
+    conversation_tracker,
+    elapsed: int,
+    call_sid: str,
+    trigger: str,
+) -> asyncio.Task:
+    """Start post-call processing once, regardless of how the pipeline ended."""
+    existing = session_state.get("_post_call_task")
+    if existing is not None:
+        return existing
+
+    conversation_tracker.flush()
+    logger.info("[{cs}] Scheduling post-call processing ({trigger})", cs=call_sid, trigger=trigger)
+    task = asyncio.create_task(
+        _safe_post_call(session_state, conversation_tracker, elapsed, call_sid)
+    )
+    session_state["_post_call_task"] = task
+    return task
+
+
 async def _mark_caregiver_notes_delivered(session_state: dict, call_sid: str):
     """Fire-and-forget: mark pre-fetched caregiver notes as delivered."""
     try:
@@ -487,13 +508,17 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         logger.info("[{cs}] Client disconnected after {s}s", cs=call_sid, s=elapsed)
         # Set end_reason if not already set by Quick Observer or Director
         session_state.setdefault("_end_reason", "user_hangup")
-        # Flush any buffered assistant text before post-call reads transcript
-        conversation_tracker.flush()
         # End pipeline first so runner.run() unblocks, then run post-call in background.
         # Previously run_post_call was awaited before EndFrame, so if Gemini/OpenAI
         # hung during analysis the pipeline would never terminate.
         await task.queue_frame(EndFrame())
-        asyncio.create_task(_safe_post_call(session_state, conversation_tracker, elapsed, call_sid))
+        _start_post_call_once(
+            session_state,
+            conversation_tracker,
+            elapsed,
+            call_sid,
+            "client_disconnected",
+        )
 
     # -------------------------------------------------------------------------
     # Run pipeline
@@ -504,3 +529,14 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     await runner.run(task)
 
     logger.info("[{cs}] Pipeline ended", cs=call_sid)
+
+    elapsed = round(time.time() - start_time)
+    session_state.setdefault("_end_reason", "pipeline_ended")
+    post_call_task = _start_post_call_once(
+        session_state,
+        conversation_tracker,
+        elapsed,
+        call_sid,
+        "pipeline_ended",
+    )
+    await post_call_task

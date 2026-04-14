@@ -243,9 +243,21 @@ const structuredInterestSchema = z.object({
   details: z.string().max(1000).optional(),
 });
 
+const callScheduleDaySchema = z.enum(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+
 const callScheduleSchema = z.object({
-  days: z.array(z.enum(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])).min(1),
+  frequency: z.enum(['daily', 'recurring', 'one-time']).default('daily'),
+  days: z.array(callScheduleDaySchema).max(7).optional(),
   time: z.string().regex(/^\d{2}:\d{2}$/, 'Time must be in HH:MM format'),
+  date: z.string().max(50).optional(),
+}).superRefine((data, ctx) => {
+  if (data.frequency === 'recurring' && (!data.days || data.days.length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['days'],
+      message: 'Recurring schedules require at least one day',
+    });
+  }
 });
 
 export const onboardingSchema = z.object({

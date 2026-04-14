@@ -2,8 +2,15 @@
 
 ## Open Bugs
 
+(none)
+
+---
+
+## Resolved Bugs
+
 ### BUG-001: Signup rejects all passwords as "found in data leak"
 - **Reported**: 2026-04-13
+- **Resolved**: 2026-04-14
 - **Reporter**: Nick
 - **App**: Mobile (consumer signup)
 - **Severity**: Critical — blocks new user registration
@@ -15,12 +22,14 @@
   4. Try different passwords — all rejected
 - **Expected**: Valid, strong passwords should be accepted
 - **Screenshot**: ![BUG-001](screenshots/bug-001-password-rejected.png)
-- **Status**: Open
+- **Fix branch**: `codex/mobile-onboarding-bugs`
+- **Status**: Fixed in `codex/mobile-onboarding-bugs` — restores native strong-password support, raises local minimum length, improves breached-password guidance, and updates mobile auth E2E passwords to be unique per run.
 
 ---
 
 ### BUG-002: "Continue to Homepage" fails after completing signup
 - **Reported**: 2026-04-13
+- **Resolved**: 2026-04-14
 - **Reporter**: Nick
 - **App**: Mobile (onboarding success screen)
 - **Severity**: Critical — blocks onboarded users from reaching the app
@@ -33,10 +42,12 @@
   5. Tapping again produces the same error
 - **Expected**: User should be navigated to the main dashboard. If an error occurs, there should be a way to go back or clear guidance on the issue.
 - **Screenshot**: ![BUG-002](screenshots/bug-002-onboarding-error.png)
-- **Status**: Open
+- **Fix branch**: `codex/mobile-onboarding-bugs`
+- **Status**: Fixed in `codex/mobile-onboarding-bugs` — aligns mobile call-schedule payloads with backend validation, prevents empty recurring schedules, and makes backend onboarding writes transactional.
 
----
+## Facundo QA TODOs
 
-## Resolved Bugs
-
-(none yet)
+- [ ] **BUG-001 signup password check**: Create a fresh mobile account on an iPhone/simulator and confirm the password field offers or accepts a strong password instead of repeatedly showing Clerk's "found in data leak" rejection.
+- [ ] **BUG-002 full onboarding completion**: Complete all five onboarding steps, tap "Continue to Homepage", and confirm the app creates the senior, links the caregiver, creates reminders, and lands on the dashboard.
+- [ ] **Recurring schedule validation**: On the Schedule Donna step, choose "Recurring" without selecting any day and confirm the app blocks progress with "Choose at least one day for this recurring call."
+- [ ] **Duplicate loved-one phone recovery**: Try onboarding with a loved-one phone number already used by another senior and confirm the app shows the duplicate-phone message rather than the generic onboarding failure.

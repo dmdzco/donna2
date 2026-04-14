@@ -12,13 +12,11 @@
 
 appId: com.donna.caregiver
 
-env:
-  TEST_CREATE_PASSWORD: "MaestroFresh2026"
-
 ---
 
 - evalScript: ${output.freshOnboardingEmail = "maestro-fresh-" + Date.now() + "+clerk_test@getdonna.ai"}
 - evalScript: ${output.onboardingSeniorPhone = "555" + String(Date.now()).slice(-7)}
+- evalScript: ${output.createPassword = "Donna-" + Date.now() + "-Z9!"}
 
 - stopApp
 - launchApp:
@@ -64,7 +62,7 @@ env:
 - tapOn:
     id: "create-account-password"
 - eraseText: 80
-- inputText: ${TEST_CREATE_PASSWORD}
+- inputText: ${output.createPassword}
 - runFlow:
     when:
       visible: "Automatic Strong Password.*"
@@ -78,18 +76,18 @@ env:
       - tapOn:
           id: "create-account-password"
       - eraseText: 80
-      - inputText: ${TEST_CREATE_PASSWORD}
+      - inputText: ${output.createPassword}
 
 - tapOn:
     id: "create-account-submit"
 
 - extendedWaitUntil:
-    visible: "Save Password\\?|Verify Your Email|About You|Automatic Strong Password.*|Password must be at least 8 characters"
+    visible: "Save Password\\?|Verify Your Email|About You|Automatic Strong Password.*|Password must be at least 12 characters"
     timeout: 90000
 
 - runFlow:
     when:
-      visible: "Automatic Strong Password.*|Password must be at least 8 characters"
+      visible: "Automatic Strong Password.*|Password must be at least 12 characters"
     commands:
       - tapOn:
           text: "Automatic Strong Password.*"
@@ -104,7 +102,7 @@ env:
       - tapOn:
           id: "create-account-password"
       - eraseText: 80
-      - inputText: ${TEST_CREATE_PASSWORD}
+      - inputText: ${output.createPassword}
       - tapOn:
           id: "create-account-submit"
       - extendedWaitUntil:

@@ -99,8 +99,10 @@ export interface OnboardingInput {
   reminders?: string[];
   topicsToAvoid?: string[];
   callSchedule?: {
+    frequency?: "daily" | "recurring" | "one-time";
     days?: ("Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun")[];
     time?: string;
+    date?: string;
   };
 }
 

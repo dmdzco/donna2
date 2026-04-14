@@ -73,6 +73,13 @@ describe('Onboarding Route — Reminder Creation (Bug #8)', () => {
     expect(routeSource).toContain('reminderTitle.trim()');
     expect(routeSource).toContain("title: reminderTitle.trim()");
   });
+
+  it('creates onboarding records inside a transaction', () => {
+    expect(routeSource).toContain('db.transaction');
+    expect(routeSource).toContain('tx.insert(seniors)');
+    expect(routeSource).toContain('tx.insert(caregivers)');
+    expect(routeSource).toContain('tx.insert(reminders)');
+  });
 });
 
 describe('Onboarding Route — Security', () => {

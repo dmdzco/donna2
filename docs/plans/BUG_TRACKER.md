@@ -14,6 +14,7 @@
   3. Password is rejected as "found in a data leak"
   4. Try different passwords — all rejected
 - **Expected**: Valid, strong passwords should be accepted
+- **Screenshot**: ![BUG-001](screenshots/bug-001-password-rejected.png)
 - **Status**: Open
 
 ---
@@ -31,6 +32,7 @@
   4. Error appears: "Failed to complete onboarding. Please try again"
   5. Tapping again produces the same error
 - **Expected**: User should be navigated to the main dashboard. If an error occurs, there should be a way to go back or clear guidance on the issue.
+- **Screenshot**: ![BUG-002](screenshots/bug-002-onboarding-error.png)
 - **Status**: Open
 
 ---

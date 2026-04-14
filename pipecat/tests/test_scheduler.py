@@ -5,9 +5,14 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, AsyncMock, MagicMock
 
 from services.scheduler import (
+    REMINDER_CONTEXT_TTL_SECONDS,
     get_scheduled_for_time,
     get_reminder_context,
+    get_reminder_context_async,
+    store_reminder_context,
     clear_reminder_context,
+    clear_reminder_context_async,
+    cleanup_stale_contexts,
     get_prefetched_context,
     pending_reminder_calls,
     prefetched_context_by_phone,
@@ -16,6 +21,26 @@ from services.scheduler import (
     _extract_senior,
     _extract_delivery,
 )
+
+
+class FakeSharedState:
+    is_shared = True
+
+    def __init__(self):
+        self.data = {}
+        self.ttls = {}
+        self.deleted = []
+
+    async def set(self, key, value, ttl=None):
+        self.data[key] = value
+        self.ttls[key] = ttl
+
+    async def get(self, key):
+        return self.data.get(key)
+
+    async def delete(self, key):
+        self.deleted.append(key)
+        self.data.pop(key, None)
 
 
 class TestGetScheduledForTime:
@@ -60,10 +85,54 @@ class TestInMemoryOps:
     def test_get_reminder_context_unknown(self):
         assert get_reminder_context("CA-999") is None
 
+    @pytest.mark.asyncio
+    async def test_get_reminder_context_async_uses_local_first(self):
+        pending_reminder_calls["CA-123"] = {"reminder": {"id": "local"}}
+        with patch("lib.redis_client.get_shared_state") as mock_shared:
+            result = await get_reminder_context_async("CA-123")
+        assert result["reminder"]["id"] == "local"
+        mock_shared.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_reminder_context_async_loads_shared_state(self):
+        state = FakeSharedState()
+        state.data["reminder_ctx:CA-redis"] = {"reminder": {"id": "shared"}}
+        with patch("lib.redis_client.get_shared_state", return_value=state):
+            result = await get_reminder_context_async("CA-redis")
+        assert result["reminder"]["id"] == "shared"
+        assert pending_reminder_calls["CA-redis"] == result
+
+    @pytest.mark.asyncio
+    async def test_store_reminder_context_writes_local_and_shared_state(self):
+        state = FakeSharedState()
+        context = {"reminder": {"id": "r1"}, "triggered_at": datetime.now(timezone.utc)}
+        with patch("lib.redis_client.get_shared_state", return_value=state):
+            await store_reminder_context("CA-123", context)
+        assert pending_reminder_calls["CA-123"] == context
+        assert state.data["reminder_ctx:CA-123"] == context
+        assert state.ttls["reminder_ctx:CA-123"] == REMINDER_CONTEXT_TTL_SECONDS
+
     def test_clear_reminder_context(self):
         pending_reminder_calls["CA-123"] = {"data": True}
         clear_reminder_context("CA-123")
         assert "CA-123" not in pending_reminder_calls
+
+    @pytest.mark.asyncio
+    async def test_clear_reminder_context_async_deletes_shared_state(self):
+        state = FakeSharedState()
+        pending_reminder_calls["CA-123"] = {"data": True}
+        state.data["reminder_ctx:CA-123"] = {"data": True}
+        with patch("lib.redis_client.get_shared_state", return_value=state):
+            await clear_reminder_context_async("CA-123")
+        assert "CA-123" not in pending_reminder_calls
+        assert state.deleted == ["reminder_ctx:CA-123"]
+        assert "reminder_ctx:CA-123" not in state.data
+
+    def test_cleanup_stale_contexts_handles_string_timestamps(self):
+        old = datetime.now(timezone.utc) - timedelta(minutes=45)
+        pending_reminder_calls["CA-old"] = {"triggered_at": old.isoformat()}
+        assert cleanup_stale_contexts(max_age_minutes=30) == 1
+        assert "CA-old" not in pending_reminder_calls
 
     def test_get_prefetched_context_one_time_use(self):
         prefetched_context_by_phone["5551234567"] = {"senior": {"name": "Test"}}
@@ -132,10 +201,12 @@ class TestTriggerReminderCall:
         mock_client = MagicMock()
         mock_client.calls.create.return_value = mock_call
         mock_delivery = {"id": "d-new", "attempt_count": 1}
+        state = FakeSharedState()
 
         with patch("services.scheduler._get_twilio_client", return_value=mock_client), \
              patch("services.memory.build_context", new_callable=AsyncMock, return_value="Memory context"), \
              patch("services.scheduler.query_one", new_callable=AsyncMock, return_value=mock_delivery), \
+             patch("lib.redis_client.get_shared_state", return_value=state), \
              patch.dict("os.environ", {"TWILIO_PHONE_NUMBER": "+10000000000"}):
             from services.scheduler import trigger_reminder_call
             result = await trigger_reminder_call(
@@ -146,6 +217,8 @@ class TestTriggerReminderCall:
             assert result is not None
             assert result["sid"] == "CA-new-123"
             assert "CA-new-123" in pending_reminder_calls
+            assert state.data["reminder_ctx:CA-new-123"]["memory_context"] == "Memory context"
+            assert state.ttls["reminder_ctx:CA-new-123"] == REMINDER_CONTEXT_TTL_SECONDS
 
     @pytest.mark.asyncio
     async def test_handles_exception(self):

@@ -229,7 +229,7 @@ def mock_scheduler_service():
     """Patch services.scheduler for tool handler tests."""
     with patch("services.reminder_delivery.mark_reminder_acknowledged", new_callable=AsyncMock) as mock_ack, \
          patch("services.reminder_delivery.mark_call_ended_without_acknowledgment", new_callable=AsyncMock) as mock_no_ack, \
-         patch("services.scheduler.clear_reminder_context", new_callable=AsyncMock) as mock_clear:
+         patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock) as mock_clear:
         mock_ack.return_value = None
         mock_no_ack.return_value = None
         mock_clear.return_value = None

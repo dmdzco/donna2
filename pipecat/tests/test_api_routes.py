@@ -47,7 +47,7 @@ class TestHealthEndpoint:
 
 
 class TestVoiceAnswerEndpoint:
-    @patch("services.scheduler.get_reminder_context", return_value=None)
+    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
     @patch("services.scheduler.get_prefetched_context", return_value=None)
     @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
     def test_voice_answer_returns_twiml(self, mock_find, mock_prefetch, mock_reminder, client):
@@ -68,7 +68,7 @@ class TestVoiceAnswerEndpoint:
         assert "/ws" in response.text
         assert "ws_token" in response.text
 
-    @patch("services.scheduler.get_reminder_context", return_value=None)
+    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
     @patch("services.scheduler.get_prefetched_context", return_value=None)
     @patch("services.reminder_delivery.get_reminder_by_call_sid", new_callable=AsyncMock, return_value=None)
     @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
@@ -154,7 +154,7 @@ class TestVoiceAnswerEndpoint:
 
         assert response.status_code == 403
 
-    @patch("services.scheduler.get_reminder_context", return_value=None)
+    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
     @patch("services.scheduler.get_prefetched_context", return_value=None)
     @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
     def test_voice_answer_accepts_valid_twilio_signature(

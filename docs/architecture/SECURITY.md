@@ -194,6 +194,8 @@ Before promoting a production deployment:
 - Verify `TWILIO_AUTH_TOKEN` exists on both Pipecat and Node services.
 - Verify `CLERK_SECRET_KEY` exists on Node.
 - Set `REDIS_URL` before running more than one Pipecat instance.
+- Set Pipecat `LOG_LEVEL=INFO` for Railway dev/staging/prod before smoke testing or promotion.
+- Verify Railway logs do not contain prompt context, transcripts, medical notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
 - Smoke test real Twilio signatures, signed TwiML with `ws_token`, `/ws` token rejection/reuse, and a call longer than five minutes.
 
 ### Remaining PHI Encryption Action Item

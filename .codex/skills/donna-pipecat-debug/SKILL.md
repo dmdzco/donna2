@@ -43,6 +43,13 @@ Start by classifying the bug before reading large files. Use `references/hotspot
 - `npm run test:e2e:*` for frontend regressions
 - `make deploy-dev-pipecat` only when runtime confirmation is needed
 
+## Railway Log Hygiene
+
+- Use `LOG_LEVEL=INFO` for Railway dev/staging/prod validation unless a short-lived incident requires `DEBUG`.
+- Do not leave Pipecat `DEBUG` enabled in shared Railway environments after a live call. Debug logs can include LLM prompt context, transcripts, caregiver notes, medical notes, raw Twilio WebSocket parameters, and one-time `ws_token` values.
+- After live Twilio smoke tests, scan Pipecat logs for sensitive payloads as part of the verification, not only call success or latency.
+- If you need debug-level details, capture only the narrow time window, avoid copying PHI into notes, and remove or redact sensitive log excerpts from any durable artifact.
+
 ## Output
 
 - Identify the failing subsystem first.

@@ -317,4 +317,14 @@ Questions before implementation:
 - Should admins/cofounders be allowed to place arbitrary phone calls, or should all calls require a known senior?
 - Is `BASE_URL` guaranteed to be Pipecat's public URL in every Pipecat deployment? If not, WebSocket token fixes should also harden URL construction.
 - Which vendors have current signed BAAs as of the production environment, if any? The docs currently say none.
-- Are production logs ever run with `LOG_LEVEL=DEBUG`? If yes, phone-debug logging in the voice answer path needs immediate redaction.
+
+## Operational Lesson From Security Dev Smoke
+
+Railway dev validation on April 14, 2026 proved the security + Redis call path worked end to end, but also showed that Pipecat `LOG_LEVEL=DEBUG` can emit sensitive prompt context and Twilio WebSocket parameters, including one-time `ws_token` values.
+
+Before promoting security work to `main` or production:
+
+- Set Pipecat `LOG_LEVEL=INFO` in Railway dev/staging/prod unless a short-lived incident explicitly requires debug logs.
+- Treat any debug log mode on Pipecat as PHI-bearing and time-bound.
+- Verify smoke-call logs do not include prompt context, transcripts, medical notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
+- Patch or suppress third-party/Pipecat debug emitters before relying on `DEBUG` in a shared Railway environment.

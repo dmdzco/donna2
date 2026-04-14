@@ -54,11 +54,18 @@ Treat code as the runtime source of truth and compliance docs as intent. If docs
 ## Red Flags
 
 - Raw transcripts, reminders, or medical notes logged or sent to error tooling.
+- Pipecat or Railway environments running with `LOG_LEVEL=DEBUG` and emitting prompt context, transcripts, caregiver notes, medical notes, raw WebSocket parameters, or one-time `ws_token` values.
 - New routes that bypass existing auth middleware.
 - Python and Node implementations drifting on security-sensitive behavior.
 - Sensitive fields stored or returned in plaintext when encrypted or minimized alternatives already exist.
 - Hardcoded secrets, debug bypasses, or "temporary" auth exemptions.
 - Retention/export/delete flows that miss mirrored tables or companion encrypted columns.
+
+## Deployment Log Hygiene
+
+- Before main/prod promotion, verify Pipecat `LOG_LEVEL=INFO` in Railway dev/staging/prod.
+- If `DEBUG` is temporarily required for an incident, treat logs as PHI-bearing, keep the window short, and confirm no prompt context, raw transcripts, medical notes, caregiver notes, WebSocket parameters, or `ws_token` values are retained in normal logs.
+- Security smoke tests must include a log review after the live Twilio call, not just HTTP/WebSocket success.
 
 ## Output
 

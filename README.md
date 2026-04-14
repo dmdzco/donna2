@@ -335,6 +335,7 @@ Before promoting this security branch, verify production-like env readiness in R
 - `TWILIO_AUTH_TOKEN` is present on Pipecat and Node
 - `CLERK_SECRET_KEY` is present on Node
 - `REDIS_URL` is present before scaling Pipecat beyond one instance
+- Pipecat `LOG_LEVEL=INFO` is set before Railway dev/staging/prod smoke tests
 
 Live Twilio smoke test checklist:
 
@@ -343,6 +344,7 @@ Live Twilio smoke test checklist:
 - `/ws` rejects missing, invalid, expired, and reused tokens.
 - A normal call lasting longer than five minutes does not drop because the token only gates connection startup.
 - Manual call initiation uses `seniorId`; the server resolves the phone number after authorization.
+- Railway logs from the smoke call do not include prompt context, transcripts, medical notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
 
 Security follow-up: the staged PHI encryption/export migration remains a separate action item. It should add encrypted companion columns for the highest-risk remaining plaintext fields, backfill in batches, switch reads to encrypted-first, update exports to decrypt only at the authorized boundary, and only then stop writing/null plaintext after verification.
 

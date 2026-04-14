@@ -23,7 +23,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 type CreateAccountStep = "form" | "verify_email";
 
-const MIN_PASSWORD_LENGTH = 12;
+const MIN_PASSWORD_LENGTH = 10;
 
 function isBreachedPasswordError(error: unknown): boolean {
   if (
@@ -308,15 +308,14 @@ export default function CreateAccountScreen() {
                   }}
                   error={errors.password}
                   secureTextEntry
-                  textContentType="newPassword"
-                  autoComplete="new-password"
-                  passwordRules={`minlength: ${MIN_PASSWORD_LENGTH}; required: upper; required: lower; required: digit;`}
+                  textContentType="oneTimeCode"
+                  autoComplete="one-time-code"
                   testID="create-account-password"
                 />
                 {!errors.password && (
                   <Text className="text-muted text-[13px] mt-2 leading-5">
-                    Use at least {MIN_PASSWORD_LENGTH} characters. The
-                    suggested strong password works best.
+                    Use at least {MIN_PASSWORD_LENGTH} characters with a mix of
+                    letters and numbers.
                   </Text>
                 )}
               </View>

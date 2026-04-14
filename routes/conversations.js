@@ -8,6 +8,28 @@ import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
 
+// Get summary-only calls for a senior (caregiver-facing)
+router.get('/api/seniors/:id/calls', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
+  try {
+    if (!await canAccessSenior(req.auth, req.params.id)) {
+      return res.status(403).json({ error: 'Access denied to this senior' });
+    }
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'read',
+      resourceType: 'conversation',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { seniorId: req.params.id, view: 'call_summaries' },
+    });
+    const calls = await conversationService.getCallSummariesForSenior(req.params.id, 20);
+    res.json(calls);
+  } catch (error) {
+    routeError(res, error, 'GET /api/seniors/:id/calls');
+  }
+});
+
 // Get conversations for a senior
 router.get('/api/seniors/:id/conversations', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
   try {
@@ -23,7 +45,9 @@ router.get('/api/seniors/:id/conversations', requireAuth, validateParams(seniorI
       userAgent: req.get('user-agent'),
       metadata: { seniorId: req.params.id },
     });
-    const convos = await conversationService.getForSenior(req.params.id, 20);
+    const convos = req.auth.isAdmin
+      ? await conversationService.getForSenior(req.params.id, 20)
+      : await conversationService.getCallSummariesForSenior(req.params.id, 20);
     res.json(convos);
   } catch (error) {
     routeError(res, error, 'GET /api/seniors/:id/conversations');
@@ -41,14 +65,17 @@ router.get('/api/conversations', requireAuth, async (req, res) => {
       ipAddress: req.ip,
       userAgent: req.get('user-agent'),
     });
-    const convos = await conversationService.getRecent(50);
     if (req.auth.isAdmin) {
+      const convos = await conversationService.getRecent(50);
       return res.json(convos);
     }
     // Filter to accessible seniors
     const accessibleIds = await getAccessibleSeniorIds(req.auth);
-    const filtered = convos.filter(c => accessibleIds.includes(c.seniorId));
-    res.json(filtered);
+    if (!accessibleIds?.length) {
+      return res.json([]);
+    }
+    const convos = await conversationService.getRecentCallSummariesForSeniors(accessibleIds, 50);
+    res.json(convos);
   } catch (error) {
     routeError(res, error, 'GET /api/conversations');
   }

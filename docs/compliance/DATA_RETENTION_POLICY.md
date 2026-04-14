@@ -56,7 +56,7 @@ This policy applies to all data stored in:
 
 | Data Type | Table(s) | Contains PHI? | Retention Period | Trigger | Destruction Method |
 |-----------|----------|---------------|-----------------|---------|-------------------|
-| **Conversation transcripts** | `conversations.transcript`, `.summary` | Yes (HIGH) | 1 year from call date | `conversations.started_at` | Automated purge job: set transcript/summary to NULL, retain metadata |
+| **Conversation transcripts and summaries** | `conversations.transcript_encrypted`, `transcript_text_encrypted`, `summary_encrypted`; legacy `conversations.transcript` / `.summary` read fallback | Yes (HIGH) | 1 year from call date | `conversations.started_at` | Automated purge job: set transcript/summary fields to NULL, retain metadata |
 | **Conversation metadata** | `conversations` (non-PHI fields: id, senior_id, started_at, ended_at, duration, status, sentiment) | Low | 3 years from call date | `conversations.started_at` | Automated purge job: DELETE row |
 | **Semantic memories** | `memories` | Yes (HIGH) | 2 years from creation OR 1 year after senior becomes inactive | `memories.created_at` or `seniors.is_active` + last call date | Automated purge job: DELETE row (including embedding vector) |
 | **Call analyses** | `call_analyses` | Yes (MEDIUM) | 1 year from creation | `call_analyses.created_at` | Automated purge job: DELETE row |
@@ -94,7 +94,8 @@ This policy applies to all data stored in:
 
 ### Conversations (1 year transcript, 3 years metadata)
 
-- **Transcript (1 year)**: Conversation content is the most sensitive PHI. One year provides adequate time for quality review, dispute resolution, and caregiver inquiries about past calls. After 1 year, the transcript and summary are NULLed but metadata (date, duration, sentiment) is retained for longitudinal analysis.
+- **Transcript and summary (1 year)**: Conversation content is the most sensitive PHI. One year provides adequate time for quality review, dispute resolution, and caregiver inquiries about past calls. New transcript writes use encrypted-only fields (`transcript_encrypted`, `transcript_text_encrypted`) and summary writes prefer `summary_encrypted`; legacy plaintext columns are read fallbacks for existing rows during migration. After 1 year, transcript and summary fields are NULLed but metadata (date, duration, sentiment) is retained for longitudinal analysis.
+- **Caregiver call summaries**: Caregiver-facing APIs decrypt summaries server-side only after authentication and per-senior authorization, then return summary-only call records. Transcript fields and encryption keys are not returned to caregiver clients.
 - **Metadata (3 years)**: Non-PHI call metadata (when calls happened, duration, sentiment score) supports operational analytics and care pattern tracking without retaining sensitive content.
 
 ### Memories (2 years)
@@ -148,9 +149,13 @@ Implement a scheduled purge job that runs daily during off-peak hours (e.g., 3:0
 -- Example: Purge conversation transcripts older than 1 year
 -- Phase 1: NULL out PHI fields (retain metadata)
 UPDATE conversations
-SET transcript = NULL, summary = NULL
+SET transcript = NULL,
+    transcript_encrypted = NULL,
+    transcript_text_encrypted = NULL,
+    summary = NULL,
+    summary_encrypted = NULL
 WHERE started_at < NOW() - INTERVAL '1 year'
-  AND transcript IS NOT NULL
+  AND (transcript IS NOT NULL OR transcript_encrypted IS NOT NULL OR transcript_text_encrypted IS NOT NULL OR summary IS NOT NULL OR summary_encrypted IS NOT NULL)
   AND id NOT IN (SELECT resource_id FROM legal_holds WHERE resource_type = 'conversation');
 
 -- Phase 2: Delete full conversation records older than 3 years

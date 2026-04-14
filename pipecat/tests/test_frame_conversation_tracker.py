@@ -5,10 +5,11 @@ from TextFrames, transcript building, and frame passthrough.
 """
 
 import pytest
+from unittest.mock import AsyncMock, patch
 
 from pipecat.frames.frames import TextFrame
 
-from processors.conversation_tracker import ConversationTrackerProcessor
+from processors.conversation_tracker import ConversationState, ConversationTrackerProcessor
 from tests.conftest import make_transcription, run_processor_test
 
 
@@ -36,6 +37,50 @@ class TestTrackerUserMessage:
         assert transcript[0]["role"] == "user"
         assert "Hello Donna" in transcript[0]["content"]
 
+    @pytest.mark.asyncio
+    async def test_keeps_full_transcript_when_director_transcript_is_capped(self, session_state):
+        tracker = ConversationTrackerProcessor(session_state=session_state)
+        frames = [make_transcription(f"message {i}") for i in range(45)]
+
+        await run_processor_test(processors=[tracker], frames_to_inject=frames)
+
+        assert len(session_state["_full_transcript"]) == 45
+        assert len(session_state["_transcript"]) == 40
+        assert session_state["_full_transcript"][0]["content"] == "message 0"
+        assert session_state["_transcript"][0]["content"] == "message 5"
+
+    @pytest.mark.asyncio
+    async def test_persists_transcript_draft_when_enabled(self, session_state):
+        session_state["call_sid"] = "CA-draft-001"
+        session_state["_transcript_persistence_enabled"] = True
+        tracker = ConversationTrackerProcessor(session_state=session_state)
+
+        with patch("services.conversations.update_transcript", new_callable=AsyncMock) as mock_update:
+            await run_processor_test(
+                processors=[tracker],
+                frames_to_inject=[make_transcription("Hello Donna")],
+            )
+            await tracker.flush_pending_persistence()
+
+        assert mock_update.await_count >= 1
+        call_sid, transcript = mock_update.await_args.args
+        assert call_sid == "CA-draft-001"
+        assert transcript[-1]["content"] == "Hello Donna"
+
+    @pytest.mark.asyncio
+    async def test_does_not_persist_transcript_draft_unless_enabled(self, session_state):
+        session_state["call_sid"] = "CA-draft-002"
+        tracker = ConversationTrackerProcessor(session_state=session_state)
+
+        with patch("services.conversations.update_transcript", new_callable=AsyncMock) as mock_update:
+            await run_processor_test(
+                processors=[tracker],
+                frames_to_inject=[make_transcription("Hello Donna")],
+            )
+            await tracker.flush_pending_persistence()
+
+        mock_update.assert_not_awaited()
+
 
 class TestTrackerAssistantMessage:
     """Verify question/advice extraction from LLM TextFrames."""
@@ -57,6 +102,51 @@ class TestTrackerAssistantMessage:
             frames_to_inject=[TextFrame(text="You should try to drink more water today.")],
         )
         assert len(tracker.state.advice_given) >= 1
+
+
+class TestSplitPipelineTracking:
+    """Verify production-style split user/assistant tracker wiring."""
+
+    @pytest.mark.asyncio
+    async def test_split_trackers_share_state_and_persist_full_transcript(self, session_state):
+        session_state["call_sid"] = "CA-split-001"
+        session_state["_transcript_persistence_enabled"] = True
+        state = ConversationState()
+        user_tracker = ConversationTrackerProcessor(
+            session_state=session_state,
+            state=state,
+            track_assistant=False,
+        )
+        assistant_tracker = ConversationTrackerProcessor(
+            session_state=session_state,
+            state=state,
+            track_user=False,
+        )
+
+        with patch("services.conversations.update_transcript", new_callable=AsyncMock) as mock_update:
+            await run_processor_test(
+                processors=[user_tracker, assistant_tracker],
+                frames_to_inject=[
+                    make_transcription("I was gardening today"),
+                    TextFrame(text="How is your garden growing?"),
+                ],
+            )
+            await user_tracker.flush_pending_persistence()
+            await assistant_tracker.flush_pending_persistence()
+
+        assert user_tracker.state is assistant_tracker.state
+        assert "gardening" in assistant_tracker.state.topics_discussed
+        assert assistant_tracker.state.questions_asked
+
+        full_transcript = session_state["_full_transcript"]
+        assert [turn["role"] for turn in full_transcript] == ["user", "assistant"]
+        assert "gardening" in full_transcript[0]["content"]
+        assert "garden growing" in full_transcript[1]["content"]
+
+        assert mock_update.await_count >= 1
+        call_sid, persisted = mock_update.await_args.args
+        assert call_sid == "CA-split-001"
+        assert [turn["role"] for turn in persisted] == ["user", "assistant"]
 
 
 class TestTrackerPassthrough:

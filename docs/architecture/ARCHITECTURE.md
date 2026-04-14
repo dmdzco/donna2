@@ -126,7 +126,7 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 | Table | Purpose | Key Fields / Indexes |
 |-------|---------|-------------|
 | `seniors` | User profiles, interests, call settings | phone (unique) |
-| `conversations` | Call records with transcripts | call_sid, senior_id + started_at DESC |
+| `conversations` | Call records with encrypted transcripts and summaries | call_sid, senior_id + started_at DESC |
 | `memories` | Semantic memory store (pgvector embeddings) | senior_id, HNSW on embedding |
 | `reminders` | Scheduled reminders (one-time + recurring) | scheduled_time WHERE active, is_recurring |
 | `reminder_deliveries` | Delivery tracking per call attempt | reminder_id + scheduled_for, status |

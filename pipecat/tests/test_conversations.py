@@ -45,14 +45,84 @@ class TestComplete:
             assert result["status"] == "completed"
 
     @pytest.mark.asyncio
-    async def test_serializes_transcript_as_json(self):
+    async def test_writes_encrypted_transcript_without_plaintext(self):
         with patch("services.conversations.query_one", new_callable=AsyncMock, return_value={"id": "c1"}) as mock_q:
             from services.conversations import complete
             transcript = [{"role": "user", "content": "hello"}]
             await complete("CA-1", {"transcript": transcript})
             args = mock_q.call_args[0]
-            # transcript param is at index 4 (after duration, status, summary)
-            assert json.loads(args[4]) == transcript
+            sql = args[0]
+            assert "transcript_encrypted = $8" in sql
+            assert "transcript_text_encrypted = $9" in sql
+            assert "transcript = $" not in sql
+            assert json.loads(args[8]) == transcript
+
+    @pytest.mark.asyncio
+    async def test_writes_encrypted_text_transcript(self):
+        with patch("services.conversations.query_one", new_callable=AsyncMock, return_value={"id": "c1"}) as mock_q:
+            from services.conversations import complete
+            transcript = [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "Hi there"},
+            ]
+            await complete("CA-1", {"transcript": transcript})
+            args = mock_q.call_args[0]
+            assert args[9] == "Senior: hello\nDonna: Hi there"
+
+
+class TestTranscriptPersistence:
+    def test_formats_transcript_text(self):
+        from services.conversations import format_transcript_text
+
+        transcript = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "Hi there"},
+            {"role": "assistant", "content": "[EPHEMERAL: internal guidance]"},
+        ]
+
+        assert format_transcript_text(transcript) == "Senior: hello\nDonna: Hi there"
+
+    @pytest.mark.asyncio
+    async def test_update_transcript_writes_encrypted_fields_only(self):
+        with patch("services.conversations.query_one", new_callable=AsyncMock, return_value={"id": "c1"}) as mock_q:
+            from services.conversations import update_transcript
+
+            transcript = [{"role": "user", "content": "hello"}]
+            await update_transcript("CA-1", transcript)
+
+            args = mock_q.call_args[0]
+            sql = args[0]
+            assert "transcript_encrypted = $1" in sql
+            assert "transcript_text_encrypted = $2" in sql
+            assert "transcript = $" not in sql
+            assert json.loads(args[1]) == transcript
+            assert args[2] == "Senior: hello"
+            assert args[3] == "CA-1"
+
+    @pytest.mark.asyncio
+    async def test_get_transcript_prefers_encrypted_json(self):
+        transcript = [{"role": "user", "content": "hello"}]
+        row = {
+            "transcript": None,
+            "transcript_encrypted": json.dumps(transcript),
+            "transcript_text_encrypted": "Senior: fallback",
+        }
+        with patch("services.conversations.query_one", new_callable=AsyncMock, return_value=row):
+            from services.conversations import get_transcript_by_call_sid
+
+            assert await get_transcript_by_call_sid("CA-1") == transcript
+
+    @pytest.mark.asyncio
+    async def test_get_transcript_falls_back_to_encrypted_text(self):
+        row = {
+            "transcript": None,
+            "transcript_encrypted": None,
+            "transcript_text_encrypted": "Senior: hello",
+        }
+        with patch("services.conversations.query_one", new_callable=AsyncMock, return_value=row):
+            from services.conversations import get_transcript_by_call_sid
+
+            assert await get_transcript_by_call_sid("CA-1") == "Senior: hello"
 
 
 class TestGetByCallSid:

@@ -135,16 +135,19 @@ async def _fetch_conversations_consolidated(senior_id: str, limit: int = 3) -> t
     Consolidates get_recent_summaries + get_recent_turns into a single DB query.
     """
     from db import query_many
+    from lib.encryption import decrypt, decrypt_json
     import json
     import math
     from datetime import datetime, timezone
 
     rows = await query_many(
-        """SELECT summary, transcript, started_at, duration_seconds
+        """SELECT summary, summary_encrypted, transcript, transcript_encrypted,
+                  started_at, duration_seconds
            FROM conversations
            WHERE senior_id = $1
              AND status = 'completed'
-             AND (summary IS NOT NULL OR transcript IS NOT NULL)
+             AND (summary IS NOT NULL OR summary_encrypted IS NOT NULL
+                  OR transcript IS NOT NULL OR transcript_encrypted IS NOT NULL)
            ORDER BY started_at DESC
            LIMIT $2""",
         senior_id,
@@ -169,10 +172,11 @@ async def _fetch_conversations_consolidated(senior_id: str, limit: int = 3) -> t
     # Build summaries text
     summary_lines = []
     for row in rows:
-        if row.get("summary"):
+        summary = decrypt(row.get("summary_encrypted")) if row.get("summary_encrypted") else row.get("summary")
+        if summary and summary != "[encrypted]":
             time_ago = _time_label(row["started_at"])
             dur = f"({round(row['duration_seconds'] / 60)} min)" if row.get("duration_seconds") else ""
-            summary_lines.append(f"- {time_ago} {dur}: {row['summary']}")
+            summary_lines.append(f"- {time_ago} {dur}: {summary}")
     summaries_text = "\n".join(summary_lines) if summary_lines else None
 
     # Build turns text
@@ -182,7 +186,11 @@ async def _fetch_conversations_consolidated(senior_id: str, limit: int = 3) -> t
     max_turns = 20
     for row in rows:
         try:
-            transcript = row.get("transcript")
+            transcript = (
+                decrypt_json(row.get("transcript_encrypted"))
+                if row.get("transcript_encrypted")
+                else row.get("transcript")
+            )
             if not transcript:
                 continue
             if isinstance(transcript, str):

@@ -308,7 +308,7 @@ pipecat/
 | Table | Purpose | Key Fields |
 |-------|---------|------------|
 | **seniors** | User profiles | name, phone, interests, familyInfo, medicalNotes, timezone, call_settings (JSONB), call_context_snapshot (JSONB), cached_news (TEXT) |
-| **conversations** | Call records | callSid, transcript, duration, status, summary |
+| **conversations** | Call records | callSid, encrypted transcript, duration, status, encrypted summary |
 | **memories** | Long-term memory | content, type, importance, embedding (1536d, HNSW index) |
 | **reminders** | Scheduled reminders | title, scheduledTime, isRecurring, type |
 | **reminder_deliveries** | Delivery tracking | status, attemptCount, userResponse, callSid |

@@ -10,9 +10,11 @@ Sits in the pipeline after the LLM and reads both:
 - TextFrame (LLM output) → extract questions and advice phrases
 """
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 
+from loguru import logger
 from pipecat.frames.frames import EndFrame, TextFrame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameProcessor
 
@@ -50,6 +52,7 @@ _ADVICE_PATTERN = re.compile(
 _MAX_TOPICS = 10
 _MAX_QUESTIONS = 8
 _MAX_ADVICE = 8
+_MAX_DIRECTOR_TRANSCRIPT_TURNS = 40
 
 
 # ---------------------------------------------------------------------------
@@ -165,14 +168,30 @@ class ConversationTrackerProcessor(FrameProcessor):
     The tracked state is available via .state and .get_summary().
 
     If *session_state* is provided, also maintains a shared ``_transcript``
-    list that the Conversation Director reads for full conversation context.
+    list that the Conversation Director reads for bounded recent context.
+    Full call history is kept separately in ``_full_transcript`` and, for
+    production calls, persisted asynchronously as draft transcript data.
     """
 
-    def __init__(self, session_state: dict | None = None, **kwargs):
+    def __init__(
+        self,
+        session_state: dict | None = None,
+        state: ConversationState | None = None,
+        track_user: bool = True,
+        track_assistant: bool = True,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
-        self.state = ConversationState()
+        self.state = state or ConversationState()
         self._session_state = session_state
+        self._track_user = track_user
+        self._track_assistant = track_assistant
         self._assistant_buffer = ""
+        if self._session_state is not None:
+            self._session_state.setdefault(
+                "_full_transcript",
+                list(self._session_state.get("_transcript") or []),
+            )
 
     def get_summary(self) -> str | None:
         """Get formatted tracking summary for system prompt injection."""
@@ -194,17 +213,104 @@ class ConversationTrackerProcessor(FrameProcessor):
 
     def flush(self):
         """Flush any remaining buffered assistant text. Call before post-call."""
+        if not self._track_assistant:
+            return
         self._flush_assistant_buffer()
+
+    async def flush_pending_persistence(self, timeout: float = 5.0) -> None:
+        """Wait briefly for in-flight transcript draft writes to finish."""
+        if self._session_state is None:
+            return
+
+        tasks = set(self._session_state.get("_transcript_persist_tasks") or ())
+        if not tasks:
+            return
+
+        done, pending = await asyncio.wait(tasks, timeout=timeout)
+        for task in done:
+            try:
+                task.result()
+            except Exception:
+                # The persistence task already logs sanitized failure details.
+                pass
+
+        if pending:
+            logger.warning(
+                "[{cs}] Transcript draft persistence still pending (count={n})",
+                cs=self._session_state.get("call_sid", "unknown"),
+                n=len(pending),
+            )
 
     def _flush_assistant_buffer(self):
         """Flush buffered assistant text into shared transcript."""
         text = self._assistant_buffer.strip()
         if text and self._session_state is not None:
-            transcript = self._session_state.setdefault("_transcript", [])
-            transcript.append({"role": "assistant", "content": text})
-            if len(transcript) > 40:
-                self._session_state["_transcript"] = transcript[-40:]
+            self._record_turn("assistant", text)
         self._assistant_buffer = ""
+
+    def _record_turn(self, role: str, content: str) -> None:
+        """Record one completed turn in full and bounded transcript state."""
+        if self._session_state is None:
+            return
+
+        turn = {"role": role, "content": content}
+
+        full_transcript = self._session_state.setdefault("_full_transcript", [])
+        full_transcript.append(turn)
+
+        director_transcript = self._session_state.setdefault("_transcript", [])
+        director_transcript.append(turn)
+        if len(director_transcript) > _MAX_DIRECTOR_TRANSCRIPT_TURNS:
+            self._session_state["_transcript"] = director_transcript[-_MAX_DIRECTOR_TRANSCRIPT_TURNS:]
+
+        self._schedule_transcript_persistence()
+
+    def _schedule_transcript_persistence(self) -> None:
+        """Persist a full transcript snapshot without blocking the audio path."""
+        if self._session_state is None:
+            return
+        if not self._session_state.get("_transcript_persistence_enabled"):
+            return
+
+        call_sid = self._session_state.get("call_sid")
+        if not call_sid or call_sid == "unknown":
+            return
+
+        snapshot = list(self._session_state.get("_full_transcript") or [])
+        if not snapshot:
+            return
+
+        seq = int(self._session_state.get("_transcript_persist_seq") or 0) + 1
+        self._session_state["_transcript_persist_seq"] = seq
+
+        task = asyncio.create_task(self._persist_transcript_snapshot(call_sid, snapshot, seq))
+        tasks = self._session_state.setdefault("_transcript_persist_tasks", set())
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
+    async def _persist_transcript_snapshot(
+        self,
+        call_sid: str,
+        snapshot: list[dict],
+        seq: int,
+    ) -> None:
+        """Write the latest transcript snapshot if it has not been superseded."""
+        assert self._session_state is not None
+        lock = self._session_state.setdefault("_transcript_persist_lock", asyncio.Lock())
+
+        async with lock:
+            if seq != self._session_state.get("_transcript_persist_seq"):
+                return
+
+            try:
+                from services.conversations import update_transcript
+                await update_transcript(call_sid, snapshot)
+            except Exception as e:
+                logger.warning(
+                    "[{cs}] Transcript draft persistence failed: {err}",
+                    cs=call_sid,
+                    err=str(e),
+                )
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
@@ -218,24 +324,23 @@ class ConversationTrackerProcessor(FrameProcessor):
 
         if isinstance(frame, TranscriptionFrame):
             # Flush any buffered assistant text from previous turn
-            self._flush_assistant_buffer()
+            if self._track_assistant:
+                self._flush_assistant_buffer()
 
             # Track user message in shared transcript
-            if self._session_state is not None:
-                transcript = self._session_state.setdefault("_transcript", [])
-                transcript.append({"role": "user", "content": frame.text})
-                if len(transcript) > 40:
-                    self._session_state["_transcript"] = transcript[-40:]
+            if self._track_user and self._session_state is not None:
+                self._record_turn("user", frame.text)
 
             # User message → extract topics
-            topics = extract_topics(frame.text)
-            for t in topics:
-                if t not in self.state.topics_discussed:
-                    self.state.topics_discussed.append(t)
-            if len(self.state.topics_discussed) > _MAX_TOPICS:
-                self.state.topics_discussed = self.state.topics_discussed[-_MAX_TOPICS:]
+            if self._track_user:
+                topics = extract_topics(frame.text)
+                for t in topics:
+                    if t not in self.state.topics_discussed:
+                        self.state.topics_discussed.append(t)
+                if len(self.state.topics_discussed) > _MAX_TOPICS:
+                    self.state.topics_discussed = self.state.topics_discussed[-_MAX_TOPICS:]
 
-        elif isinstance(frame, TextFrame):
+        elif self._track_assistant and isinstance(frame, TextFrame):
             # Buffer assistant text (flushed when next TranscriptionFrame arrives)
             self._assistant_buffer += frame.text
 

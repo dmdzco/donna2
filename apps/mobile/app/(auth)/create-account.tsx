@@ -23,6 +23,36 @@ WebBrowser.maybeCompleteAuthSession();
 
 type CreateAccountStep = "form" | "verify_email";
 
+const MIN_PASSWORD_LENGTH = 12;
+
+function isBreachedPasswordError(error: unknown): boolean {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    Array.isArray((error as { errors?: unknown[] }).errors)
+  ) {
+    return (error as {
+      errors: Array<{ code?: string; message?: string; longMessage?: string }>;
+    }).errors.some(
+      (entry) => {
+        const text = `${entry.code ?? ""} ${entry.message ?? ""} ${
+          entry.longMessage ?? ""
+        }`.toLowerCase();
+        return (
+          text.includes("pwn") ||
+          text.includes("breach") ||
+          text.includes("data leak") ||
+          text.includes("compromised")
+        );
+      },
+    );
+  }
+
+  return error instanceof Error
+    ? /pwn|breach|data leak|compromised/i.test(error.message)
+    : false;
+}
+
 export default function CreateAccountScreen() {
   const router = useRouter();
   const { signUp, setActive, isLoaded } = useSignUp();
@@ -81,8 +111,8 @@ export default function CreateAccountScreen() {
 
     if (!email.trim()) nextErrors.email = "Email is required";
     if (!password) nextErrors.password = "Password is required";
-    if (password && password.length < 8) {
-      nextErrors.password = "Password must be at least 8 characters";
+    if (password && password.length < MIN_PASSWORD_LENGTH) {
+      nextErrors.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
     }
 
     setErrors(nextErrors);
@@ -111,7 +141,9 @@ export default function CreateAccountScreen() {
       const clerkFieldErrors = getClerkFieldErrors(err);
       const nextFieldErrors = {
         email: clerkFieldErrors.emailAddress,
-        password: clerkFieldErrors.password,
+        password: isBreachedPasswordError(err)
+          ? "That password has appeared in a public breach. Use the suggested strong password, or choose a unique passphrase."
+          : clerkFieldErrors.password,
       };
 
       if (nextFieldErrors.email || nextFieldErrors.password) {
@@ -276,10 +308,17 @@ export default function CreateAccountScreen() {
                   }}
                   error={errors.password}
                   secureTextEntry
-                  textContentType="oneTimeCode"
-                  autoComplete="off"
+                  textContentType="newPassword"
+                  autoComplete="new-password"
+                  passwordRules={`minlength: ${MIN_PASSWORD_LENGTH}; required: upper; required: lower; required: digit;`}
                   testID="create-account-password"
                 />
+                {!errors.password && (
+                  <Text className="text-muted text-[13px] mt-2 leading-5">
+                    Use at least {MIN_PASSWORD_LENGTH} characters. The
+                    suggested strong password works best.
+                  </Text>
+                )}
               </View>
 
               <Button

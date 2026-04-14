@@ -254,6 +254,8 @@ async def websocket_endpoint(websocket: WebSocket):
         "previous_calls_summary": None,
         "todays_context": None,
         "_transcript": [],
+        "_full_transcript": [],
+        "_transcript_persistence_enabled": True,
         "_call_metadata": call_metadata,
     }
 

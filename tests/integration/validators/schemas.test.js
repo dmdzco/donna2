@@ -558,6 +558,42 @@ describe('onboardingSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts daily callSchedule without explicit days', () => {
+    const result = onboardingSchema.safeParse({
+      ...validPayload,
+      callSchedule: {
+        frequency: 'daily',
+        time: '09:00',
+      },
+    });
+    expect(result.success).toBe(true);
+    expect(result.data.callSchedule.frequency).toBe('daily');
+  });
+
+  it('accepts one-time callSchedule without recurring days', () => {
+    const result = onboardingSchema.safeParse({
+      ...validPayload,
+      callSchedule: {
+        frequency: 'one-time',
+        time: '09:00',
+        date: '2026-04-20T14:00:00.000Z',
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects recurring callSchedule with no selected days', () => {
+    const result = onboardingSchema.safeParse({
+      ...validPayload,
+      callSchedule: {
+        frequency: 'recurring',
+        days: [],
+        time: '09:00',
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('rejects callSchedule with 12h time format', () => {
     const result = onboardingSchema.safeParse({
       ...validPayload,

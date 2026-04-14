@@ -41,7 +41,7 @@ from pipecat_flows import FlowManager
 from flows.nodes import build_initial_node
 from flows.tools import make_flows_tools
 from processors.conversation_director import ConversationDirectorProcessor
-from processors.conversation_tracker import ConversationTrackerProcessor
+from processors.conversation_tracker import ConversationState, ConversationTrackerProcessor
 from processors.guidance_stripper import GuidanceStripperProcessor
 from processors.metrics_logger import MetricsLoggerProcessor
 from processors.quick_observer import QuickObserverProcessor
@@ -409,7 +409,17 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     # -------------------------------------------------------------------------
     quick_observer = QuickObserverProcessor(session_state=session_state)
     conversation_director = ConversationDirectorProcessor(session_state=session_state)
-    conversation_tracker = ConversationTrackerProcessor(session_state=session_state)
+    conversation_state = ConversationState()
+    user_conversation_tracker = ConversationTrackerProcessor(
+        session_state=session_state,
+        state=conversation_state,
+        track_assistant=False,
+    )
+    conversation_tracker = ConversationTrackerProcessor(
+        session_state=session_state,
+        state=conversation_state,
+        track_user=False,
+    )
     guidance_stripper = GuidanceStripperProcessor()
     metrics_logger = MetricsLoggerProcessor(session_state=session_state)
 
@@ -439,6 +449,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             transport.input(),
             stt,
             quick_observer,
+            user_conversation_tracker,
             conversation_director,
             context_aggregator.user(),
             pipeline_llm,

@@ -146,6 +146,22 @@ Used across all service modules for Railway log output.
 
 ---
 
+## Field-Level PHI Encryption
+
+**Files**: `pipecat/lib/encryption.py`, `lib/encryption.js`
+
+Donna stores newly persisted conversation transcripts and call summaries in AES-256-GCM encrypted companion columns:
+
+- `conversations.transcript_encrypted` stores the structured turn list for authorized admin/export/post-call use.
+- `conversations.transcript_text_encrypted` stores a plain-text transcript rendering for future retrieval and analysis.
+- `conversations.summary_encrypted` stores call summaries used by caregiver and admin views.
+
+The legacy plaintext `conversations.transcript` and `conversations.summary` columns remain read fallbacks for rows created before the encrypted migration and are included in retention purges. New transcript writes should not populate `conversations.transcript`.
+
+Caregiver clients do not receive encrypted blobs or decryption keys. The Node API authenticates the caregiver, verifies per-senior access, decrypts the summary server-side, and returns summary-only call records via `/api/seniors/:id/calls`. Admin conversation routes may return decrypted transcripts for the admin transcript viewer.
+
+---
+
 ## Error Handling
 
 **File**: `pipecat/api/middleware/error_handler.py`
@@ -208,7 +224,7 @@ Scope for that follow-up:
 - Backfill encrypted values in batches and log counts only.
 - Change reads to prefer encrypted columns and fall back to plaintext only during the migration window.
 - Update exports to decrypt only at the authorized boundary and fail on decryption errors rather than silently falling back to stale plaintext.
-- Stop writing plaintext, then null/drop plaintext columns only after backfill verification and release validation.
+- Stop writing remaining plaintext PHI fields, then null/drop plaintext columns only after backfill verification and release validation.
 
 ---
 

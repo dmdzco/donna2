@@ -1,6 +1,6 @@
 import { db } from '../db/client.js';
 import { conversations, seniors } from '../db/schema.js';
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { eq, desc, and, sql, inArray } from 'drizzle-orm';
 import { createLogger } from '../lib/logger.js';
 import { encrypt, decrypt, encryptJson, decryptJson } from '../lib/encryption.js';
 import { callAnalysisService } from './call-analyses.js';
@@ -17,7 +17,75 @@ function decryptConversationFields(row) {
     transcript,
     summaryEncrypted: undefined,
     transcriptEncrypted: undefined,
+    transcriptTextEncrypted: undefined,
   };
+}
+
+function decryptSummary(row) {
+  return row.summaryEncrypted ? decrypt(row.summaryEncrypted) : row.summary;
+}
+
+async function addSummaryFallbacks(rows) {
+  const analyses = await callAnalysisService.getLatestByConversationIds(rows.map(row => row.id));
+
+  return rows.map(row => {
+    const analysis = analyses.get(row.id) || null;
+    const summary = decryptSummary(row) || analysis?.summary || null;
+
+    return {
+      id: row.id,
+      seniorId: row.seniorId,
+      seniorName: row.seniorName,
+      startedAt: row.startedAt,
+      endedAt: row.endedAt,
+      durationSeconds: row.durationSeconds,
+      status: row.status,
+      summary,
+      sentiment: row.sentiment,
+    };
+  });
+}
+
+function contentToText(content) {
+  if (content == null) return '';
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter(block => block && block.type === 'text')
+      .map(block => String(block.text || ''))
+      .filter(text => !text.startsWith('[EPHEMERAL') && !text.startsWith('[Internal'))
+      .join(' ');
+  }
+  return String(content);
+}
+
+export function formatTranscriptText(transcript) {
+  if (transcript == null) return null;
+  if (typeof transcript === 'string') {
+    const text = transcript.trim();
+    if (!text) return null;
+    try {
+      return formatTranscriptText(JSON.parse(text));
+    } catch {
+      return text;
+    }
+  }
+  if (!Array.isArray(transcript)) {
+    const text = String(transcript).trim();
+    return text || null;
+  }
+
+  const lines = [];
+  for (const turn of transcript) {
+    if (!turn || typeof turn !== 'object') continue;
+    const text = contentToText(turn.content).trim();
+    if (!text || text.startsWith('[EPHEMERAL') || text.startsWith('[Internal')) continue;
+    const role = String(turn.role || 'unknown').toLowerCase();
+    const label = role === 'assistant' ? 'Donna' : role === 'user' ? 'Senior' : role.charAt(0).toUpperCase() + role.slice(1);
+    lines.push(`${label}: ${text}`);
+  }
+
+  return lines.length ? lines.join('\n') : null;
 }
 
 export const conversationService = {
@@ -43,8 +111,8 @@ export const conversationService = {
         status: data.status || 'completed',
         summary: data.summary,
         summaryEncrypted: encrypt(data.summary),
-        transcript: data.transcript,
         transcriptEncrypted: encryptJson(data.transcript),
+        transcriptTextEncrypted: encrypt(formatTranscriptText(data.transcript)),
         callMetrics: data.callMetrics,
         sentiment: data.sentiment,
         concerns: data.concerns,
@@ -83,6 +151,27 @@ export const conversationService = {
         analysis,
       };
     });
+  },
+
+  // Get summary-only call records for caregiver-facing views.
+  async getCallSummariesForSenior(seniorId, limit = 10) {
+    const rows = await db.select({
+      id: conversations.id,
+      seniorId: conversations.seniorId,
+      startedAt: conversations.startedAt,
+      endedAt: conversations.endedAt,
+      durationSeconds: conversations.durationSeconds,
+      status: conversations.status,
+      summary: conversations.summary,
+      summaryEncrypted: conversations.summaryEncrypted,
+      sentiment: conversations.sentiment,
+    })
+    .from(conversations)
+    .where(eq(conversations.seniorId, seniorId))
+    .orderBy(desc(conversations.startedAt))
+    .limit(limit);
+
+    return addSummaryFallbacks(rows);
   },
 
   // Update conversation summary (called after post-call analysis)
@@ -213,5 +302,30 @@ export const conversationService = {
     return results.map(r => ({
       ...decryptConversationFields(r),
     }));
+  },
+
+  // Get recent summary-only call records scoped to authorized senior IDs.
+  async getRecentCallSummariesForSeniors(seniorIds, limit = 20) {
+    if (!seniorIds?.length) return [];
+
+    const rows = await db.select({
+      id: conversations.id,
+      seniorId: conversations.seniorId,
+      seniorName: seniors.name,
+      startedAt: conversations.startedAt,
+      endedAt: conversations.endedAt,
+      durationSeconds: conversations.durationSeconds,
+      status: conversations.status,
+      summary: conversations.summary,
+      summaryEncrypted: conversations.summaryEncrypted,
+      sentiment: conversations.sentiment,
+    })
+    .from(conversations)
+    .leftJoin(seniors, eq(conversations.seniorId, seniors.id))
+    .where(inArray(conversations.seniorId, seniorIds))
+    .orderBy(desc(conversations.startedAt))
+    .limit(limit);
+
+    return addSummaryFallbacks(rows);
   }
 };

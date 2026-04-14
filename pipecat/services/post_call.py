@@ -13,6 +13,57 @@ import asyncio
 from loguru import logger
 
 
+def _transcript_has_content(transcript) -> bool:
+    if isinstance(transcript, list):
+        return any(isinstance(t, dict) and t.get("content") for t in transcript)
+    if isinstance(transcript, str):
+        return bool(transcript.strip())
+    return bool(transcript)
+
+
+async def _get_post_call_transcript(
+    session_state: dict,
+    conversation_tracker,
+):
+    """Return full transcript, falling back to persisted Neon draft."""
+    call_sid = session_state.get("call_sid", "unknown")
+
+    if conversation_tracker:
+        try:
+            conversation_tracker.flush()
+        except Exception as e:
+            logger.warning("[{cs}] Transcript flush failed: {err}", cs=call_sid, err=str(e))
+        if hasattr(conversation_tracker, "flush_pending_persistence"):
+            await conversation_tracker.flush_pending_persistence()
+
+    transcript = session_state.get("_full_transcript") or session_state.get("_transcript") or []
+    if _transcript_has_content(transcript):
+        return transcript
+
+    if not call_sid or call_sid == "unknown":
+        return transcript
+
+    try:
+        from services.conversations import get_transcript_by_call_sid
+
+        persisted = await get_transcript_by_call_sid(call_sid)
+        if _transcript_has_content(persisted):
+            if isinstance(persisted, list):
+                session_state["_full_transcript"] = persisted
+                session_state["_transcript"] = persisted[-40:]
+            logger.info(
+                "[{cs}] Loaded persisted transcript fallback (turns={turns}, chars={chars})",
+                cs=call_sid,
+                turns=len(persisted) if isinstance(persisted, list) else 0,
+                chars=len(persisted) if isinstance(persisted, str) else 0,
+            )
+            return persisted
+    except Exception as e:
+        logger.error("[{cs}] Persisted transcript fallback failed: {err}", cs=call_sid, err=str(e))
+
+    return transcript
+
+
 async def run_post_call(
     session_state: dict,
     conversation_tracker,
@@ -38,8 +89,8 @@ async def run_post_call(
             session_state, conversation_tracker, duration_seconds
         )
 
-    # Collect transcript from session
-    transcript = session_state.get("_transcript", [])
+    # Collect full transcript from session, falling back to persisted Neon draft.
+    transcript = await _get_post_call_transcript(session_state, conversation_tracker)
     analysis = None
 
     # Step 1: Complete conversation (must run first — prerequisite for all)
@@ -57,7 +108,7 @@ async def run_post_call(
     # --- Parallel group: independent steps (2, 3, 5, 6) ---
     async def _step2_analysis():
         from lib.growthbook import is_on
-        if not (transcript and senior and is_on("post_call_analysis_enabled", session_state)):
+        if not (_transcript_has_content(transcript) and senior and is_on("post_call_analysis_enabled", session_state)):
             return None
         from services.call_analysis import analyze_completed_call, save_call_analysis
         result = await analyze_completed_call(transcript, senior)
@@ -71,7 +122,7 @@ async def run_post_call(
         return result
 
     async def _step3_memory():
-        if not (transcript and senior_id):
+        if not (_transcript_has_content(transcript) and senior_id):
             return
         from services.memory import extract_from_conversation
         if isinstance(transcript, list):
@@ -391,7 +442,7 @@ async def _run_onboarding_post_call(
 
     logger.info("[{cs}] Running onboarding post-call processing", cs=call_sid)
 
-    transcript = session_state.get("_transcript", [])
+    transcript = await _get_post_call_transcript(session_state, conversation_tracker)
 
     # 1. Complete conversation record
     try:

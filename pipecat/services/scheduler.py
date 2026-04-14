@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from db import query_one, query_many, execute
-from lib.sanitize import mask_name
+from lib.sanitize import mask_phone
 from services.reminder_delivery import mark_delivered, format_reminder_prompt
 
 # Lazy-loaded Twilio client
@@ -221,7 +221,7 @@ async def trigger_reminder_call(
         return None
 
     try:
-        logger.info("Pre-fetching context for {name}", name=mask_name(senior.get("name")))
+        logger.info("Pre-fetching context for senior_id={sid}", sid=str(senior.get("id", ""))[:8])
 
         from services.memory import build_context
         memory_context = await build_context(senior["id"], None, senior)
@@ -292,7 +292,7 @@ async def trigger_reminder_call(
 
 async def prefetch_for_phone(phone_number: str, senior: dict | None) -> dict:
     """Pre-fetch context for a manual outbound call."""
-    logger.info("Pre-fetching for manual call: {name}", name=mask_name(senior.get("name")) if senior else "unknown")
+    logger.info("Pre-fetching for manual call has_senior={has}", has=bool(senior))
 
     memory_context = None
     pre_generated_greeting = None
@@ -308,7 +308,7 @@ async def prefetch_for_phone(phone_number: str, senior: dict | None) -> dict:
         if cached:
             memory_context = cached.get("memory_context")
             pre_generated_greeting = cached.get("greeting")
-            logger.info("Using cached context for {name}", name=mask_name(senior.get("name")))
+            logger.info("Using cached context for senior_id={sid}", sid=str(senior.get("id", ""))[:8])
         else:
             from services.memory import build_context
             memory_context = await build_context(senior["id"], None, senior)
@@ -326,7 +326,7 @@ async def prefetch_for_phone(phone_number: str, senior: dict | None) -> dict:
         "fetched_at": datetime.now(timezone.utc),
     }
 
-    logger.info("Pre-fetch complete phone={p} greeting_ready={g}", p=normalized, g=bool(pre_generated_greeting))
+    logger.info("Pre-fetch complete phone={p} greeting_ready={g}", p=mask_phone(phone_number), g=bool(pre_generated_greeting))
     return {"senior": senior, "memory_context": memory_context, "pre_generated_greeting": pre_generated_greeting}
 
 
@@ -348,7 +348,7 @@ def clear_reminder_context(call_sid: str) -> None:
         from lib.redis_client import get_shared_state
         import asyncio
         state = get_shared_state()
-        if hasattr(state, '_url'):
+        if getattr(state, "is_shared", False):
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 loop.create_task(state.delete(f"reminder_ctx:{call_sid}"))

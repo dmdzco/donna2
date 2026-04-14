@@ -1,7 +1,8 @@
 """Redis client for multi-instance shared state.
 
-Falls back to in-memory dicts when REDIS_URL is not set, so single-instance
-deployments work without Redis.
+Uses Redis protocol when REDIS_URL is set, uses Upstash REST when
+UPSTASH_REDIS_REST_URL/TOKEN are set, and falls back to in-memory dicts for
+single-instance deployments.
 
 Usage:
     from lib.redis_client import shared_state
@@ -24,6 +25,8 @@ from loguru import logger
 
 class InMemoryState:
     """In-memory fallback when Redis is not configured."""
+
+    is_shared = False
 
     def __init__(self):
         self._data: dict[str, Any] = {}
@@ -95,6 +98,8 @@ class InMemoryState:
 class RedisState:
     """Redis-backed shared state for multi-instance deployments."""
 
+    is_shared = True
+
     def __init__(self, url: str):
         self._url = url
         self._redis = None
@@ -165,25 +170,150 @@ class RedisState:
             self._redis = None
 
 
-def create_shared_state(redis_url: str = "") -> InMemoryState | RedisState:
+class UpstashRestState:
+    """Upstash REST-backed shared state for multi-instance deployments."""
+
+    RETRY_AFTER_SECONDS = 60
+
+    def __init__(self, url: str, token: str):
+        url = url.strip()
+        if url and "://" not in url:
+            url = f"https://{url}"
+        self._url = url.rstrip("/")
+        self._token = token
+        self._client = None
+        self._disabled_until = 0.0
+
+    @property
+    def is_shared(self) -> bool:
+        return time.monotonic() >= self._disabled_until
+
+    async def _get_client(self):
+        if self._client is None:
+            import httpx
+            self._client = httpx.AsyncClient(
+                base_url=self._url,
+                headers={"Authorization": f"Bearer {self._token}"},
+                timeout=5.0,
+            )
+            display_url = self._url.removeprefix("https://").removeprefix("http://")
+            logger.info("Upstash Redis REST connected: {}", display_url)
+        return self._client
+
+    async def _command(self, *parts: Any) -> Any:
+        if not self.is_shared:
+            raise RuntimeError("Upstash Redis REST is temporarily unavailable")
+        import httpx
+
+        client = await self._get_client()
+        try:
+            response = await client.post("/", json=list(parts))
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            self._disabled_until = time.monotonic() + self.RETRY_AFTER_SECONDS
+            logger.warning(
+                "Upstash Redis REST unavailable; using local state until retry: {err}",
+                err=str(exc),
+            )
+            raise
+        payload = response.json()
+        if isinstance(payload, dict) and "error" in payload and payload["error"]:
+            raise RuntimeError(payload["error"])
+        return payload.get("result") if isinstance(payload, dict) else payload
+
+    async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
+        serialized = json.dumps(value, default=str)
+        if ttl:
+            await self._command("SET", key, serialized, "EX", ttl)
+        else:
+            await self._command("SET", key, serialized)
+
+    async def get(self, key: str) -> Any | None:
+        val = await self._command("GET", key)
+        if val is None:
+            return None
+        try:
+            return json.loads(val)
+        except (json.JSONDecodeError, TypeError):
+            return val
+
+    async def delete(self, key: str) -> None:
+        await self._command("DEL", key)
+
+    async def keys(self, pattern: str = "*") -> list[str]:
+        cursor = "0"
+        keys: list[str] = []
+        while True:
+            result = await self._command("SCAN", cursor, "MATCH", pattern, "COUNT", 100)
+            if not isinstance(result, list) or len(result) != 2:
+                return keys
+            cursor = str(result[0])
+            keys.extend(result[1] or [])
+            if cursor == "0":
+                return keys
+
+    async def set_hash(self, key: str, mapping: dict, ttl: int | None = None) -> None:
+        serialized: list[Any] = []
+        for field, value in mapping.items():
+            serialized.extend([field, json.dumps(value, default=str)])
+        if serialized:
+            await self._command("HSET", key, *serialized)
+        if ttl:
+            await self._command("EXPIRE", key, ttl)
+
+    async def get_hash(self, key: str) -> dict | None:
+        val = await self._command("HGETALL", key)
+        if not val:
+            return None
+        if isinstance(val, dict):
+            items = val.items()
+        elif isinstance(val, list):
+            items = zip(val[0::2], val[1::2])
+        else:
+            return None
+        return {k: json.loads(v) for k, v in items}
+
+    async def delete_hash_field(self, key: str, field: str) -> None:
+        await self._command("HDEL", key, field)
+
+    async def cleanup(self) -> int:
+        """Upstash handles TTL expiry automatically. Returns 0."""
+        return 0
+
+    async def close(self) -> None:
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+
+
+def create_shared_state(
+    redis_url: str = "",
+    upstash_url: str = "",
+    upstash_token: str = "",
+) -> InMemoryState | RedisState | UpstashRestState:
     """Create shared state backend based on configuration."""
     if redis_url:
         logger.info("Using Redis for shared state")
         return RedisState(redis_url)
+    elif upstash_url and upstash_token:
+        logger.info("Using Upstash Redis REST for shared state")
+        return UpstashRestState(upstash_url, upstash_token)
     else:
         logger.info("Using in-memory shared state (single instance)")
         return InMemoryState()
 
 
 # Module-level singleton — lazy init
-_state: InMemoryState | RedisState | None = None
+_state: InMemoryState | RedisState | UpstashRestState | None = None
 
 
-def get_shared_state() -> InMemoryState | RedisState:
+def get_shared_state() -> InMemoryState | RedisState | UpstashRestState:
     """Get or create the shared state singleton."""
     global _state
     if _state is None:
         import os
         redis_url = os.getenv("REDIS_URL", "")
-        _state = create_shared_state(redis_url)
+        upstash_url = os.getenv("UPSTASH_REDIS_REST_URL", "")
+        upstash_token = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
+        _state = create_shared_state(redis_url, upstash_url, upstash_token)
     return _state

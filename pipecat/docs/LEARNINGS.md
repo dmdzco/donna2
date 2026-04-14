@@ -74,7 +74,7 @@ Two sequential LLM round trips: one to generate the tool call, one to generate t
 - `check_caregiver_notes` → Pre-fetched at call start, injected into system prompt
 
 ### Fire-and-Forget for Non-Critical DB Writes
-`mark_reminder_acknowledged` handler returns immediately with a success response. The actual DB write runs in `asyncio.create_task()`. Claude gets its response instantly; the database update happens in the background. Same pattern used for marking caregiver notes as delivered.
+`mark_reminder_acknowledged` handler returns immediately with a success response. The actual DB write runs in `asyncio.create_task()` so Claude's next spoken response is not delayed, but post-call processing waits briefly and re-reads `reminder_deliveries.status` before deciding whether to retry. Caregiver notes are no longer marked delivered on connect; post-call marks them only when the assistant transcript contains delivery evidence.
 
 ### Memory Gate: 500ms Wait Saves 4.3s
 Before passing the final transcription to Claude, wait up to 500ms for the memory prefetch cache to populate. The prefetch started on interim transcriptions while the user was still speaking — most of the time it's already cached. Worst case: 500ms delay. Best case: 0ms (cache hit). Compared to Claude calling `search_memories` tool: ~4.3s saved.

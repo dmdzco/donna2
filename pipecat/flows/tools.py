@@ -2,7 +2,7 @@
 
 Active tools exposed to Claude (2 tools — Director-first architecture):
 - web_search: Real-time web search with spoken filler UX
-- mark_reminder_acknowledged: Track reminder delivery status (fire-and-forget)
+- mark_reminder_acknowledged: Track reminder delivery status with post-call DB verification
 
 Retired tools (handlers kept for Gemini / future use):
 - search_memories → Director injects memories as ephemeral context (500ms gate)
@@ -202,7 +202,8 @@ def make_tool_handlers(session_state: dict) -> dict:
         user_response = args.get("user_response", "")
         logger.info("Tool: mark_reminder id={rid} status={s}", rid=reminder_id, s=status)
 
-        # Local tracking is synchronous (critical for prompt context)
+        # Local tracking is synchronous (critical for prompt context), but
+        # post-call cleanup verifies the DB status before skipping retries.
         delivered = session_state.setdefault("reminders_delivered", set())
         if reminder_id:
             delivered.add(reminder_id)
@@ -211,21 +212,44 @@ def make_tool_handlers(session_state: dict) -> dict:
         if title:
             delivered.add(title)
 
-        # Fire-and-forget: DB write in background (don't block Claude's response)
-        async def _background_ack():
+        session_state["_reminder_ack_attempted"] = True
+
+        async def _persist_ack():
             try:
                 from services.reminder_delivery import mark_reminder_acknowledged
-                delivery = session_state.get("reminder_delivery")
                 delivery_id = delivery.get("id") if delivery else None
-                if delivery_id:
-                    await mark_reminder_acknowledged(delivery_id, status, user_response)
-                    logger.info("Background mark_reminder completed: {rid}", rid=reminder_id)
-                else:
+                if not delivery_id:
+                    session_state["_reminder_ack_persisted"] = False
                     logger.warning("mark_reminder: no delivery_id in session")
-            except Exception as e:
-                logger.error("Background mark_reminder failed: {err}", err=str(e))
+                    return None
 
-        asyncio.create_task(_background_ack())
+                row = await mark_reminder_acknowledged(delivery_id, status, user_response)
+                session_state["_reminder_ack_persisted"] = bool(row)
+                if row:
+                    logger.info("mark_reminder persisted: {rid}", rid=reminder_id)
+                else:
+                    logger.warning("mark_reminder persistence returned no row: {rid}", rid=reminder_id)
+                return row
+            except Exception as e:
+                session_state["_reminder_ack_persisted"] = False
+                logger.error("mark_reminder persistence failed: {err}", err=str(e))
+                return None
+
+        if not (delivery.get("id") if delivery else None):
+            session_state["_reminder_ack_persisted"] = False
+            logger.warning("mark_reminder: no delivery_id in session")
+            return {"status": "success", "result": "Reminder response noted."}
+
+        try:
+            task = asyncio.create_task(_persist_ack())
+            session_state["_reminder_ack_task"] = task
+            ack_tasks = session_state.setdefault("_reminder_ack_tasks", set())
+            ack_tasks.add(task)
+            task.add_done_callback(ack_tasks.discard)
+        except Exception as e:
+            session_state["_reminder_ack_persisted"] = False
+            logger.error("mark_reminder scheduling failed: {err}", err=str(e))
+
         return {"status": "success", "result": f"Reminder marked as {status}."}
 
     async def handle_save_detail(args: dict) -> dict:

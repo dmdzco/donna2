@@ -83,9 +83,9 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 │   │         (conditional reminder → main → winding_down → closing)      │   │
 │   │                     │ TextFrame                                      │   │
 │   │                     ▼                                                │   │
-│   │         Conversation Tracker (topics + shared transcript)            │   │
-│   │                     ▼                                                │   │
 │   │         Guidance Stripper (strips <guidance> + [BRACKETED])          │   │
+│   │                     ▼                                                │   │
+│   │         Conversation Tracker (topics + stripped transcript)          │   │
 │   │                     ▼                                                │   │
 │   │         ElevenLabs TTS → Audio Out → Twilio (mulaw 8kHz)            │   │
 │   │                     ▼                                                │   │

@@ -49,8 +49,9 @@ class TestHealthEndpoint:
 class TestVoiceAnswerEndpoint:
     @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
     @patch("services.scheduler.get_prefetched_context", return_value=None)
+    @patch("services.seniors.find_any_by_phone", new_callable=AsyncMock, return_value=None)
     @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
-    def test_voice_answer_returns_twiml(self, mock_find, mock_prefetch, mock_reminder, client):
+    def test_voice_answer_returns_twiml(self, mock_find, mock_find_any, mock_prefetch, mock_reminder, client):
         """Test that /voice/answer returns valid TwiML XML."""
         response = client.post(
             "/voice/answer",
@@ -71,9 +72,31 @@ class TestVoiceAnswerEndpoint:
     @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
     @patch("services.scheduler.get_prefetched_context", return_value=None)
     @patch("services.reminder_delivery.get_reminder_by_call_sid", new_callable=AsyncMock, return_value=None)
-    @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
-    def test_voice_answer_includes_params(self, mock_find, mock_reminder_db, mock_prefetch, mock_reminder, client):
+    @patch("services.conversations.create", new_callable=AsyncMock, return_value={"id": "conv-456"})
+    @patch("api.routes.voice._hydrate_senior_call_context", new_callable=AsyncMock)
+    @patch("services.seniors.find_by_phone", new_callable=AsyncMock)
+    def test_voice_answer_includes_params(self, mock_find, mock_hydrate, mock_create, mock_reminder_db, mock_prefetch, mock_reminder, client):
         """Test that TwiML includes stream parameters."""
+        mock_find.return_value = {
+            "id": "senior-456",
+            "name": "Margaret",
+            "phone": "5559876543",
+            "timezone": "America/New_York",
+            "is_active": True,
+        }
+        mock_hydrate.return_value = {
+            "memory_context": "memory",
+            "pre_generated_greeting": "Hello Margaret",
+            "news_context": None,
+            "recent_turns": None,
+            "previous_calls_summary": None,
+            "todays_context": None,
+            "last_call_analysis": None,
+            "call_settings": {},
+            "has_caregiver_notes": False,
+            "caregiver_notes_content": [],
+        }
+
         response = client.post(
             "/voice/answer",
             data={
@@ -156,9 +179,10 @@ class TestVoiceAnswerEndpoint:
 
     @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
     @patch("services.scheduler.get_prefetched_context", return_value=None)
+    @patch("services.seniors.find_any_by_phone", new_callable=AsyncMock, return_value=None)
     @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
     def test_voice_answer_accepts_valid_twilio_signature(
-        self, mock_find, mock_prefetch, mock_reminder, client, monkeypatch
+        self, mock_find, mock_find_any, mock_prefetch, mock_reminder, client, monkeypatch
     ):
         monkeypatch.setenv("ENVIRONMENT", "production")
         monkeypatch.setenv("PIPECAT_PUBLIC_URL", "https://pipecat.test")
@@ -186,6 +210,34 @@ class TestVoiceAnswerEndpoint:
         assert response.status_code == 200
         assert "wss://pipecat.test/ws" in response.text
         assert "ws_token" in response.text
+
+    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
+    @patch("services.scheduler.get_prefetched_context", return_value=None)
+    @patch("services.seniors.find_any_by_phone", new_callable=AsyncMock)
+    @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
+    def test_voice_answer_inactive_senior_uses_no_phi_hangup(
+        self, mock_find, mock_find_any, mock_prefetch, mock_reminder, client
+    ):
+        """Inactive seniors should not create conversations or load PHI context."""
+        mock_find_any.return_value = {
+            "id": "senior-inactive",
+            "phone": "5559876543",
+            "is_active": False,
+        }
+
+        response = client.post(
+            "/voice/answer",
+            data={
+                "CallSid": "CAinactive",
+                "From": "+15559876543",
+                "To": "+15551234567",
+                "Direction": "inbound",
+            },
+        )
+
+        assert response.status_code == 200
+        assert "<Hangup/>" in response.text
+        assert "<Stream" not in response.text
 
 
 class TestVoiceStatusEndpoint:

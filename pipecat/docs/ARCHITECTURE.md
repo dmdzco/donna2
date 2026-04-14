@@ -18,8 +18,9 @@
                                    │ WebSocket
                     ┌──────────────▼──────────────┐
                     │        main.py /ws            │
-                    │   Accepts WS, creates         │
-                    │   session_state, calls bot.py  │
+                    │   Accepts WS, validates       │
+                    │   Twilio start frame + token  │
+                    │   before active-call capacity │
                     └──────────────┬───────────────┘
                                    │
                     ┌──────────────▼──────────────┐
@@ -85,16 +86,16 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         │ TextFrame
                         ▼
               ┌─────────────────────┐
-              │ Conversation Tracker │  Tracks topics, questions,
-              │                      │  advice per call. Shares
-              │                      │  transcript via session_state
+              │  Guidance Stripper   │  Removes <guidance>...</guidance>
+              │                      │  tags and [BRACKETED] directives
+              │                      │  before TTS and transcript
               └─────────┬───────────┘
                         │
                         ▼
               ┌─────────────────────┐
-              │  Guidance Stripper   │  Removes <guidance>...</guidance>
-              │                      │  tags and [BRACKETED] directives
-              │                      │  before TTS
+              │ Conversation Tracker │  Tracks topics, questions,
+              │                      │  advice per call. Stores
+              │                      │  stripped transcript text
               └─────────┬───────────┘
                         │
                         ▼
@@ -119,7 +120,7 @@ The pipeline processors don't call each other directly. They communicate through
 1. **Frame injection** — Quick Observer and Conversation Director inject guidance into the LLM context by pushing `LLMMessagesAppendFrame` frames. These get appended to Claude's message history before it generates a response, but they don't trigger an LLM call on their own (`run_llm=False`). The next `TranscriptionFrame` reaching the Context Aggregator triggers the actual LLM call, at which point all injected guidance is already in context.
 
 2. **Shared `session_state` dict** — A mutable dictionary initialized in `main.py` and passed to every processor. Key shared state:
-   - `_transcript` — Rolling conversation history (max 40 turns), written by ConversationTracker, read by ConversationDirector for its Groq/Gemini analysis
+   - `_transcript` — Rolling conversation history (max 40 turns), written by ConversationTracker after guidance stripping, read by ConversationDirector for its Groq/Gemini analysis
    - `_goodbye_in_progress` — Set by QuickObserver when strong goodbye detected, read by Director to suppress stale guidance injection
    - `_call_start_time` — Set in bot.py, read by Director for time-based fallbacks
    - `_conversation_tracker` — Reference to the ConversationTracker processor, read by Flow nodes to build tracking summaries
@@ -377,13 +378,13 @@ When the Twilio client disconnects, `run_post_call()` in `services/post_call.py`
 
 1. **Complete conversation** — Updates DB with duration, status, transcript
 2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions. Now also includes `mood` (e.g., happy, lonely, anxious) and `caregiver_sms` (a privacy-respecting, mood-aware message for caregivers)
-2.5. **Caregiver notification** — POST to Node.js API for call_completed + concern_detected alerts. The `caregiver_sms` from analysis is sent to caregivers via this pipeline; if the senior seems down, it subtly suggests the caregiver give them a call
+2.5. **Caregiver notes + notifications** — Marks caregiver notes delivered only when assistant transcript evidence shows Donna delivered them. POSTs to Node.js API for call_completed + concern_detected alerts, raising on non-2xx responses and retrying transient failures once. The `caregiver_sms` from analysis is sent to caregivers via this pipeline; if the senior seems down, it subtly suggests the caregiver give them a call
 3. **Summary persistence** — Writes analysis summary to `conversations.summary` (enables `get_recent_summaries()` and cross-call context)
 3.5. **Interest discovery** — Extracts new interests from conversation, updates senior profile
 3.6. **Interest scores** — Computes engagement scores per interest topic
 4. **Memory extraction** — OpenAI extracts facts/preferences/events from transcript, stores with embeddings
 5. **Daily context** — Saves topics, advice, reminders, and summary for same-day cross-call memory
-6. **Reminder cleanup** — Marks unacknowledged reminders for retry
+6. **Reminder cleanup** — Waits briefly for any in-flight reminder acknowledgment write, re-reads `reminder_deliveries.status`, and marks unacknowledged reminders for retry
 7. **Cache clearing** — Clears senior context cache and reminder context
 8. **Snapshot rebuild** — Rebuilds `seniors.call_context_snapshot` JSONB (analysis, summaries, turns, daily context) so next call reads a single column instead of 6 queries
 

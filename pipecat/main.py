@@ -101,7 +101,12 @@ from api.routes.data import router as data_router
 from api.routes.export import router as export_router
 from api.routes.metrics import router as metrics_router
 from api.routes.voice import router as voice_router, call_metadata
-from bot import run_bot
+from bot import (
+    WebSocketAuthError,
+    authenticate_websocket_call,
+    prepare_websocket_call,
+    run_bot,
+)
 
 app = FastAPI(title="Donna Pipecat", version="0.1.0")
 
@@ -220,22 +225,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await websocket.accept()
 
-    # Admission control: reject if at capacity
-    if _call_semaphore.locked():
-        logger.warning("Rejected call: at capacity ({max})", max=MAX_CALLS)
-        await websocket.close(code=1013)  # Try Again Later
-        return
-
-    await _call_semaphore.acquire()
-    _active_calls += 1
-    if _active_calls > _peak_calls:
-        _peak_calls = _active_calls
-
-    # Track this task for graceful shutdown draining
-    current_task = asyncio.current_task()
-    if current_task:
-        register_call_task(current_task)
-
     session_state = {
         "senior_id": None,
         "senior": None,
@@ -260,6 +249,53 @@ async def websocket_endpoint(websocket: WebSocket):
     }
 
     try:
+        prepared_call = await prepare_websocket_call(
+            websocket,
+            session_state,
+            consume_token=False,
+        )
+    except WebSocketAuthError as exc:
+        logger.warning("[{cs}] Rejected WebSocket before capacity: {reason}",
+                       cs=session_state.get("call_sid") or "unknown", reason=str(exc))
+        await websocket.close(code=1008)
+        return
+    except Exception as exc:
+        logger.warning("[{cs}] WebSocket handshake failed before capacity: {reason}",
+                       cs=session_state.get("call_sid") or "unknown", reason=str(exc))
+        await websocket.close(code=1008)
+        return
+
+    # Admission control: reject valid calls if no AI call slot is immediately free.
+    try:
+        await asyncio.wait_for(_call_semaphore.acquire(), timeout=0.01)
+    except asyncio.TimeoutError:
+        logger.warning("Rejected authenticated call: at capacity ({max})", max=MAX_CALLS)
+        await websocket.close(code=1013)  # Try Again Later
+        return
+
+    try:
+        prepared_call["metadata"] = await authenticate_websocket_call(
+            prepared_call["call_data"],
+            session_state,
+            consume_token=True,
+        )
+    except WebSocketAuthError as exc:
+        logger.warning("[{cs}] WebSocket auth failed at token consume: {reason}",
+                       cs=session_state.get("call_sid") or "unknown", reason=str(exc))
+        _call_semaphore.release()
+        await websocket.close(code=1008)
+        return
+
+    _active_calls += 1
+    if _active_calls > _peak_calls:
+        _peak_calls = _active_calls
+
+    # Track this task for graceful shutdown draining
+    current_task = asyncio.current_task()
+    if current_task:
+        register_call_task(current_task)
+
+    try:
         import sentry_sdk as _sentry
         _sentry.set_tag("senior_id", session_state.get("senior_id", "unknown"))
         _sentry.set_tag("call_type", session_state.get("call_type", "unknown"))
@@ -267,7 +303,7 @@ async def websocket_endpoint(websocket: WebSocket):
         pass
 
     try:
-        await run_bot(websocket, session_state)
+        await run_bot(websocket, session_state, prepared_call=prepared_call)
     except Exception as e:
         import traceback as _tb
         logger.error("Pipeline error: {err}\n{tb}", err=str(e), tb=_tb.format_exc())

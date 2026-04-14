@@ -2,7 +2,7 @@
 
 Assembles the full Pipecat pipeline for a single call session:
   Twilio WebSocket → Deepgram STT → Quick Observer → LLM Context →
-  Anthropic Claude → Conversation Tracker → Guidance Stripper →
+  Anthropic Claude → Guidance Stripper → Conversation Tracker →
   ElevenLabs TTS → Twilio output
 
 Called once per incoming WebSocket connection from Twilio.
@@ -52,7 +52,15 @@ class WebSocketAuthError(Exception):
     """Raised when a Twilio media WebSocket cannot be admitted."""
 
 
-async def authenticate_websocket_call(call_data: dict, session_state: dict) -> dict:
+HANDSHAKE_TIMEOUT_SECONDS = float(os.getenv("TWILIO_WS_HANDSHAKE_TIMEOUT_SECONDS", "5"))
+
+
+async def authenticate_websocket_call(
+    call_data: dict,
+    session_state: dict,
+    *,
+    consume_token: bool = True,
+) -> dict:
     """Authenticate the Twilio media WebSocket before any AI services start."""
     call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "")
     if not call_sid:
@@ -75,8 +83,46 @@ async def authenticate_websocket_call(call_data: dict, session_state: dict) -> d
     if not provided_token or not hmac.compare_digest(str(expected_token), str(provided_token)):
         raise WebSocketAuthError("invalid token")
 
-    await mark_ws_token_consumed(call_sid, metadata)
+    if consume_token:
+        await mark_ws_token_consumed(call_sid, metadata)
     return metadata
+
+
+async def prepare_websocket_call(
+    websocket: WebSocket,
+    session_state: dict,
+    *,
+    consume_token: bool = True,
+) -> dict:
+    """Parse and authenticate the Twilio start frame with a short timeout.
+
+    This can run before active-call capacity is acquired so stalled or invalid
+    WebSockets do not occupy an AI call slot.
+    """
+    try:
+        transport_type, call_data = await asyncio.wait_for(
+            parse_telephony_websocket(websocket),
+            timeout=HANDSHAKE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise WebSocketAuthError("handshake timeout") from exc
+
+    stream_sid = call_data.get("stream_id", "")
+    call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "unknown")
+    session_state["call_sid"] = call_sid
+
+    logger.info("[{cs}] Stream connected: {ss} (type={tt})", cs=call_sid, ss=stream_sid, tt=transport_type)
+
+    metadata = await authenticate_websocket_call(
+        call_data,
+        session_state,
+        consume_token=consume_token,
+    )
+    return {
+        "transport_type": transport_type,
+        "call_data": call_data,
+        "metadata": metadata,
+    }
 
 
 def create_tts_service(session_state: dict):
@@ -137,21 +183,6 @@ def _start_post_call_once(
     return task
 
 
-async def _mark_caregiver_notes_delivered(session_state: dict, call_sid: str):
-    """Fire-and-forget: mark pre-fetched caregiver notes as delivered."""
-    try:
-        from services.caregivers import mark_note_delivered
-        notes = session_state.get("_caregiver_notes_content") or []
-        for note in notes:
-            note_id = note.get("id") if isinstance(note, dict) else None
-            if note_id:
-                await mark_note_delivered(note_id, call_sid)
-        if notes:
-            logger.info("[{cs}] Marked {n} caregiver notes as delivered", cs=call_sid, n=len(notes))
-    except Exception as e:
-        logger.error("[{cs}] Error marking caregiver notes delivered: {err}", cs=call_sid, err=str(e))
-
-
 async def _load_call_metadata(call_sid: str, session_state: dict) -> dict:
     """Load call metadata from local state, then Redis for multi-instance routing."""
     call_meta = session_state.get("_call_metadata", {})
@@ -178,7 +209,7 @@ async def _load_call_metadata(call_sid: str, session_state: dict) -> dict:
     return {}
 
 
-async def run_bot(websocket: WebSocket, session_state: dict) -> None:
+async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict | None = None) -> None:
     """Run the Donna voice pipeline for a single call.
 
     Args:
@@ -202,19 +233,19 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     # -------------------------------------------------------------------------
     # Parse Twilio WebSocket handshake
     # -------------------------------------------------------------------------
-    transport_type, call_data = await parse_telephony_websocket(websocket)
+    if prepared_call is None:
+        try:
+            prepared_call = await prepare_websocket_call(websocket, session_state)
+        except WebSocketAuthError as exc:
+            logger.warning("[unknown] WebSocket auth failed: {reason}", reason=str(exc))
+            return
+
+    transport_type = prepared_call["transport_type"]
+    call_data = prepared_call["call_data"]
+    metadata = prepared_call["metadata"]
     stream_sid = call_data.get("stream_id", "")
     call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "unknown")
     session_state["call_sid"] = call_sid
-
-    logger.info("[{cs}] Stream connected: {ss} (type={tt})", cs=call_sid, ss=stream_sid, tt=transport_type)
-
-    # Validate WebSocket token (generated by /voice/answer, passed via TwiML <Parameter>).
-    try:
-        metadata = await authenticate_websocket_call(call_data, session_state)
-    except WebSocketAuthError as exc:
-        logger.warning("[{cs}] WebSocket auth failed: {reason}", cs=call_sid or "unknown", reason=str(exc))
-        return  # Pipeline won't start — WebSocket will close
 
     # Populate session_state from call_metadata (pre-fetched by /voice/answer)
     if metadata:
@@ -453,8 +484,8 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             conversation_director,
             context_aggregator.user(),
             pipeline_llm,
-            conversation_tracker,
             guidance_stripper,
+            conversation_tracker,
             tts,
             transport.output(),
             context_aggregator.assistant(),
@@ -508,9 +539,6 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         # Warm up Groq TCP+TLS immediately before greeting plays.
         from services.director_llm import warmup_fast_providers
         asyncio.create_task(warmup_fast_providers())
-        # Fire-and-forget: mark pre-fetched caregiver notes as delivered
-        if session_state.get("_caregiver_notes_content"):
-            asyncio.create_task(_mark_caregiver_notes_delivered(session_state, call_sid))
         await flow_manager.initialize(initial_node)
 
     @transport.event_handler("on_client_disconnected")

@@ -6,7 +6,7 @@ appId: com.donna.caregiver
 
 ---
 
-- evalScript: ${output.createPassword = "Donna-" + Date.now() + "-Z9!"}
+- evalScript: ${output.createPassword = "Dx7mQ9vLp2"}
 
 - stopApp
 - launchApp:
@@ -72,12 +72,12 @@ appId: com.donna.caregiver
     id: "create-account-submit"
 
 - extendedWaitUntil:
-    visible: "Save Password\\?|Verify Your Email|About You|Automatic Strong Password.*|Password must be at least 12 characters"
+    visible: "Save Password\\?|Verify Your Email|About You|Automatic Strong Password.*|Password must be at least 10 characters"
     timeout: 90000
 
 - runFlow:
     when:
-      visible: "Automatic Strong Password.*|Password must be at least 12 characters"
+      visible: "Automatic Strong Password.*|Password must be at least 10 characters"
     commands:
       - tapOn:
           text: "Automatic Strong Password.*"

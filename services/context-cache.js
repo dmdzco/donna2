@@ -65,8 +65,13 @@ function getLocalHour(timezone) {
     });
     return parseInt(formatter.format(now), 10);
   } catch (e) {
-    // Default to EST if timezone invalid
-    return new Date().getUTCHours() - 5;
+    // Default to New York local time if the profile timezone is invalid.
+    const fallbackFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour: 'numeric',
+      hour12: false
+    });
+    return parseInt(fallbackFormatter.format(new Date()), 10);
   }
 }
 

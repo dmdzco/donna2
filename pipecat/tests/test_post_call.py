@@ -6,6 +6,7 @@ daily context save, reminder cleanup, cache clearing.
 """
 
 import pytest
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 from processors.conversation_tracker import ConversationTrackerProcessor
@@ -83,6 +84,7 @@ class TestPostCallProcessing:
              patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
              patch("services.context_cache.clear_cache"), \
              patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
+             patch("services.reminder_delivery.get_delivery_status", new_callable=AsyncMock, return_value={"id": "delivery-001", "status": "delivered"}), \
              patch("services.reminder_delivery.mark_call_ended_without_acknowledgment", new_callable=AsyncMock) as mock_no_ack:
 
             mock_analyze.return_value = {
@@ -95,6 +97,114 @@ class TestPostCallProcessing:
             await run_post_call(reminder_session_state, tracker, duration_seconds=30)
 
             mock_no_ack.assert_awaited_once_with("delivery-001")
+
+    @pytest.mark.asyncio
+    async def test_post_call_rechecks_reminder_status_even_when_locally_delivered(self, reminder_session_state):
+        """Local reminder tracking should not suppress DB retry cleanup."""
+        reminder_session_state["_transcript"] = [
+            {"role": "assistant", "content": "Remember to take your metformin."},
+        ]
+        reminder_session_state["reminders_delivered"] = {"rem-001", "Take metformin"}
+
+        tracker = ConversationTrackerProcessor(session_state=reminder_session_state)
+
+        with patch("services.conversations.complete", new_callable=AsyncMock), \
+             patch("services.call_analysis.analyze_completed_call", new_callable=AsyncMock, return_value=None), \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock), \
+             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={}), \
+             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
+             patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
+             patch("services.context_cache.clear_cache"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
+             patch("services.reminder_delivery.get_delivery_status", new_callable=AsyncMock, return_value={"id": "delivery-001", "status": "delivered"}), \
+             patch("services.reminder_delivery.mark_call_ended_without_acknowledgment", new_callable=AsyncMock) as mock_no_ack:
+
+            from services.post_call import run_post_call
+            await run_post_call(reminder_session_state, tracker, duration_seconds=30)
+
+            mock_no_ack.assert_awaited_once_with("delivery-001")
+
+    @pytest.mark.asyncio
+    async def test_post_call_waits_for_reminder_ack_task_before_status_check(self, reminder_session_state):
+        """A no-latency tool ack still gets a brief post-call settlement window."""
+        reminder_session_state["_transcript"] = [
+            {"role": "assistant", "content": "Remember to take your metformin."},
+        ]
+
+        async def finished_ack():
+            reminder_session_state["_reminder_ack_persisted"] = True
+
+        reminder_session_state["_reminder_ack_task"] = asyncio.create_task(finished_ack())
+        tracker = ConversationTrackerProcessor(session_state=reminder_session_state)
+
+        with patch("services.conversations.complete", new_callable=AsyncMock), \
+             patch("services.call_analysis.analyze_completed_call", new_callable=AsyncMock, return_value=None), \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock), \
+             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={}), \
+             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
+             patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
+             patch("services.context_cache.clear_cache"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
+             patch("services.reminder_delivery.get_delivery_status", new_callable=AsyncMock, return_value={"id": "delivery-001", "status": "acknowledged"}) as mock_status, \
+             patch("services.reminder_delivery.mark_call_ended_without_acknowledgment", new_callable=AsyncMock) as mock_no_ack:
+
+            from services.post_call import run_post_call
+            await run_post_call(reminder_session_state, tracker, duration_seconds=30)
+
+            assert reminder_session_state["_reminder_ack_persisted"] is True
+            mock_status.assert_awaited_once_with("delivery-001")
+            mock_no_ack.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_post_call_marks_caregiver_note_after_assistant_delivery(self, session_state):
+        """Caregiver notes should be marked delivered only with transcript evidence."""
+        session_state["_caregiver_notes_content"] = [
+            {
+                "id": "note-001",
+                "content": "Sarah asked about your knee pain.",
+            }
+        ]
+        session_state["_transcript"] = [
+            {
+                "role": "assistant",
+                "content": "Before I forget, Sarah wanted me to ask about your knee pain.",
+            },
+            {"role": "user", "content": "It's better today."},
+        ]
+
+        tracker = ConversationTrackerProcessor(session_state=session_state)
+
+        with patch("services.conversations.complete", new_callable=AsyncMock), \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock), \
+             patch("services.caregivers.mark_note_delivered", new_callable=AsyncMock) as mock_note, \
+             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={}), \
+             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
+             patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
+             patch("services.context_cache.clear_cache"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
+             patch("lib.growthbook.is_on", return_value=False):
+
+            from services.post_call import run_post_call
+            await run_post_call(session_state, tracker, duration_seconds=60)
+
+            mock_note.assert_awaited_once_with("note-001", "CA-test-001")
+
+    def test_format_concern_for_notification_uses_node_expected_string(self):
+        from services.post_call import _format_concern_for_notification
+
+        concern = {
+            "severity": "high",
+            "description": "Margaret reported feeling dizzy.",
+            "recommended_action": "Caregiver should check in today.",
+            "evidence": "Full transcript evidence should not be needed here.",
+        }
+
+        text = _format_concern_for_notification(concern)
+
+        assert "dizzy" in text
+        assert "check in" in text
+        assert "Full transcript" not in text
+        assert len(text) <= 300
 
     @pytest.mark.asyncio
     async def test_post_call_discovers_new_interests(self, session_state):

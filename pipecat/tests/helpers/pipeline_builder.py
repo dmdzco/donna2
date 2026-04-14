@@ -54,8 +54,8 @@ def build_test_pipeline(
 
     Pipeline layout (matches bot.py):
         input_transport -> quick_observer -> user_conversation_tracker ->
-        conversation_director -> context_aggregator.user() -> llm -> conversation_tracker ->
-        guidance_stripper -> tts -> output_transport ->
+        conversation_director -> context_aggregator.user() -> llm -> guidance_stripper ->
+        conversation_tracker -> tts -> output_transport ->
         context_aggregator.assistant() -> frame_capture
 
     Returns TestPipelineComponents with references to all components.
@@ -106,8 +106,8 @@ def build_test_pipeline(
     # For tests, the MockLLMProcessor handles context accumulation directly.
     processors.extend([
         llm,
-        conversation_tracker,
         guidance_stripper,
+        conversation_tracker,
         tts,
         output_transport,
         frame_capture,

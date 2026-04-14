@@ -21,7 +21,8 @@ export class ErrorBoundary extends Component<Props, State> {
             Something went wrong
           </Text>
           <Text style={{ fontSize: 15, color: COLORS.muted, textAlign: "center", marginBottom: 24 }}>
-            {this.state.error?.message || "An unexpected error occurred"}
+            Donna ran into a problem. Please try again. If it keeps happening,
+            close and reopen the app.
           </Text>
           <Pressable
             onPress={() => this.setState({ hasError: false, error: undefined })}

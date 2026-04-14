@@ -15,7 +15,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Button } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
-import { api } from "@/src/lib/api";
+import { api, getErrorMessage } from "@/src/lib/api";
 import {
   useOnboardingStore,
   type OnboardingCall,
@@ -209,9 +209,14 @@ export default function SuccessScreen() {
       store.reset();
       router.replace("/(tabs)");
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Something went wrong";
-      Alert.alert("Error", message);
+      Alert.alert(
+        "Couldn't Finish Setup",
+        getErrorMessage(
+          err,
+          "We couldn't finish setup. Your information is still here. Check your connection and try again.",
+          "save",
+        ),
+      );
     } finally {
       setLoading(false);
     }

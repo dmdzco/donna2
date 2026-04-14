@@ -86,8 +86,12 @@ export default function LovedOneProfileScreen() {
       router.replace("/(tabs)/settings");
     } catch (error) {
       Alert.alert(
-        "Error",
-        getErrorMessage(error, "Failed to update profile. Please try again."),
+        "Couldn't Save",
+        getErrorMessage(
+          error,
+          "We couldn't save this profile. Your changes are still here. Please try again.",
+          "save",
+        ),
       );
     }
   };

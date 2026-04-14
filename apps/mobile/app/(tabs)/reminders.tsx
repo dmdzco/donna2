@@ -385,7 +385,11 @@ export default function RemindersScreen() {
 
           {(createReminder.isError || updateReminder.isError) && (
             <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
-              {getErrorMessage(createReminder.error ?? updateReminder.error)}
+              {getErrorMessage(
+                createReminder.error ?? updateReminder.error,
+                "We couldn't save this reminder. Your changes are still here. Please try again.",
+                "save",
+              )}
             </Text>
           )}
         </View>
@@ -422,7 +426,11 @@ export default function RemindersScreen() {
 
         {deleteReminder.isError && (
           <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
-            {getErrorMessage(deleteReminder.error, "Failed to delete reminder")}
+            {getErrorMessage(
+              deleteReminder.error,
+              "We couldn't delete this reminder. Please try again.",
+              "delete",
+            )}
           </Text>
         )}
       </Modal>

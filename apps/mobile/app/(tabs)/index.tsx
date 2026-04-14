@@ -365,7 +365,11 @@ export default function DashboardScreen() {
           </View>
           {initiateCall.isError && (
             <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
-              {getErrorMessage(initiateCall.error, "Failed to initiate call")}
+              {getErrorMessage(
+                initiateCall.error,
+                "Donna couldn't start the call. Please try again in a moment. If this is urgent, call your loved one directly.",
+                "call",
+              )}
             </Text>
           )}
         </View>

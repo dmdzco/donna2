@@ -12,6 +12,47 @@ const API_URL =
 
 type FetchOptions = RequestInit & { token?: string };
 
+const DEFAULT_TIMEOUT_MS = 15000;
+
+export type ApiErrorKind =
+  | "network"
+  | "timeout"
+  | "unauthorized"
+  | "forbidden"
+  | "not_found"
+  | "validation"
+  | "conflict"
+  | "rate_limit"
+  | "server"
+  | "unknown";
+
+function classifyStatus(status: number): ApiErrorKind {
+  if (status === 401) return "unauthorized";
+  if (status === 403) return "forbidden";
+  if (status === 404) return "not_found";
+  if (status === 409) return "conflict";
+  if (status === 422 || status === 400) return "validation";
+  if (status === 429) return "rate_limit";
+  if (status >= 500) return "server";
+  return "unknown";
+}
+
+function requestIdFrom(body: Record<string, unknown>, res?: Response) {
+  const bodyRequestId =
+    typeof body.requestId === "string" ? body.requestId : undefined;
+  return bodyRequestId ?? res?.headers.get("x-request-id") ?? undefined;
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 async function fetchJson<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
   const { token, ...fetchOpts } = options;
   const headers: Record<string, string> = {
@@ -20,18 +61,48 @@ async function fetchJson<T>(endpoint: string, options: FetchOptions = {}): Promi
     ...((fetchOpts.headers as Record<string, string>) ?? {}),
   };
 
-  const res = await fetch(`${API_URL}${endpoint}`, { ...fetchOpts, headers });
+  const controller = new AbortController();
+  let didTimeout = false;
+  const timeout = setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, DEFAULT_TIMEOUT_MS);
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    const error = new ApiError(
-      body.error ?? body.message ?? `HTTP ${res.status}`,
-      res.status,
-      body,
-    );
-    throw error;
+  const sourceSignal = fetchOpts.signal;
+  const abortFromSource = () => controller.abort();
+  sourceSignal?.addEventListener("abort", abortFromSource);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${endpoint}`, {
+      ...fetchOpts,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (didTimeout || isAbortError(error)) {
+      throw ApiError.timeout();
+    }
+    throw ApiError.network();
+  } finally {
+    clearTimeout(timeout);
+    sourceSignal?.removeEventListener("abort", abortFromSource);
   }
 
+  if (!res.ok) {
+    const body = asRecord(await res.json().catch(() => ({})));
+    throw new ApiError(
+      typeof body.error === "string" || typeof body.message === "string"
+        ? String(body.error ?? body.message)
+        : `HTTP ${res.status}`,
+      res.status,
+      body,
+      classifyStatus(res.status),
+      requestIdFrom(body, res),
+    );
+  }
+
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -41,9 +112,19 @@ export class ApiError extends Error {
     message: string,
     public status: number,
     public body: Record<string, unknown>,
+    public kind: ApiErrorKind = classifyStatus(status),
+    public requestId?: string,
   ) {
     super(message);
     this.name = "ApiError";
+  }
+
+  static network() {
+    return new ApiError("Network request failed", 0, {}, "network");
+  }
+
+  static timeout() {
+    return new ApiError("Request timed out", 0, {}, "timeout");
   }
 
   get isUnauthorized() {
@@ -56,9 +137,9 @@ export class ApiError extends Error {
     return this.status === 404 && this.body?.needsOnboarding === true;
   }
 
-  /** Human-readable message including status code for debugging */
+  /** Production-safe message for caregiver-facing UI. */
   get displayMessage() {
-    return `${this.message} (${this.status})`;
+    return getErrorMessage(this);
   }
 }
 
@@ -84,14 +165,80 @@ export interface AccountDeletionResult {
   message?: string;
 }
 
+export type ErrorMessageContext = "load" | "save" | "delete" | "call" | "auth";
+
+export function isRetryableApiError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  return (
+    error.kind === "network" ||
+    error.kind === "timeout" ||
+    error.kind === "rate_limit" ||
+    error.kind === "server"
+  );
+}
+
 /**
- * Extract a user-facing error message from a React Query error.
- * Shows the API error message + status code for debugging.
- * Falls back to a generic message for non-API errors.
+ * Extract a production-safe user-facing error message.
+ * Keep raw backend messages out of UI because these paths can touch PHI.
  */
-export function getErrorMessage(error: unknown, fallback = "Something went wrong"): string {
-  if (error instanceof ApiError) return error.displayMessage;
-  if (error instanceof Error) return error.message;
+export function getErrorMessage(
+  error: unknown,
+  fallback = "Something went wrong. Please try again.",
+  context: ErrorMessageContext = "load",
+): string {
+  if (error instanceof ApiError) {
+    if (context === "call") {
+      if (error.kind === "network" || error.kind === "timeout") {
+        return "Donna needs a steady internet connection to start the call. Check your connection and try again. If this is urgent, call your loved one directly.";
+      }
+      if (error.kind === "server" || error.kind === "rate_limit") {
+        return "Donna couldn't start the call right now. Please try again in a moment. If this is urgent, call your loved one directly.";
+      }
+    }
+
+    if (context === "save") {
+      if (error.kind === "network" || error.kind === "timeout") {
+        return "We couldn't save this because the connection dropped. Your changes are still here. Check your connection and try again.";
+      }
+      if (error.kind === "server" || error.kind === "rate_limit") {
+        return "We couldn't save this right now. Your changes are still here. Please try again in a moment.";
+      }
+    }
+
+    if (context === "delete") {
+      if (error.kind === "network" || error.kind === "timeout") {
+        return "We couldn't delete this because the connection dropped. Check your connection and try again.";
+      }
+      if (error.kind === "server" || error.kind === "rate_limit") {
+        return "We couldn't delete this right now. Please try again in a moment.";
+      }
+    }
+
+    switch (error.kind) {
+      case "network":
+        return "You're offline or the connection dropped. Check your connection and try again.";
+      case "timeout":
+        return "Donna is taking too long to respond. Check your connection and try again.";
+      case "unauthorized":
+        return "Please sign in again to continue.";
+      case "forbidden":
+        return "You don't have access to that information.";
+      case "not_found":
+        return error.needsOnboarding
+          ? "Finish setup to continue."
+          : "We couldn't find that information. Please try again.";
+      case "validation":
+        return "Check the information and try again.";
+      case "conflict":
+        return "That information is already in use. Check it and try again.";
+      case "rate_limit":
+        return "Too many attempts. Wait a moment and try again.";
+      case "server":
+        return "Donna couldn't reach the server. Please try again in a moment.";
+      default:
+        return fallback;
+    }
+  }
   return fallback;
 }
 

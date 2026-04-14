@@ -2,7 +2,7 @@ import "../global.css";
 import { useEffect } from "react";
 import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { tokenCache } from "@/src/lib/auth";
 import {
   registerForPushNotifications,
@@ -19,12 +19,13 @@ import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { COLORS } from "@/src/constants/theme";
 import { ErrorBoundary } from "@/src/components/ErrorBoundary";
+import { NetworkProvider } from "@/src/providers/NetworkProvider";
+import { queryClient } from "@/src/lib/queryClient";
 
 SplashScreen.preventAutoHideAsync();
-
-const queryClient = new QueryClient();
 
 const CLERK_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
 
@@ -111,8 +112,12 @@ export default function RootLayout() {
         <ClerkLoaded>
           <QueryClientProvider client={queryClient}>
             <GestureHandlerRootView style={{ flex: 1 }}>
-              <StatusBar style="dark" />
-              <AuthGuard />
+              <SafeAreaProvider>
+                <NetworkProvider>
+                  <StatusBar style="dark" />
+                  <AuthGuard />
+                </NetworkProvider>
+              </SafeAreaProvider>
             </GestureHandlerRootView>
           </QueryClientProvider>
         </ClerkLoaded>

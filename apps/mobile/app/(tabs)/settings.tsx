@@ -168,7 +168,11 @@ export default function SettingsScreen() {
       setShowDeleteAccountModal(false);
       Alert.alert(
         "Delete Account Failed",
-        getErrorMessage(error, "Please contact support to delete your account.")
+        getErrorMessage(
+          error,
+          "We couldn't delete your account right now. Please try again or contact support.",
+          "delete",
+        )
       );
     }
   };

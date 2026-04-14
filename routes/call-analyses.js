@@ -4,6 +4,7 @@ import { callAnalyses, seniors } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
 import { routeError } from './helpers.js';
+import { normalizeCallAnalysis } from '../services/call-analyses.js';
 
 const router = Router();
 
@@ -22,6 +23,7 @@ router.get('/api/call-analyses', requireAdmin, async (req, res) => {
       positiveObservations: callAnalyses.positiveObservations,
       followUpSuggestions: callAnalyses.followUpSuggestions,
       callQuality: callAnalyses.callQuality,
+      analysisEncrypted: callAnalyses.analysisEncrypted,
       createdAt: callAnalyses.createdAt,
     })
     .from(callAnalyses)
@@ -29,7 +31,10 @@ router.get('/api/call-analyses', requireAdmin, async (req, res) => {
     .orderBy(desc(callAnalyses.createdAt))
     .limit(100);
 
-    res.json(analyses);
+    res.json(analyses.map(analysis => ({
+      ...normalizeCallAnalysis(analysis),
+      seniorName: analysis.seniorName,
+    })));
   } catch (error) {
     routeError(res, error, 'GET /api/call-analyses');
   }

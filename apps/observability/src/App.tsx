@@ -3,6 +3,7 @@ import { CallList } from './components/CallList';
 import { CallTimeline } from './components/CallTimeline';
 import { ObserverPanel } from './components/ObserverPanel';
 import { MetricsPanel } from './components/MetricsPanel';
+import { AnalysisPanel } from './components/AnalysisPanel';
 import { LiveCallMonitor } from './components/LiveCallMonitor';
 import { InfraDashboard } from './components/InfraDashboard';
 import { LoginPage } from './components/LoginPage';
@@ -11,7 +12,7 @@ import type { Call } from './types';
 import './App.css';
 
 type AppMode = 'history' | 'live' | 'infra';
-type ViewMode = 'timeline' | 'observer' | 'metrics';
+type ViewMode = 'analysis' | 'timeline' | 'observer' | 'metrics';
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState<boolean>(!!getToken());
@@ -85,14 +86,25 @@ export default function App() {
             <>
               {/* Call Info Header */}
               <div className="call-header">
-                <div className="call-info">
-                  <h2>{selectedCall.senior_name || 'Unknown Senior'}</h2>
-                  <span className="call-phone">{selectedCall.senior_phone}</span>
-                  <span className={`call-status status-${selectedCall.status}`}>
-                    {selectedCall.status.replace('_', ' ')}
-                  </span>
+                <div className="call-info-block">
+                  <div className="call-info">
+                    <h2>{selectedCall.senior_name || 'Unknown Senior'}</h2>
+                    <span className="call-phone">{selectedCall.senior_phone}</span>
+                    <span className={`call-status status-${selectedCall.status}`}>
+                      {selectedCall.status.replace('_', ' ')}
+                    </span>
+                  </div>
+                  {selectedCall.summary && (
+                    <p className="call-summary-preview">{selectedCall.summary}</p>
+                  )}
                 </div>
                 <div className="view-toggle">
+                  <button
+                    className={viewMode === 'analysis' ? 'active' : ''}
+                    onClick={() => setViewMode('analysis')}
+                  >
+                    Analysis
+                  </button>
                   <button
                     className={viewMode === 'timeline' ? 'active' : ''}
                     onClick={() => setViewMode('timeline')}
@@ -116,7 +128,9 @@ export default function App() {
 
               {/* Content based on view mode */}
               <div className="call-content">
-                {viewMode === 'timeline' ? (
+                {viewMode === 'analysis' ? (
+                  <AnalysisPanel call={selectedCall} />
+                ) : viewMode === 'timeline' ? (
                   <CallTimeline callId={selectedCall.id} />
                 ) : viewMode === 'observer' ? (
                   <ObserverPanel callId={selectedCall.id} />

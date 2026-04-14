@@ -42,6 +42,7 @@ export interface Conversation {
   summary?: string;
   sentiment?: string;
   concerns?: string[];
+  analysis?: CallAnalysis | null;
 }
 
 export interface CallAnalysis {
@@ -51,10 +52,10 @@ export interface CallAnalysis {
   summary?: string;
   topics?: string[];
   engagementScore?: number;
-  concerns?: string[];
+  concerns?: Array<string | Record<string, unknown>>;
   positiveObservations?: string[];
   followUpSuggestions?: string[];
-  callQuality?: string;
+  callQuality?: Record<string, unknown> | string | null;
 }
 
 /**

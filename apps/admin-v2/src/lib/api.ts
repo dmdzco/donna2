@@ -74,8 +74,8 @@ export const api = {
   // Calls
   calls: {
     list: () => fetchJson<Call[]>('/api/conversations'),
-    initiate: (phoneNumber: string) =>
-      authFetch('/api/call', { method: 'POST', body: JSON.stringify({ phoneNumber }) }),
+    initiate: (seniorId: string) =>
+      authFetch('/api/call', { method: 'POST', body: JSON.stringify({ seniorId }) }),
   },
 
   // Reminders

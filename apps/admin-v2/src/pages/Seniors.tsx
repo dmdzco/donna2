@@ -100,7 +100,7 @@ export default function Seniors() {
   async function handleCall(senior: Senior) {
     if (!confirm(`Call ${senior.name} at ${senior.phone}?`)) return;
     try {
-      await api.calls.initiate(senior.phone);
+      await api.calls.initiate(senior.id);
       showToast('Call initiated');
     } catch (e: any) {
       showToast(e.message || 'Failed to initiate call', 'error');

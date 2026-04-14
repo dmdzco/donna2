@@ -1,10 +1,10 @@
-import crypto from 'crypto';
+import { isProductionEnv, matchServiceApiKey, parseServiceApiKeys } from '../lib/security-config.js';
 
 /**
  * API key authentication middleware.
- * Reads DONNA_API_KEY from environment. If set, all /api/* routes
+ * Reads DONNA_API_KEYS from environment. If set, all /api/* routes
  * require Authorization: Bearer <key> header.
- * If DONNA_API_KEY is not set, auth is disabled (development mode).
+ * If no service API keys are set, auth is disabled outside production only.
  */
 // Route prefixes that use their own auth (JWT or Clerk) instead of API key.
 // Express mounts this middleware at /api, so req.path is the path after /api.
@@ -25,10 +25,13 @@ const EXEMPT_PATHS = [
 ];
 
 export function requireApiKey(req, res, next) {
-  const apiKey = process.env.DONNA_API_KEY;
+  const configuredKeys = parseServiceApiKeys();
 
-  // If no API key configured, skip auth (dev mode)
-  if (!apiKey) {
+  // If no API key configured, skip auth outside production only.
+  if (configuredKeys.size === 0) {
+    if (isProductionEnv()) {
+      return res.status(503).json({ error: 'Service API key auth is not configured' });
+    }
     return next();
   }
 
@@ -43,12 +46,12 @@ export function requireApiKey(req, res, next) {
   }
 
   const token = authHeader.slice(7);
-
-  // Constant-time comparison to prevent timing attacks
-  if (!timingSafeEqual(token, apiKey)) {
+  const keyLabel = matchServiceApiKey(token);
+  if (!keyLabel) {
     return res.status(403).json({ error: 'Invalid API key' });
   }
 
+  req.serviceApiKeyLabel = keyLabel;
   next();
 }
 
@@ -65,21 +68,4 @@ export function isApiKeyExemptPath(path) {
 function normalizeApiPath(path) {
   if (!path || path === '/') return '/';
   return path.replace(/\/+$/, '') || '/';
-}
-
-/**
- * Constant-time string comparison to prevent timing attacks.
- * Handles different-length strings safely (timingSafeEqual throws on length mismatch).
- */
-function timingSafeEqual(a, b) {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-
-  if (bufA.length !== bufB.length) {
-    // Still perform a comparison to avoid leaking length info via timing
-    crypto.timingSafeEqual(bufA, bufA);
-    return false;
-  }
-
-  return crypto.timingSafeEqual(bufA, bufB);
 }

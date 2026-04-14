@@ -5,14 +5,14 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
+from twilio.request_validator import RequestValidator
 
 # Set required env vars before importing app
 os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ.setdefault("TWILIO_ACCOUNT_SID", "ACtest")
 os.environ.setdefault("TWILIO_AUTH_TOKEN", "test-token")
 os.environ.setdefault("TWILIO_PHONE_NUMBER", "+15551234567")
-os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/testdb")
-os.environ.setdefault("SKIP_TWILIO_VALIDATION", "true")
+os.environ.setdefault("ALLOW_UNSIGNED_TWILIO_WEBHOOKS", "true")
 
 from main import app
 
@@ -66,6 +66,7 @@ class TestVoiceAnswerEndpoint:
         assert "<Response>" in response.text
         assert "<Stream" in response.text
         assert "/ws" in response.text
+        assert "ws_token" in response.text
 
     @patch("services.scheduler.get_reminder_context", return_value=None)
     @patch("services.scheduler.get_prefetched_context", return_value=None)
@@ -134,6 +135,58 @@ class TestVoiceAnswerEndpoint:
 
         assert metadata == {}
 
+    def test_voice_answer_rejects_unsigned_webhook_in_production(self, client, monkeypatch):
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("PIPECAT_PUBLIC_URL", "https://pipecat.test")
+        monkeypatch.setenv("TWILIO_AUTH_TOKEN", "test-token")
+        monkeypatch.delenv("ALLOW_UNSIGNED_TWILIO_WEBHOOKS", raising=False)
+        monkeypatch.delenv("SKIP_TWILIO_VALIDATION", raising=False)
+
+        response = client.post(
+            "/voice/answer",
+            data={
+                "CallSid": "CAunsigned",
+                "From": "+15559876543",
+                "To": "+15551234567",
+                "Direction": "inbound",
+            },
+        )
+
+        assert response.status_code == 403
+
+    @patch("services.scheduler.get_reminder_context", return_value=None)
+    @patch("services.scheduler.get_prefetched_context", return_value=None)
+    @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
+    def test_voice_answer_accepts_valid_twilio_signature(
+        self, mock_find, mock_prefetch, mock_reminder, client, monkeypatch
+    ):
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("PIPECAT_PUBLIC_URL", "https://pipecat.test")
+        monkeypatch.setenv("TWILIO_AUTH_TOKEN", "test-token")
+        monkeypatch.delenv("ALLOW_UNSIGNED_TWILIO_WEBHOOKS", raising=False)
+        monkeypatch.delenv("SKIP_TWILIO_VALIDATION", raising=False)
+
+        data = {
+            "CallSid": "CAsigned",
+            "From": "+15559876543",
+            "To": "+15551234567",
+            "Direction": "inbound",
+        }
+        signature = RequestValidator("test-token").compute_signature(
+            "https://pipecat.test/voice/answer",
+            data,
+        )
+
+        response = client.post(
+            "/voice/answer",
+            data=data,
+            headers={"X-Twilio-Signature": signature},
+        )
+
+        assert response.status_code == 200
+        assert "wss://pipecat.test/ws" in response.text
+        assert "ws_token" in response.text
+
 
 class TestVoiceStatusEndpoint:
     def test_voice_status_completed(self, client):
@@ -169,7 +222,7 @@ class TestCallsEndpointAuth:
         """POST /api/call should require auth."""
         response = client.post(
             "/api/call",
-            json={"phone_number": "+15559876543"},
+            json={"seniorId": "senior-test"},
         )
         assert response.status_code == 401
 

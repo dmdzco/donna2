@@ -10,8 +10,12 @@ Usage:
 """
 
 import os
+import base64
 from dataclasses import dataclass, field
 from functools import lru_cache
+
+
+DEFAULT_JWT_SECRET = "donna-admin-secret-change-me"
 
 
 @dataclass(frozen=True)
@@ -20,7 +24,9 @@ class Settings:
 
     # ---- Server ----
     port: int = 7860
+    environment: str = ""
     base_url: str = ""
+    pipecat_public_url: str = ""
     admin_url: str = ""
     railway_public_domain: str = ""
 
@@ -58,6 +64,7 @@ class Settings:
     jwt_secret: str = "donna-admin-secret-change-me"
     jwt_secret_previous: str = ""  # Old JWT secret during credential rotation
     donna_api_key: str = ""
+    donna_api_keys: str = ""
     cofounder_api_key_1: str = ""
     cofounder_api_key_2: str = ""
     clerk_secret_key: str = ""
@@ -71,6 +78,7 @@ class Settings:
     max_concurrent_calls: int = 50
     load_test_mode: bool = False
     redis_url: str = ""  # Optional — enables multi-instance shared state
+    pipecat_require_redis: bool = False
 
     # ---- GrowthBook ----
     growthbook_api_host: str = ""
@@ -89,11 +97,98 @@ class Settings:
     retention_daily_context_days: int = 90
     retention_call_metrics_days: int = 180
     retention_reminder_deliveries_days: int = 90
-    retention_audit_logs_days: int = 730
+    retention_audit_logs_days: int = 2190
 
     @property
     def is_production(self) -> bool:
-        return bool(self.railway_public_domain)
+        return self.environment == "production" or bool(self.railway_public_domain)
+
+
+def _truthy(value: str | None) -> bool:
+    return str(value or "").lower() in {"1", "true", "yes", "on"}
+
+
+def is_production_environment() -> bool:
+    return os.getenv("ENVIRONMENT") == "production" or bool(os.getenv("RAILWAY_PUBLIC_DOMAIN"))
+
+
+def _decode_field_encryption_key(raw: str) -> bytes | None:
+    if not raw:
+        return None
+    try:
+        padded = raw + "=" * (-len(raw) % 4)
+        return base64.urlsafe_b64decode(padded)
+    except Exception:
+        return None
+
+
+def is_valid_field_encryption_key(raw: str) -> bool:
+    decoded = _decode_field_encryption_key(raw)
+    return decoded is not None and len(decoded) == 32
+
+
+def parse_service_api_keys(raw: str | None = None) -> dict[str, str]:
+    value = os.getenv("DONNA_API_KEYS", "") if raw is None else raw
+    keys: dict[str, str] = {}
+    for entry in value.split(","):
+        item = entry.strip()
+        if not item or ":" not in item:
+            continue
+        label, key = item.split(":", 1)
+        label = label.strip()
+        key = key.strip()
+        if label and key:
+            keys[label] = key
+    if not is_production_environment() and os.getenv("DONNA_API_KEY"):
+        keys["legacy"] = os.getenv("DONNA_API_KEY", "")
+    return keys
+
+
+def get_service_api_key(label: str) -> str | None:
+    return parse_service_api_keys().get(label)
+
+
+def get_pipecat_public_url() -> str:
+    public_url = os.getenv("PIPECAT_PUBLIC_URL", "")
+    if public_url:
+        return public_url.rstrip("/")
+    base_url = os.getenv("BASE_URL", "")
+    if not is_production_environment() and base_url:
+        return base_url.rstrip("/")
+    return ""
+
+
+def validate_production_config() -> list[str]:
+    if not is_production_environment():
+        return []
+
+    errors: list[str] = []
+    jwt_secret = os.getenv("JWT_SECRET", DEFAULT_JWT_SECRET)
+    field_key = os.getenv("FIELD_ENCRYPTION_KEY", "")
+    public_url = os.getenv("PIPECAT_PUBLIC_URL", "")
+
+    if not jwt_secret or jwt_secret == DEFAULT_JWT_SECRET:
+        errors.append("JWT_SECRET must be set to a non-default value")
+    if not parse_service_api_keys():
+        errors.append("DONNA_API_KEYS must contain at least one labeled key")
+    if not is_valid_field_encryption_key(field_key):
+        errors.append("FIELD_ENCRYPTION_KEY must decode to 32 bytes")
+    if not os.getenv("TWILIO_AUTH_TOKEN", ""):
+        errors.append("TWILIO_AUTH_TOKEN is required")
+    if not public_url or not public_url.startswith("https://"):
+        errors.append("PIPECAT_PUBLIC_URL must be an https:// URL")
+    if _truthy(os.getenv("PIPECAT_REQUIRE_REDIS")) and not os.getenv("REDIS_URL", ""):
+        errors.append("REDIS_URL is required when PIPECAT_REQUIRE_REDIS=true")
+
+    return errors
+
+
+def assert_production_config() -> None:
+    errors = validate_production_config()
+    if errors:
+        raise RuntimeError(
+            "Production security configuration invalid: " + "; ".join(errors)
+        )
 
 
 @lru_cache(maxsize=1)
@@ -106,7 +201,9 @@ def _load_settings() -> Settings:
     return Settings(
         # Server
         port=int(_env("PORT", "7860")),
+        environment=_env("ENVIRONMENT"),
         base_url=_env("BASE_URL"),
+        pipecat_public_url=_env("PIPECAT_PUBLIC_URL"),
         admin_url=_env("ADMIN_URL"),
         railway_public_domain=_env("RAILWAY_PUBLIC_DOMAIN"),
         # Database
@@ -139,6 +236,7 @@ def _load_settings() -> Settings:
         jwt_secret=_env("JWT_SECRET", "donna-admin-secret-change-me"),
         jwt_secret_previous=_env("JWT_SECRET_PREVIOUS"),
         donna_api_key=_env("DONNA_API_KEY"),
+        donna_api_keys=_env("DONNA_API_KEYS"),
         cofounder_api_key_1=_env("COFOUNDER_API_KEY_1"),
         cofounder_api_key_2=_env("COFOUNDER_API_KEY_2"),
         clerk_secret_key=_env("CLERK_SECRET_KEY"),
@@ -150,6 +248,7 @@ def _load_settings() -> Settings:
         max_concurrent_calls=int(_env("MAX_CONCURRENT_CALLS", "50")),
         load_test_mode=_env("LOAD_TEST_MODE", "false").lower() == "true",
         redis_url=_env("REDIS_URL"),
+        pipecat_require_redis=_truthy(_env("PIPECAT_REQUIRE_REDIS")),
         # GrowthBook
         growthbook_api_host=_env("GROWTHBOOK_API_HOST"),
         growthbook_client_key=_env("GROWTHBOOK_CLIENT_KEY"),
@@ -164,7 +263,7 @@ def _load_settings() -> Settings:
         retention_daily_context_days=int(_env("RETENTION_DAILY_CONTEXT_DAYS", "90")),
         retention_call_metrics_days=int(_env("RETENTION_CALL_METRICS_DAYS", "180")),
         retention_reminder_deliveries_days=int(_env("RETENTION_REMINDER_DELIVERIES_DAYS", "90")),
-        retention_audit_logs_days=int(_env("RETENTION_AUDIT_LOGS_DAYS", "730")),
+        retention_audit_logs_days=int(_env("RETENTION_AUDIT_LOGS_DAYS", "2190")),
     )
 
 

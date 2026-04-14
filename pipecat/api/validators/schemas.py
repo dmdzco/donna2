@@ -10,7 +10,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -125,12 +125,9 @@ class UpdateReminderRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 class InitiateCallRequest(BaseModel):
-    phone_number: str = Field(min_length=10, max_length=20)
+    model_config = ConfigDict(populate_by_name=True)
 
-    @field_validator("phone_number")
-    @classmethod
-    def validate_phone(cls, v: str) -> str:
-        return normalize_phone(v)
+    senior_id: str = Field(alias="seniorId", min_length=1)
 
 
 # ---------------------------------------------------------------------------

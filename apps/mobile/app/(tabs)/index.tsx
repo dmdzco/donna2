@@ -209,16 +209,16 @@ export default function DashboardScreen() {
   }, []);
 
   const handleInitiateCall = useCallback(async () => {
-    if (!senior?.phone) return;
+    if (!senior?.id) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      await initiateCall.mutateAsync(senior.phone);
+      await initiateCall.mutateAsync(senior.id);
       setCallModalVisible(false);
       setCallContext("");
     } catch {
       // Error is handled by react-query -- could show alert here
     }
-  }, [senior?.phone, initiateCall]);
+  }, [senior?.id, initiateCall]);
 
   // Loading state
   if (seniorLoading) {

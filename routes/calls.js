@@ -10,12 +10,20 @@ import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
 
+function formatPhoneForCall(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return String(phone || '').startsWith('+') ? String(phone) : `+${digits}`;
+}
+
 // API: Initiate outbound call (strict rate limit: 5/min)
 router.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSchema), async (req, res) => {
-  const { phoneNumber } = req.body;
+  const { seniorId } = req.body;
   const twilioClient = req.app.get('twilioClient');
   // Twilio webhooks must hit Pipecat (voice pipeline), not this Node.js server
-  const PIPECAT_URL = process.env.PIPECAT_BASE_URL || req.app.get('baseUrl');
+  const PIPECAT_URL = req.app.get('baseUrl');
 
   logAudit({
     userId: req.auth.userId,
@@ -24,30 +32,39 @@ router.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSche
     resourceType: 'call',
     ipAddress: req.ip,
     userAgent: req.get('user-agent'),
-    metadata: { phoneLast4: phoneNumber ? phoneNumber.slice(-4) : null },
+    metadata: { seniorId },
   });
 
   try {
-    // PRE-FETCH: Look up senior and build context BEFORE calling Twilio
-    const senior = await seniorService.findByPhone(phoneNumber);
-    if (senior) {
-      // Check if user can access this senior
-      if (!await canAccessSenior(req.auth, senior.id)) {
-        return res.status(403).json({ error: 'Access denied to this senior' });
-      }
-      await schedulerService.prefetchForPhone(phoneNumber, senior);
+    const senior = await seniorService.getById(seniorId);
+    if (!senior) {
+      return res.status(404).json({ error: 'Senior not found' });
+    }
+    if (!senior.isActive) {
+      return res.status(400).json({ error: 'Senior is not active' });
     }
 
+    // Check if user can access this senior before resolving/calling the phone number.
+    if (!await canAccessSenior(req.auth, senior.id)) {
+      return res.status(403).json({ error: 'Access denied to this senior' });
+    }
+
+    const callPhone = formatPhoneForCall(senior.phone);
+    if (!callPhone) {
+      return res.status(400).json({ error: 'Senior phone is not callable' });
+    }
+    await schedulerService.prefetchForPhone(callPhone, senior);
+
     const call = await twilioClient.calls.create({
-      to: phoneNumber,
+      to: callPhone,
       from: process.env.TWILIO_PHONE_NUMBER,
       url: `${PIPECAT_URL}/voice/answer`,
       statusCallback: `${PIPECAT_URL}/voice/status`,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
     });
 
-    console.log(`Initiated call ${call.sid} to phone ending ${phoneNumber?.slice(-4) || 'unknown'}`);
-    res.json({ success: true, callSid: call.sid });
+    console.log(`Initiated call ${call.sid} for senior ${senior.id}`);
+    res.json({ success: true, callSid: call.sid, seniorId: senior.id });
 
   } catch (error) {
     console.error('Failed to initiate call:', error.message);

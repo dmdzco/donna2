@@ -479,7 +479,7 @@ async def analyze_turn_speculative(
     """Run speculative analysis via the fast provider (Groq).
 
     Uses the speculative circuit breaker (shorter timeout, lower threshold).
-    Does NOT fall back to Gemini — speculative uses the fast provider only.
+    Does NOT fall back to Gemini - speculative uses the fast provider only.
     """
     if not fast_provider_available():
         return None

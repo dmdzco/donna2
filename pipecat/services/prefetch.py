@@ -58,6 +58,16 @@ _SKIP_PATTERNS = re.compile(
 # Max queries per extraction
 _MAX_QUERIES = 3
 
+_MEMORY_CACHE_STOP_WORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "been", "but", "by",
+    "can", "could", "did", "do", "does", "for", "from", "had", "has",
+    "have", "he", "her", "hers", "him", "his", "i", "if", "in", "is",
+    "it", "its", "me", "my", "of", "on", "or", "our", "she", "so",
+    "that", "the", "their", "them", "then", "there", "they", "this",
+    "to", "was", "we", "were", "what", "when", "where", "with", "you",
+    "your",
+})
+
 
 # ---------------------------------------------------------------------------
 # PrefetchCache
@@ -80,10 +90,14 @@ class PrefetchCache:
         self._misses = 0
 
     def _normalize_key(self, query: str) -> str:
-        return " ".join(sorted(query.lower().split()))
+        return " ".join(sorted(self._word_set(query)))
 
     def _word_set(self, text: str) -> set[str]:
-        return set(text.lower().split())
+        return {
+            w
+            for w in re.findall(r"[a-z0-9]+", text.lower())
+            if w and w not in _MEMORY_CACHE_STOP_WORDS
+        }
 
     def put(self, query: str, results: list[dict], source: str = "prefetch") -> None:
         """Store prefetch results. Evicts oldest entry if at capacity."""
@@ -297,15 +311,18 @@ async def run_prefetch(
             if results:
                 cache.put(query, results, source="prefetch")
                 logger.info(
-                    "[Prefetch] Cached {n} results ({ms}ms)",
-                    n=len(results), ms=elapsed_ms,
+                    "[Prefetch] Cached {n} results ({ms}ms, query_chars={chars})",
+                    n=len(results), ms=elapsed_ms, chars=len(query),
                 )
                 return True
             else:
-                logger.debug("[Prefetch] No results ({ms}ms)", ms=elapsed_ms)
+                logger.debug(
+                    "[Prefetch] No results ({ms}ms, query_chars={chars})",
+                    ms=elapsed_ms, chars=len(query),
+                )
                 return False
         except Exception as e:
-            logger.warning("[Prefetch] Search failed: {err}", err=str(e))
+            logger.warning("[Prefetch] Search failed (query_chars={chars}): {err}", chars=len(query), err=str(e))
             return False
 
     results = await asyncio.gather(*[_search_one(q) for q in new_queries])

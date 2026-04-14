@@ -19,6 +19,7 @@ Run:
 """
 
 import os
+import re
 import time
 import uuid
 
@@ -58,6 +59,8 @@ class TwilioCallUser(HttpUser):
                     exception=Exception(f"HTTP {resp.status_code}"),
                 )
                 return
+            token_match = re.search(r'name="ws_token" value="([^"]+)"', resp.text)
+            ws_token = token_match.group(1) if token_match else ""
         except Exception as e:
             events.request.fire(
                 request_type="WS", name="voice_answer",
@@ -112,6 +115,7 @@ class TwilioCallUser(HttpUser):
                         "call_sid": call_sid,
                         "conversation_id": "",
                         "call_type": "check-in",
+                        "ws_token": ws_token,
                     },
                 },
                 "streamSid": stream_sid,

@@ -23,8 +23,9 @@ class TestToolHandlerIntegration:
         })
 
         assert result["status"] == "success"
-        # Handler tracks user_response (or reminder_id fallback) in reminders_delivered
-        assert "I'll take it now" in reminder_session_state.get("reminders_delivered", set())
+        delivered = reminder_session_state.get("reminders_delivered", set())
+        assert "rem-001" in delivered
+        assert "Take metformin" in delivered
 
     @pytest.mark.asyncio
     async def test_web_search_handles_empty_query(self, session_state):

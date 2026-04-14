@@ -199,10 +199,10 @@ async def require_auth(request: Request) -> AuthContext:
         except jwt.ExpiredSignatureError:
             logger.debug("Clerk token expired")
         except jwt.InvalidTokenError as exc:
-            logger.debug(f"Clerk token validation failed: {exc}")
+            logger.debug("Clerk token validation failed: {err_type}", err_type=type(exc).__name__)
         except Exception as exc:
             # Network failures fetching JWKS, unexpected errors — log and reject
-            logger.warning(f"Clerk JWKS verification error: {exc}")
+            logger.warning("Clerk JWKS verification error: {err_type}", err_type=type(exc).__name__)
 
     # Audit: log failed auth attempt
     try:

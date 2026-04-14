@@ -21,7 +21,12 @@ async def link_user_to_senior(
         senior_id,
         role,
     )
-    logger.info("Linked caregiver to senior as {role}", role=role)
+    logger.info(
+        "Linked user {uid} to senior {sid} as {role}",
+        uid=str(clerk_user_id)[:8],
+        sid=str(senior_id)[:8],
+        role=role,
+    )
     return row
 
 

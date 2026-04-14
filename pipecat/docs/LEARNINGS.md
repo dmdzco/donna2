@@ -7,7 +7,7 @@ Hard-won lessons from building and optimizing the real-time voice pipeline. Each
 ## Pipeline Architecture
 
 ### LLM Tool Calls Are Unreliable for Critical Actions
-Claude says "goodbye" in text but inconsistently calls the `transition_to_winding_down` tool. The call stays open and the senior hears silence. **Solution:** Quick Observer detects goodbye via regex (0ms) and injects `EndFrame` programmatically after a 2s delay. Never rely on Claude tool calls for call-ending logic.
+Claude says "goodbye" in text but inconsistently calls the `transition_to_winding_down` tool. The call stays open and the senior hears silence. **Solution:** Quick Observer detects goodbye via regex (0ms) and injects `EndFrame` programmatically after the configured goodbye delay. Never rely on Claude tool calls for call-ending logic.
 
 ### Non-Blocking Director Is Essential
 The Conversation Director must NEVER block the pipeline. It passes frames through instantly and runs analysis in `asyncio.create_task()`. A blocking Director would add 200-700ms to every turn. The tradeoff: guidance is injected same-turn (via speculative) or previous-turn (fallback), never synchronously.
@@ -124,10 +124,10 @@ Only one scheduler instance should run across all environments. Set `SCHEDULER_E
 ## Testing
 
 ### Mock Both Directors in Tests
-Tests that run the pipeline need to mock both `analyze_turn_speculative` (Guidance Director, silence-based) and `analyze_queries` (Query Director, continuous). Mocking only one leaves the other making real Groq API calls. Pre-set `processor._last_result` to simulate previous-turn guidance when testing guidance injection.
+Tests that run the pipeline need to mock `analyze_turn_speculative` (Guidance Director, silence-based), `analyze_queries` (Query Director, continuous), and `analyze_turn` when the test can hit the full-analysis fallback path. Pre-set `processor._last_result` to simulate previous-turn guidance when testing guidance injection.
 
 ### Regression Tests Need Pre-Set Guidance State
-Tests that verify Director actions (force end at 12 minutes, force winding-down at 9 minutes) depend on `_take_actions()` being called, which only happens during guidance injection. Without the regular analysis path (removed), tests must pre-set `_last_result` on the Director processor so previous-turn guidance triggers actions.
+Tests that verify Director actions (force end and force winding-down) no longer need pre-seeded guidance state. `_take_actions()` is checked on every final transcription, even when no guidance was injected.
 
 ---
 

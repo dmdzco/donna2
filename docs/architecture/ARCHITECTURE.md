@@ -30,7 +30,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1 (0ms): regex patterns
               │   (BLOCKING)         │  Injects guidance via LLMMessagesAppendFrame
-              │                      │  Strong goodbye → EndFrame in 2s
+              │                      │  Strong goodbye → EndFrame delay
               └─────────┬───────────┘
                         ▼
               ┌─────────────────────┐   ┌─────────────────────────┐
@@ -68,11 +68,11 @@ Twilio Audio ──► FastAPIWebsocketTransport
 - **Latency**: 0ms (blocking, inline)
 - **Method**: regex patterns across health, goodbye, emotion, cognitive, activity, and other categories
 - **Output**: Injects guidance for the current turn
-- **Goodbye detection**: Strong goodbye → programmatic EndFrame after 2s delay (bypasses unreliable LLM tool calls)
+- **Goodbye detection**: Strong goodbye → programmatic EndFrame after configured delay (bypasses unreliable LLM tool calls)
 
 ### Layer 2: Conversation Director (`processors/conversation_director.py`)
-- **Latency**: ~70ms primary / ~150ms fallback (non-blocking via `asyncio.create_task`)
-- **Providers**: Groq (`gpt-oss-20b`) primary, Gemini Flash fallback for full guidance analysis
+- **Latency**: fast provider plus non-blocking fallback via `asyncio.create_task`
+- **Providers**: Groq (`gpt-oss-20b`) for fast speculative/query analysis, Gemini Flash fallback for next-turn guidance
 - **Speculative analysis**: Detects silence onset (250ms gap in interims), starts analysis during silence for same-turn injection
 - **Output**: Same-turn guidance (speculative hit) or previous-turn cached guidance (fallback)
 - **Dynamic news**: Injects news context when `should_mention_news` is signaled (one-shot per call)

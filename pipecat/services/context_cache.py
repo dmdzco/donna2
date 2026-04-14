@@ -20,7 +20,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from loguru import logger
 from db import execute
-from lib.sanitize import mask_name
 
 # In-memory cache: senior_id -> cached context dict
 _cache: dict[str, dict] = {}
@@ -268,7 +267,7 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
 
         senior = await get_by_id(senior_id)
         if not senior:
-            logger.info("Senior not found, skipping")
+            logger.info("Senior {sid} not found, skipping", sid=str(senior_id)[:8])
             return None
 
         # Consolidated fetches: 2 queries instead of 5
@@ -302,9 +301,9 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
                         news_context_full,
                         senior_id,
                     )
-                    logger.info("Persisted cached news for {name}", name=mask_name(senior.get("name")))
+                    logger.info("Persisted cached news for senior_id={sid}", sid=str(senior_id)[:8])
                 except Exception as e:
-                    logger.error("Failed to persist news: {err}", err=str(e))
+                    logger.error("Failed to persist news for senior_id={sid}: {err}", sid=str(senior_id)[:8], err=str(e))
 
         # Generate greeting using the greeting rotation service
         greeting_result = get_greeting(
@@ -319,8 +318,8 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
         )
 
         logger.info(
-            "Generated greeting for {name}: period={p}, template={t}",
-            name=mask_name(senior.get("name")),
+            "Generated greeting for senior_id={sid}: period={p}, template={t}",
+            sid=str(senior_id)[:8],
             p=greeting_result["period"],
             t=greeting_result["template_index"],
         )
@@ -369,11 +368,11 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
         _cache[senior_id] = cached
 
         elapsed = round((time.time() - start) * 1000)
-        logger.info("Pre-cached context for {name} in {ms}ms", name=mask_name(senior.get("name")), ms=elapsed)
+        logger.info("Pre-cached context for senior_id={sid} in {ms}ms", sid=str(senior_id)[:8], ms=elapsed)
         return cached
 
     except Exception as e:
-        logger.error("Error pre-caching context: {err}", err=str(e))
+        logger.error("Error pre-caching {sid}: {err}", sid=str(senior_id)[:8], err=str(e))
         return None
 
 
@@ -385,11 +384,11 @@ def get_cache(senior_id: str) -> dict | None:
 
     if time.time() > cached["expires_at"]:
         del _cache[senior_id]
-        logger.info("Cache expired")
+        logger.info("Cache expired for {sid}", sid=str(senior_id)[:8])
         return None
 
     age_min = round((time.time() - cached["cached_at"]) / 60)
-    logger.info("Cache hit (age: {age} min)", age=age_min)
+    logger.info("Cache hit for {sid} (age: {age} min)", sid=str(senior_id)[:8], age=age_min)
     return cached
 
 
@@ -397,7 +396,7 @@ def clear_cache(senior_id: str) -> None:
     """Clear cache for a senior (e.g., after call ends and new memories stored)."""
     if senior_id in _cache:
         del _cache[senior_id]
-        logger.info("Cleared cache")
+        logger.info("Cleared cache for {sid}", sid=str(senior_id)[:8])
 
 
 def clear_all() -> None:

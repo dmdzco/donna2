@@ -36,3 +36,12 @@ Completed April 14, 2026:
 - Removed stale Upstash variables from `donna-pipecat` and `donna-api` production. `REDIS_URL` is the only Redis-related variable left on `donna-pipecat` production.
 
 Note: production Redis also resolves on Railway private networking (`redis-sje8.railway.internal`). Use `railway ssh --service donna-pipecat --environment production ...` for future Redis smoke tests that need network access from inside Railway.
+
+## Reminder Context Shared State
+
+Completed April 14, 2026:
+
+- Pipecat-side reminder initiation now stores reminder context in local memory and Redis as `reminder_ctx:{call_sid}` with a 30 minute TTL.
+- `/voice/answer` now loads reminder context local-first, then Redis, before falling back to the database delivery row used by Node-scheduled reminders.
+- Call completion and post-call cleanup now await reminder context deletion from Redis.
+- Unit coverage verifies local-first lookup, Redis fallback, Redis write TTL, Redis cleanup, and stale cleanup for Redis-deserialized timestamp strings.

@@ -193,13 +193,14 @@ Both implement the same async interface:
 
 ### What's Stored in Redis
 - `call_metadata:{call_sid}` — Call context for WebSocket handler (TTL: 30 min)
-
-Reminder context is still initially stored in Pipecat process memory. `clear_reminder_context()` attempts to delete a `reminder_ctx:{call_sid}` Redis key for forward compatibility, but the scheduler does not yet write reminder context to Redis. Persist that initial reminder context before scaling reminder-triggered calls across multiple Pipecat replicas.
+- `reminder_ctx:{call_sid}` — Pipecat-scheduler reminder context for outbound reminder calls (TTL: 30 min)
 
 ### Cross-Instance Flow
 1. `/voice/answer` stores call metadata in local dict + Redis
 2. `/ws` reads metadata from local dict first, falls back to Redis
-3. On call completion, metadata cleaned from both local dict and Redis
+3. Pipecat-side reminder initiation stores reminder context in local dict + Redis
+4. `/voice/answer` reads reminder context from local dict first, falls back to Redis, then falls back to the database delivery row for Node-scheduled reminders
+5. On call completion, metadata and reminder context are cleaned from both local dict and Redis
 
 ---
 
@@ -208,7 +209,7 @@ Reminder context is still initially stored in Pipecat process memory. `clear_rem
 | Requirement | Status | How |
 |-------------|--------|-----|
 | Shared call metadata | Ready | Redis client module |
-| Shared reminder context | Needed | Scheduler initial reminder context is still local-only |
+| Shared reminder context | Ready | Pipecat scheduler writes `reminder_ctx:{call_sid}` with TTL; `/voice/answer` loads local-first, Redis-second |
 | Scheduler deduplication | Ready | PostgreSQL advisory locks |
 | Connection pool per instance | Ready | Each instance creates own pool |
 | Health monitoring | Ready | Per-instance `/health` endpoint |

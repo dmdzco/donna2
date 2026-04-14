@@ -1,0 +1,4 @@
+interface:
+  display_name: "Donna iOS Release"
+  short_description: "Ship Donna iOS builds with EAS and TestFlight"
+  default_prompt: "Use $donna-ios-release to build, submit, or troubleshoot Donna's iOS TestFlight release."

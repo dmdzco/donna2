@@ -46,6 +46,7 @@ from processors.guidance_stripper import GuidanceStripperProcessor
 from processors.metrics_logger import MetricsLoggerProcessor
 from processors.quick_observer import QuickObserverProcessor
 from services.post_call import run_post_call
+from serializers.telnyx import DonnaTelnyxFrameSerializer
 
 class WebSocketAuthError(Exception):
     """Raised when a Twilio media WebSocket cannot be admitted."""
@@ -54,14 +55,32 @@ class WebSocketAuthError(Exception):
 HANDSHAKE_TIMEOUT_SECONDS = settings.twilio_ws_handshake_timeout_seconds
 
 
+def _provider_call_id(call_data: dict, session_state: dict | None = None) -> str:
+    """Return the canonical call identifier for the active telephony provider."""
+    session_state = session_state or {}
+    return (
+        call_data.get("call_id")
+        or call_data.get("call_control_id")
+        or session_state.get("call_sid")
+        or ""
+    )
+
+
+def _provider_ws_token(call_data: dict) -> str:
+    """Extract the one-time WebSocket token from provider-specific metadata."""
+    body_token = (call_data.get("body") or {}).get("ws_token", "")
+    query_token = (call_data.get("query_params") or {}).get("ws_token", "")
+    return body_token or query_token
+
+
 async def authenticate_websocket_call(
     call_data: dict,
     session_state: dict,
     *,
     consume_token: bool = True,
 ) -> dict:
-    """Authenticate the Twilio media WebSocket before any AI services start."""
-    call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "")
+    """Authenticate the media WebSocket before any AI services start."""
+    call_sid = _provider_call_id(call_data, session_state)
     if not call_sid:
         raise WebSocketAuthError("missing call_sid")
 
@@ -72,7 +91,7 @@ async def authenticate_websocket_call(
         raise WebSocketAuthError("unknown call_sid")
 
     expected_token = metadata.get("ws_token")
-    provided_token = (call_data.get("body") or {}).get("ws_token", "")
+    provided_token = _provider_ws_token(call_data)
     if not expected_token:
         raise WebSocketAuthError("missing expected token")
     if metadata.get("ws_token_consumed"):
@@ -93,7 +112,7 @@ async def prepare_websocket_call(
     *,
     consume_token: bool = True,
 ) -> dict:
-    """Parse and authenticate the Twilio start frame with a short timeout.
+    """Parse and authenticate the telephony start frame with a short timeout.
 
     This can run before active-call capacity is acquired so stalled or invalid
     WebSockets do not occupy an AI call slot.
@@ -107,7 +126,8 @@ async def prepare_websocket_call(
         raise WebSocketAuthError("handshake timeout") from exc
 
     stream_sid = call_data.get("stream_id", "")
-    call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "unknown")
+    call_data["query_params"] = dict(websocket.query_params)
+    call_sid = _provider_call_id(call_data, session_state) or "unknown"
     session_state["call_sid"] = call_sid
 
     logger.info("[{cs}] Stream connected: {ss} (type={tt})", cs=call_sid, ss=stream_sid, tt=transport_type)
@@ -208,6 +228,59 @@ def create_tts_service(session_state: dict):
     )
 
 
+def _telnyx_sample_rate_for_codec(codec: str, configured_rate: int) -> int:
+    codec = (codec or "").upper()
+    if codec in {"PCMU", "PCMA", "G722"}:
+        return 8000
+    if codec == "L16":
+        return 16000
+    if codec in {"OPUS", "AMR-WB"}:
+        return configured_rate or 16000
+    return 8000
+
+
+def _create_telephony_serializer(
+    *,
+    transport_type: str,
+    call_data: dict,
+    stream_sid: str,
+    call_sid: str,
+    cfg,
+):
+    """Create the provider serializer at the only lossy audio boundary."""
+    if transport_type == "telnyx":
+        outbound_encoding = (call_data.get("outbound_encoding") or cfg.telnyx_stream_codec or "L16").upper()
+        inbound_encoding = (cfg.telnyx_stream_codec or outbound_encoding).upper()
+        sample_rate = _telnyx_sample_rate_for_codec(outbound_encoding, cfg.telnyx_stream_sample_rate)
+
+        logger.info(
+            "[{cs}] Telnyx serializer codec_in={codec_in} codec_out={codec_out} wire_rate={rate}Hz",
+            cs=call_sid,
+            codec_in=outbound_encoding,
+            codec_out=inbound_encoding,
+            rate=sample_rate,
+        )
+        return DonnaTelnyxFrameSerializer(
+            stream_id=stream_sid,
+            call_control_id=call_sid,
+            outbound_encoding=outbound_encoding,
+            inbound_encoding=inbound_encoding,
+            api_key=cfg.telnyx_api_key,
+            params=DonnaTelnyxFrameSerializer.InputParams(
+                telnyx_sample_rate=sample_rate,
+                outbound_encoding=outbound_encoding,
+                inbound_encoding=inbound_encoding,
+            ),
+        )
+
+    return TwilioFrameSerializer(
+        stream_sid=stream_sid,
+        call_sid=call_sid,
+        account_sid=cfg.twilio_account_sid,
+        auth_token=cfg.twilio_auth_token,
+    )
+
+
 async def _safe_post_call(session_state: dict, conversation_tracker, elapsed: int, call_sid: str):
     """Run post-call in background with its own error boundary."""
     try:
@@ -304,7 +377,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     call_data = prepared_call["call_data"]
     metadata = prepared_call["metadata"]
     stream_sid = call_data.get("stream_id", "")
-    call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "unknown")
+    call_sid = _provider_call_id(call_data, session_state) or "unknown"
     session_state["call_sid"] = call_sid
 
     # Populate session_state from call_metadata (pre-fetched by /voice/answer)
@@ -425,6 +498,14 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     is_onboarding = session_state.get("call_type") == "onboarding"
     vad_stop_secs = 0.8 if is_onboarding else 1.2
 
+    serializer = _create_telephony_serializer(
+        transport_type=transport_type,
+        call_data=call_data,
+        stream_sid=stream_sid,
+        call_sid=call_sid,
+        cfg=cfg,
+    )
+
     transport = FastAPIWebsocketTransport(
         websocket=websocket,
         params=FastAPIWebsocketParams(
@@ -438,12 +519,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
                     min_volume=0.5,
                 ),
             ),
-            serializer=TwilioFrameSerializer(
-                stream_sid=stream_sid,
-                call_sid=call_sid,
-                account_sid=cfg.twilio_account_sid,
-                auth_token=cfg.twilio_auth_token,
-            ),
+            serializer=serializer,
         ),
     )
 

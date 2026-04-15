@@ -41,6 +41,18 @@ class Settings:
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""
 
+    # ---- Telephony Provider ----
+    telephony_provider: str = "twilio"
+
+    # ---- Telnyx ----
+    telnyx_api_key: str = ""
+    telnyx_public_key: str = ""
+    telnyx_phone_number: str = ""
+    telnyx_connection_id: str = ""
+    telnyx_stream_codec: str = "L16"
+    telnyx_stream_sample_rate: int = 16000
+    telnyx_webhook_tolerance_seconds: int = 300
+
     # ---- AI Services ----
     anthropic_api_key: str = ""
     deepgram_api_key: str = ""
@@ -187,7 +199,17 @@ def validate_production_config() -> list[str]:
         errors.append("DONNA_API_KEYS must contain at least one labeled key")
     if not is_valid_field_encryption_key(field_key):
         errors.append("FIELD_ENCRYPTION_KEY must decode to 32 bytes")
-    if not os.getenv("TWILIO_AUTH_TOKEN", ""):
+    telephony_provider = os.getenv("TELEPHONY_PROVIDER", "twilio").lower()
+    if telephony_provider == "telnyx":
+        if not os.getenv("TELNYX_API_KEY", ""):
+            errors.append("TELNYX_API_KEY is required when TELEPHONY_PROVIDER=telnyx")
+        if not os.getenv("TELNYX_PUBLIC_KEY", ""):
+            errors.append("TELNYX_PUBLIC_KEY is required when TELEPHONY_PROVIDER=telnyx")
+        if not os.getenv("TELNYX_PHONE_NUMBER", ""):
+            errors.append("TELNYX_PHONE_NUMBER is required when TELEPHONY_PROVIDER=telnyx")
+        if not os.getenv("TELNYX_CONNECTION_ID", ""):
+            errors.append("TELNYX_CONNECTION_ID is required when TELEPHONY_PROVIDER=telnyx")
+    elif not os.getenv("TWILIO_AUTH_TOKEN", ""):
         errors.append("TWILIO_AUTH_TOKEN is required")
     if not public_url or not public_url.startswith("https://"):
         errors.append("PIPECAT_PUBLIC_URL must be an https:// URL")
@@ -235,6 +257,16 @@ def _load_settings() -> Settings:
         twilio_account_sid=_env("TWILIO_ACCOUNT_SID"),
         twilio_auth_token=_env("TWILIO_AUTH_TOKEN"),
         twilio_phone_number=_env("TWILIO_PHONE_NUMBER"),
+        # Telephony Provider
+        telephony_provider=_env("TELEPHONY_PROVIDER", "twilio").lower(),
+        # Telnyx
+        telnyx_api_key=_env("TELNYX_API_KEY"),
+        telnyx_public_key=_env("TELNYX_PUBLIC_KEY"),
+        telnyx_phone_number=_env("TELNYX_PHONE_NUMBER"),
+        telnyx_connection_id=_env("TELNYX_CONNECTION_ID"),
+        telnyx_stream_codec=_env("TELNYX_STREAM_CODEC", "L16").upper(),
+        telnyx_stream_sample_rate=_env_int("TELNYX_STREAM_SAMPLE_RATE", 16000),
+        telnyx_webhook_tolerance_seconds=_env_int("TELNYX_WEBHOOK_TOLERANCE_SECONDS", 300),
         # AI Services
         anthropic_api_key=_env("ANTHROPIC_API_KEY"),
         deepgram_api_key=_env("DEEPGRAM_API_KEY"),

@@ -9,6 +9,11 @@ import { initiateCallSchema } from '../validators/schemas.js';
 import { canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
 import { sendError } from '../lib/http-response.js';
+import {
+  endTelnyxCall,
+  getTelephonyProvider,
+  initiateTelnyxOutboundCall,
+} from '../services/telnyx.js';
 
 const router = Router();
 
@@ -24,7 +29,8 @@ function formatPhoneForCall(phone) {
 router.post('/api/call', requireAuth, validateBody(initiateCallSchema), idempotencyMiddleware, callLimiter, async (req, res) => {
   const { seniorId } = req.body;
   const twilioClient = req.app.get('twilioClient');
-  // Twilio webhooks must hit Pipecat (voice pipeline), not this Node.js server
+  const telephonyProvider = getTelephonyProvider();
+  // Telephony webhooks must hit Pipecat (voice pipeline), not this Node.js server.
   const PIPECAT_URL = req.app.get('baseUrl');
 
   logAudit({
@@ -55,6 +61,22 @@ router.post('/api/call', requireAuth, validateBody(initiateCallSchema), idempote
     if (!callPhone) {
       return sendError(res, 400, { error: 'Senior phone is not callable' });
     }
+
+    if (telephonyProvider === 'telnyx') {
+      const call = await initiateTelnyxOutboundCall({
+        seniorId: senior.id,
+        callType: 'check-in',
+        baseUrl: PIPECAT_URL,
+      });
+      return res.json({
+        success: true,
+        provider: 'telnyx',
+        callSid: call.callSid,
+        callControlId: call.callControlId,
+        seniorId: senior.id,
+      });
+    }
+
     await schedulerService.prefetchForPhone(callPhone, senior);
 
     const call = await twilioClient.calls.create({
@@ -65,7 +87,7 @@ router.post('/api/call', requireAuth, validateBody(initiateCallSchema), idempote
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
     });
 
-    res.json({ success: true, callSid: call.sid, seniorId: senior.id });
+    res.json({ success: true, provider: 'twilio', callSid: call.sid, seniorId: senior.id });
 
   } catch (error) {
     routeError(res, error, 'POST /api/call');
@@ -85,8 +107,13 @@ router.get('/api/calls', requireAdmin, (req, res) => {
 router.post('/api/calls/:callSid/end', requireAdmin, async (req, res) => {
   const twilioClient = req.app.get('twilioClient');
   try {
+    if (getTelephonyProvider() === 'telnyx') {
+      await endTelnyxCall(req.params.callSid, { baseUrl: req.app.get('baseUrl') });
+      return res.json({ success: true, provider: 'telnyx' });
+    }
+
     await twilioClient.calls(req.params.callSid).update({ status: 'completed' });
-    res.json({ success: true });
+    res.json({ success: true, provider: 'twilio' });
   } catch (error) {
     routeError(res, error, 'POST /api/calls/:callSid/end');
   }

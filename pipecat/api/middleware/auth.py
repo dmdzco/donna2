@@ -20,7 +20,7 @@ import jwt
 from jwt import PyJWKClient
 from fastapi import HTTPException, Request
 from loguru import logger
-from config import DEFAULT_JWT_SECRET, is_production_environment
+from config import DEFAULT_JWT_SECRET, is_production_environment, parse_service_api_keys
 
 # JWT secrets — required in production.
 # JWT_SECRET_PREVIOUS enables zero-downtime credential rotation:
@@ -236,3 +236,22 @@ async def require_admin(request: Request) -> AuthContext:
     if not auth.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")
     return auth
+
+
+async def require_service_api_key(request: Request) -> str:
+    """Require a labeled service API key from DONNA_API_KEYS.
+
+    This is for backend-to-backend calls where a frontend user token should not
+    be forwarded across service boundaries.
+    """
+    provided = request.headers.get("x-api-key", "")
+    if not provided:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            provided = auth_header[7:]
+
+    for label, key in parse_service_api_keys().items():
+        if provided and hmac.compare_digest(str(provided), str(key)):
+            return label
+
+    raise HTTPException(status_code=401, detail="Service authentication required")

@@ -99,6 +99,7 @@ from api.routes.calls import router as calls_router
 from api.routes.data import router as data_router
 from api.routes.export import router as export_router
 from api.routes.metrics import router as metrics_router
+from api.routes.telnyx import router as telnyx_router
 from api.routes.voice import router as voice_router, call_metadata
 from bot import (
     WebSocketAuthError,
@@ -174,6 +175,7 @@ app.include_router(calls_router)
 app.include_router(data_router)
 app.include_router(export_router)
 app.include_router(metrics_router)
+app.include_router(telnyx_router)
 
 
 @app.get("/health")

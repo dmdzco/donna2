@@ -120,6 +120,7 @@ class TestGetGreeting:
 
         summary = "Earlier today, David said he was busy today and planned to work out tomorrow."
         with patch("services.greetings.random.random", return_value=0.0), \
+             patch("services.greetings.get_local_hour", return_value=13), \
              patch("services.greetings.random.choice", side_effect=choose_first):
             result = get_greeting(
                 senior_name="David",

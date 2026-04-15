@@ -1,4 +1,4 @@
-"""Post-call processing — runs after the Twilio client disconnects.
+"""Post-call processing — runs after the telephony client disconnects.
 
 Orchestrates: conversation completion, call analysis (Gemini Flash),
 memory extraction, daily context save, reminder cleanup, and cache clearing.

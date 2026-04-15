@@ -23,7 +23,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - **Barge-in support** — Interrupt detection via Silero VAD
 
 ### Core Capabilities
-- Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
+- Real-time voice calls (Telnyx Voice API → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3)
 - LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - Text-to-speech (ElevenLabs by default; Cartesia available behind provider flag; high-rate PCM internally before telephony conversion)
@@ -59,7 +59,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 ### Security
 - JWT admin authentication + Cofounder API keys
 - Labeled service API key authentication (`DONNA_API_KEYS`; legacy `DONNA_API_KEY` only outside production)
-- Twilio webhook signature verification
+- Telnyx webhook signature verification plus single-use WebSocket token validation
 - Rate limiting in Node and Pipecat middleware
 - Security headers (HSTS, X-Frame-Options)
 - Zod/Pydantic input validation
@@ -128,7 +128,7 @@ See [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) for ful
 Linear pipeline of `FrameProcessor`s. The Conversation Director is **non-blocking** — it passes frames through instantly while running analysis in a background task.
 
 ```
-Phone Call → Twilio → WebSocket → Pipecat Pipeline
+Phone Call → Telnyx → WebSocket → Pipecat Pipeline
                                        │
                                   Deepgram STT (Nova 3)
                                        │ TranscriptionFrame
@@ -163,7 +163,7 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                                        ▼
                              Guidance Stripper → Conversation Tracker
                                        ▼
-                             TTS high-rate PCM → Twilio Audio Out (final 8kHz μ-law)
+                             TTS high-rate PCM → Telnyx Audio Out (16kHz L16)
                                        │
                                        ▼ (on disconnect)
                              Post-Call: Analysis + Memory + Daily Context
@@ -238,8 +238,8 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── caregivers.py                   # Caregiver-senior relationships
 │   └── news.py                         # OpenAI cached news + Tavily/OpenAI web_search
 ├── api/
-│   ├── routes/                         # voice.py, calls.py, auth.py, metrics.py, export.py, data.py
-│   ├── middleware/                      # auth, api_auth, rate_limit, security, twilio
+│   ├── routes/                         # telnyx.py, call_context.py, calls.py, auth.py, metrics.py, export.py, data.py
+│   ├── middleware/                      # auth, api_auth, rate_limit, security
 │   └── validators/schemas.py           # Pydantic input validation
 ├── db/
 │   ├── client.py                       # asyncpg pool + query helpers + health check
@@ -271,12 +271,19 @@ apps/                                   # Frontend apps (Vercel)
 # Server
 PORT=7860
 ENVIRONMENT=production                  # Required in production; enables fail-closed security checks
-PIPECAT_PUBLIC_URL=https://...          # Public Pipecat URL used for Twilio webhooks and wss:// streams
+PIPECAT_PUBLIC_URL=https://...          # Public Pipecat URL used for Telnyx webhooks and wss:// streams
 
-# Twilio
-TWILIO_ACCOUNT_SID=...
-TWILIO_AUTH_TOKEN=...
-TWILIO_PHONE_NUMBER=+1...
+# Telnyx voice
+TELNYX_API_KEY=...
+TELNYX_PUBLIC_KEY=...
+TELNYX_CONNECTION_ID=...
+TELNYX_PHONE_NUMBER=+1...
+TELNYX_STREAM_CODEC=L16
+TELNYX_STREAM_SAMPLE_RATE=16000
+TELNYX_STREAM_TRACK=inbound_track
+TELNYX_BIDIRECTIONAL_TARGET_LEGS=both
+TELNYX_L16_INPUT_BYTE_ORDER=little
+TELNYX_L16_OUTPUT_BYTE_ORDER=little
 
 # Database
 DATABASE_URL=postgresql://...           # Neon PostgreSQL + pgvector
@@ -326,9 +333,10 @@ Production boot is intentionally fail-closed. Node and Pipecat refuse to start i
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check with active call count |
-| `/voice/answer` | POST | Twilio webhook (returns TwiML with `<Stream>`) |
-| `/voice/status` | POST | Call status updates |
-| `/api/call` | POST | Initiate outbound call |
+| `/telnyx/events` | POST | Telnyx Call Control webhook |
+| `/telnyx/outbound` | POST | Service-to-service outbound Telnyx call creation |
+| `/telnyx/calls/:id/end` | POST | Service-to-service Telnyx call hangup |
+| `/api/call` | POST | Initiate outbound Telnyx call |
 | `/api/calls` | GET | List recent calls |
 | `/api/calls/:sid/end` | POST | Force-end a call |
 
@@ -343,7 +351,7 @@ make deploy-staging          # Both services to staging
 make deploy-prod             # Both services to production
 ```
 
-> **Do NOT test voice/call features locally.** Deploy to Railway dev and test with real Twilio calls.
+> **Do NOT test voice/call features locally.** Deploy to Railway dev/facudev and test with real Telnyx calls.
 
 Before promoting to production, verify production-like env readiness in Railway:
 
@@ -352,15 +360,15 @@ Before promoting to production, verify production-like env readiness in Railway:
 - `JWT_SECRET` is non-default
 - `DONNA_API_KEYS` contains labeled keys, including a Pipecat/notification key
 - `FIELD_ENCRYPTION_KEY` decodes to 32 bytes
-- `TWILIO_AUTH_TOKEN` is present on Pipecat and Node
+- `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_CONNECTION_ID`, and `TELNYX_PHONE_NUMBER` are present on Pipecat
 - `CLERK_SECRET_KEY` is present on Node
 - `REDIS_URL` is present before scaling Pipecat beyond one instance
 - Pipecat `LOG_LEVEL=INFO` is set before Railway dev/staging/prod smoke tests
 
-Live Twilio smoke test checklist:
+Live Telnyx smoke test checklist:
 
-- Unsigned `/voice/answer` and `/voice/status` requests are rejected.
-- A valid Twilio-signed `/voice/answer` returns TwiML containing a `ws_token`.
+- Unsigned `/telnyx/events` requests are rejected in production mode.
+- A valid Telnyx-signed `call.initiated` webhook answers inbound calls and starts a media stream.
 - `/ws` rejects missing, invalid, expired, and reused tokens.
 - A normal call lasting longer than five minutes does not drop because the token only gates connection startup.
 - Manual call initiation uses `seniorId`; the server resolves the phone number after authorization.

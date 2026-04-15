@@ -1,6 +1,8 @@
 import { db } from '../db/client.js';
 import { reminders, seniors, reminderDeliveries, conversations, notificationPreferences, notifications, caregivers } from '../db/schema.js';
 import { eq, and, lte, isNull, or, sql, ne, lt, gte, desc } from 'drizzle-orm';
+import twilio from 'twilio';
+import { memoryService } from './memory.js';
 import { contextCacheService } from './context-cache.js';
 import { runDailyPurgeIfNeeded } from './data-retention.js';
 import { createLogger } from '../lib/logger.js';
@@ -13,19 +15,36 @@ import {
   resolveTimezoneFromProfile,
   zonedWallTimeToUtcDate,
 } from '../lib/timezone.js';
-import { initiateTelnyxOutboundCall } from './telnyx.js';
 
 const log = createLogger('Scheduler');
 
-// Retry Telnyx outbound requests with exponential backoff (3 attempts, 1s -> 2s -> 4s).
-async function retryTelnyxCall(params, maxAttempts = 3) {
+// Initialize Twilio client lazily
+let twilioClient = null;
+const getTwilioClient = () => {
+  if (!twilioClient && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+    twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  }
+  return twilioClient;
+};
+
+// Store pre-fetched context for outbound calls (callSid -> { reminder, senior, memoryContext, reminderPrompt })
+export const pendingReminderCalls = new Map();
+
+// Store pre-fetched context by phone number (for manual API calls)
+export const prefetchedContextByPhone = new Map();
+
+// Normalize phone to last 10 digits (matches seniors.js)
+const normalizePhone = (phone) => phone.replace(/\D/g, '').slice(-10);
+
+// Retry Twilio calls.create() with exponential backoff (3 attempts, 1s → 2s → 4s)
+async function retryTwilioCall(client, params, maxAttempts = 3) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await initiateTelnyxOutboundCall(params);
+      return await client.calls.create(params);
     } catch (err) {
       if (attempt === maxAttempts) throw err;
       const delay = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
-      log.warn('Telnyx call retry', { attempt, maxAttempts, delay_ms: delay, error: err.message });
+      log.warn('Twilio call retry', { attempt, maxAttempts, delay_ms: delay, error: err.message, to: params.to });
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -281,7 +300,7 @@ export const schedulerService = {
   /**
    * Unified outbound call trigger for both reminder and welfare calls.
    * Gates ALL calls through isInCallWindow(). Handles context prefetch,
-   * Telnyx call creation, and type-specific bookkeeping.
+   * Twilio call creation, and type-specific bookkeeping.
    */
   async triggerOutboundCall(spec, baseUrl) {
     const { type, senior } = spec;
@@ -295,11 +314,17 @@ export const schedulerService = {
       return null;
     }
 
+    const client = getTwilioClient();
+    if (!client) {
+      log.error('Twilio not configured');
+      return null;
+    }
+
     try {
       if (type === 'reminder') {
-        return await this._triggerReminderPath(spec, baseUrl);
+        return await this._triggerReminderPath(spec, baseUrl, client);
       } else {
-        return await this._triggerWelfarePath(spec, baseUrl);
+        return await this._triggerWelfarePath(spec, baseUrl, client);
       }
     } catch (error) {
       log.error('Failed to initiate call', { type, name: senior.name, error: error.message });
@@ -308,45 +333,160 @@ export const schedulerService = {
   },
 
   /**
-   * Reminder call path: create a Telnyx call through Pipecat.
-   * Pipecat writes the delivery row and seeds call metadata before the stream starts.
+   * Reminder call path: build memory context, create Twilio call, create delivery record,
+   * store in pendingReminderCalls for /voice/answer pickup.
    */
-  async _triggerReminderPath(spec, baseUrl) {
+  async _triggerReminderPath(spec, baseUrl, client) {
     const { senior, reminder, scheduledFor, existingDelivery } = spec;
 
-    const targetScheduledFor = scheduledFor || this.getScheduledForTime(reminder, senior) || new Date();
-    log.info('Triggering Telnyx reminder call', { seniorId: senior.id, reminderId: reminder.id });
+    log.info('Pre-fetching reminder context', { name: senior.name });
 
-    const call = await retryTelnyxCall({
-      seniorId: senior.id,
-      callType: 'reminder',
-      reminderId: reminder.id,
-      scheduledFor: targetScheduledFor.toISOString(),
-      existingDeliveryId: existingDelivery?.id,
-      baseUrl,
+    // PRE-FETCH: Build memory context (includes news) BEFORE the call
+    const memoryContext = await memoryService.buildContext(senior.id, null, senior);
+    const reminderPrompt = this.formatReminderPrompt(reminder);
+
+    log.info('Context ready, triggering reminder call', { contextLen: memoryContext?.length || 0 });
+
+    const call = await retryTwilioCall(client, {
+      to: senior.phone,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      url: `${baseUrl}/voice/answer?call_type=reminder`,
+      statusCallback: `${baseUrl}/voice/status`,
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
     });
 
-    log.info('Reminder call initiated', { callSid: call.callSid, seniorId: senior.id });
-    return { sid: call.callSid, callSid: call.callSid, callControlId: call.callControlId };
+    // Calculate scheduledFor if not provided
+    const targetScheduledFor = scheduledFor || this.getScheduledForTime(reminder, senior) || new Date();
+
+    // Create or update delivery record
+    let delivery;
+    if (existingDelivery) {
+      // Retry - update existing delivery
+      [delivery] = await db.update(reminderDeliveries)
+        .set({
+          deliveredAt: new Date(),
+          callSid: call.sid,
+          attemptCount: existingDelivery.attemptCount + 1,
+          status: 'delivered'
+        })
+        .where(eq(reminderDeliveries.id, existingDelivery.id))
+        .returning();
+      log.info('Updated delivery record', { deliveryId: delivery.id, attempt: delivery.attemptCount });
+    } else {
+      // First attempt - create new delivery record
+      [delivery] = await db.insert(reminderDeliveries).values({
+        reminderId: reminder.id,
+        scheduledFor: targetScheduledFor,
+        deliveredAt: new Date(),
+        callSid: call.sid,
+        status: 'delivered',
+        attemptCount: 1
+      }).returning();
+      log.info('Created delivery record', { deliveryId: delivery.id });
+    }
+
+    // Store pre-fetched context for this call (ready when /voice/answer is hit)
+    pendingReminderCalls.set(call.sid, {
+      reminder,
+      senior,
+      memoryContext,  // PRE-FETCHED
+      reminderPrompt, // PRE-FORMATTED
+      triggeredAt: new Date(),
+      delivery,       // Include delivery record for acknowledgment tracking
+      scheduledFor: targetScheduledFor,
+      _createdAt: Date.now(),
+    });
+
+    log.info('Reminder call initiated', { callSid: call.sid, name: senior.name });
+    return call;
   },
 
   /**
-   * Welfare call path: create a Telnyx call through Pipecat.
-   * Pipecat hydrates context on the voice service side.
+   * Welfare call path: prefetch context (cache-aware), create Twilio call,
+   * store in prefetchedContextByPhone for /voice/answer pickup.
    */
-  async _triggerWelfarePath(spec, baseUrl) {
+  async _triggerWelfarePath(spec, baseUrl, client) {
     const { senior } = spec;
 
-    log.info('Triggering Telnyx welfare call', { seniorId: senior.id });
+    log.info('Welfare check: pre-fetching context', { name: senior.name, seniorId: senior.id });
 
-    const call = await retryTelnyxCall({
-      seniorId: senior.id,
-      callType: 'check-in',
-      baseUrl,
+    await this.prefetchForPhone(senior.phone, senior);
+
+    const call = await retryTwilioCall(client, {
+      to: senior.phone,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      url: `${baseUrl}/voice/answer`,
+      statusCallback: `${baseUrl}/voice/status`,
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
     });
 
-    log.info('Welfare check call initiated', { callSid: call.callSid, seniorId: senior.id });
-    return { sid: call.callSid, callSid: call.callSid, callControlId: call.callControlId };
+    log.info('Welfare check call initiated', { callSid: call.sid, name: senior.name });
+    return call;
+  },
+
+  /**
+   * Pre-fetch context for a manual outbound call (before Twilio connects)
+   * Uses cache if available, otherwise builds fresh context
+   */
+  async prefetchForPhone(phoneNumber, senior) {
+    log.info('Pre-fetching context for manual call', { name: senior?.name, phone: phoneNumber });
+
+    let memoryContext = null;
+    let preGeneratedGreeting = null;
+    let newsContext = null;
+
+    if (senior) {
+      // Check cache first
+      const cached = contextCacheService.getCache(senior.id);
+
+      if (cached) {
+        // Use cached context
+        memoryContext = cached.memoryContext;
+        preGeneratedGreeting = cached.greeting;
+        newsContext = cached.newsContext;
+        log.info('Using cached context', { name: senior.name });
+      } else {
+        // Build fresh context
+        memoryContext = await memoryService.buildContext(senior.id, null, senior);
+        preGeneratedGreeting = await this.generateGreeting(senior, memoryContext);
+      }
+    }
+
+    // Normalize phone for consistent lookup
+    const normalized = normalizePhone(phoneNumber);
+    prefetchedContextByPhone.set(normalized, {
+      senior,
+      memoryContext,
+      preGeneratedGreeting,
+      newsContext,
+      fetchedAt: new Date(),
+      _createdAt: Date.now(),
+    });
+
+    log.info('Pre-fetch complete', { phone: normalized, greetingReady: !!preGeneratedGreeting });
+    return { senior, memoryContext, preGeneratedGreeting, newsContext };
+  },
+
+  /**
+   * Generate a template greeting for pre-fetch.
+   * Personalized greetings are now handled by Pipecat's greeting service.
+   */
+  async generateGreeting(senior, memoryContext) {
+    const firstName = senior.name?.split(' ')[0];
+    return `Hello ${firstName}! It's Donna calling to check in. How are you doing today?`;
+  },
+
+  /**
+   * Get pre-fetched context for a phone number (for manual API calls)
+   */
+  getPrefetchedContext(phoneNumber) {
+    // Normalize phone for consistent lookup
+    const normalized = normalizePhone(phoneNumber);
+    const context = prefetchedContextByPhone.get(normalized);
+    if (context) {
+      prefetchedContextByPhone.delete(normalized); // One-time use
+    }
+    return context;
   },
 
   /**
@@ -451,6 +591,39 @@ export const schedulerService = {
     } catch (error) {
       log.error('Failed to update delivery status', { error: error.message });
     }
+  },
+
+  /**
+   * Get reminder context for a call (if it was triggered by a reminder)
+   */
+  getReminderContext(callSid) {
+    return pendingReminderCalls.get(callSid);
+  },
+
+  /**
+   * Clear reminder context after call ends
+   */
+  clearReminderContext(callSid) {
+    pendingReminderCalls.delete(callSid);
+  },
+
+  /**
+   * Format reminder for injection into system prompt
+   */
+  formatReminderPrompt(reminder) {
+    let prompt = `\n\nIMPORTANT REMINDER TO DELIVER:`;
+    prompt += `\nYou are calling to remind them about: "${reminder.title}"`;
+    if (reminder.description) {
+      prompt += `\nDetails: ${reminder.description}`;
+    }
+    if (reminder.type === 'medication') {
+      prompt += `\nThis is a medication reminder - be gentle but clear about the importance of taking their medication.`;
+    } else if (reminder.type === 'appointment') {
+      prompt += `\nThis is an appointment reminder - make sure they know the time and any preparation needed.`;
+    }
+    prompt += `\n\nDeliver this reminder naturally in the conversation - don't sound robotic or alarming.`;
+    prompt += `\nStart with a warm greeting, then mention the reminder.`;
+    return prompt;
   },
 
   /**
@@ -591,6 +764,7 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
           attempted,
           succeeded,
           failed,
+          pending_contexts: pendingReminderCalls.size,
         });
       }
     }
@@ -630,6 +804,26 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
     log.error('Initial pre-fetch error', { error: err.message });
     try { import('@sentry/node').then(Sentry => Sentry.captureException(err)); } catch {}
   });
+
+  // Cleanup stale pending contexts every 5 minutes (TTL: 30 minutes)
+  const PENDING_TTL_MS = 30 * 60 * 1000;
+  setInterval(() => {
+    const now = Date.now();
+    let cleaned = 0;
+    for (const [key, value] of pendingReminderCalls.entries()) {
+      if (value._createdAt && now - value._createdAt > PENDING_TTL_MS) {
+        pendingReminderCalls.delete(key);
+        cleaned++;
+      }
+    }
+    for (const [key, value] of prefetchedContextByPhone.entries()) {
+      if (value._createdAt && now - value._createdAt > PENDING_TTL_MS) {
+        prefetchedContextByPhone.delete(key);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) log.info('Cleaned stale pending contexts', { cleaned });
+  }, 5 * 60 * 1000);
 
   log.info('Context pre-caching enabled (hourly check for 5 AM local time)');
   log.info('Unified scheduler ready (reminders + welfare every 60s)');

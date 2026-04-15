@@ -13,4 +13,4 @@ API_LIMIT = "100/minute"        # All /api/* routes
 CALL_LIMIT = "5/minute"         # Call initiation endpoints
 WRITE_LIMIT = "30/minute"       # POST/PUT/DELETE operations
 AUTH_LIMIT = "10/minute"        # Login/auth endpoints
-WEBHOOK_LIMIT = "500/minute"    # Twilio webhooks
+WEBHOOK_LIMIT = "500/minute"    # Voice webhooks

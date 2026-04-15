@@ -92,7 +92,7 @@ export const reminderDeliveries = pgTable('reminder_deliveries', {
   // Status: pending, delivered, acknowledged, confirmed, retry_pending, max_attempts
   status: varchar('status', { length: 50 }).default('pending'),
   attemptCount: integer('attempt_count').default(0),  // Number of delivery attempts
-  callSid: varchar('call_sid', { length: 100 }),      // Twilio call ID
+  callSid: varchar('call_sid', { length: 100 }),      // Provider call ID
   createdAt: timestamp('created_at').defaultNow(),
 });
 

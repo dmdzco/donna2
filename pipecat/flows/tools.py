@@ -506,8 +506,8 @@ def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
       (Gemini) extracts all important details from the full transcript after
       the call ends. In-call saving is redundant and adds latency.
 
-    - check_caregiver_notes: EXCLUDED — notes are pre-fetched at call start
-      (/voice/answer parallel fetch) and injected directly into the system
+    - check_caregiver_notes: EXCLUDED — notes are hydrated at call start
+      (Telnyx call metadata setup) and injected directly into the system
       prompt. Claude already has them before the first word is spoken.
     """
     handlers = make_tool_handlers(session_state)

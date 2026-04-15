@@ -172,10 +172,19 @@ def get_audio_profile(session_state: dict) -> dict[str, int | str]:
     """Pick the highest safe internal sample rates for the active telephony pipeline."""
     cfg = get_settings()
     provider = resolve_tts_provider(session_state)
-    audio_in_sample_rate = cfg.telephony_internal_input_sample_rate
+    is_telnyx = session_state.get("_transport_type") == "telnyx"
+    audio_in_sample_rate = (
+        TELNYX_REQUIRED_SAMPLE_RATE
+        if is_telnyx
+        else cfg.telephony_internal_input_sample_rate
+    )
 
     if provider == "cartesia":
-        audio_out_sample_rate = cfg.cartesia_output_sample_rate
+        audio_out_sample_rate = (
+            TELNYX_REQUIRED_SAMPLE_RATE
+            if is_telnyx
+            else cfg.cartesia_output_sample_rate
+        )
         if audio_out_sample_rate not in SUPPORTED_CARTESIA_SAMPLE_RATES:
             logger.warning(
                 "Unsupported Cartesia sample rate {rate}; using 48000",
@@ -183,7 +192,11 @@ def get_audio_profile(session_state: dict) -> dict[str, int | str]:
             )
             audio_out_sample_rate = 48000
     else:
-        audio_out_sample_rate = cfg.elevenlabs_output_sample_rate
+        audio_out_sample_rate = (
+            TELNYX_REQUIRED_SAMPLE_RATE
+            if is_telnyx
+            else cfg.elevenlabs_output_sample_rate
+        )
         if audio_out_sample_rate not in SUPPORTED_ELEVENLABS_SAMPLE_RATES:
             logger.warning(
                 "Unsupported ElevenLabs sample rate {rate}; using 44100",
@@ -210,6 +223,7 @@ def create_tts_service(session_state: dict):
     output_sample_rate = int(audio_profile["audio_out_sample_rate"])
 
     if provider == "cartesia":
+        is_telnyx = session_state.get("_transport_type") == "telnyx"
         logger.info("TTS provider: Cartesia Sonic 3")
         return CartesiaTTSService(
             api_key=cfg.cartesia_api_key,
@@ -220,7 +234,11 @@ def create_tts_service(session_state: dict):
             # μ-law / A-law conversion at the provider edge.
             encoding="pcm_s16le",
             params=CartesiaTTSService.InputParams(
-                generation_config=GenerationConfig(speed=1.05, volume=1.2, emotion="enthusiastic"),
+                generation_config=GenerationConfig(
+                    speed=1.0 if is_telnyx else 1.05,
+                    volume=0.9 if is_telnyx else 1.2,
+                    emotion="enthusiastic",
+                ),
             ),
         )
 
@@ -377,6 +395,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     stream_sid = call_data.get("stream_id", "")
     call_sid = _provider_call_id(call_data, session_state) or "unknown"
     session_state["call_sid"] = call_sid
+    session_state["_transport_type"] = transport_type
 
     # Populate session_state from call_metadata (pre-fetched by /voice/answer)
     if metadata:

@@ -7,6 +7,7 @@ the provider edge.
 
 from __future__ import annotations
 
+import audioop
 import base64
 import json
 from typing import Optional
@@ -67,6 +68,8 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
         self._input_resampler = create_stream_resampler()
         self._output_resampler = create_stream_resampler()
         self._hangup_attempted = False
+        self._logged_output_audio = False
+        self._logged_input_audio = False
 
     async def setup(self, frame: StartFrame):
         self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
@@ -90,6 +93,20 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
         serialized_data = await self._encode_audio(frame.audio, frame.sample_rate)
         if not serialized_data:
             return None
+        if not self._logged_output_audio:
+            self._logged_output_audio = True
+            input_ms = round((len(frame.audio) / 2) / frame.sample_rate * 1000)
+            wire_ms = round((len(serialized_data) / 2) / self._telnyx_sample_rate * 1000)
+            logger.info(
+                "[{cid}] Telnyx output audio frame input_rate={input_rate}Hz input_ms={input_ms} "
+                "wire_rate={wire_rate}Hz wire_ms={wire_ms} wire_bytes={wire_bytes} byte_order=rtp_network",
+                cid=self._call_control_id or "unknown",
+                input_rate=frame.sample_rate,
+                input_ms=input_ms,
+                wire_rate=self._telnyx_sample_rate,
+                wire_ms=wire_ms,
+                wire_bytes=len(serialized_data),
+            )
 
         return json.dumps(
             {
@@ -110,6 +127,21 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
             deserialized_data = await self._decode_audio(payload)
             if not deserialized_data:
                 return None
+            if not self._logged_input_audio:
+                self._logged_input_audio = True
+                wire_ms = round((len(payload) / 2) / self._telnyx_sample_rate * 1000)
+                pipeline_ms = round((len(deserialized_data) / 2) / self._sample_rate * 1000)
+                logger.info(
+                    "[{cid}] Telnyx input audio frame wire_rate={wire_rate}Hz wire_ms={wire_ms} "
+                    "pipeline_rate={pipeline_rate}Hz pipeline_ms={pipeline_ms} wire_bytes={wire_bytes} "
+                    "byte_order=rtp_network",
+                    cid=self._call_control_id or "unknown",
+                    wire_rate=self._telnyx_sample_rate,
+                    wire_ms=wire_ms,
+                    pipeline_rate=self._sample_rate,
+                    pipeline_ms=pipeline_ms,
+                    wire_bytes=len(payload),
+                )
             return InputAudioRawFrame(
                 audio=deserialized_data,
                 num_channels=1,
@@ -128,11 +160,14 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
     async def _encode_audio(self, pcm_bytes: bytes, in_rate: int) -> bytes | None:
         encoding = self._params.inbound_encoding
         if encoding == "L16":
-            return await self._output_resampler.resample(
+            resampled = await self._output_resampler.resample(
                 pcm_bytes,
                 in_rate,
                 self._telnyx_sample_rate,
             )
+            # Telnyx RTP mode expects an RTP L16 payload. RTP L16 uses network
+            # byte order; Pipecat PCM frames are signed 16-bit little-endian.
+            return audioop.byteswap(resampled, 2)
 
         raise ValueError(f"Unsupported Telnyx inbound encoding: {encoding}")
 
@@ -142,8 +177,9 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
             if len(payload) % 2 != 0:
                 logger.warning("Dropping malformed L16 Telnyx payload with odd byte length")
                 return None
+            pcm = audioop.byteswap(payload, 2)
             return await self._input_resampler.resample(
-                payload,
+                pcm,
                 self._telnyx_sample_rate,
                 self._sample_rate,
             )

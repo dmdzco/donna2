@@ -106,6 +106,37 @@ def test_audio_profile_prefers_cartesia_48k_and_16k_input(cartesia_env):
     assert profile["audio_out_sample_rate"] == 48000
 
 
+def test_audio_profile_keeps_telnyx_cartesia_at_16k(cartesia_env):
+    """Telnyx L16 keeps input, TTS, and wire audio at 16kHz."""
+    from bot import get_audio_profile
+
+    session_state = {
+        "_flags": {"tts_provider": "cartesia"},
+        "_transport_type": "telnyx",
+    }
+    profile = get_audio_profile(session_state)
+
+    assert profile["tts_provider"] == "cartesia"
+    assert profile["audio_in_sample_rate"] == 16000
+    assert profile["audio_out_sample_rate"] == 16000
+
+
+def test_cartesia_uses_lower_volume_for_telnyx(cartesia_env):
+    """Telnyx phone output uses a less aggressive TTS level to avoid clipping."""
+    from bot import create_tts_service
+
+    session_state = {
+        "_flags": {"tts_provider": "cartesia"},
+        "_transport_type": "telnyx",
+    }
+    tts = create_tts_service(session_state)
+    gen_config = tts._settings.get("generation_config")
+
+    assert tts._init_sample_rate == 16000
+    assert gen_config.speed == 1.0
+    assert gen_config.volume == 0.9
+
+
 def test_audio_profile_falls_back_to_elevenlabs_when_cartesia_unavailable(cartesia_env):
     """Missing Cartesia credentials fall back to the ElevenLabs audio profile."""
     from bot import get_audio_profile

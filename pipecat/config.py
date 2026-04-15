@@ -54,6 +54,12 @@ class Settings:
     cerebras_api_key: str = ""
     groq_api_key: str = ""
 
+    # ---- Audio ----
+    telephony_internal_input_sample_rate: int = 16000
+    elevenlabs_output_sample_rate: int = 44100
+    cartesia_output_sample_rate: int = 48000
+    gemini_internal_output_sample_rate: int = 24000
+
     # ---- Model Selection ----
     fast_observer_model: str = "gemini-3-flash-preview"
     cerebras_director_model: str = "gpt-oss-120b"
@@ -206,6 +212,12 @@ def _load_settings() -> Settings:
     def _env(key: str, default: str = "") -> str:
         return os.environ.get(key, default)
 
+    def _env_int(key: str, default: int) -> int:
+        try:
+            return int(_env(key, str(default)))
+        except ValueError:
+            return default
+
     return Settings(
         # Server
         port=int(_env("PORT", "7860")),
@@ -235,6 +247,11 @@ def _load_settings() -> Settings:
         tavily_api_key=_env("TAVILY_API_KEY"),
         cerebras_api_key=_env("CEREBRAS_API_KEY"),
         groq_api_key=_env("GROQ_API_KEY"),
+        # Audio
+        telephony_internal_input_sample_rate=_env_int("TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE", 16000),
+        elevenlabs_output_sample_rate=_env_int("ELEVENLABS_OUTPUT_SAMPLE_RATE", 44100),
+        cartesia_output_sample_rate=_env_int("CARTESIA_OUTPUT_SAMPLE_RATE", 48000),
+        gemini_internal_output_sample_rate=_env_int("GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE", 24000),
         # Model Selection
         fast_observer_model=_env("FAST_OBSERVER_MODEL", "gemini-3-flash-preview"),
         cerebras_director_model=_env("CEREBRAS_DIRECTOR_MODEL", "gpt-oss-120b"),

@@ -3,7 +3,7 @@
 Assembles the full Pipecat pipeline for a single call session:
   Twilio WebSocket → Deepgram STT → Quick Observer → LLM Context →
   Anthropic Claude → Guidance Stripper → Conversation Tracker →
-  ElevenLabs TTS → Twilio output
+  TTS provider → Twilio output
 
 Called once per incoming WebSocket connection from Twilio.
 """
@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import hmac
-import os
 import time
 
 from deepgram import LiveOptions
@@ -129,18 +128,6 @@ SUPPORTED_CARTESIA_SAMPLE_RATES = {8000, 16000, 22050, 24000, 44100, 48000}
 SUPPORTED_ELEVENLABS_SAMPLE_RATES = {8000, 16000, 22050, 24000, 44100}
 
 
-def _get_env_int(name: str, default: int) -> int:
-    """Read an integer env var with a safe fallback."""
-    value = os.getenv(name)
-    if not value:
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        logger.warning("Invalid integer for {name}: {value}; using {default}", name=name, value=value, default=default)
-        return default
-
-
 def resolve_tts_provider(session_state: dict) -> str:
     """Resolve the active TTS provider after applying availability fallbacks."""
     cfg = get_settings()
@@ -157,11 +144,12 @@ def resolve_tts_provider(session_state: dict) -> str:
 
 def get_audio_profile(session_state: dict) -> dict[str, int | str]:
     """Pick the highest safe internal sample rates for the active telephony pipeline."""
+    cfg = get_settings()
     provider = resolve_tts_provider(session_state)
-    audio_in_sample_rate = _get_env_int("TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE", 16000)
+    audio_in_sample_rate = cfg.telephony_internal_input_sample_rate
 
     if provider == "cartesia":
-        audio_out_sample_rate = _get_env_int("CARTESIA_OUTPUT_SAMPLE_RATE", 48000)
+        audio_out_sample_rate = cfg.cartesia_output_sample_rate
         if audio_out_sample_rate not in SUPPORTED_CARTESIA_SAMPLE_RATES:
             logger.warning(
                 "Unsupported Cartesia sample rate {rate}; using 48000",
@@ -169,7 +157,7 @@ def get_audio_profile(session_state: dict) -> dict[str, int | str]:
             )
             audio_out_sample_rate = 48000
     else:
-        audio_out_sample_rate = _get_env_int("ELEVENLABS_OUTPUT_SAMPLE_RATE", 44100)
+        audio_out_sample_rate = cfg.elevenlabs_output_sample_rate
         if audio_out_sample_rate not in SUPPORTED_ELEVENLABS_SAMPLE_RATES:
             logger.warning(
                 "Unsupported ElevenLabs sample rate {rate}; using 44100",

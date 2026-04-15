@@ -55,7 +55,7 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 │   │                    Pipecat Pipeline (bot.py)                         │   │
 │   ├─────────────────────────────────────────────────────────────────────┤   │
 │   │                                                                      │   │
-│   │   Audio In → Deepgram STT (Nova 3, 8kHz)                             │   │
+│   │   Audio In → Deepgram STT (Nova 3, internal 16kHz PCM)                │   │
 │   │                     │ TranscriptionFrame                             │   │
 │   │                     ▼                                                │   │
 │   │         ┌───────────────────────┐                                    │   │
@@ -87,7 +87,7 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 │   │                     ▼                                                │   │
 │   │         Conversation Tracker (topics + stripped transcript)          │   │
 │   │                     ▼                                                │   │
-│   │         ElevenLabs TTS → Audio Out → Twilio (mulaw 8kHz)            │   │
+│   │         TTS high-rate PCM → Audio Out → Twilio (final 8kHz μ-law)    │   │
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (assistant) ← tracks responses            │   │
 │   │                                                                      │   │
@@ -237,13 +237,13 @@ Quick Observer pattern categories:
 | **Framework** | Pipecat v0.0.101+ | FrameProcessor pipeline |
 | **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
-| **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
+| **Phone** | Twilio Media Streams | WebSocket wire audio is 8kHz μ-law |
 | **Voice LLM** | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Groq (`gpt-oss-20b`) | Active fast provider for query/speculative guidance |
 | **Director Fallback Helper** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Regular non-speculative fallback in `director_llm.py` |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
 | **STT** | Deepgram Nova 3 (`nova-3-general`) | Real-time, interim results, 8kHz |
-| **TTS** | ElevenLabs (`eleven_turbo_v2_5`) by default; Cartesia behind provider flag | Streaming voice synthesis |
+| **TTS** | ElevenLabs (`eleven_turbo_v2_5`) by default; Cartesia behind provider flag | Internal high-rate PCM: ElevenLabs `44100`, Cartesia `pcm_s16le` at `48000`; serializer performs final phone conversion |
 | **VAD** | Silero | confidence=0.6, stop_secs=1.2, min_volume=0.5 |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |

@@ -266,12 +266,12 @@ Operational lookup/display fields such as senior name, phone, timezone, city/sta
 
 | File | Purpose |
 |------|---------|
-| `pipecat/api/middleware/auth.py` | 3-tier authentication (109 LOC) |
+| `pipecat/api/middleware/auth.py` | 3-tier authentication (238 LOC) |
 | `middleware/api-auth.js` | Node service API key auth with constant-time comparison |
-| `pipecat/api/middleware/twilio.py` | Twilio webhook signature validation (53 LOC) |
-| `pipecat/api/middleware/rate_limit.py` | 5-tier rate limiting config (17 LOC) |
-| `pipecat/api/middleware/security.py` | Security headers (31 LOC) |
-| `pipecat/api/middleware/error_handler.py` | Safe error responses (34 LOC) |
-| `pipecat/api/validators/schemas.py` | Pydantic input schemas (143 LOC) |
-| `pipecat/lib/sanitize.py` | PII masking utilities (39 LOC) |
-| `pipecat/config.py` | Centralized env vars (132 LOC) |
+| `pipecat/api/middleware/twilio.py` | Twilio webhook signature validation (113 LOC) |
+| `pipecat/api/middleware/rate_limit.py` | 5-tier rate limiting config (16 LOC) |
+| `pipecat/api/middleware/security.py` | Security headers (30 LOC) |
+| `pipecat/api/middleware/error_handler.py` | Safe error responses (33 LOC) |
+| `pipecat/api/validators/schemas.py` | Pydantic input schemas (139 LOC) |
+| `pipecat/lib/sanitize.py` | PII masking utilities (38 LOC) |
+| `pipecat/config.py` | Centralized env vars (310 LOC) |

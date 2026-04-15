@@ -15,7 +15,6 @@ No Director, no Observer, no FlowManager, no separate STT/TTS.
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 
 from loguru import logger
@@ -24,6 +23,7 @@ from pipecat.frames.frames import EndFrame, InputTextRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from config import get_settings
 
 try:
     from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
@@ -35,17 +35,6 @@ except ImportError as e:
 
 from processors.conversation_tracker import ConversationTrackerProcessor
 from services.post_call import run_post_call
-
-
-def _get_env_int(name: str, default: int) -> int:
-    value = os.getenv(name)
-    if not value:
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        logger.warning("Invalid integer for {name}: {value}; using {default}", name=name, value=value, default=default)
-        return default
 
 
 def _build_system_prompt(session_state: dict) -> str:
@@ -150,8 +139,9 @@ async def run_gemini_pipeline(
 
     system_prompt = _build_system_prompt(session_state)
     logger.debug("[{cs}] Gemini system prompt: {n} chars", cs=call_sid, n=len(system_prompt))
-    audio_in_sample_rate = _get_env_int("TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE", 16000)
-    audio_out_sample_rate = _get_env_int("GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE", 24000)
+    cfg = get_settings()
+    audio_in_sample_rate = cfg.telephony_internal_input_sample_rate
+    audio_out_sample_rate = cfg.gemini_internal_output_sample_rate
     logger.info(
         "[{cs}] Gemini audio profile in={audio_in}Hz out={audio_out}Hz",
         cs=call_sid,
@@ -165,7 +155,7 @@ async def run_gemini_pipeline(
     from flows.gemini_tools import _build_gemini_tools, register_gemini_tools
 
     llm = GeminiLiveLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY", ""),
+        api_key=cfg.google_api_key,
         model="models/gemini-3.1-flash-live-preview",
         voice_id="Aoede",
         system_instruction=system_prompt,

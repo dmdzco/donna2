@@ -183,8 +183,8 @@ Runs automatically after every call disconnect:
 
 ### Security
 - JWT admin authentication + cofounder API keys
-- API key authentication (DONNA_API_KEY)
-- Twilio webhook signature verification
+- Labeled service API key authentication (`DONNA_API_KEYS`; legacy `DONNA_API_KEY` only outside production)
+- Twilio webhook signature verification plus single-use `ws_token` validation for Media Stream WebSockets
 - Rate limiting (slowapi)
 - Security headers (HSTS, X-Frame-Options)
 - Pydantic input validation

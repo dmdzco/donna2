@@ -105,6 +105,7 @@ def _telnyx_stream_options(ws_token: str) -> dict[str, Any]:
         "stream_codec": codec,
         "stream_bidirectional_mode": "rtp",
         "stream_bidirectional_codec": codec,
+        "stream_bidirectional_sampling_rate": cfg.telnyx_stream_sample_rate,
     }
 
 

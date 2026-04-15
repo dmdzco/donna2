@@ -16,7 +16,6 @@ import {
   Plus,
   X,
   Lightbulb,
-  ChevronDown,
 } from "lucide-react-native";
 import { Button, Input, Modal, ProgressBar } from "@/src/components/ui";
 import { COLORS, TIME_OPTIONS } from "@/src/constants/theme";

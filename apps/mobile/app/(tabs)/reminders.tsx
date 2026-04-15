@@ -25,7 +25,7 @@ import {
   useUpdateReminder,
   useDeleteReminder,
 } from "@/src/hooks";
-import { Button, Input, Modal, TimePickerField } from "@/src/components/ui";
+import { Button, DatePickerField, Input, Modal, TimePickerField } from "@/src/components/ui";
 import type { Reminder } from "@/src/types";
 
 // --- Types ---
@@ -34,14 +34,21 @@ type ReminderFormData = {
   title: string;
   description: string;
   faqs: string;
+  date: string; // "YYYY-MM-DD"
   time: string;
   isRecurring: boolean;
 };
+
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 const EMPTY_FORM: ReminderFormData = {
   title: "",
   description: "",
   faqs: "",
+  date: todayIso(),
   time: "9:00 AM",
   isRecurring: true,
 };
@@ -104,10 +111,16 @@ export default function RemindersScreen() {
 
   const openEditModal = useCallback((reminder: Reminder) => {
     setEditingReminder(reminder);
+    let editDate = todayIso();
+    if (reminder.scheduledTime) {
+      const d = new Date(reminder.scheduledTime);
+      editDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
     setForm({
       title: reminder.title,
       description: reminder.description ?? "",
       faqs: "",
+      date: editDate,
       time: reminder.scheduledTime
         ? getReminderTimeLabel(reminder, seniorTimezone)
         : "9:00 AM",
@@ -139,7 +152,9 @@ export default function RemindersScreen() {
     const description = [form.description.trim(), form.faqs.trim()]
       .filter(Boolean)
       .join("\n\nFAQs:\n");
-    const scheduledTime = timeStringToUtcIso(form.time, seniorTimezone);
+    const [year, month, day] = form.date.split("-").map(Number);
+    const selectedDate = new Date(year, month - 1, day);
+    const scheduledTime = timeStringToUtcIso(form.time, seniorTimezone, selectedDate);
     const cronExpression = form.isRecurring
       ? cronExpressionFromTime(form.time)
       : undefined;
@@ -319,6 +334,17 @@ export default function RemindersScreen() {
                 setForm((prev) => ({ ...prev, faqs: text }))
               }
               accessibilityLabel="Frequently asked questions"
+            />
+          </View>
+
+          {/* Date picker */}
+          <View className="mb-4">
+            <DatePickerField
+              value={form.date}
+              onChange={(date) => setForm((prev) => ({ ...prev, date }))}
+              helperText={timeHelperText}
+              accessibilityLabel="Select reminder date"
+              testID="reminder-date-picker"
             />
           </View>
 

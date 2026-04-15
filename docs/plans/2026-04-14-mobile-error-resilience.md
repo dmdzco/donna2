@@ -31,8 +31,8 @@ Goal: make Donna's mobile app fail clearly and safely under poor network, backen
 - [x] Remove raw backend error messages from mobile-owned 500 responses.
 - [x] Run backend middleware/route tests, full Node tests, mobile TypeScript, auth guard, asset verification, Expo dependency check, and whitespace checks.
 - [x] Add encrypted local drafts for onboarding, with cleanup on setup completion and sign-out.
+- [x] Add optional Sentry mobile crash reporting with strict PHI scrubbing and screenshots/replay/tracing/logs disabled.
 
 ## Later Work
 
 - [ ] Add real-device tests for airplane mode, slow network, app background/resume, and expired auth.
-- [ ] Add Sentry or equivalent with strict PHI scrubbing.

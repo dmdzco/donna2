@@ -1,6 +1,7 @@
-import { Component, ReactNode } from "react";
+import { Component, ErrorInfo, ReactNode } from "react";
 import { View, Text, Pressable } from "react-native";
 import { COLORS } from "@/src/constants/theme";
+import { captureBoundaryException } from "@/src/lib/errorReporting";
 
 type Props = { children: ReactNode; fallback?: ReactNode };
 type State = { hasError: boolean; error?: Error };
@@ -10,6 +11,10 @@ export class ErrorBoundary extends Component<Props, State> {
 
   static getDerivedStateFromError(error: Error) {
     return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    captureBoundaryException(error, errorInfo);
   }
 
   render() {

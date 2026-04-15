@@ -24,6 +24,7 @@ import { COLORS } from "@/src/constants/theme";
 import { ErrorBoundary } from "@/src/components/ErrorBoundary";
 import { NetworkProvider } from "@/src/providers/NetworkProvider";
 import { queryClient } from "@/src/lib/queryClient";
+import { withErrorReporting } from "@/src/lib/errorReporting";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -92,7 +93,7 @@ function AuthGuard() {
   return <Stack screenOptions={{ headerShown: false }} />;
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const [fontsLoaded] = useFonts({
     PlayfairDisplay_400Regular,
     PlayfairDisplay_500Medium,
@@ -125,3 +126,5 @@ export default function RootLayout() {
     </ErrorBoundary>
   );
 }
+
+export default withErrorReporting(RootLayout);

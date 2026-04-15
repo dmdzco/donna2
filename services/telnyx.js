@@ -1,9 +1,5 @@
 import { getPipecatPublicUrl, parseServiceApiKeys } from '../lib/security-config.js';
 
-export function getTelephonyProvider(env = process.env) {
-  return String(env.TELEPHONY_PROVIDER || 'twilio').toLowerCase();
-}
-
 function getPipecatServiceKey(env = process.env) {
   const keys = parseServiceApiKeys(env);
   for (const label of ['pipecat', 'node', 'scheduler', 'legacy']) {
@@ -54,8 +50,21 @@ async function postPipecat(path, body, { baseUrl, env = process.env } = {}) {
   return payload;
 }
 
-export async function initiateTelnyxOutboundCall({ seniorId, callType = 'check-in', baseUrl }) {
-  return postPipecat('/telnyx/outbound', { seniorId, callType }, { baseUrl });
+export async function initiateTelnyxOutboundCall({
+  seniorId,
+  callType = 'check-in',
+  reminderId,
+  scheduledFor,
+  existingDeliveryId,
+  baseUrl,
+}) {
+  return postPipecat('/telnyx/outbound', {
+    seniorId,
+    callType,
+    ...(reminderId ? { reminderId } : {}),
+    ...(scheduledFor ? { scheduledFor } : {}),
+    ...(existingDeliveryId ? { existingDeliveryId } : {}),
+  }, { baseUrl });
 }
 
 export async function endTelnyxCall(callSid, { baseUrl } = {}) {

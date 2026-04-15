@@ -63,7 +63,7 @@ def test_defaults_to_elevenlabs_when_no_flags(cartesia_env):
 
 
 def test_cartesia_uses_default_encoding(cartesia_env):
-    """Cartesia uses default pcm_s16le encoding (pipeline handles resampling + mulaw)."""
+    """Cartesia uses pcm_s16le encoding so the serializer owns final telephony framing."""
     from bot import create_tts_service
     from pipecat.services.cartesia.tts import CartesiaTTSService
 
@@ -106,35 +106,51 @@ def test_audio_profile_prefers_cartesia_48k_and_16k_input(cartesia_env):
     assert profile["audio_out_sample_rate"] == 48000
 
 
-def test_audio_profile_keeps_telnyx_cartesia_at_16k(cartesia_env):
-    """Telnyx L16 keeps input, TTS, and wire audio at 16kHz."""
+def test_audio_profile_keeps_telnyx_l16_cartesia_high_rate_until_serializer(cartesia_env):
+    """Telnyx L16 keeps STT at 16k but leaves Cartesia high-rate until the serializer edge."""
     from bot import get_audio_profile
 
-    session_state = {
-        "_flags": {"tts_provider": "cartesia"},
-        "_transport_type": "telnyx",
-    }
-    profile = get_audio_profile(session_state)
+    with patch.dict(os.environ, {"TELNYX_STREAM_CODEC": "L16", "TELNYX_STREAM_SAMPLE_RATE": "16000"}):
+        session_state = {
+            "_flags": {"tts_provider": "cartesia"},
+            "_transport_type": "telnyx",
+        }
+        profile = get_audio_profile(session_state)
 
     assert profile["tts_provider"] == "cartesia"
     assert profile["audio_in_sample_rate"] == 16000
-    assert profile["audio_out_sample_rate"] == 16000
+    assert profile["audio_out_sample_rate"] == 48000
 
 
 def test_cartesia_uses_lower_volume_for_telnyx(cartesia_env):
     """Telnyx phone output uses a less aggressive TTS level to avoid clipping."""
     from bot import create_tts_service
 
-    session_state = {
-        "_flags": {"tts_provider": "cartesia"},
-        "_transport_type": "telnyx",
-    }
-    tts = create_tts_service(session_state)
+    with patch.dict(os.environ, {"TELNYX_STREAM_CODEC": "L16", "TELNYX_STREAM_SAMPLE_RATE": "16000"}):
+        session_state = {
+            "_flags": {"tts_provider": "cartesia"},
+            "_transport_type": "telnyx",
+        }
+        tts = create_tts_service(session_state)
     gen_config = tts._settings.get("generation_config")
 
-    assert tts._init_sample_rate == 16000
+    assert tts._init_sample_rate == 48000
     assert gen_config.speed == 1.0
     assert gen_config.volume == 0.9
+
+
+def test_cartesia_keeps_48k_for_telnyx_l16(cartesia_env):
+    """Cartesia stays high-rate internally; the Telnyx serializer performs final 16k conversion."""
+    from bot import create_tts_service
+
+    with patch.dict(os.environ, {"TELNYX_STREAM_CODEC": "L16", "TELNYX_STREAM_SAMPLE_RATE": "16000"}):
+        session_state = {
+            "_flags": {"tts_provider": "cartesia"},
+            "_transport_type": "telnyx",
+        }
+        tts = create_tts_service(session_state)
+
+    assert tts._init_sample_rate == 48000
 
 
 def test_audio_profile_falls_back_to_elevenlabs_when_cartesia_unavailable(cartesia_env):

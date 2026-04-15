@@ -2,8 +2,6 @@
 
 Serves:
 - /health — health check
-- /voice/answer — Twilio voice webhook (TwiML)
-- /voice/status — Twilio status callback
 - /ws — WebSocket endpoint for Pipecat voice pipeline
 - /api/call — outbound call initiation
 - /api/calls — active call listing (admin)
@@ -100,7 +98,7 @@ from api.routes.data import router as data_router
 from api.routes.export import router as export_router
 from api.routes.metrics import router as metrics_router
 from api.routes.telnyx import router as telnyx_router
-from api.routes.voice import router as voice_router, call_metadata
+from api.routes.call_context import call_metadata
 from bot import (
     WebSocketAuthError,
     authenticate_websocket_call,
@@ -170,7 +168,6 @@ register_error_handlers(app)
 # Routes
 # ---------------------------------------------------------------------------
 app.include_router(auth_router)
-app.include_router(voice_router)
 app.include_router(calls_router)
 app.include_router(data_router)
 app.include_router(export_router)
@@ -238,7 +235,7 @@ async def live():
 # ---------------------------------------------------------------------------
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """Twilio connects here via TwiML <Stream>. Runs the Pipecat pipeline."""
+    """Telnyx connects here for media streaming. Runs the Pipecat pipeline."""
     global _active_calls, _peak_calls
 
     if _shutting_down:

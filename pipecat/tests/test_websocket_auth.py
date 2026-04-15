@@ -1,10 +1,10 @@
-"""Tests for Twilio Media Stream WebSocket admission."""
+"""Tests for telephony media WebSocket admission."""
 
 import time
 
 import pytest
 
-from api.routes.voice import call_metadata
+from api.routes.call_context import call_metadata
 from bot import WebSocketAuthError, authenticate_websocket_call
 
 

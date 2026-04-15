@@ -10,8 +10,6 @@ from __future__ import annotations
 import audioop
 import base64
 import json
-import random
-import struct
 from typing import Optional
 
 import aiohttp
@@ -43,6 +41,8 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
         sample_rate: Optional[int] = None
         inbound_encoding: str = "L16"
         outbound_encoding: str = "L16"
+        l16_input_byte_order: str = "little"
+        l16_output_byte_order: str = "little"
         auto_hang_up: bool = True
 
     def __init__(
@@ -64,6 +64,10 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
             raise ValueError("Donna Telnyx serializer only supports L16/16000Hz")
         if self._params.telnyx_sample_rate != 16000:
             raise ValueError("Donna Telnyx serializer requires 16000Hz")
+        if self._params.l16_input_byte_order not in {"network", "little"}:
+            raise ValueError("Donna Telnyx serializer L16 input byte order must be network or little")
+        if self._params.l16_output_byte_order not in {"network", "little"}:
+            raise ValueError("Donna Telnyx serializer L16 output byte order must be network or little")
 
         self._telnyx_sample_rate = self._params.telnyx_sample_rate
         self._sample_rate = 0
@@ -72,9 +76,6 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
         self._hangup_attempted = False
         self._logged_output_audio = False
         self._logged_input_audio = False
-        self._rtp_sequence_number = random.randint(0, 65535)
-        self._rtp_timestamp = random.randint(0, 2**32 - 1)
-        self._rtp_ssrc = random.randint(1, 2**32 - 1)
 
     async def setup(self, frame: StartFrame):
         self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
@@ -104,14 +105,15 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
             wire_ms = round((len(serialized_data) / 2) / self._telnyx_sample_rate * 1000)
             logger.info(
                 "[{cid}] Telnyx output audio frame input_rate={input_rate}Hz input_ms={input_ms} "
-                "wire_rate={wire_rate}Hz wire_ms={wire_ms} wire_bytes={wire_bytes} byte_order=rtp_network "
-                "rtp_header=true",
+                "wire_rate={wire_rate}Hz wire_ms={wire_ms} wire_bytes={wire_bytes} byte_order={byte_order} "
+                "rtp_header=false",
                 cid=self._call_control_id or "unknown",
                 input_rate=frame.sample_rate,
                 input_ms=input_ms,
                 wire_rate=self._telnyx_sample_rate,
                 wire_ms=wire_ms,
                 wire_bytes=len(serialized_data),
+                byte_order=self._params.l16_output_byte_order,
             )
 
         return json.dumps(
@@ -140,13 +142,14 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
                 logger.info(
                     "[{cid}] Telnyx input audio frame wire_rate={wire_rate}Hz wire_ms={wire_ms} "
                     "pipeline_rate={pipeline_rate}Hz pipeline_ms={pipeline_ms} wire_bytes={wire_bytes} "
-                    "byte_order=rtp_network",
+                    "byte_order={byte_order}",
                     cid=self._call_control_id or "unknown",
                     wire_rate=self._telnyx_sample_rate,
                     wire_ms=wire_ms,
                     pipeline_rate=self._sample_rate,
                     pipeline_ms=pipeline_ms,
                     wire_bytes=len(payload),
+                    byte_order=self._params.l16_input_byte_order,
                 )
             return InputAudioRawFrame(
                 audio=deserialized_data,
@@ -171,25 +174,14 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
                 in_rate,
                 self._telnyx_sample_rate,
             )
-            # Telnyx RTP mode expects an RTP L16 payload. RTP L16 uses network
-            # byte order; Pipecat PCM frames are signed 16-bit little-endian.
-            return self._wrap_rtp(audioop.byteswap(resampled, 2))
+            if self._params.l16_output_byte_order == "little":
+                return resampled
+            # Telnyx media messages carry an RTP payload, not a full RTP packet.
+            # RTP L16 normally uses network byte order; Pipecat PCM frames are
+            # signed 16-bit little-endian.
+            return audioop.byteswap(resampled, 2)
 
         raise ValueError(f"Unsupported Telnyx inbound encoding: {encoding}")
-
-    def _wrap_rtp(self, payload: bytes) -> bytes:
-        """Wrap one L16 payload chunk in an RTP packet for Telnyx bidirectional media."""
-        header = struct.pack(
-            "!BBHII",
-            0x80,
-            96,
-            self._rtp_sequence_number,
-            self._rtp_timestamp,
-            self._rtp_ssrc,
-        )
-        self._rtp_sequence_number = (self._rtp_sequence_number + 1) % 65536
-        self._rtp_timestamp = (self._rtp_timestamp + len(payload) // 2) % (2**32)
-        return header + payload
 
     async def _decode_audio(self, payload: bytes) -> bytes | None:
         encoding = self._params.outbound_encoding
@@ -197,7 +189,7 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
             if len(payload) % 2 != 0:
                 logger.warning("Dropping malformed L16 Telnyx payload with odd byte length")
                 return None
-            pcm = audioop.byteswap(payload, 2)
+            pcm = payload if self._params.l16_input_byte_order == "little" else audioop.byteswap(payload, 2)
             return await self._input_resampler.resample(
                 pcm,
                 self._telnyx_sample_rate,

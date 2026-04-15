@@ -1,11 +1,11 @@
 """Donna voice pipeline — core bot entry point.
 
 Assembles the full Pipecat pipeline for a single call session:
-  Twilio WebSocket → Deepgram STT → Quick Observer → LLM Context →
+  Telnyx WebSocket → Deepgram STT → Quick Observer → LLM Context →
   Anthropic Claude → Guidance Stripper → Conversation Tracker →
-  TTS provider → Twilio output
+  TTS provider → Telnyx output
 
-Called once per incoming WebSocket connection from Twilio.
+Called once per incoming WebSocket connection from Telnyx.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.utils import parse_telephony_websocket
-from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
@@ -40,6 +39,7 @@ from pipecat_flows import FlowManager
 from config import get_settings, settings
 from flows.nodes import build_initial_node
 from flows.tools import make_flows_tools
+from lib.telnyx_audio import TelnyxAudioProfileError, resolve_telnyx_audio_profile
 from processors.conversation_director import ConversationDirectorProcessor
 from processors.conversation_tracker import ConversationState, ConversationTrackerProcessor
 from processors.guidance_stripper import GuidanceStripperProcessor
@@ -49,10 +49,10 @@ from services.post_call import run_post_call
 from serializers.telnyx import DonnaTelnyxFrameSerializer
 
 class WebSocketAuthError(Exception):
-    """Raised when a Twilio media WebSocket cannot be admitted."""
+    """Raised when a telephony media WebSocket cannot be admitted."""
 
 
-HANDSHAKE_TIMEOUT_SECONDS = settings.twilio_ws_handshake_timeout_seconds
+HANDSHAKE_TIMEOUT_SECONDS = settings.telephony_ws_handshake_timeout_seconds
 
 
 def _provider_call_id(call_data: dict, session_state: dict | None = None) -> str:
@@ -84,7 +84,7 @@ async def authenticate_websocket_call(
     if not call_sid:
         raise WebSocketAuthError("missing call_sid")
 
-    from api.routes.voice import get_call_metadata, mark_ws_token_consumed
+    from api.routes.call_context import get_call_metadata, mark_ws_token_consumed
 
     metadata = await get_call_metadata(call_sid)
     if not metadata:
@@ -146,10 +146,7 @@ async def prepare_websocket_call(
 
 SUPPORTED_CARTESIA_SAMPLE_RATES = {16000, 22050, 24000, 44100, 48000}
 SUPPORTED_ELEVENLABS_SAMPLE_RATES = {16000, 22050, 24000, 44100}
-TELNYX_REQUIRED_CODEC = "L16"
-TELNYX_REQUIRED_SAMPLE_RATE = 16000
-
-
+TELNYX_WIDEBAND_CODEC = "L16"
 class TelnyxAudioConfigError(Exception):
     """Raised when Telnyx starts a stream below Donna's required audio profile."""
 
@@ -173,18 +170,13 @@ def get_audio_profile(session_state: dict) -> dict[str, int | str]:
     cfg = get_settings()
     provider = resolve_tts_provider(session_state)
     is_telnyx = session_state.get("_transport_type") == "telnyx"
-    audio_in_sample_rate = (
-        TELNYX_REQUIRED_SAMPLE_RATE
-        if is_telnyx
-        else cfg.telephony_internal_input_sample_rate
-    )
+    telnyx_profile = resolve_telnyx_audio_profile(cfg) if is_telnyx else None
+    audio_in_sample_rate = cfg.telephony_internal_input_sample_rate
+    if telnyx_profile and telnyx_profile.uses_l16_serializer:
+        audio_in_sample_rate = telnyx_profile.sample_rate
 
     if provider == "cartesia":
-        audio_out_sample_rate = (
-            TELNYX_REQUIRED_SAMPLE_RATE
-            if is_telnyx
-            else cfg.cartesia_output_sample_rate
-        )
+        audio_out_sample_rate = cfg.cartesia_output_sample_rate
         if audio_out_sample_rate not in SUPPORTED_CARTESIA_SAMPLE_RATES:
             logger.warning(
                 "Unsupported Cartesia sample rate {rate}; using 48000",
@@ -192,11 +184,7 @@ def get_audio_profile(session_state: dict) -> dict[str, int | str]:
             )
             audio_out_sample_rate = 48000
     else:
-        audio_out_sample_rate = (
-            TELNYX_REQUIRED_SAMPLE_RATE
-            if is_telnyx
-            else cfg.elevenlabs_output_sample_rate
-        )
+        audio_out_sample_rate = cfg.elevenlabs_output_sample_rate
         if audio_out_sample_rate not in SUPPORTED_ELEVENLABS_SAMPLE_RATES:
             logger.warning(
                 "Unsupported ElevenLabs sample rate {rate}; using 44100",
@@ -231,7 +219,7 @@ def create_tts_service(session_state: dict):
             model="sonic-3",
             sample_rate=output_sample_rate,
             # Keep linear PCM in-process; the telephony serializer owns the final
-            # μ-law / A-law conversion at the provider edge.
+            # L16/16 kHz conversion at the provider edge.
             encoding="pcm_s16le",
             params=CartesiaTTSService.InputParams(
                 generation_config=GenerationConfig(
@@ -262,38 +250,42 @@ def _create_telephony_serializer(
 ):
     """Create the provider serializer at the only lossy audio boundary."""
     if transport_type == "telnyx":
+        try:
+            profile = resolve_telnyx_audio_profile(cfg)
+        except TelnyxAudioProfileError as exc:
+            raise TelnyxAudioConfigError(str(exc)) from exc
+
         observed_encoding = (call_data.get("outbound_encoding") or "").upper()
-        if observed_encoding and observed_encoding != TELNYX_REQUIRED_CODEC:
+        if observed_encoding and observed_encoding != profile.codec:
             raise TelnyxAudioConfigError(
                 f"Telnyx stream started as {observed_encoding}; "
-                f"Donna Telnyx requires {TELNYX_REQUIRED_CODEC}/{TELNYX_REQUIRED_SAMPLE_RATE}Hz"
+                f"Donna Telnyx is configured for {profile.label}"
             )
 
         logger.info(
             "[{cs}] Telnyx serializer codec_in={codec_in} codec_out={codec_out} wire_rate={rate}Hz",
             cs=call_sid,
-            codec_in=TELNYX_REQUIRED_CODEC,
-            codec_out=TELNYX_REQUIRED_CODEC,
-            rate=TELNYX_REQUIRED_SAMPLE_RATE,
+            codec_in=profile.codec,
+            codec_out=profile.codec,
+            rate=profile.sample_rate,
         )
         return DonnaTelnyxFrameSerializer(
             stream_id=stream_sid,
             call_control_id=call_sid,
-            outbound_encoding=TELNYX_REQUIRED_CODEC,
-            inbound_encoding=TELNYX_REQUIRED_CODEC,
+            outbound_encoding=profile.codec,
+            inbound_encoding=profile.codec,
             api_key=cfg.telnyx_api_key,
             params=DonnaTelnyxFrameSerializer.InputParams(
-                telnyx_sample_rate=TELNYX_REQUIRED_SAMPLE_RATE,
-                outbound_encoding=TELNYX_REQUIRED_CODEC,
-                inbound_encoding=TELNYX_REQUIRED_CODEC,
+                telnyx_sample_rate=profile.sample_rate,
+                outbound_encoding=profile.codec,
+                inbound_encoding=profile.codec,
+                l16_input_byte_order=profile.l16_input_byte_order,
+                l16_output_byte_order=profile.l16_output_byte_order,
             ),
         )
 
-    return TwilioFrameSerializer(
-        stream_sid=stream_sid,
-        call_sid=call_sid,
-        account_sid=cfg.twilio_account_sid,
-        auth_token=cfg.twilio_auth_token,
+    raise TelnyxAudioConfigError(
+        f"Unsupported telephony transport {transport_type}; Donna voice is configured for Telnyx"
     )
 
 
@@ -361,7 +353,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     """Run the Donna voice pipeline for a single call.
 
     Args:
-        websocket: Starlette WebSocket from Twilio.
+        websocket: Starlette WebSocket from Telnyx.
         session_state: Pre-populated dict with call context:
             - senior_id: str
             - senior: dict (profile)
@@ -397,7 +389,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     session_state["call_sid"] = call_sid
     session_state["_transport_type"] = transport_type
 
-    # Populate session_state from call_metadata (pre-fetched by /voice/answer)
+    # Populate session_state from call_metadata seeded by the Telnyx route.
     if metadata:
         # Use `or` assignment — setdefault won't overwrite pre-initialized None values
         session_state["senior"] = session_state.get("senior") or metadata.get("senior")
@@ -508,12 +500,12 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     )
 
     # -------------------------------------------------------------------------
-    # Transport (Twilio ↔ FastAPI WebSocket)
+    # Transport (Telnyx ↔ FastAPI WebSocket)
     # -------------------------------------------------------------------------
     # Onboarding callers are adult caregivers (typical speech pace) — shorter pause.
-    # Senior Twilio calls keep longer pause tolerance for elderly speech patterns.
-    # Telnyx L16 has cleaner audio than Twilio μ-law, so use a more responsive VAD
-    # profile while we validate barge-in and turn latency on the new provider.
+    # Senior fallback telephony calls keep longer pause tolerance for elderly speech patterns.
+    # Telnyx validation uses a more responsive VAD profile while we tune
+    # barge-in and turn latency on the new provider.
     is_onboarding = session_state.get("call_type") == "onboarding"
     if transport_type == "telnyx":
         vad_stop_secs = 0.8

@@ -2,13 +2,13 @@
 
 > Investor-facing unit economics for Donna's voice workflow.
 
-*Last updated: April 14, 2026. Prices are based on published vendor pricing pages on that date. Actual invoices can differ because of negotiated discounts, taxes, carrier fees, model substitutions, failed-call partial usage, and plan minimums.*
+*Last updated: April 15, 2026. Prices in the comparison tables were prepared from published vendor pricing pages on April 14, 2026. Donna's active voice implementation has since moved from Twilio Media Streams to Telnyx Voice API; refresh the exact COGS model against account billing before using it as a current financial forecast.*
 
 ---
 
 ## Executive Summary
 
-Donna's current live-call workflow costs about **$0.70 per 10-minute call**, or **$0.07 per live call minute**, before customer support, payroll, app store fees, compliance counsel, or CAC.
+The old Twilio live-call workflow modeled here cost about **$0.70 per 10-minute call**, or **$0.07 per live call minute**, before customer support, payroll, app store fees, compliance counsel, or CAC. The active runtime now uses Telnyx for voice, so use the Telnyx rows as the starting point and refresh the final numbers from billing.
 
 For investor planning, model Donna as:
 
@@ -42,7 +42,7 @@ Modeling cases:
 
 | Case | Cost / minute | What has to be true |
 |---|---:|---|
-| Current | ~$0.070 | Twilio + ElevenLabs default, current search/SMS assumptions. |
+| Prior Twilio baseline | ~$0.070 | Twilio + ElevenLabs default, search/SMS assumptions from the April 14 model. |
 | Realistic optimized | ~$0.036 | Cheaper TTS, Telnyx or equivalent carrier path, no major quality loss. |
 | Aggressive optimized | ~$0.028 | Lower TTS characters per call, cheaper TTS, carrier savings, SMS/search tightly controlled, possible volume discounts. |
 
@@ -72,13 +72,13 @@ The active voice pipeline is in `pipecat/bot.py`:
 
 | Layer | Current runtime default | Notes |
 |---|---|---|
-| Phone carrier | Twilio Programmable Voice + Media Streams | Node initiates calls; Pipecat answers `/voice/answer` and runs `/ws`. |
+| Phone carrier | Telnyx Voice API media streaming | Node asks Pipecat `/telnyx/outbound` to place calls; Pipecat handles `/telnyx/events` and `/ws`. |
 | STT | Deepgram Nova-3 General streaming | Continuous stream for full call duration. |
 | Main voice LLM | Anthropic Claude Sonnet 4.5 | Prompt caching enabled. |
 | Director LLM | Groq `openai/gpt-oss-20b`, Gemini fallback | Runs off critical path for guidance/query extraction. |
 | Post-call analysis | Gemini 3 Flash Preview | Summaries, concerns, engagement, caregiver SMS copy. |
 | Memory extraction | OpenAI `gpt-4o-mini` + embeddings | Runs post-call; embeddings are de minimis in cost. |
-| TTS | ElevenLabs `eleven_turbo_v2_5` by default | Cartesia is behind `TTS_PROVIDER=cartesia` or GrowthBook flag. Runtime keeps TTS as high-rate PCM internally: ElevenLabs `44100`, Cartesia `pcm_s16le` at `48000`; Twilio conversion happens at the serializer edge. |
+| TTS | Environment-controlled; Cartesia and ElevenLabs supported | Runtime keeps TTS as high-rate PCM internally: ElevenLabs `44100`, Cartesia `pcm_s16le` at `48000`; Telnyx conversion happens at the serializer edge. |
 | Web/news | Tavily basic search, OpenAI web search fallback/news | Current feature remains enabled. |
 | Notifications | Twilio SMS + Resend email | Defaults allow both SMS and email if caregiver preferences permit. |
 | Hosting/data | Railway, Neon Postgres/pgvector, Redis | Mostly fixed platform cost, not the main COGS driver. |
@@ -137,9 +137,9 @@ Sensitivity:
 
 ---
 
-## Current Per-Call Cost
+## Prior Twilio Per-Call Baseline
 
-**Current default stack: Twilio + Deepgram STT + Claude Sonnet + Groq Director + Gemini post-call + ElevenLabs TTS.**
+**Prior baseline stack: Twilio + Deepgram STT + Claude Sonnet + Groq Director + Gemini post-call + ElevenLabs TTS.** The active voice runtime is Telnyx; this table is retained as the old baseline for comparison until the Telnyx cost model is refreshed from account billing.
 
 | Component | Usage | Cost / 10-min call |
 |---|---:|---:|
@@ -287,16 +287,16 @@ Recommended evaluation order:
 2. Deepgram Aura-2 if quality is good enough and vendor simplification matters.
 3. Deepgram Aura-1 if it passes senior-listening quality tests, because the COGS impact is strongest.
 
-### 3. Keep Twilio For Reliability Until Product-Market Fit, Then Revisit Carrier
+### 3. Telnyx Is Now The Active Carrier
 
-Twilio is expensive but operationally simple and already integrated. Telnyx SIP pricing starts at $0.005/min outbound and $0.0035/min inbound, which can save about $0.13 per 10-minute outbound call versus Twilio voice + Media Streams.
+Donna has moved live voice to Telnyx in code. Treat Twilio as an archived fallback for voice and keep its references here only as the old cost baseline.
 
-Carrier migration should wait until:
+Next cost-model cleanup:
 
-- call volume is high enough for savings to justify migration risk
-- we have automated call-quality monitoring
-- Twilio-specific webhook/security assumptions are abstracted
-- support burden from number migration is acceptable
+- pull actual Telnyx billed call minutes and media streaming charges after production traffic starts
+- split inbound, outbound, failed-call, and test-call costs
+- verify SMS cost remains Twilio/notification-specific unless SMS is migrated too
+- update investor-facing tables with the observed Telnyx blended per-minute rate
 
 ### 4. Tune Product Pricing Around Minutes
 
@@ -325,7 +325,7 @@ Track these daily from `call_metrics`, `conversations`, vendor dashboards, and n
 - assistant TTS character count per call
 - Claude prompt/cache/output tokens per call
 - Deepgram billed stream minutes
-- Twilio billed minutes and Media Stream minutes
+- Telnyx billed minutes and media streaming minutes
 - post-call analysis success/failure rate
 - OpenAI/Tavily search calls per senior/day
 - SMS count per completed call

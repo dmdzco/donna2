@@ -1,6 +1,5 @@
 import base64
 import json
-import struct
 
 import pytest
 
@@ -40,14 +39,58 @@ async def test_telnyx_l16_serializer_keeps_pcm_until_wire_boundary():
     serialized = await serializer.serialize(frame)
     payload = base64.b64decode(json.loads(serialized)["media"]["payload"])
 
-    assert len(payload) == 16
-    version_payload_type, payload_type, sequence, timestamp, ssrc = struct.unpack("!BBHII", payload[:12])
-    assert version_payload_type == 0x80
-    assert payload_type == 96
-    assert sequence >= 0
-    assert timestamp >= 0
-    assert ssrc > 0
-    assert payload[12:] == b"\x02\x01\x04\x03"
+    assert payload == b"\x01\x02\x03\x04"
+
+
+@pytest.mark.asyncio
+async def test_telnyx_l16_serializer_emits_20ms_payload_at_16k():
+    serializer = DonnaTelnyxFrameSerializer(
+        stream_id="stream-1",
+        call_control_id="v2:test",
+        outbound_encoding="L16",
+        inbound_encoding="L16",
+        api_key="test-key",
+        params=DonnaTelnyxFrameSerializer.InputParams(telnyx_sample_rate=16000),
+    )
+    await serializer.setup(StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000))
+
+    frame = OutputAudioRawFrame(
+        audio=b"\x01\x02" * 320,
+        sample_rate=16000,
+        num_channels=1,
+    )
+
+    serialized = await serializer.serialize(frame)
+    payload = base64.b64decode(json.loads(serialized)["media"]["payload"])
+
+    assert len(payload) == 640
+
+
+@pytest.mark.asyncio
+async def test_telnyx_l16_serializer_can_emit_little_endian_payload():
+    serializer = DonnaTelnyxFrameSerializer(
+        stream_id="stream-1",
+        call_control_id="v2:test",
+        outbound_encoding="L16",
+        inbound_encoding="L16",
+        api_key="test-key",
+        params=DonnaTelnyxFrameSerializer.InputParams(
+            telnyx_sample_rate=16000,
+            l16_output_byte_order="little",
+        ),
+    )
+    await serializer.setup(StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000))
+
+    frame = OutputAudioRawFrame(
+        audio=b"\x01\x02\x03\x04",
+        sample_rate=16000,
+        num_channels=1,
+    )
+
+    serialized = await serializer.serialize(frame)
+    payload = base64.b64decode(json.loads(serialized)["media"]["payload"])
+
+    assert payload == b"\x01\x02\x03\x04"
 
 
 @pytest.mark.asyncio
@@ -66,7 +109,35 @@ async def test_telnyx_l16_deserializer_restores_pipeline_pcm_endianness():
         json.dumps(
             {
                 "event": "media",
-                "media": {"payload": base64.b64encode(b"\x02\x01\x04\x03").decode()},
+                "media": {"payload": base64.b64encode(b"\x01\x02\x03\x04").decode()},
+            }
+        )
+    )
+
+    assert frame.audio == b"\x01\x02\x03\x04"
+    assert frame.sample_rate == 16000
+
+
+@pytest.mark.asyncio
+async def test_telnyx_l16_deserializer_can_accept_little_endian_payload():
+    serializer = DonnaTelnyxFrameSerializer(
+        stream_id="stream-1",
+        call_control_id="v2:test",
+        outbound_encoding="L16",
+        inbound_encoding="L16",
+        api_key="test-key",
+        params=DonnaTelnyxFrameSerializer.InputParams(
+            telnyx_sample_rate=16000,
+            l16_input_byte_order="little",
+        ),
+    )
+    await serializer.setup(StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000))
+
+    frame = await serializer.deserialize(
+        json.dumps(
+            {
+                "event": "media",
+                "media": {"payload": base64.b64encode(b"\x01\x02\x03\x04").decode()},
             }
         )
     )

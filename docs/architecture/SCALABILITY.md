@@ -28,30 +28,19 @@ _call_semaphore = asyncio.Semaphore(MAX_CALLS)
 ```
 
 WebSocket handler flow:
-1. Accept WebSocket connection (Twilio protocol requires accept before close)
-2. Parse the Twilio start frame and validate `call_sid` + `ws_token` before consuming active-call capacity
+1. Accept WebSocket connection from Telnyx
+2. Parse the Telnyx start frame and validate `call_control_id` + `ws_token` before consuming active-call capacity
 3. Try to acquire `_call_semaphore` immediately
 4. If at capacity: close with code 1013 (Try Again Later)
 5. After capacity is reserved, consume the single-use `ws_token`
 6. Start STT/LLM/TTS services and increment `_active_calls`
 7. On disconnect: release semaphore in `finally` block
 
-### TwiML Fallback
+### Telnyx Capacity Handling
 
-**File**: `pipecat/api/routes/voice.py`
+**File**: `pipecat/main.py`
 
-Before returning the WebSocket `<Stream>` TwiML, `/voice/answer` checks capacity:
-
-```xml
-<!-- Returned when at capacity -->
-<Response>
-    <Say voice="Polly.Joanna">
-        I'm sorry, all lines are busy right now.
-        I'll call you back in a few minutes. Goodbye!
-    </Say>
-    <Hangup/>
-</Response>
-```
+Call metadata is created by `pipecat/api/routes/telnyx.py`. The WebSocket handler validates the token before reserving active-call capacity, then closes with `1013` when the service is full.
 
 ### Monitoring
 
@@ -110,12 +99,12 @@ The HNSW vector index is the highest-impact single change: turns O(n) full-table
 
 The Node.js scheduler is authoritative for production reminder and welfare calls. Pipecat's scheduler module remains for helper parity, reminder context handoff, and explicit Python-side experiments; it must stay disabled unless the architecture changes.
 
-Node builds a unified call plan, prioritizes reminders over welfare checks, gates all calls through the senior's local calling window, retries Twilio `calls.create()`, and points webhooks at Pipecat `/voice/answer` and `/voice/status`.
+Node builds a unified call plan, prioritizes reminders over welfare checks, gates all calls through the senior's local calling window, retries service-to-service Telnyx outbound requests, and asks Pipecat `/telnyx/outbound` to create the calls.
 
 Pipecat's helper scheduler still supports parallel initiation with a limiter:
 
 ```python
-sem = asyncio.Semaphore(10)  # 10 concurrent Twilio API calls
+sem = asyncio.Semaphore(10)  # 10 concurrent Telnyx call requests
 
 async def _limited_trigger(item):
     async with sem:
@@ -130,9 +119,8 @@ results = await asyncio.gather(
 - 100 reminders × 10 parallel = ~50 seconds
 
 ### Retry with Exponential Backoff
-Twilio call initiation retries on both backends:
-- **Python** (`tenacity`): 3 attempts, 1s → 2s → 4s delays
-- **Node.js** (`retryTwilioCall()`): 3 attempts, 1s → 2s → 4s delays
+Telnyx call initiation retries on Node:
+- **Node.js** (`retryTelnyxCall()`): 3 attempts, 1s → 2s → 4s delays
 
 ### Pending Context Cleanup
 In-memory Maps (`pendingReminderCalls`, `prefetchedContextByPhone`) have automatic TTL cleanup:
@@ -193,16 +181,16 @@ Both implement the same async interface:
 - `keys(pattern)` / `cleanup()`
 
 ### What's Stored in Redis
-- `call_metadata:{call_sid}` — encrypted call context for WebSocket handler (TTL: 30 min)
-- `reminder_ctx:{call_sid}` — encrypted Pipecat-scheduler reminder context for outbound reminder calls (TTL: 30 min)
+- `call_metadata:{call_control_id}` — encrypted call context for WebSocket handler (TTL: 30 min)
+- `reminder_ctx:{call_control_id}` — encrypted Pipecat-scheduler reminder context for outbound reminder calls (TTL: 30 min)
 
 These payloads can contain PHI-bearing memory context, reminders, transcript fragments, senior profile fields, and caregiver note content. Shared-state writes use `pipecat/lib/shared_state_phi.py`, which encrypts the dict before it enters Redis and still accepts legacy raw dict payloads during rollout.
 
 ### Cross-Instance Flow
-1. `/voice/answer` stores call metadata in local dict + Redis
+1. `/telnyx/events` and `/telnyx/outbound` store call metadata in local dict + Redis
 2. `/ws` reads metadata from local dict first, falls back to Redis
 3. Pipecat-side reminder initiation stores reminder context in local dict + Redis
-4. `/voice/answer` reads reminder context from local dict first, falls back to Redis, then falls back to the database delivery row for Node-scheduled reminders
+4. Telnyx call setup reads reminder context from local dict first, falls back to Redis, then falls back to the database delivery row for Node-scheduled reminders
 5. On call completion, metadata and reminder context are cleaned from both local dict and Redis
 
 ---
@@ -212,11 +200,11 @@ These payloads can contain PHI-bearing memory context, reminders, transcript fra
 | Requirement | Status | How |
 |-------------|--------|-----|
 | Shared call metadata | Ready | Redis client module |
-| Shared reminder context | Ready | Pipecat scheduler writes `reminder_ctx:{call_sid}` with TTL; `/voice/answer` loads local-first, Redis-second |
+| Shared reminder context | Ready | Pipecat scheduler writes `reminder_ctx:{call_control_id}` with TTL; Telnyx setup loads local-first, Redis-second |
 | Scheduler deduplication | Ready | PostgreSQL advisory locks |
 | Connection pool per instance | Ready | Each instance creates own pool |
 | Health monitoring | Ready | Per-instance `/health` endpoint |
-| WebSocket affinity | Needed | Twilio routes by call_sid (TBD) |
+| WebSocket affinity | Needed | Telnyx routes by call control ID (TBD) |
 | Rate limiting | Needed | Redis-backed slowapi (currently in-memory) |
 | Context cache sharing | Needed | Redis-backed cache (currently in-memory) |
 
@@ -320,7 +308,7 @@ The ~700ms at 500 users includes network round-trip from macOS to us-east-1 Neon
 | **Anthropic** | Claude Sonnet 4.5 | 1,000 RPM / 450K input TPM | ~1,000 RPM / ~5M input TPM | **BLOCKER** — input tokens 11x over limit |
 | **ElevenLabs** | TTS Streaming | ~5 concurrent (Creator tier) | 500 concurrent | **BLOCKER** — 100x under capacity |
 | **Deepgram** | STT Streaming (Nova 3) | Unknown (pay-as-you-go) | 500 concurrent streams | **VERIFY** — contact Deepgram |
-| **Twilio** | Voice Calls | Full account, active | 500 concurrent | **LIKELY OK** — verify account capacity |
+| **Telnyx** | Voice Calls | Active Voice API application | 500 concurrent | **VERIFY** — confirm account capacity and WebSocket media limits |
 | **OpenAI** | Embeddings | 3,000 RPM / 1M TPM | ~2,000-4,000 RPM | **AT RISK** — prefetch cache mitigates |
 | **Groq** | Director primary | Verify account limits | 500 concurrent Director calls | **VERIFY** — current primary Director provider |
 | **Gemini** | Director fallback + Analysis | 1,500 RPM (free tier) | Fallback Director + ~500 post-call burst | **AT RISK** — post-call bursts can contend with fallback Director |
@@ -378,7 +366,7 @@ Mitigated by predictive prefetch cache (most `search_memories` calls hit cache a
 | Upgrade ElevenLabs to Enterprise | **P0** | Account admin | Custom pricing |
 | Verify Groq Director limits and Gemini fallback/post-call headroom | **P0** | DevOps | Depends on plan |
 | Verify Deepgram concurrent stream limit | **P1** | Account admin | Contact sales |
-| Verify Twilio concurrent call capacity | **P1** | Account admin | Check dashboard |
+| Verify Telnyx concurrent call capacity | **P1** | Account admin | Check dashboard/support limits |
 | Set Railway instance to 8GB+ RAM | **P1** | DevOps | ~$20-40/mo |
 | Consider multi-instance (2-3 replicas) | **P2** | Engineering | Architecture work |
 

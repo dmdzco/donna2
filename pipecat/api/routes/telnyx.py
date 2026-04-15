@@ -12,6 +12,7 @@ import json
 import os
 import secrets
 import time
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
@@ -23,7 +24,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.middleware.auth import require_service_api_key
-from api.routes.voice import (
+from api.routes.call_context import (
     _cleanup_metadata,
     _hydrate_senior_call_context,
     _metadata_lock,
@@ -33,11 +34,12 @@ from api.routes.voice import (
 )
 from config import get_pipecat_public_url, get_settings, is_production_environment
 from lib.sanitize import mask_phone
+from lib.telnyx_audio import DEFAULT_TELNYX_AUDIO_PROFILE, resolve_telnyx_audio_profile
 
 router = APIRouter()
 
-TELNYX_STREAM_CODEC = "L16"
-TELNYX_STREAM_SAMPLE_RATE = 16000
+TELNYX_DEFAULT_STREAM_CODEC = DEFAULT_TELNYX_AUDIO_PROFILE.codec
+TELNYX_DEFAULT_STREAM_SAMPLE_RATE = DEFAULT_TELNYX_AUDIO_PROFILE.sample_rate
 
 _TERMINAL_EVENTS = {
     "call.hangup",
@@ -53,6 +55,9 @@ class TelnyxOutboundCallRequest(BaseModel):
 
     senior_id: str = Field(alias="seniorId")
     call_type: str = Field(default="check-in", alias="callType")
+    reminder_id: str | None = Field(default=None, alias="reminderId")
+    scheduled_for: datetime | None = Field(default=None, alias="scheduledFor")
+    existing_delivery_id: str | None = Field(default=None, alias="existingDeliveryId")
 
 
 def _format_phone_for_call(phone: str) -> str:
@@ -96,13 +101,15 @@ def _telnyx_stream_url(ws_token: str) -> str:
 
 
 def _telnyx_stream_options(ws_token: str) -> dict[str, Any]:
+    profile = resolve_telnyx_audio_profile(get_settings())
     return {
         "stream_url": _telnyx_stream_url(ws_token),
-        "stream_track": "both_tracks",
-        "stream_codec": TELNYX_STREAM_CODEC,
-        "stream_bidirectional_mode": "rtp",
-        "stream_bidirectional_codec": TELNYX_STREAM_CODEC,
-        "stream_bidirectional_sampling_rate": TELNYX_STREAM_SAMPLE_RATE,
+        "stream_track": profile.stream_track,
+        "stream_codec": profile.codec,
+        "stream_bidirectional_mode": profile.bidirectional_mode,
+        "stream_bidirectional_codec": profile.codec,
+        "stream_bidirectional_sampling_rate": profile.sample_rate,
+        "stream_bidirectional_target_legs": profile.bidirectional_target_legs,
     }
 
 
@@ -162,7 +169,10 @@ async def _store_senior_metadata(
     target_phone: str,
     ws_token: str,
     start_stream_after_answer: bool,
+    reminder_prompt: str | None = None,
+    reminder_context: dict | None = None,
 ) -> dict:
+    profile = resolve_telnyx_audio_profile(get_settings())
     hydrated = await _hydrate_senior_call_context(
         senior=senior,
         call_sid=call_control_id,
@@ -184,8 +194,8 @@ async def _store_senior_metadata(
         "prospect_id": None,
         "memory_context": hydrated["memory_context"],
         "conversation_id": conversation_id,
-        "reminder_prompt": None,
-        "reminder_context": None,
+        "reminder_prompt": reminder_prompt,
+        "reminder_context": reminder_context,
         "pre_generated_greeting": hydrated["pre_generated_greeting"],
         "previous_calls_summary": hydrated["previous_calls_summary"],
         "recent_turns": hydrated["recent_turns"],
@@ -203,8 +213,8 @@ async def _store_senior_metadata(
         "ws_token_consumed": False,
         "telephony_provider": "telnyx",
         "telnyx_start_stream_after_answer": start_stream_after_answer,
-        "telnyx_stream_codec": TELNYX_STREAM_CODEC,
-        "telnyx_stream_sample_rate": TELNYX_STREAM_SAMPLE_RATE,
+        "telnyx_stream_codec": profile.codec,
+        "telnyx_stream_sample_rate": profile.sample_rate,
     }
 
     async with _metadata_lock:
@@ -239,6 +249,7 @@ async def _store_prospect_metadata(
     ws_token: str,
     start_stream_after_answer: bool,
 ) -> None:
+    profile = resolve_telnyx_audio_profile(get_settings())
     prospect = None
     prospect_id = None
     memory_context = None
@@ -274,8 +285,8 @@ async def _store_prospect_metadata(
         "ws_token_consumed": False,
         "telephony_provider": "telnyx",
         "telnyx_start_stream_after_answer": start_stream_after_answer,
-        "telnyx_stream_codec": TELNYX_STREAM_CODEC,
-        "telnyx_stream_sample_rate": TELNYX_STREAM_SAMPLE_RATE,
+        "telnyx_stream_codec": profile.codec,
+        "telnyx_stream_sample_rate": profile.sample_rate,
     }
     async with _metadata_lock:
         call_metadata[call_control_id] = metadata
@@ -289,13 +300,16 @@ async def _answer_telnyx_call(call_control_id: str) -> None:
 
 
 async def _start_telnyx_stream(call_control_id: str, ws_token: str) -> None:
+    profile = resolve_telnyx_audio_profile(get_settings())
     endpoint = f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/streaming_start"
     await _telnyx_post(endpoint, _telnyx_stream_options(ws_token))
     logger.info(
-        "[{cid}] Telnyx media stream started codec={codec} sample_rate={rate}Hz",
+        "[{cid}] Telnyx media stream started codec={codec} sample_rate={rate}Hz track={track} target={target}",
         cid=call_control_id,
-        codec=TELNYX_STREAM_CODEC,
-        rate=TELNYX_STREAM_SAMPLE_RATE,
+        codec=profile.codec,
+        rate=profile.sample_rate,
+        track=profile.stream_track,
+        target=profile.bidirectional_target_legs,
     )
 
 
@@ -422,11 +436,50 @@ async def telnyx_events(request: Request, background_tasks: BackgroundTasks):
     return {"received": True}
 
 
-@router.post("/telnyx/outbound")
-async def telnyx_outbound_call(
+async def _prepare_reminder_context(
     body: TelnyxOutboundCallRequest,
-    _service_label: str = Depends(require_service_api_key),
-):
+    call_control_id: str,
+) -> tuple[str | None, dict | None]:
+    if body.call_type != "reminder" or not body.reminder_id:
+        return None, None
+
+    from services.reminder_delivery import (
+        create_or_update_delivery_for_call,
+        format_reminder_prompt,
+        get_reminder_by_id,
+    )
+
+    reminder = await get_reminder_by_id(body.reminder_id)
+    if not reminder:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+
+    scheduled_for = body.scheduled_for or datetime.now(timezone.utc)
+    delivery = await create_or_update_delivery_for_call(
+        reminder_id=body.reminder_id,
+        scheduled_for=scheduled_for,
+        call_sid=call_control_id,
+        existing_delivery_id=body.existing_delivery_id,
+    )
+    normalized_reminder = {
+        "title": reminder.get("title"),
+        "description": reminder.get("description"),
+        "type": reminder.get("reminder_type") or reminder.get("type"),
+    }
+    reminder_context = {
+        "reminder": normalized_reminder,
+        "delivery": {
+            "id": delivery.get("id"),
+            "reminder_id": delivery.get("reminder_id"),
+            "status": delivery.get("status"),
+            "attempt_count": delivery.get("attempt_count"),
+        },
+        "scheduled_for": scheduled_for,
+    }
+    return format_reminder_prompt(normalized_reminder), reminder_context
+
+
+async def create_telnyx_outbound_call(body: TelnyxOutboundCallRequest) -> dict:
+    """Create an outbound Telnyx call and seed Pipecat call metadata."""
     cfg = get_settings()
     if not cfg.telnyx_connection_id or not cfg.telnyx_phone_number:
         raise HTTPException(status_code=500, detail="Telnyx connection is not configured")
@@ -459,6 +512,7 @@ async def telnyx_outbound_call(
     if not call_control_id:
         raise HTTPException(status_code=502, detail="Telnyx did not return a call_control_id")
 
+    reminder_prompt, reminder_context = await _prepare_reminder_context(body, call_control_id)
     await _store_senior_metadata(
         call_control_id=call_control_id,
         senior=senior,
@@ -467,9 +521,16 @@ async def telnyx_outbound_call(
         target_phone=target_phone,
         ws_token=ws_token,
         start_stream_after_answer=False,
+        reminder_prompt=reminder_prompt,
+        reminder_context=reminder_context,
     )
 
-    logger.info("[{cid}] Initiated Telnyx outbound call for senior {sid}", cid=call_control_id, sid=str(senior["id"])[:8])
+    logger.info(
+        "[{cid}] Initiated Telnyx outbound call for senior {sid} type={call_type}",
+        cid=call_control_id,
+        sid=str(senior["id"])[:8],
+        call_type=body.call_type,
+    )
     return {
         "success": True,
         "provider": "telnyx",
@@ -479,11 +540,23 @@ async def telnyx_outbound_call(
     }
 
 
+async def end_telnyx_call(call_control_id: str) -> dict:
+    await _hangup_telnyx_call(call_control_id)
+    await _cleanup_metadata(call_control_id)
+    return {"success": True, "provider": "telnyx", "callSid": call_control_id}
+
+
+@router.post("/telnyx/outbound")
+async def telnyx_outbound_call(
+    body: TelnyxOutboundCallRequest,
+    _service_label: str = Depends(require_service_api_key),
+):
+    return await create_telnyx_outbound_call(body)
+
+
 @router.post("/telnyx/calls/{call_control_id}/end")
 async def telnyx_end_call(
     call_control_id: str,
     _service_label: str = Depends(require_service_api_key),
 ):
-    await _hangup_telnyx_call(call_control_id)
-    await _cleanup_metadata(call_control_id)
-    return {"success": True, "provider": "telnyx", "callSid": call_control_id}
+    return await end_telnyx_call(call_control_id)

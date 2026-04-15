@@ -57,22 +57,22 @@ async def list_seniors(auth: AuthContext = Depends(require_auth)):
 
 ---
 
-## Twilio Webhook Validation
+## Telnyx Webhook Validation
 
-**File**: `pipecat/api/middleware/twilio.py`
+**File**: `pipecat/api/routes/telnyx.py`
 
-All `/voice/*` endpoints verify Twilio's `X-Twilio-Signature` header:
+`/telnyx/events` verifies Telnyx Ed25519 webhook signatures:
 
-- Uses `twilio.request_validator.RequestValidator` with `TWILIO_AUTH_TOKEN`
-- Uses `PIPECAT_PUBLIC_URL` for stable production URL reconstruction
+- Uses `TELNYX_PUBLIC_KEY`, `telnyx-signature-ed25519`, and `telnyx-timestamp`
+- Enforces the configured timestamp tolerance (`TELNYX_WEBHOOK_TOLERANCE_SECONDS`)
 - **Production**: Rejects unsigned or invalid requests with 403
-- **Development/test**: Allows unsigned webhooks only when `ALLOW_UNSIGNED_TWILIO_WEBHOOKS=true`
-- Required env var: `TWILIO_AUTH_TOKEN` (500 error if missing)
+- **Development/test**: Allows unsigned webhooks only when `ALLOW_UNSIGNED_TELNYX_WEBHOOKS=true`
+- Required env vars: `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_PHONE_NUMBER`
 
-Twilio Media Stream WebSockets are gated separately:
+Telnyx media stream WebSockets are gated separately:
 
-- `/voice/answer` generates a random single-use `ws_token` and includes it in TwiML `<Stream>` parameters
-- `/ws` parses the Twilio start frame with a short timeout and validates `call_sid` + `ws_token` before consuming active-call capacity
+- `/telnyx/events` or `/telnyx/outbound` generates a random single-use `ws_token` and includes it in the Telnyx stream URL
+- `/ws` parses the Telnyx start frame with a short timeout and validates `call_control_id` + `ws_token` before consuming active-call capacity
 - After capacity is reserved, `/ws` consumes the single-use token before constructing STT/LLM/TTS services
 - Tokens expire after five minutes only if unused; active calls are not disconnected by token expiry
 - Redis-backed metadata is used when configured so multi-instance Pipecat can validate call state
@@ -91,7 +91,7 @@ Five rate limit tiers using `slowapi` (backed by in-memory storage, keyed by rem
 | Call Initiation | 5/minute | `POST /api/call` |
 | Write Operations | 30/minute | POST/PUT/DELETE |
 | Auth Endpoints | 10/minute | Login/token endpoints |
-| Webhooks | 500/minute | Twilio callbacks |
+| Webhooks | 500/minute | Telnyx callbacks |
 
 ---
 
@@ -208,7 +208,7 @@ Global exception handlers prevent internal details from leaking:
 - All env vars centralized in a `frozen=True` dataclass (immutable after load)
 - `lru_cache(maxsize=1)` ensures single-load behavior
 - `ENVIRONMENT=production` or `RAILWAY_PUBLIC_DOMAIN` enables production fail-closed behavior. This applies to Railway staging too, because staging has a public Railway domain.
-- `JWT_SECRET`, `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `TWILIO_AUTH_TOKEN`, and `PIPECAT_PUBLIC_URL` are required in production
+- `JWT_SECRET`, `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `PIPECAT_PUBLIC_URL`, `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_PHONE_NUMBER`, and `TELNYX_CONNECTION_ID` are required in production
 - Node also requires `CLERK_SECRET_KEY` for Clerk-authenticated routes in production
 - `PIPECAT_REQUIRE_REDIS=true` requires `REDIS_URL` before horizontal scaling
 - API keys stored as env vars, never committed to code
@@ -222,12 +222,12 @@ Before deploying any public Railway environment, including staging and productio
 - Set `PIPECAT_PUBLIC_URL=https://...` to the public Pipecat service URL.
 - Set labeled `DONNA_API_KEYS`; do not rely on legacy `DONNA_API_KEY` in production.
 - Verify `FIELD_ENCRYPTION_KEY` decodes to 32 bytes.
-- Verify `TWILIO_AUTH_TOKEN` exists on both Pipecat and Node services.
+- Verify Telnyx credentials exist on Pipecat and the Node service can reach Pipecat's `/telnyx/outbound` route.
 - Verify `CLERK_SECRET_KEY` exists on Node.
 - Set `REDIS_URL` before running more than one Pipecat instance.
 - Set Pipecat `LOG_LEVEL=INFO` for Railway dev/staging/prod before smoke testing or promotion.
 - Verify Railway logs do not contain prompt context, transcripts, medical notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
-- Smoke test real Twilio signatures, signed TwiML with `ws_token`, `/ws` token rejection/reuse, and a call longer than five minutes.
+- Smoke test real Telnyx webhook signatures, `/ws` token rejection/reuse, inbound audio, outbound audio, and a call longer than five minutes.
 
 ### PHI Encryption Migration Runbook
 
@@ -251,7 +251,7 @@ Operational lookup/display fields such as senior name, phone, timezone, city/sta
 | # | Finding | Severity | Resolution |
 |---|---------|----------|------------|
 | 1 | No authentication on API routes | CRITICAL | 3-tier auth middleware |
-| 2 | No Twilio webhook validation | HIGH | X-Twilio-Signature verification |
+| 2 | No voice webhook validation | HIGH | Telnyx Ed25519 webhook verification |
 | 3 | No input validation | HIGH | Pydantic schemas on all endpoints |
 | 4 | No rate limiting | HIGH | 5-tier slowapi rate limiting |
 | 5 | No security headers | MEDIUM | SecurityHeadersMiddleware |
@@ -268,7 +268,7 @@ Operational lookup/display fields such as senior name, phone, timezone, city/sta
 |------|---------|
 | `pipecat/api/middleware/auth.py` | 3-tier authentication (238 LOC) |
 | `middleware/api-auth.js` | Node service API key auth with constant-time comparison |
-| `pipecat/api/middleware/twilio.py` | Twilio webhook signature validation (113 LOC) |
+| `pipecat/api/routes/telnyx.py` | Telnyx webhook signature validation and outbound call setup |
 | `pipecat/api/middleware/rate_limit.py` | 5-tier rate limiting config (16 LOC) |
 | `pipecat/api/middleware/security.py` | Security headers (30 LOC) |
 | `pipecat/api/middleware/error_handler.py` | Safe error responses (33 LOC) |

@@ -1,17 +1,37 @@
-"""Call management API routes for the Telnyx voice path."""
+"""Call management API routes.
+
+Port of routes/calls.js — initiate outbound calls, list active, end calls.
+"""
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
+from twilio.rest import Client as TwilioClient
 
 from api.middleware.auth import require_auth, require_admin, AuthContext
-from api.routes.call_context import call_metadata
-from api.routes.telnyx import TelnyxOutboundCallRequest, create_telnyx_outbound_call, end_telnyx_call
+from api.routes.voice import call_metadata
 from api.validators.schemas import InitiateCallRequest
 from services.audit import fire_and_forget_audit, auth_to_role
+from config import get_pipecat_public_url
 
 router = APIRouter()
+
+# Lazy Twilio client
+_twilio_client: TwilioClient | None = None
+
+
+def _get_twilio() -> TwilioClient:
+    global _twilio_client
+    if _twilio_client is None:
+        sid = os.getenv("TWILIO_ACCOUNT_SID")
+        token = os.getenv("TWILIO_AUTH_TOKEN")
+        if not sid or not token:
+            raise HTTPException(status_code=500, detail="Twilio not configured")
+        _twilio_client = TwilioClient(sid, token)
+    return _twilio_client
 
 
 def _format_phone_for_call(phone: str) -> str:
@@ -35,7 +55,7 @@ async def initiate_call(
 ):
     """Initiate an outbound call for an authorized senior.
 
-    Pipecat creates the Telnyx call and hydrates context on the voice service.
+    Pre-fetches senior context before triggering the Twilio call.
     """
     senior_id = body.senior_id
 
@@ -48,8 +68,12 @@ async def initiate_call(
         user_agent=request.headers.get("user-agent"),
         metadata={"senior_id": senior_id},
     )
+    base_url = get_pipecat_public_url()
+
     try:
+        # Pre-fetch: look up senior and build context
         from services.seniors import get_by_id
+        from services.scheduler import prefetch_for_phone
 
         senior = await get_by_id(senior_id)
         if not senior:
@@ -69,19 +93,19 @@ async def initiate_call(
         phone = _format_phone_for_call(senior["phone"])
         if not phone:
             raise HTTPException(status_code=400, detail="Senior phone is not callable")
+        await prefetch_for_phone(phone, senior)
 
-        call = await create_telnyx_outbound_call(
-            TelnyxOutboundCallRequest(seniorId=senior_id, callType="check-in")
+        client = _get_twilio()
+        call = client.calls.create(
+            to=phone,
+            from_=os.getenv("TWILIO_PHONE_NUMBER"),
+            url=f"{base_url}/voice/answer",
+            status_callback=f"{base_url}/voice/status",
+            status_callback_event=["initiated", "ringing", "answered", "completed"],
         )
 
-        logger.info("Initiated Telnyx call {sid} for senior {senior_id}", sid=call["callSid"], senior_id=senior["id"])
-        return {
-            "success": True,
-            "provider": "telnyx",
-            "call_sid": call["callSid"],
-            "call_control_id": call["callControlId"],
-            "senior_id": senior["id"],
-        }
+        logger.info("Initiated call {sid} for senior {senior_id}", sid=call.sid, senior_id=senior["id"])
+        return {"success": True, "call_sid": call.sid, "senior_id": senior["id"]}
 
     except HTTPException:
         raise
@@ -111,7 +135,9 @@ async def list_active_calls(request: Request, auth: AuthContext = Depends(requir
 async def end_call(call_sid: str, auth: AuthContext = Depends(require_admin)):
     """End an active call (admin only)."""
     try:
-        return await end_telnyx_call(call_sid)
+        client = _get_twilio()
+        client.calls(call_sid).update(status="completed")
+        return {"success": True}
     except Exception as e:
         logger.error("Failed to end call {sid}: {err}", sid=call_sid, err=str(e))
         raise HTTPException(status_code=500, detail="Failed to end call")

@@ -69,13 +69,13 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Scheduled Reminder Calls** - Polling scheduler with prefetch + delivery tracking
 - **Call Context Snapshot** - Pre-computed JSONB snapshot (analysis, summaries, turns, daily context) rebuilt after each call, eliminates 6 DB queries at call time
 - **Context Pre-caching** - Senior context + news cached at 5 AM local time, news persisted to `seniors.cached_news`
-- Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
+- Real-time voice calls (Telnyx Voice API → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3 via Pipecat)
 - LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - TTS (ElevenLabs via Pipecat)
 - VAD (Silero — confidence=0.6, min_volume=0.5; stop_secs=1.2 for senior calls, 0.8 for onboarding calls)
 - News via OpenAI web search (1hr cache), in-call web search via Tavily (raw results, no LLM answer)
-- Security: JWT admin auth, API key auth, Twilio webhook validation, rate limiting, security headers
+- Security: JWT admin auth, API key auth, Telnyx webhook validation, rate limiting, security headers
 
 ### Infrastructure & Reliability
 - **Circuit Breakers** - Gemini (5s), OpenAI embedding (10s), news (10s) — `lib/circuit_breaker.py`
@@ -115,9 +115,9 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 Linear pipeline of `FrameProcessor`s. Frames flow top to bottom. The Conversation Director is in the pipeline but **non-blocking** — it passes frames through instantly while running Gemini analysis in the background.
 
 ```
-Twilio Audio ──► FastAPIWebsocketTransport
+Telnyx Audio ──► FastAPIWebsocketTransport
                         │
-                   Deepgram STT (Nova 3, 8kHz)
+                   Deepgram STT (Nova 3, 16kHz)
                         │ TranscriptionFrame
                         ▼
               ┌─────────────────────┐
@@ -158,7 +158,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               ElevenLabs TTS (eleven_turbo_v2_5)
                         ▼
-              FastAPIWebsocketTransport ──► Twilio Audio (mulaw 8kHz)
+              FastAPIWebsocketTransport ──► Telnyx Audio (L16 16kHz)
                         ▼
               Context Aggregator (assistant) ← tracks assistant responses
 ```
@@ -234,7 +234,8 @@ pipecat/
 │
 ├── api/
 │   ├── routes/
-│   │   ├── voice.py                 ← /voice/answer (TwiML + parallel fetch + snapshot), /voice/status (330 LOC)
+│   │   ├── telnyx.py                ← /telnyx/events, /telnyx/outbound, Telnyx signature validation
+│   │   ├── call_context.py          ← Shared encrypted call metadata + senior context hydration
 │   │   ├── calls.py                 ← /api/call, /api/calls
 │   │   ├── auth.py                  ← Token revocation: revoke-token, revoke-all, logout
 │   │   └── export.py                ← HIPAA right-to-access: /api/seniors/{id}/export
@@ -272,9 +273,9 @@ pipecat/
 
 ### Three Environments
 
-Donna runs three fully isolated environments. Each has its own Railway services, Neon database branch, and Twilio phone number.
+Donna runs fully isolated environments. Each has its own Railway services, Neon database branch, and Telnyx voice number.
 
-| Environment | Purpose | Database | Twilio # | Pipecat URL | API URL |
+| Environment | Purpose | Database | Voice # | Pipecat URL | API URL |
 |---|---|---|---|---|---|
 | **production** | Live customers | Neon `main` branch | +18064508649 | donna-pipecat-production.up.railway.app | donna-api-production-2450.up.railway.app |
 | **staging** | Pre-merge CI validation | Neon `staging` branch | +19789235477 | (created on deploy) | (created on deploy) |
@@ -282,7 +283,7 @@ Donna runs three fully isolated environments. Each has its own Railway services,
 
 **Isolation guarantees:**
 - Each environment has its own database (Neon copy-on-write branches) — bad writes in dev never touch production data
-- Each environment uses its own Twilio phone number — dev calls never reach real seniors
+- Each environment uses its own Telnyx voice number — dev calls never reach real seniors
 - API keys (Anthropic, Deepgram, ElevenLabs, etc.) are shared across environments (safe — they're stateless services)
 
 ### Daily Development Workflow
@@ -555,12 +556,13 @@ Live: https://admin-v2-liart.vercel.app
 # Server
 PORT=7860
 ENVIRONMENT=production                  # Enables production fail-closed security checks
-PIPECAT_PUBLIC_URL=https://...          # Public Pipecat URL; used for Twilio signatures + wss:// streams
+PIPECAT_PUBLIC_URL=https://...          # Public Pipecat URL; used for Telnyx signatures + wss:// streams
 
-# Twilio
-TWILIO_ACCOUNT_SID=...
-TWILIO_AUTH_TOKEN=...
-TWILIO_PHONE_NUMBER=+1...
+# Telnyx
+TELNYX_API_KEY=...
+TELNYX_PUBLIC_KEY=...
+TELNYX_PHONE_NUMBER=+1...
+TELNYX_CONNECTION_ID=...
 
 # Database
 DATABASE_URL=...                 # Neon PostgreSQL
@@ -611,8 +613,8 @@ PIPECAT_REQUIRE_REDIS=true                   # Enforce Redis when horizontally s
 Production boot intentionally fails closed if required security env vars are missing or unsafe. `DONNA_API_KEY` is only a local/test compatibility fallback; production must use labeled `DONNA_API_KEYS`.
 
 Security deploy smoke tests before promotion:
-- unsigned `/voice/answer` and `/voice/status` reject;
-- valid Twilio-signed `/voice/answer` returns TwiML with `ws_token`;
+- unsigned `/telnyx/events` rejects in production;
+- valid Telnyx-signed `/telnyx/events` creates call metadata with `ws_token`;
 - `/ws` rejects missing/invalid/expired/reused tokens;
 - calls longer than five minutes continue normally after connection;
 - manual call initiation uses `seniorId` and resolves the phone server-side after authZ.

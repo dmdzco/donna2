@@ -1,9 +1,7 @@
 """Reminder scheduler service.
 
-Port of services/scheduler.js — finds due reminders, triggers outbound calls,
-and runs the polling loop. Uses asyncio for polling instead of setInterval.
-
-Delivery record CRUD lives in services/reminder_delivery.py.
+Node is the authoritative scheduler. This opt-in Pipecat scheduler uses the
+same Telnyx outbound path if explicitly enabled.
 """
 
 from __future__ import annotations
@@ -13,30 +11,15 @@ import os
 import re
 from datetime import datetime, timezone, timedelta
 from loguru import logger
-from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from db import query_one, query_many, execute
 from lib.sanitize import mask_phone
 from lib.phi import decrypt_reminder_phi, decrypt_senior_phi
-from services.reminder_delivery import mark_delivered, format_reminder_prompt
-
-# Lazy-loaded Twilio client
-_twilio_client = None
+from services.reminder_delivery import mark_delivered
 
 # Pre-fetched context maps (shared state — same semantics as Node.js Maps)
 pending_reminder_calls: dict[str, dict] = {}
 prefetched_context_by_phone: dict[str, dict] = {}
 REMINDER_CONTEXT_TTL_SECONDS = 30 * 60
-
-
-def _get_twilio_client():
-    global _twilio_client
-    if _twilio_client is None:
-        sid = os.environ.get("TWILIO_ACCOUNT_SID")
-        token = os.environ.get("TWILIO_AUTH_TOKEN")
-        if sid and token:
-            from twilio.rest import Client
-            _twilio_client = Client(sid, token)
-    return _twilio_client
 
 
 def _normalize_phone(phone: str) -> str:
@@ -277,77 +260,25 @@ async def trigger_reminder_call(
     scheduled_for: datetime | None = None,
     existing_delivery: dict | None = None,
 ) -> dict | None:
-    """Trigger an outbound call for a reminder. Pre-fetches context first."""
-    client = _get_twilio_client()
-    if not client:
-        logger.error("Twilio not configured")
-        return None
+    """Trigger an outbound Telnyx call for a reminder."""
 
     try:
-        logger.info("Pre-fetching context for senior_id={sid}", sid=str(senior.get("id", ""))[:8])
-
-        from services.memory import build_context
-        memory_context = await build_context(senior["id"], None, senior)
-        reminder_prompt = format_reminder_prompt(reminder)
-
-        logger.info("Context ready, triggering call (ctx_len={n})", n=len(memory_context or ""))
-
-        @retry(
-            stop=stop_after_attempt(3),
-            wait=wait_exponential(multiplier=1, min=1, max=4),
-            before_sleep=before_sleep_log(logger, "WARNING"),
-            reraise=True,
-        )
-        def _create_call():
-            return client.calls.create(
-                to=senior["phone"],
-                from_=os.environ["TWILIO_PHONE_NUMBER"],
-                url=f"{base_url}/voice/answer?call_type=reminder",
-                status_callback=f"{base_url}/voice/status",
-                status_callback_event=["initiated", "ringing", "answered", "completed"],
-            )
-
-        call = await asyncio.get_event_loop().run_in_executor(None, _create_call)
-
         target_scheduled_for = scheduled_for or get_scheduled_for_time(reminder) or datetime.now(timezone.utc)
 
-        # Create or update delivery record
-        if existing_delivery:
-            delivery = await query_one(
-                """UPDATE reminder_deliveries SET
-                     delivered_at = NOW(), call_sid = $1,
-                     attempt_count = $2, status = 'delivered'
-                   WHERE id = $3 RETURNING *""",
-                call.sid,
-                existing_delivery.get("attempt_count", 0) + 1,
-                existing_delivery["id"],
-            )
-            logger.info("Updated delivery {did} attempt={a}", did=delivery["id"], a=delivery["attempt_count"])
-        else:
-            delivery = await query_one(
-                """INSERT INTO reminder_deliveries
-                   (reminder_id, scheduled_for, delivered_at, call_sid, status, attempt_count)
-                   VALUES ($1, $2, NOW(), $3, 'delivered', 1)
-                   RETURNING *""",
-                reminder["id"],
-                target_scheduled_for,
-                call.sid,
-            )
-            logger.info("Created delivery {did}", did=delivery["id"])
+        from api.routes.telnyx import TelnyxOutboundCallRequest, create_telnyx_outbound_call
 
-        reminder_context = {
-            "reminder": reminder,
-            "senior": senior,
-            "memory_context": memory_context,
-            "reminder_prompt": reminder_prompt,
-            "triggered_at": datetime.now(timezone.utc),
-            "delivery": delivery,
-            "scheduled_for": target_scheduled_for,
-        }
-        await store_reminder_context(call.sid, reminder_context)
+        call = await create_telnyx_outbound_call(
+            TelnyxOutboundCallRequest(
+                seniorId=str(senior["id"]),
+                callType="reminder",
+                reminderId=str(reminder["id"]),
+                scheduledFor=target_scheduled_for,
+                existingDeliveryId=str(existing_delivery["id"]) if existing_delivery else None,
+            )
+        )
 
-        logger.info("Call initiated callSid={cs}", cs=call.sid)
-        return {"sid": call.sid, "delivery": delivery}
+        logger.info("Telnyx call initiated callSid={cs}", cs=call["callSid"])
+        return {"sid": call["callSid"]}
 
     except Exception as e:
         logger.error("Failed to initiate call: {err}", err=str(e))
@@ -570,7 +501,7 @@ async def start_scheduler(base_url: str, interval_seconds: int = 60) -> None:
 
     logger.info("Starting scheduler (interval={i}s)", i=interval_seconds)
 
-    _trigger_sem = asyncio.Semaphore(10)  # Limit concurrent Twilio API calls
+    _trigger_sem = asyncio.Semaphore(10)  # Limit concurrent Telnyx call requests
 
     async def check_reminders():
         try:

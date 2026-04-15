@@ -88,7 +88,7 @@ Full call lifecycle from WebSocket connect to post-call processing:
 | `MockSTTProcessor` | `mocks/mock_stt.py` | Emits TranscriptionFrames from scripted text |
 | `MockLLMProcessor` | `mocks/mock_llm.py` | Returns configurable responses, tracks tool calls |
 | `MockTTSProcessor` | `mocks/mock_tts.py` | Passes through text as audio frames |
-| `TestTransport` | `mocks/test_transport.py` | Simulates Twilio WebSocket transport |
+| `TestTransport` | `mocks/test_transport.py` | Simulates telephony WebSocket transport |
 | `FakeDBPool` | `conftest.py` | In-memory database mock |
 
 ### LOAD_TEST_MODE
@@ -132,9 +132,9 @@ Built on Locust (Python-native, supports WebSocket via custom client):
 | File | Tests | Duration |
 |------|-------|----------|
 | `locustfile_db.py` | Database query performance (search, store, summaries) | Configurable |
-| `locustfile_ws.py` | WebSocket pipeline (mock Twilio protocol) | 30s-10min per call |
+| `locustfile_ws.py` | Legacy WebSocket pipeline load test (mock Twilio protocol) | 30s-10min per call |
 | `locustfile_scheduler.py` | Scheduler throughput (reminder initiation) | Single run |
-| `twilio_mock.py` | Mock Twilio Media Stream WebSocket protocol | Utility |
+| `twilio_mock.py` | Legacy mock Twilio Media Stream WebSocket protocol | Utility |
 | `conftest.py` | Shared load test configuration | — |
 
 ### Runner Scripts
@@ -166,8 +166,8 @@ bash tests/load/run_load_tests.sh spike
 bash tests/load/run_load_tests.sh db
 ```
 
-### Mock Twilio WebSocket Protocol (`twilio_mock.py`)
-Simulates Twilio Media Stream messages:
+### Legacy Mock Twilio WebSocket Protocol (`twilio_mock.py`)
+Kept for historical load testing coverage. The active voice carrier is Telnyx; update this load test before using it for current production capacity planning. It simulates Twilio Media Stream messages:
 1. `connected` — WebSocket established
 2. `start` — Stream started (includes streamSid)
 3. `media` — Base64 audio frames (8kHz mulaw, every 20ms)
@@ -196,7 +196,7 @@ pipecat/tests/
 │   ├── locustfile_db.py             ← Database load tests
 │   ├── locustfile_ws.py             ← WebSocket load tests
 │   ├── locustfile_scheduler.py      ← Scheduler throughput tests
-│   ├── twilio_mock.py               ← Mock Twilio protocol
+│   ├── twilio_mock.py               ← Legacy mock Twilio protocol
 │   ├── run_load_tests.sh            ← Test runner with scenarios
 │   └── monitor_health.sh            ← Health monitoring to CSV
 │

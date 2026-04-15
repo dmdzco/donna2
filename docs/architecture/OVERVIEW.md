@@ -46,8 +46,8 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 │          │                                                                   │
 │          ▼                                                                   │
 │   ┌──────────────────────────────────────────────────────────┐              │
-│   │              Twilio Media Streams                         │              │
-│   │         /voice/answer → <Stream url="/ws">                │              │
+│   │              Telnyx Voice API                              │              │
+│   │         /telnyx/events + media fork → /ws                  │              │
 │   └────────────────────┬─────────────────────────────────────┘              │
 │                        │ WebSocket                                           │
 │                        ▼                                                     │
@@ -87,7 +87,7 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 │   │                     ▼                                                │   │
 │   │         Conversation Tracker (topics + stripped transcript)          │   │
 │   │                     ▼                                                │   │
-│   │         TTS high-rate PCM → Audio Out → Twilio (final 8kHz μ-law)    │   │
+│   │         TTS 16kHz PCM → Audio Out → Telnyx (16kHz L16)               │   │
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (assistant) ← tracks responses            │   │
 │   │                                                                      │   │
@@ -237,13 +237,13 @@ Quick Observer pattern categories:
 | **Framework** | Pipecat v0.0.101+ | FrameProcessor pipeline |
 | **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
-| **Phone** | Twilio Media Streams | WebSocket wire audio is 8kHz μ-law |
+| **Phone** | Telnyx Voice API media streaming | WebSocket wire audio is 16kHz L16 |
 | **Voice LLM** | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Groq (`gpt-oss-20b`) | Active fast provider for query/speculative guidance |
 | **Director Fallback Helper** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Regular non-speculative fallback in `director_llm.py` |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
-| **STT** | Deepgram Nova 3 (`nova-3-general`) | Real-time, interim results, 8kHz |
-| **TTS** | ElevenLabs (`eleven_turbo_v2_5`) by default; Cartesia behind provider flag | Internal high-rate PCM: ElevenLabs `44100`, Cartesia `pcm_s16le` at `48000`; serializer performs final phone conversion |
+| **STT** | Deepgram Nova 3 (`nova-3-general`) | Real-time, interim results, 16kHz linear PCM |
+| **TTS** | ElevenLabs (`eleven_turbo_v2_5`) by default; Cartesia behind provider flag | Telnyx calls use native 16kHz PCM from TTS; non-phone paths can use higher internal rates |
 | **VAD** | Silero | confidence=0.6, stop_secs=1.2, min_volume=0.5 |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
@@ -291,8 +291,8 @@ pipecat/
 │   ├── caregivers.py                ← Caregiver relationships
 │   └── news.py                      ← Cached news + live web_search provider fallback
 ├── api/
-│   ├── routes/                      ← voice.py, calls.py
-│   └── middleware/                   ← auth, api_auth, rate_limit, security, twilio
+│   ├── routes/                      ← telnyx.py, call_context.py, calls.py
+│   └── middleware/                   ← auth, api_auth, rate_limit, security
 ├── db/client.py                     ← asyncpg pool + query helpers
 ├── tests/                           ← 61 test files + helpers/mocks/scenarios
 ├── pyproject.toml                   ← Python 3.12, dependencies

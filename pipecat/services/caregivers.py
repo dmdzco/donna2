@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from loguru import logger
 from db import query_one, query_many, execute
+from lib.encryption import decrypt
 
 
 async def link_user_to_senior(
@@ -93,6 +94,10 @@ async def get_pending_notes(senior_id: str) -> list[dict]:
            ORDER BY cn.created_at ASC""",
         senior_id,
     )
+    for row in rows:
+        if row.get("content_encrypted"):
+            row["content"] = decrypt(row["content_encrypted"])
+        row.pop("content_encrypted", None)
     return rows
 
 

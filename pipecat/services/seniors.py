@@ -9,6 +9,8 @@ import json
 import re
 from loguru import logger
 from db import query_one, query_many, execute
+from lib.encryption import encrypt, encrypt_json
+from lib.phi import decrypt_senior_phi
 from lib.sanitize import mask_phone
 
 
@@ -26,15 +28,19 @@ async def find_by_phone(phone: str, *, active_only: bool = True) -> dict | None:
     """
     normalized = _normalize_phone(phone)
     active_clause = " AND is_active = true" if active_only else ""
-    return await query_one(
+    row = await query_one(
         """SELECT id, name, phone, timezone, interests, family_info,
+                  family_info_encrypted,
                   medical_notes, preferred_call_times, is_active,
+                  medical_notes_encrypted, preferred_call_times_encrypted,
                   city, state, zip_code, additional_info,
-                  call_context_snapshot, cached_news, call_settings,
+                  additional_info_encrypted, call_context_snapshot,
+                  call_context_snapshot_encrypted, cached_news, call_settings,
                   interest_scores
            FROM seniors WHERE phone = $1""" + active_clause,
         normalized,
     )
+    return decrypt_senior_phi(row)
 
 
 async def find_any_by_phone(phone: str) -> dict | None:
@@ -47,23 +53,25 @@ async def create(data: dict) -> dict:
     phone = _normalize_phone(data["phone"])
     row = await query_one(
         """INSERT INTO seniors (name, phone, timezone, interests, family_info,
-           medical_notes, preferred_call_times, city, state, zip_code, additional_info)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           family_info_encrypted, medical_notes, medical_notes_encrypted,
+           preferred_call_times, preferred_call_times_encrypted,
+           city, state, zip_code, additional_info, additional_info_encrypted)
+           VALUES ($1, $2, $3, $4, NULL, $5, NULL, $6, NULL, $7, $8, $9, $10, NULL, $11)
            RETURNING *""",
         data.get("name"),
         phone,
         data.get("timezone", "America/New_York"),
         data.get("interests"),
-        data.get("familyInfo"),
-        data.get("medicalNotes"),
-        data.get("preferredCallTimes"),
+        encrypt_json(data.get("familyInfo")),
+        encrypt(data.get("medicalNotes")),
+        encrypt_json(data.get("preferredCallTimes")),
         data.get("city"),
         data.get("state"),
         data.get("zipCode"),
-        data.get("additionalInfo"),
+        encrypt(data.get("additionalInfo")),
     )
     logger.info("Created senior: phone={phone}", phone=mask_phone(phone))
-    return row
+    return decrypt_senior_phi(row)
 
 
 async def update(senior_id: str, data: dict) -> dict | None:
@@ -72,19 +80,24 @@ async def update(senior_id: str, data: dict) -> dict | None:
     values = []
     idx = 1
 
+    encrypted_json_fields = {
+        "familyInfo": ("family_info", "family_info_encrypted"),
+        "preferredCallTimes": ("preferred_call_times", "preferred_call_times_encrypted"),
+    }
+    encrypted_text_fields = {
+        "medicalNotes": ("medical_notes", "medical_notes_encrypted"),
+        "additionalInfo": ("additional_info", "additional_info_encrypted"),
+    }
+
     for key, col in [
         ("name", "name"),
         ("phone", "phone"),
         ("timezone", "timezone"),
         ("interests", "interests"),
         ("interest_scores", "interest_scores"),
-        ("familyInfo", "family_info"),
-        ("medicalNotes", "medical_notes"),
-        ("preferredCallTimes", "preferred_call_times"),
         ("city", "city"),
         ("state", "state"),
         ("zipCode", "zip_code"),
-        ("additionalInfo", "additional_info"),
     ]:
         if key in data:
             val = data[key]
@@ -96,6 +109,20 @@ async def update(senior_id: str, data: dict) -> dict | None:
             values.append(val)
             idx += 1
 
+    for key, (plain_col, encrypted_col) in encrypted_json_fields.items():
+        if key in data:
+            fields.append(f"{plain_col} = NULL")
+            fields.append(f"{encrypted_col} = ${idx}")
+            values.append(encrypt_json(data.get(key)))
+            idx += 1
+
+    for key, (plain_col, encrypted_col) in encrypted_text_fields.items():
+        if key in data:
+            fields.append(f"{plain_col} = NULL")
+            fields.append(f"{encrypted_col} = ${idx}")
+            values.append(encrypt(data.get(key)))
+            idx += 1
+
     if not fields:
         return await get_by_id(senior_id)
 
@@ -103,28 +130,32 @@ async def update(senior_id: str, data: dict) -> dict | None:
     values.append(senior_id)
 
     sql = f"UPDATE seniors SET {', '.join(fields)} WHERE id = ${idx} RETURNING *"
-    return await query_one(sql, *values)
+    row = await query_one(sql, *values)
+    return decrypt_senior_phi(row)
 
 
 async def list_active() -> list[dict]:
     """List all active seniors."""
-    return await query_many(
+    rows = await query_many(
         "SELECT id, name, phone, timezone, interests, is_active, city, state"
         " FROM seniors WHERE is_active = true"
     )
+    return rows
 
 
 async def get_by_id(senior_id: str) -> dict | None:
     """Get a senior by ID."""
-    return await query_one("SELECT * FROM seniors WHERE id = $1", senior_id)
+    row = await query_one("SELECT * FROM seniors WHERE id = $1", senior_id)
+    return decrypt_senior_phi(row)
 
 
 async def deactivate(senior_id: str) -> dict | None:
     """Soft-delete a senior (set is_active = false)."""
-    return await query_one(
+    row = await query_one(
         "UPDATE seniors SET is_active = false, updated_at = NOW() WHERE id = $1 RETURNING *",
         senior_id,
     )
+    return decrypt_senior_phi(row)
 
 
 # Backward-compatible alias

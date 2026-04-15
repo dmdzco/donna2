@@ -116,6 +116,7 @@ async def run_post_call(
     # Collect full transcript from session, falling back to persisted Neon draft.
     transcript = await _get_post_call_transcript(session_state, conversation_tracker)
     analysis = None
+    post_call_error_steps: list[str] = []
 
     # Step 1: Complete conversation (must run first — prerequisite for all)
     try:
@@ -127,6 +128,7 @@ async def run_post_call(
                 "transcript": transcript,
             })
     except Exception as e:
+        post_call_error_steps.append("complete conversation")
         logger.error("[{cs}] Post-call step 1 (complete conversation) failed: {err}", cs=call_sid, err=str(e))
 
     # Mark caregiver notes only when Donna actually appears to have delivered
@@ -134,6 +136,7 @@ async def run_post_call(
     try:
         await _mark_delivered_caregiver_notes(session_state, transcript)
     except Exception as e:
+        post_call_error_steps.append("caregiver note delivery check")
         logger.error("[{cs}] Post-call caregiver note delivery check failed: {err}", cs=call_sid, err=str(e))
 
     # --- Parallel group: independent steps (2, 3, 5, 6) ---
@@ -148,7 +151,7 @@ async def run_post_call(
         summary = result.get("summary") if result else None
         if summary and summary != "Analysis unavailable":
             from services.conversations import update_summary
-            await update_summary(call_sid, summary)
+            await update_summary(call_sid, summary, result.get("sentiment"))
             logger.info("[{cs}] Persisted call summary ({n} chars)", cs=call_sid, n=len(summary))
         return result
 
@@ -215,6 +218,7 @@ async def run_post_call(
     # Extract analysis result (step 2)
     analysis_result = results[0]
     if isinstance(analysis_result, Exception):
+        post_call_error_steps.append("call analysis")
         logger.error("[{cs}] Post-call step 2 (call analysis) failed: {err}", cs=call_sid, err=str(analysis_result))
     else:
         analysis = analysis_result
@@ -223,6 +227,7 @@ async def run_post_call(
         results,
     )):
         if isinstance(r, Exception) and i > 0:  # step 2 already logged above
+            post_call_error_steps.append(step_name)
             logger.error("[{cs}] Post-call ({step}) failed: {err}", cs=call_sid, step=step_name, err=str(r))
 
     # --- Sequential group: steps that depend on analysis ---
@@ -234,6 +239,7 @@ async def run_post_call(
                 senior_id, call_sid, analysis, duration_seconds
             )
     except Exception as e:
+        post_call_error_steps.append("caregiver notification")
         logger.error("[{cs}] Post-call step 2.5 (caregiver notification) failed: {err}", cs=call_sid, err=str(e))
 
     # 3.5 Discover new interests from the call
@@ -254,10 +260,11 @@ async def run_post_call(
                 )
                 senior["interests"] = updated
                 logger.info(
-                    "[{cs}] Discovered {n} new interests: {new}",
-                    cs=call_sid, n=len(new_interests), new=new_interests,
+                    "[{cs}] Discovered {n} new interests",
+                    cs=call_sid, n=len(new_interests),
                 )
     except Exception as e:
+        post_call_error_steps.append("interest discovery")
         logger.error("[{cs}] Post-call step 3.5 (interest discovery) failed: {err}", cs=call_sid, err=str(e))
 
     # 3.6 Compute and persist interest engagement scores
@@ -270,6 +277,7 @@ async def run_post_call(
                 await update_interest_scores(senior_id, scores)
                 logger.info("[{cs}] Updated interest scores", cs=call_sid)
     except Exception as e:
+        post_call_error_steps.append("interest scores")
         logger.error("[{cs}] Post-call step 3.6 (interest scores) failed: {err}", cs=call_sid, err=str(e))
 
     # 4. Save daily context
@@ -291,6 +299,7 @@ async def run_post_call(
                 },
             )
     except Exception as e:
+        post_call_error_steps.append("daily context")
         logger.error("[{cs}] Post-call step 4 (daily context) failed: {err}", cs=call_sid, err=str(e))
 
     # 7. Rebuild call context snapshot for next call
@@ -301,11 +310,17 @@ async def run_post_call(
             snapshot = await build_snapshot(senior_id, tz, analysis)
             await save_snapshot(senior_id, snapshot)
     except Exception as e:
+        post_call_error_steps.append("call snapshot")
         logger.error("[{cs}] Post-call step 7 (call snapshot) failed: {err}", cs=call_sid, err=str(e))
 
     # 8. Persist call metrics for observability
     try:
-        await _persist_call_metrics(session_state, duration_seconds, conversation_tracker)
+        await _persist_call_metrics(
+            session_state,
+            duration_seconds,
+            conversation_tracker,
+            error_count=len(post_call_error_steps),
+        )
     except Exception as e:
         logger.error("[{cs}] Post-call step 8 (call metrics) failed: {err}", cs=call_sid, err=str(e))
 
@@ -316,6 +331,7 @@ async def _persist_call_metrics(
     session_state: dict,
     duration_seconds: int,
     conversation_tracker,
+    error_count: int = 0,
 ) -> None:
     """Write per-call metrics to call_metrics table for observability."""
     import time
@@ -376,11 +392,11 @@ async def _persist_call_metrics(
         json.dumps(breaker_states) if breaker_states else None,
         tools_used or None,
         json.dumps(token_usage) if any(token_usage.values()) else None,
-        0,
+        error_count,
     )
     logger.info(
-        "[{cs}] Call metrics persisted (turns={t}, duration={d}s)",
-        cs=call_sid, t=turn_count, d=duration_seconds,
+        "[{cs}] Call metrics persisted (turns={t}, duration={d}s, errors={e})",
+        cs=call_sid, t=turn_count, d=duration_seconds, e=error_count,
     )
 
 
@@ -683,9 +699,11 @@ async def _trigger_caregiver_notification(
     import os
     import httpx
 
-    node_url = os.environ.get(
-        "NODE_API_URL", "https://donna-api-production-2450.up.railway.app"
-    )
+    node_url = os.environ.get("NODE_API_URL")
+    if not node_url:
+        logger.warning("NODE_API_URL not set, skipping caregiver notification")
+        return
+
     from config import get_service_api_key
 
     api_key = get_service_api_key("pipecat") or get_service_api_key("notifications") or ""

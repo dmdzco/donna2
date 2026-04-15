@@ -232,7 +232,11 @@ async def _hydrate_senior_call_context(
                     senior_id=senior_id,
                     news_context=news_context,
                     interest_scores=senior.get("interest_scores"),
-                    last_call_sentiment=call_quality.get("rapport"),
+                    last_call_sentiment=(
+                        analysis_data.get("sentiment")
+                        or analysis_data.get("mood")
+                        or call_quality.get("rapport")
+                    ),
                     last_call_engagement=analysis_data.get("engagement_score"),
                     followup_chance=(call_settings or {}).get("greeting_followup_chance", 0.6),
                 )

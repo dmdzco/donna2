@@ -7,11 +7,11 @@ for free with find_by_phone().
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 
 from loguru import logger
 from db import execute
+from lib.encryption import encrypt_json
 from services.conversations import get_recent_summaries, get_recent_turns
 from services.daily_context import get_todays_context, format_todays_context
 
@@ -41,11 +41,14 @@ async def build_snapshot(
 
 
 async def save_snapshot(senior_id: str, snapshot: dict) -> None:
-    """Persist snapshot to seniors.call_context_snapshot."""
+    """Persist snapshot to encrypted senior snapshot storage."""
     try:
         await execute(
-            "UPDATE seniors SET call_context_snapshot = $1 WHERE id = $2",
-            json.dumps(snapshot),
+            """UPDATE seniors
+               SET call_context_snapshot = NULL,
+                   call_context_snapshot_encrypted = $1
+               WHERE id = $2""",
+            encrypt_json(snapshot),
             senior_id,
         )
         logger.info("Saved call snapshot")

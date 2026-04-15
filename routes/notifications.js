@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { notificationPreferencesSchema, notificationTriggerSchema } from '../validators/schemas.js';
-import { notificationService } from '../services/notifications.js';
+import { decryptNotificationRow, notificationService } from '../services/notifications.js';
 import { db } from '../db/client.js';
 import { caregivers, notifications } from '../db/schema.js';
 import { eq, and, desc } from 'drizzle-orm';
@@ -112,7 +112,7 @@ router.get('/api/notifications', requireAuth, async (req, res) => {
       .limit(limit)
       .offset(offset);
 
-    res.json(results);
+    res.json(results.map(decryptNotificationRow));
   } catch (error) {
     routeError(res, error, 'GET /api/notifications');
   }
@@ -140,7 +140,7 @@ router.patch('/api/notifications/:id/read', requireAuth, idempotencyMiddleware, 
       return sendError(res, 404, { error: 'Notification not found' });
     }
 
-    res.json(updated);
+    res.json(decryptNotificationRow(updated));
   } catch (error) {
     routeError(res, error, 'PATCH /api/notifications/:id/read');
   }

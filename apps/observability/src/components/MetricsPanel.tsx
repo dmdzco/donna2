@@ -44,11 +44,15 @@ export function MetricsPanel({ callId }: MetricsPanelProps) {
           </div>
           <div className="summary-card">
             <div className="summary-label">Est. Cost</div>
-            <div className="summary-value">${callMetrics.estimatedCost.toFixed(4)}</div>
+            <div className="summary-value">
+              {callMetrics.estimatedCost != null ? `$${callMetrics.estimatedCost.toFixed(4)}` : '--'}
+            </div>
           </div>
           <div className="summary-card">
             <div className="summary-label">Avg Response</div>
-            <div className="summary-value">{callMetrics.avgResponseTime}ms</div>
+            <div className="summary-value">
+              {callMetrics.avgResponseTime != null ? `${callMetrics.avgResponseTime}ms` : '--'}
+            </div>
           </div>
           {callMetrics.avgTtfa != null && (
             <div className="summary-card">
@@ -58,8 +62,22 @@ export function MetricsPanel({ callId }: MetricsPanelProps) {
           )}
           <div className="summary-card">
             <div className="summary-label">Models</div>
-            <div className="summary-value summary-value-small">{callMetrics.modelsUsed.join(', ')}</div>
+            <div className="summary-value summary-value-small">
+              {callMetrics.modelsUsed.length > 0 ? callMetrics.modelsUsed.join(', ') : '--'}
+            </div>
           </div>
+          {callMetrics.llmTtfbAvgMs != null && (
+            <div className="summary-card">
+              <div className="summary-label">Avg LLM TTFB</div>
+              <div className="summary-value">{callMetrics.llmTtfbAvgMs}ms</div>
+            </div>
+          )}
+          {callMetrics.endReason && (
+            <div className="summary-card">
+              <div className="summary-label">End Reason</div>
+              <div className="summary-value summary-value-small">{callMetrics.endReason}</div>
+            </div>
+          )}
         </div>
       )}
 

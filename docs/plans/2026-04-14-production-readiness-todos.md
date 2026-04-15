@@ -80,12 +80,12 @@ Relevant files:
 
 ### 2. Make PHI storage encrypted-only by default
 
-- [ ] Inventory every PHI-bearing column in `db/schema.js`.
-- [x] Stop writing plaintext PHI where encrypted companion columns exist for conversations, memories, and call analyses.
-- [ ] Backfill existing plaintext PHI into encrypted columns.
-- [x] Change read paths to prefer encrypted fields and treat plaintext as legacy-only fallback for conversations, memories, exports, weekly reports, and call analyses.
+- [x] Inventory every PHI-bearing column in `db/schema.js`; senior name/phone/timezone/location/interests remain documented operational PII for lookup/display.
+- [x] Stop writing plaintext PHI where encrypted companion columns exist for conversations, memories, call analyses, senior profile PHI, reminders, daily context, notifications, waitlist signups, prospects, and caregiver notes.
+- [ ] Backfill existing plaintext PHI into encrypted columns with `node scripts/backfill-encrypted-phi.js --write`, then clear legacy plaintext with `--write --null-plaintext` after verification.
+- [x] Change read paths to prefer encrypted fields and treat plaintext as legacy-only fallback for conversations, memories, exports, weekly reports, call analyses, senior profiles, reminders, daily context, notifications, prospects, and caregiver notes.
 - [ ] Decide which fields require searchable/indexed plaintext substitutes, and implement minimized derived values instead of raw PHI.
-- [ ] Add tests proving new writes do not populate plaintext PHI fields.
+- [x] Add tests proving new write payloads do not populate plaintext PHI fields. Node covers encryption helpers used by write paths; Pipecat targeted reminder/daily-context/scheduler/call-snapshot route tests pass.
 - [x] Add a production startup guard that refuses PHI writes if `FIELD_ENCRYPTION_KEY` is missing or invalid.
 
 Known plaintext-risk areas:
@@ -99,14 +99,20 @@ Known plaintext-risk areas:
 - [x] `call_analyses.follow_up_suggestions`
 - [x] `call_analyses.call_quality`
 - [x] `memories.content`
-- [ ] `reminders.title`
-- [ ] `reminders.description`
-- [ ] `seniors.medical_notes`
-- [ ] `seniors.family_info`
-- [ ] `seniors.additional_info`
-- [ ] `daily_call_context` summary/topic/advice/key moment fields
-- [ ] `notifications.content`
-- [ ] `notifications.metadata`
+- [x] `reminders.title`
+- [x] `reminders.description`
+- [x] `reminder_deliveries.user_response`
+- [x] `seniors.medical_notes`
+- [x] `seniors.family_info`
+- [x] `seniors.preferred_call_times`
+- [x] `seniors.additional_info`
+- [x] `seniors.call_context_snapshot`
+- [x] `daily_call_context` summary/topic/advice/key moment fields
+- [x] `notifications.content`
+- [x] `notifications.metadata`
+- [x] `waitlist` signup payload
+- [x] `prospects` learned caller/loved-one context
+- [x] `caregiver_notes.content`
 
 Acceptance criteria:
 
@@ -128,6 +134,9 @@ Relevant files:
 - `routes/reminders.js`
 - `routes/notifications.js`
 - `services/seniors.js`
+- `lib/phi.js`
+- `pipecat/lib/phi.py`
+- `scripts/backfill-encrypted-phi.js`
 - `pipecat/services/seniors.py`
 
 ### 3. Move all outbound call context handoff to shared state
@@ -378,7 +387,7 @@ Acceptance criteria:
 
 ### 12. Data rights workflows
 
-- [ ] Verify export includes encrypted-only data after the PHI migration.
+- [ ] Verify export includes encrypted-only data after the PHI migration. Node and Pipecat export code now decrypts encrypted senior PHI, reminders, daily context, conversations, memories, and call analyses; run against a migrated database before closing.
 - [ ] Verify hard delete covers Node and Pipecat-created records.
 - [ ] Verify delete/export routes are audited.
 - [ ] Verify third-party deletion obligations are documented per BAA.

@@ -166,6 +166,18 @@ class TestUpdateSummary:
             assert result is not None
 
     @pytest.mark.asyncio
+    async def test_updates_summary_and_sentiment(self):
+        with patch("services.conversations.query_one", new_callable=AsyncMock, return_value={"id": "c1"}) as mock_q:
+            from services.conversations import update_summary
+            await update_summary("CA-1", "Good call", "positive")
+            args = mock_q.call_args[0]
+            sql = args[0]
+            assert "summary_encrypted = $1" in sql
+            assert "sentiment = COALESCE($2, sentiment)" in sql
+            assert args[2] == "positive"
+            assert args[3] == "CA-1"
+
+    @pytest.mark.asyncio
     async def test_returns_none_on_error(self):
         with patch("services.conversations.query_one", new_callable=AsyncMock, side_effect=Exception("DB error")):
             from services.conversations import update_summary

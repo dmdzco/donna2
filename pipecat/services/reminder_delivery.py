@@ -15,6 +15,8 @@ import time
 
 from loguru import logger
 from db import query_one, execute
+from lib.encryption import encrypt
+from lib.phi import decrypt_reminder_phi
 
 
 async def mark_delivered(reminder_id: str) -> None:
@@ -41,10 +43,11 @@ async def mark_reminder_acknowledged(
     try:
         row = await query_one(
             """UPDATE reminder_deliveries SET
-                 status = $1, acknowledged_at = NOW(), user_response = $2
+                 status = $1, acknowledged_at = NOW(),
+                 user_response = NULL, user_response_encrypted = $2
                WHERE id = $3 RETURNING *""",
             status,
-            user_response,
+            encrypt(user_response),
             delivery_id,
         )
         logger.info("Delivery {did} marked {s}", did=delivery_id, s=status)
@@ -112,7 +115,8 @@ async def get_reminder_by_call_sid(call_sid: str) -> dict | None:
     row = await query_one(
         """SELECT rd.id AS delivery_id, rd.reminder_id, rd.scheduled_for,
                   rd.status AS delivery_status, rd.attempt_count,
-                  r.title, r.description, r.type AS reminder_type
+                  r.title, r.title_encrypted, r.description,
+                  r.description_encrypted, r.type AS reminder_type
            FROM reminder_deliveries rd
            JOIN reminders r ON rd.reminder_id = r.id
            WHERE rd.call_sid = $1
@@ -120,6 +124,7 @@ async def get_reminder_by_call_sid(call_sid: str) -> dict | None:
         call_sid,
     )
     if row:
+        row = decrypt_reminder_phi(row)
         logger.info("Found reminder for call {cs}", cs=call_sid)
     return row
 

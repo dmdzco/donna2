@@ -15,6 +15,7 @@ import { getAccessibleSeniorIds, canAccessSenior, routeError } from './helpers.j
 import { logAudit, authToRole } from '../services/audit.js';
 import { sendError } from '../lib/http-response.js';
 import { getDatePartsInTimezone, resolveTimezoneFromProfile } from '../lib/timezone.js';
+import { decryptReminderPhi, encryptReminderPhi } from '../lib/phi.js';
 
 const router = Router();
 
@@ -61,7 +62,9 @@ router.get('/api/reminders', requireAuth, async (req, res) => {
       seniorName: seniors.name,
       type: reminders.type,
       title: reminders.title,
+      titleEncrypted: reminders.titleEncrypted,
       description: reminders.description,
+      descriptionEncrypted: reminders.descriptionEncrypted,
       scheduledTime: reminders.scheduledTime,
       isRecurring: reminders.isRecurring,
       cronExpression: reminders.cronExpression,
@@ -74,7 +77,7 @@ router.get('/api/reminders', requireAuth, async (req, res) => {
     .where(eq(reminders.isActive, true))
     .orderBy(desc(reminders.createdAt));
 
-    const result = await query;
+    const result = (await query).map(decryptReminderPhi);
     if (accessibleIds === null) {
       return res.json(result); // Admin sees all
     }
@@ -99,10 +102,7 @@ router.post('/api/reminders', requireAuth, validateBody(createReminderSchema), i
       (isRecurring ? dailyCronFromScheduledTime(scheduledTime, seniorProfile) : undefined);
     const reminderScheduledTime = dateFromScheduledTime(scheduledTime);
     const [reminder] = await db.insert(reminders).values({
-      seniorId,
-      type,
-      title,
-      description,
+      ...encryptReminderPhi({ seniorId, type, title, description }),
       scheduledTime: reminderScheduledTime,
       isRecurring,
       cronExpression: reminderCronExpression,
@@ -117,7 +117,7 @@ router.post('/api/reminders', requireAuth, validateBody(createReminderSchema), i
       userAgent: req.get('user-agent'),
       metadata: { seniorId, reminderType: type },
     });
-    res.json(reminder);
+    res.json(decryptReminderPhi(reminder));
   } catch (error) {
     routeError(res, error, 'POST /api/reminders');
   }
@@ -142,8 +142,17 @@ router.patch('/api/reminders/:id', requireAuth, validateParams(reminderIdParamSc
 
     const { title, description, scheduledTime, isRecurring, cronExpression, isActive } = req.body;
     const updateData = {};
-    if (title !== undefined) updateData.title = title;
-    if (description !== undefined) updateData.description = description;
+    if (title !== undefined || description !== undefined) {
+      Object.assign(updateData, encryptReminderPhi({ title, description }));
+      if (title === undefined) {
+        delete updateData.title;
+        delete updateData.titleEncrypted;
+      }
+      if (description === undefined) {
+        delete updateData.description;
+        delete updateData.descriptionEncrypted;
+      }
+    }
     if (scheduledTime !== undefined) updateData.scheduledTime = dateFromScheduledTime(scheduledTime);
     if (isRecurring !== undefined) updateData.isRecurring = isRecurring;
     if (cronExpression !== undefined) {
@@ -174,7 +183,7 @@ router.patch('/api/reminders/:id', requireAuth, validateParams(reminderIdParamSc
       .set(updateData)
       .where(eq(reminders.id, req.params.id))
       .returning();
-    res.json(reminder);
+    res.json(decryptReminderPhi(reminder));
   } catch (error) {
     routeError(res, error, 'PATCH /api/reminders/:id');
   }

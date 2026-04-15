@@ -112,7 +112,50 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
 
 // Get active calls — voice sessions are tracked by Pipecat, not Node.js
 router.get('/api/observability/active', requireAdmin, async (req, res) => {
-  res.json({ activeCalls: [] });
+  try {
+    const active = await db.select({
+      id: conversations.id,
+      callSid: conversations.callSid,
+      seniorId: conversations.seniorId,
+      seniorName: seniors.name,
+      seniorPhone: seniors.phone,
+      startedAt: conversations.startedAt,
+      endedAt: conversations.endedAt,
+      durationSeconds: conversations.durationSeconds,
+      status: conversations.status,
+      transcript: conversations.transcript,
+      transcriptEncrypted: conversations.transcriptEncrypted,
+    })
+    .from(conversations)
+    .leftJoin(seniors, eq(conversations.seniorId, seniors.id))
+    .where(and(
+      eq(conversations.status, 'in_progress'),
+      sql`started_at >= NOW() - interval '2 hours'`
+    ))
+    .orderBy(desc(conversations.startedAt))
+    .limit(20);
+
+    const activeCalls = active.map(call => {
+      const transcript = readTranscript(call);
+      return {
+        id: call.id,
+        call_sid: call.callSid,
+        senior_id: call.seniorId,
+        senior_name: call.seniorName,
+        senior_phone: call.seniorPhone,
+        started_at: call.startedAt,
+        ended_at: call.endedAt,
+        duration_seconds: call.durationSeconds,
+        status: call.status,
+        turn_count: Array.isArray(transcript) ? transcript.length : 0,
+      };
+    });
+
+    auditObservabilityRead(req, null, { endpoint: 'active', count: activeCalls.length });
+    res.json({ activeCalls });
+  } catch (error) {
+    routeError(res, error, 'GET /api/observability/active');
+  }
 });
 
 // Get call details by ID
@@ -373,6 +416,7 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
 router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res) => {
   try {
     const [call] = await db.select({
+      callSid: conversations.callSid,
       transcript: conversations.transcript,
       transcriptEncrypted: conversations.transcriptEncrypted,
       callMetrics: conversations.callMetrics,
@@ -384,6 +428,18 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
     if (!call) {
       return res.status(404).json({ error: 'Call not found' });
     }
+
+    const infraRows = await db.execute(sql`
+      SELECT call_sid, senior_id, call_type, duration_seconds,
+             end_reason, turn_count, phase_durations, latency,
+             breaker_states, tools_used, token_usage, error_count,
+             created_at
+      FROM call_metrics
+      WHERE call_sid = ${call.callSid}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    const infraMetric = infraRows.rows[0] || null;
 
     // Extract per-turn metrics from transcript
     const turnMetrics = [];
@@ -400,13 +456,33 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
       });
     }
 
+    const tokenUsage = infraMetric?.token_usage || {};
+    const latency = infraMetric?.latency || {};
+    const infraCallMetrics = infraMetric ? {
+      totalInputTokens: Number(tokenUsage.prompt_tokens || 0),
+      totalOutputTokens: Number(tokenUsage.completion_tokens || 0),
+      totalTokens: Number(tokenUsage.prompt_tokens || 0) + Number(tokenUsage.completion_tokens || 0),
+      avgResponseTime: latency.turn_avg_ms != null ? Number(latency.turn_avg_ms) : null,
+      avgTtfa: latency.tts_ttfb_avg_ms != null ? Number(latency.tts_ttfb_avg_ms) : null,
+      turnCount: Number(infraMetric.turn_count || 0),
+      estimatedCost: null,
+      modelsUsed: [],
+      llmTtfbAvgMs: latency.llm_ttfb_avg_ms != null ? Number(latency.llm_ttfb_avg_ms) : null,
+      ttsTtfbAvgMs: latency.tts_ttfb_avg_ms != null ? Number(latency.tts_ttfb_avg_ms) : null,
+      endReason: infraMetric.end_reason || null,
+      errorCount: Number(infraMetric.error_count || 0),
+      toolsUsed: infraMetric.tools_used || [],
+      breakerStates: infraMetric.breaker_states || null,
+    } : null;
+
     auditObservabilityRead(req, req.params.id, {
       endpoint: 'call_metrics',
       metricTurnCount: turnMetrics.length,
     });
     res.json({
       turnMetrics,
-      callMetrics: call.callMetrics || null,
+      callMetrics: call.callMetrics || infraCallMetrics,
+      infraMetric,
       durationSeconds: call.durationSeconds,
     });
   } catch (error) {

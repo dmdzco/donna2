@@ -4,6 +4,7 @@ import { eq, sql, inArray } from 'drizzle-orm';
 import { createLogger } from '../lib/logger.js';
 import { maskName, maskPhone } from '../lib/sanitize.js';
 import { resolveTimezoneFromProfile } from '../lib/timezone.js';
+import { decryptSeniorPhi, encryptSeniorPhi } from '../lib/phi.js';
 
 const log = createLogger('Senior');
 
@@ -16,20 +17,20 @@ export const seniorService = {
     const [senior] = await db.select().from(seniors)
       .where(eq(seniors.phone, normalized));
 
-    return senior || null;
+    return senior ? decryptSeniorPhi(senior) : null;
   },
 
   // Create a new senior
   async create(data) {
     try {
       const [senior] = await db.insert(seniors).values({
-        ...data,
+        ...encryptSeniorPhi(data),
         phone: data.phone.replace(/\D/g, '').slice(-10),
         timezone: resolveTimezoneFromProfile(data),
       }).returning();
 
       log.info('Created senior', { name: maskName(senior.name), phone: maskPhone(senior.phone) });
-      return senior;
+      return decryptSeniorPhi(senior);
     } catch (error) {
       if (error.code === '23505' && error.constraint?.includes('phone')) {
         const err = new Error('This phone number is already registered for another senior');
@@ -43,7 +44,7 @@ export const seniorService = {
   // Update a senior
   async update(id, data) {
     try {
-      const updateData = { ...data, updatedAt: new Date() };
+      const updateData = { ...encryptSeniorPhi(data), updatedAt: new Date() };
 
       if (data.phone) {
         updateData.phone = data.phone.replace(/\D/g, '').slice(-10);
@@ -73,7 +74,7 @@ export const seniorService = {
         .where(eq(seniors.id, id))
         .returning();
 
-      return senior;
+      return senior ? decryptSeniorPhi(senior) : null;
     } catch (error) {
       if (error.code === '23505' && error.constraint?.includes('phone')) {
         const err = new Error('This phone number is already registered for another senior');
@@ -86,15 +87,16 @@ export const seniorService = {
 
   // List all active seniors
   async list() {
-    return db.select().from(seniors)
+    const rows = await db.select().from(seniors)
       .where(eq(seniors.isActive, true));
+    return rows.map(decryptSeniorPhi);
   },
 
   // Get senior by ID
   async getById(id) {
     const [senior] = await db.select().from(seniors)
       .where(eq(seniors.id, id));
-    return senior || null;
+    return senior ? decryptSeniorPhi(senior) : null;
   },
 
   // Deactivate (soft delete) a senior
@@ -103,7 +105,7 @@ export const seniorService = {
       .set({ isActive: false, updatedAt: new Date() })
       .where(eq(seniors.id, id))
       .returning();
-    return senior;
+    return senior ? decryptSeniorPhi(senior) : null;
   },
 
   // Hard-delete a senior and ALL associated data

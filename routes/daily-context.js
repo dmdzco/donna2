@@ -5,6 +5,7 @@ import { eq, and, gte, lt, desc } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
 import { routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
+import { decryptDailyContextPhi } from '../lib/phi.js';
 
 const router = Router();
 
@@ -36,6 +37,7 @@ router.get('/api/daily-context', requireAdmin, async (req, res) => {
       adviceGiven: dailyCallContext.adviceGiven,
       keyMoments: dailyCallContext.keyMoments,
       summary: dailyCallContext.summary,
+      contextEncrypted: dailyCallContext.contextEncrypted,
       createdAt: dailyCallContext.createdAt,
     })
     .from(dailyCallContext)
@@ -57,7 +59,7 @@ router.get('/api/daily-context', requireAdmin, async (req, res) => {
       metadata: { seniorId: seniorId || null, date: date || null, count: results.length },
     });
 
-    res.json(results);
+    res.json(results.map(decryptDailyContextPhi));
   } catch (error) {
     routeError(res, error, 'GET /api/daily-context');
   }

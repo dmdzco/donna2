@@ -58,20 +58,20 @@ This policy applies to all data stored in:
 |-----------|----------|---------------|-----------------|---------|-------------------|
 | **Conversation transcripts and summaries** | `conversations.transcript_encrypted`, `transcript_text_encrypted`, `summary_encrypted`; legacy `conversations.transcript` / `.summary` read fallback | Yes (HIGH) | 1 year from call date | `conversations.started_at` | Automated purge job: set transcript/summary fields to NULL, retain metadata |
 | **Conversation metadata** | `conversations` (non-PHI fields: id, senior_id, started_at, ended_at, duration, status, sentiment) | Low | 3 years from call date | `conversations.started_at` | Automated purge job: DELETE row |
-| **Semantic memories** | `memories` | Yes (HIGH) | 2 years from creation OR 1 year after senior becomes inactive | `memories.created_at` or `seniors.is_active` + last call date | Automated purge job: DELETE row (including embedding vector) |
-| **Call analyses** | `call_analyses` | Yes (MEDIUM) | 1 year from creation | `call_analyses.created_at` | Automated purge job: DELETE row |
-| **Daily call context** | `daily_call_context` | Yes (MEDIUM) | 90 days from call date | `daily_call_context.call_date` | Automated purge job: DELETE row |
-| **Reminder definitions** | `reminders` | Yes (medication names/schedules) | Retained while active + 1 year after deactivation | `reminders.is_active` = false date | Automated purge job: DELETE row + associated deliveries |
-| **Reminder deliveries** | `reminder_deliveries` | Yes (LOW) | 90 days from delivery date | `reminder_deliveries.created_at` | Automated purge job: DELETE row |
+| **Semantic memories** | `memories.content_encrypted`; legacy `memories.content` placeholder/fallback | Yes (HIGH) | 2 years from creation OR 1 year after senior becomes inactive | `memories.created_at` or `seniors.is_active` + last call date | Automated purge job: DELETE row (including embedding vector) |
+| **Call analyses** | `call_analyses.analysis_encrypted`; legacy structured columns fallback | Yes (MEDIUM) | 1 year from creation | `call_analyses.created_at` | Automated purge job: DELETE row |
+| **Daily call context** | `daily_call_context.context_encrypted`; legacy structured columns fallback | Yes (MEDIUM) | 90 days from call date | `daily_call_context.call_date` | Automated purge job: DELETE row |
+| **Reminder definitions** | `reminders.title_encrypted`, `description_encrypted`; legacy title/description fallback | Yes (medication names/schedules) | Retained while active + 1 year after deactivation | `reminders.is_active` = false date | Automated purge job: DELETE row + associated deliveries |
+| **Reminder deliveries** | `reminder_deliveries.user_response_encrypted`; legacy `user_response` fallback | Yes (LOW) | 90 days from delivery date | `reminder_deliveries.created_at` | Automated purge job: DELETE row |
 | **Senior profiles** | `seniors` | Yes (HIGH) | Retained while active + 1 year after last call | `seniors.is_active` + last `conversations.started_at` | Manual review + DELETE row (cascades to all related data) |
-| **Senior medical notes** | `seniors.medical_notes` | Yes (CRITICAL) | Same as senior profile | Same as senior profile | Cleared when senior is purged |
+| **Senior medical notes** | `seniors.medical_notes_encrypted`; legacy `medical_notes` fallback | Yes (CRITICAL) | Same as senior profile | Same as senior profile | Cleared when senior is purged |
 | **Caregiver relationships** | `caregivers` | Low | Retained while linked + 90 days after unlinking | Manual unlinking date | Manual review + DELETE row |
-| **Caregiver notifications** | `notifications` | Yes (MEDIUM) | 180 days from send date | `notifications.sent_at` | Automated purge job: DELETE row |
+| **Caregiver notifications** | `notifications.content_encrypted`, `metadata_encrypted`; legacy content/metadata fallback | Yes (MEDIUM) | 180 days from send date | `notifications.sent_at` | Automated purge job: DELETE row |
 | **Notification preferences** | `notification_preferences` | No | Retained while caregiver exists | Cascade from caregiver deletion | CASCADE DELETE |
-| **Call context snapshot** | `seniors.call_context_snapshot` (JSONB) | Yes (HIGH) | Overwritten on each call; set to NULL when senior is purged | N/A (ephemeral by design) | Set to NULL on senior purge |
+| **Call context snapshot** | `seniors.call_context_snapshot_encrypted`; legacy `call_context_snapshot` fallback | Yes (HIGH) | Overwritten on each call; set to NULL when senior is purged | N/A (ephemeral by design) | Set to NULL on senior purge |
 | **Cached news** | `seniors.cached_news` | No | Overwritten daily at 5 AM; set to NULL on senior purge | N/A (ephemeral) | Set to NULL on senior purge |
 | **Admin users** | `admin_users` | No (email/password hash) | Retained while active | Manual deactivation | DELETE row |
-| **Waitlist signups** | `waitlist` | Possible (name, email, phone) | 1 year from signup | `waitlist.created_at` | Automated purge job: DELETE row |
+| **Waitlist signups** | `waitlist.payload_encrypted`; legacy contact columns fallback | Possible (name, email, phone) | 1 year from signup | `waitlist.created_at` | Automated purge job: DELETE row |
 | **Audit logs** | `audit_logs` (to be created) | Yes (references PHI) | **6 years** (HIPAA minimum) | `audit_logs.created_at` | Automated purge job: DELETE row |
 
 ### Non-Database Data

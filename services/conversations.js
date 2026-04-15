@@ -31,6 +31,7 @@ async function addSummaryFallbacks(rows) {
   return rows.map(row => {
     const analysis = analyses.get(row.id) || null;
     const summary = decryptSummary(row) || analysis?.summary || null;
+    const sentiment = row.sentiment || analysis?.sentiment || null;
 
     return {
       id: row.id,
@@ -41,7 +42,7 @@ async function addSummaryFallbacks(rows) {
       durationSeconds: row.durationSeconds,
       status: row.status,
       summary,
-      sentiment: row.sentiment,
+      sentiment,
     };
   });
 }
@@ -175,10 +176,13 @@ export const conversationService = {
   },
 
   // Update conversation summary (called after post-call analysis)
-  async updateSummary(callSid, summary) {
+  async updateSummary(callSid, summary, sentiment = undefined) {
     try {
+      const update = { summary: null, summaryEncrypted: encrypt(summary) };
+      if (sentiment !== undefined) update.sentiment = sentiment;
+
       const [conversation] = await db.update(conversations)
-        .set({ summary: null, summaryEncrypted: encrypt(summary) })
+        .set(update)
         .where(eq(conversations.callSid, callSid))
         .returning();
 

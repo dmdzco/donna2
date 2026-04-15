@@ -16,6 +16,7 @@ from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from db import query_one, query_many, execute
 from lib.sanitize import mask_phone
+from lib.phi import decrypt_reminder_phi, decrypt_senior_phi
 from services.reminder_delivery import mark_delivered, format_reminder_prompt
 
 # Lazy-loaded Twilio client
@@ -113,11 +114,17 @@ async def get_due_reminders() -> list[dict]:
     # Non-recurring reminders due now
     non_recurring = await query_many(
         """SELECT r.id AS reminder_id, s.id AS senior_id,
-                  r.type, r.title, r.description, r.scheduled_time,
+                  r.type, r.title, r.title_encrypted,
+                  r.description, r.description_encrypted, r.scheduled_time,
                   r.is_recurring, r.cron_expression, r.is_active AS r_active,
                   r.last_delivered_at,
                   s.name, s.phone, s.timezone, s.interests,
-                  s.family_info, s.medical_notes, s.is_active AS s_active
+                  s.family_info, s.family_info_encrypted,
+                  s.medical_notes, s.medical_notes_encrypted,
+                  s.preferred_call_times, s.preferred_call_times_encrypted,
+                  s.additional_info, s.additional_info_encrypted,
+                  s.call_context_snapshot, s.call_context_snapshot_encrypted,
+                  s.is_active AS s_active
            FROM reminders r
            INNER JOIN seniors s ON r.senior_id = s.id
            WHERE r.is_active = true
@@ -130,11 +137,17 @@ async def get_due_reminders() -> list[dict]:
     # Recurring reminders (all active — filter by time-of-day in Python)
     recurring_all = await query_many(
         """SELECT r.id AS reminder_id, s.id AS senior_id,
-                  r.type, r.title, r.description, r.scheduled_time,
+                  r.type, r.title, r.title_encrypted,
+                  r.description, r.description_encrypted, r.scheduled_time,
                   r.is_recurring, r.cron_expression, r.is_active AS r_active,
                   r.last_delivered_at,
                   s.name, s.phone, s.timezone, s.interests,
-                  s.family_info, s.medical_notes, s.is_active AS s_active
+                  s.family_info, s.family_info_encrypted,
+                  s.medical_notes, s.medical_notes_encrypted,
+                  s.preferred_call_times, s.preferred_call_times_encrypted,
+                  s.additional_info, s.additional_info_encrypted,
+                  s.call_context_snapshot, s.call_context_snapshot_encrypted,
+                  s.is_active AS s_active
            FROM reminders r
            INNER JOIN seniors s ON r.senior_id = s.id
            WHERE r.is_active = true
@@ -221,11 +234,17 @@ async def get_due_reminders() -> list[dict]:
         """SELECT rd.id AS delivery_id, rd.scheduled_for, rd.delivered_at,
                   rd.status AS delivery_status, rd.attempt_count, rd.call_sid,
                   r.id AS reminder_id, s.id AS senior_id,
-                  r.type, r.title, r.description, r.scheduled_time,
+                  r.type, r.title, r.title_encrypted,
+                  r.description, r.description_encrypted, r.scheduled_time,
                   r.is_recurring, r.cron_expression, r.is_active AS r_active,
                   r.last_delivered_at,
                   s.name, s.phone, s.timezone, s.interests,
-                  s.family_info, s.medical_notes, s.is_active AS s_active
+                  s.family_info, s.family_info_encrypted,
+                  s.medical_notes, s.medical_notes_encrypted,
+                  s.preferred_call_times, s.preferred_call_times_encrypted,
+                  s.additional_info, s.additional_info_encrypted,
+                  s.call_context_snapshot, s.call_context_snapshot_encrypted,
+                  s.is_active AS s_active
            FROM reminder_deliveries rd
            INNER JOIN reminders r ON rd.reminder_id = r.id
            INNER JOIN seniors s ON r.senior_id = s.id
@@ -446,32 +465,42 @@ def cleanup_stale_contexts(max_age_minutes: int = 30) -> int:
 
 def _extract_reminder(row: dict) -> dict:
     """Extract reminder fields from a joined row."""
-    return {
+    return decrypt_reminder_phi({
         "id": row.get("reminder_id") or row.get("id"),
         "senior_id": row.get("senior_id"),
         "type": row.get("type"),
         "title": row.get("title"),
+        "title_encrypted": row.get("title_encrypted"),
         "description": row.get("description"),
+        "description_encrypted": row.get("description_encrypted"),
         "scheduled_time": row.get("scheduled_time"),
         "is_recurring": row.get("is_recurring"),
         "cron_expression": row.get("cron_expression"),
         "is_active": row.get("r_active") if "r_active" in row else row.get("is_active"),
         "last_delivered_at": row.get("last_delivered_at"),
-    }
+    })
 
 
 def _extract_senior(row: dict) -> dict:
     """Extract senior fields from a joined row."""
-    return {
+    return decrypt_senior_phi({
         "id": row.get("senior_id"),
         "name": row.get("name"),
         "phone": row.get("phone"),
         "timezone": row.get("timezone"),
         "interests": row.get("interests"),
         "family_info": row.get("family_info"),
+        "family_info_encrypted": row.get("family_info_encrypted"),
         "medical_notes": row.get("medical_notes"),
+        "medical_notes_encrypted": row.get("medical_notes_encrypted"),
+        "preferred_call_times": row.get("preferred_call_times"),
+        "preferred_call_times_encrypted": row.get("preferred_call_times_encrypted"),
+        "additional_info": row.get("additional_info"),
+        "additional_info_encrypted": row.get("additional_info_encrypted"),
+        "call_context_snapshot": row.get("call_context_snapshot"),
+        "call_context_snapshot_encrypted": row.get("call_context_snapshot_encrypted"),
         "is_active": row.get("s_active") if "s_active" in row else row.get("is_active"),
-    }
+    })
 
 
 def _extract_delivery(row: dict) -> dict:

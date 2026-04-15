@@ -207,6 +207,32 @@ class TestPostCallProcessing:
         assert len(text) <= 300
 
     @pytest.mark.asyncio
+    async def test_caregiver_notification_requires_node_api_url(self, monkeypatch):
+        """Missing NODE_API_URL should not fall through to a production default."""
+        monkeypatch.delenv("NODE_API_URL", raising=False)
+
+        from services.post_call import _trigger_caregiver_notification
+
+        await _trigger_caregiver_notification(
+            "senior-001",
+            "CA-test-001",
+            {"summary": "Good call", "sentiment": "positive"},
+            120,
+        )
+
+    @pytest.mark.asyncio
+    async def test_persist_call_metrics_uses_error_count(self, session_state):
+        from services.post_call import _persist_call_metrics
+
+        session_state["_call_metrics"] = {"token_usage": {}, "turn_count": 2}
+
+        with patch("db.client.execute", new_callable=AsyncMock) as mock_execute:
+            await _persist_call_metrics(session_state, 60, None, error_count=3)
+
+        args = mock_execute.await_args.args
+        assert args[-1] == 3
+
+    @pytest.mark.asyncio
     async def test_post_call_discovers_new_interests(self, session_state):
         """Steps 3.5 + 3.6: new interests are discovered and scores computed."""
         session_state["_transcript"] = [

@@ -225,15 +225,20 @@ async def get_for_senior(senior_id: str, limit: int = 10) -> list[dict]:
     )
 
 
-async def update_summary(call_sid: str, summary: str) -> dict | None:
-    """Update conversation summary (called after post-call analysis)."""
+async def update_summary(
+    call_sid: str, summary: str, sentiment: str | None = None
+) -> dict | None:
+    """Update conversation summary and optional sentiment after post-call analysis."""
     try:
         row = await query_one(
             """UPDATE conversations
-               SET summary = NULL, summary_encrypted = $1
-               WHERE call_sid = $2
+               SET summary = NULL,
+                   summary_encrypted = $1,
+                   sentiment = COALESCE($2, sentiment)
+               WHERE call_sid = $3
                RETURNING *""",
             encrypt(summary),
+            sentiment,
             call_sid,
         )
         if row:

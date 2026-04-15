@@ -55,11 +55,18 @@ router.get('/api/stats', requireAdmin, async (req, res) => {
     .orderBy(desc(conversations.startedAt))
     .limit(5);
 
+    const [{ count: activeCalls }] = await db.select({ count: sql`count(*)` })
+      .from(conversations)
+      .where(and(
+        eq(conversations.status, 'in_progress'),
+        sql`started_at >= NOW() - interval '2 hours'`
+      ));
+
     res.json({
       totalSeniors: parseInt(totalSeniors) || 0,
       callsToday: parseInt(callsToday) || 0,
       upcomingRemindersCount: upcomingReminders.length,
-      activeCalls: 0,
+      activeCalls: parseInt(activeCalls) || 0,
       upcomingReminders: upcomingReminders.map(decryptReminderPhi),
       recentCalls,
     });

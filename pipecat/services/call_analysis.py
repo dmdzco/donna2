@@ -21,11 +21,26 @@ _breaker = CircuitBreaker("gemini_analysis", failure_threshold=3, recovery_timeo
 ANALYSIS_MODEL = os.environ.get("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview")
 
 # Static instructions — passed as system_instruction
-ANALYSIS_SYSTEM_INSTRUCTION = """You analyze completed phone calls between Donna (an AI companion) and elderly individuals.
+ANALYSIS_SYSTEM_INSTRUCTION = """You analyze completed phone calls between Donna (an AI companion) and elderly individuals for the senior's caregiver.
 
-Analyze the call and return JSON with: summary (2-3 sentences), topics_discussed, reminders_delivered, engagement_score (1-10), mood (one or two words: cheerful, calm, content, a bit quiet, tired, etc.), caregiver_sms (a warm, privacy-respecting message for the senior's caregiver — keep it high-level, never expose vulnerability or repeat sensitive details; if mood seems low, subtly suggest the caregiver give them a call; include call duration naturally; max 280 chars), concerns (health/cognitive/emotional/safety with severity low/medium/high, description, evidence, recommended_action), positive_observations, follow_up_suggestions, call_quality (rapport: strong/moderate/weak, goals_achieved: bool, duration_appropriate: bool).
+Write the summary for a caregiver, not for Donna or an internal operator. It should answer: how did the senior seem, what mattered from the conversation, whether anything may need follow-up, and what a caregiver could do next. Keep it concise, factual, and useful. Do not include raw quotes, private details that are not relevant to care, or unsupported medical/financial conclusions.
 
-Output ONLY valid JSON: {"summary":"str","topics_discussed":["str"],"reminders_delivered":["str"],"engagement_score":0,"mood":"str","caregiver_sms":"str","concerns":[{"type":"health|cognitive|emotional|safety","severity":"low|medium|high","description":"str","evidence":"str","recommended_action":"str"}],"positive_observations":["str"],"follow_up_suggestions":["str"],"call_quality":{"rapport":"strong|moderate|weak","goals_achieved":true,"duration_appropriate":true}}"""
+Return JSON with:
+- summary: 2-3 caregiver-facing sentences. Start with the senior's overall sentiment/mood, then include useful context, concerns, reminders, or follow-up needs if present.
+- sentiment: one of positive, neutral, concerned, worried, distressed. Use positive for upbeat/engaged calls; neutral for routine calls; concerned for mild wellbeing or engagement issues; worried for material health/cognitive/safety concerns; distressed for acute emotional distress.
+- topics_discussed
+- reminders_delivered
+- engagement_score: 1-10
+- mood: one or two caregiver-friendly words, such as cheerful, calm, content, quiet, tired, worried, sad
+- caregiver_sms: a warm, privacy-respecting caregiver message. Keep it high-level, never expose vulnerability or repeat sensitive details; if mood seems low, subtly suggest the caregiver give them a call; include call duration naturally; max 280 chars.
+- caregiver_takeaways: 1-4 concise items a caregiver would care about
+- recommended_caregiver_action: short action or empty string if no action is needed
+- concerns: health/cognitive/emotional/safety with severity low/medium/high, description, evidence, recommended_action
+- positive_observations
+- follow_up_suggestions: caregiver-actionable suggestions for future calls or family follow-up
+- call_quality: rapport strong/moderate/weak, goals_achieved bool, duration_appropriate bool
+
+Output ONLY valid JSON: {"summary":"str","sentiment":"positive|neutral|concerned|worried|distressed","topics_discussed":["str"],"reminders_delivered":["str"],"engagement_score":0,"mood":"str","caregiver_sms":"str","caregiver_takeaways":["str"],"recommended_caregiver_action":"str","concerns":[{"type":"health|cognitive|emotional|safety","severity":"low|medium|high","description":"str","evidence":"str","recommended_action":"str"}],"positive_observations":["str"],"follow_up_suggestions":["str"],"call_quality":{"rapport":"strong|moderate|weak","goals_achieved":true,"duration_appropriate":true}}"""
 
 # Dynamic per-call content — passed as contents
 ANALYSIS_TURN_TEMPLATE = """Senior: {{SENIOR_NAME}}
@@ -34,6 +49,8 @@ Family: {{FAMILY_MEMBERS}}
 
 ## TRANSCRIPT
 {{TRANSCRIPT}}"""
+
+_SENTIMENT_VALUES = {"positive", "neutral", "concerned", "worried", "distressed"}
 
 
 def _repair_json(json_text: str) -> str:
@@ -68,15 +85,103 @@ def _format_transcript(history: list[dict] | str | None) -> str:
     )
 
 
+def _as_list(value) -> list:
+    if isinstance(value, list):
+        return value
+    return []
+
+
+def _normalize_sentiment(raw, analysis: dict) -> str:
+    """Return a stable caregiver-facing sentiment label."""
+    if isinstance(raw, str):
+        value = raw.strip().lower()
+        if value in _SENTIMENT_VALUES:
+            return value
+
+    concerns = _as_list(analysis.get("concerns"))
+    severities = {
+        str(c.get("severity", "")).lower()
+        for c in concerns
+        if isinstance(c, dict)
+    }
+    types = {
+        str(c.get("type") or c.get("category") or "").lower()
+        for c in concerns
+        if isinstance(c, dict)
+    }
+
+    mood = str(analysis.get("mood") or "").lower()
+    engagement = analysis.get("engagement_score")
+    try:
+        engagement = int(engagement)
+    except (TypeError, ValueError):
+        engagement = None
+
+    if any(term in mood for term in ("distress", "hopeless", "panic", "despair")):
+        return "distressed"
+    if "high" in severities and ("emotional" in types or "safety" in types):
+        return "distressed"
+    if "high" in severities:
+        return "worried"
+    if "medium" in severities:
+        return "concerned"
+    if engagement is not None and engagement <= 3:
+        return "concerned"
+    if any(term in mood for term in ("worried", "anxious", "sad", "lonely", "tired", "quiet")):
+        return "concerned"
+    if any(term in mood for term in ("cheer", "happy", "content", "upbeat", "positive", "engaged")):
+        return "positive"
+    return "neutral"
+
+
+def _normalize_analysis(analysis: dict | None) -> dict:
+    """Normalize LLM output so downstream storage and UI get stable keys."""
+    if not isinstance(analysis, dict):
+        analysis = {}
+    raw_sentiment = analysis.get("sentiment")
+
+    default = _get_default_analysis()
+    merged = {**default, **analysis}
+
+    merged["topics_discussed"] = _as_list(merged.get("topics_discussed") or merged.get("topics"))
+    merged["reminders_delivered"] = _as_list(merged.get("reminders_delivered"))
+    merged["concerns"] = _as_list(merged.get("concerns"))
+    merged["positive_observations"] = _as_list(merged.get("positive_observations"))
+    merged["follow_up_suggestions"] = _as_list(
+        merged.get("follow_up_suggestions") or merged.get("follow_ups")
+    )
+    merged["caregiver_takeaways"] = _as_list(merged.get("caregiver_takeaways"))
+    merged["recommended_caregiver_action"] = str(
+        merged.get("recommended_caregiver_action") or ""
+    ).strip()
+    merged["sentiment"] = _normalize_sentiment(raw_sentiment, merged)
+
+    try:
+        merged["engagement_score"] = int(merged.get("engagement_score", 5))
+    except (TypeError, ValueError):
+        merged["engagement_score"] = 5
+    merged["engagement_score"] = max(1, min(10, merged["engagement_score"]))
+
+    call_quality = merged.get("call_quality")
+    if not isinstance(call_quality, dict):
+        call_quality = default["call_quality"]
+    merged["call_quality"] = call_quality
+
+    return merged
+
+
 def _get_default_analysis() -> dict:
     """Default analysis when processing fails."""
     return {
         "summary": "Analysis unavailable",
+        "sentiment": "neutral",
         "topics_discussed": [],
         "reminders_delivered": [],
         "engagement_score": 5,
         "mood": "unknown",
         "caregiver_sms": "",
+        "caregiver_takeaways": [],
+        "recommended_caregiver_action": "",
         "concerns": [],
         "positive_observations": [],
         "follow_up_suggestions": [],
@@ -144,8 +249,11 @@ async def analyze_completed_call(
             logger.info("JSON parse failed, attempting repair")
             analysis = json.loads(_repair_json(json_text))
 
+        analysis = _normalize_analysis(analysis)
+
         logger.info(
-            "Analysis complete: engagement={score}/10, concerns={cc}",
+            "Analysis complete: sentiment={sentiment}, engagement={score}/10, concerns={cc}",
+            sentiment=analysis.get("sentiment"),
             score=analysis.get("engagement_score"),
             cc=len(analysis.get("concerns", [])),
         )
@@ -210,6 +318,8 @@ async def get_latest_analysis(senior_id: str) -> dict | None:
         if full and isinstance(full, dict):
             row["summary"] = full.get("summary", row.get("summary"))
             row["call_quality"] = full.get("call_quality", row.get("call_quality"))
+            row["sentiment"] = full.get("sentiment")
+            row["mood"] = full.get("mood")
         row.pop("analysis_encrypted", None)
     elif row:
         row.pop("analysis_encrypted", None)

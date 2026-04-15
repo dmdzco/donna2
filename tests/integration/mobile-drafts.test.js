@@ -33,10 +33,16 @@ describe('mobile encrypted drafts', () => {
     expect(secureDraftStorageSource).toContain('SecureStore.setItemAsync(chunkKey(name, index), chunk)');
   });
 
+  it('uses SecureStore-compatible keys and keeps draft failures non-blocking', () => {
+    expect(secureDraftStorageSource).toContain('return `${storageKey(name)}.count`;');
+    expect(secureDraftStorageSource).toContain('return `${storageKey(name)}.chunk.${index}`;');
+    expect(secureDraftStorageSource).toContain('return name.replace(/[^A-Za-z0-9._-]/g, "_");');
+    expect(secureDraftStorageSource).toContain('Draft persistence should never block the onboarding form.');
+  });
+
   it('clears drafts after setup completion and local sign-out', () => {
     expect(onboardingStoreSource).toContain('clearOnboardingDraft');
     expect(successSource).toContain('await clearOnboardingDraft()');
     expect(settingsSource).toContain('await clearOnboardingDraft()');
   });
 });
-

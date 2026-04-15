@@ -31,7 +31,10 @@ Goal: make Donna's mobile app fail clearly and safely under poor network, backen
 - [x] Remove raw backend error messages from mobile-owned 500 responses.
 - [x] Run backend middleware/route tests, full Node tests, mobile TypeScript, auth guard, asset verification, Expo dependency check, and whitespace checks.
 - [x] Add encrypted local drafts for onboarding, with cleanup on setup completion and sign-out.
+- [x] Fix SecureStore draft chunk keys so onboarding drafts do not throw on-device.
 - [x] Add optional Sentry mobile crash reporting with strict PHI scrubbing and screenshots/replay/tracing/logs disabled.
+- [x] Rebuild and launch the iOS dev client after native Sentry/NetInfo changes.
+- [x] Run Maestro full clickthrough, signed-in navigation/settings flows, and fresh-account onboarding on iPhone simulator.
 
 ## Later Work
 

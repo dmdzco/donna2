@@ -75,6 +75,19 @@ class TestQuickObserverGuidanceInjection:
         guidance_frames = capture.get_frames_of_type(LLMMessagesAppendFrame)
         assert len(guidance_frames) == 0
 
+    @pytest.mark.asyncio
+    async def test_token_recommendation_clears_on_neutral_turn(self, session_state):
+        processor = QuickObserverProcessor(session_state=session_state)
+        await run_processor_test(
+            processors=[processor],
+            frames_to_inject=[
+                make_transcription("I fell and hurt my knee badly"),
+                make_transcription("I thought about that for a while and it was interesting to consider"),
+            ],
+        )
+
+        assert "_token_recommendation" not in session_state
+
 
 class TestQuickObserverGoodbyeEndFrame:
     """Verify programmatic call ending on strong goodbye detection."""

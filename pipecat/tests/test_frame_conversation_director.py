@@ -305,6 +305,55 @@ class TestDirectorContextInjection:
 
         assert len(frames) == 2
 
+    def test_history_before_current_removes_current_user_turn(self, session_state):
+        session_state["_transcript"] = [
+            {"role": "assistant", "content": "How was your day?"},
+            {"role": "user", "content": "I am going to work out tomorrow."},
+        ]
+        processor = ConversationDirectorProcessor(session_state=session_state)
+
+        history = processor._history_before_current("I am going to work out tomorrow.")
+
+        assert history == [{"role": "assistant", "content": "How was your day?"}]
+
+    @pytest.mark.asyncio
+    async def test_memory_gate_does_not_wait_without_relevant_inflight(self, session_state):
+        from services.prefetch import PrefetchCache
+
+        cache = PrefetchCache()
+        cache.put("gardening", [{"id": "memory-1", "content": "Loves roses."}])
+        session_state["_prefetch_cache"] = cache
+
+        processor = ConversationDirectorProcessor(session_state=session_state)
+
+        with patch("processors.conversation_director.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await processor._inject_prefetched_memories("weather forecast")
+
+        mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_injected_memory_marks_accessed_after_push(self, session_state):
+        from services.prefetch import PrefetchCache
+
+        frames = []
+
+        async def capture_frame(frame, direction=None):
+            frames.append(frame)
+
+        cache = PrefetchCache()
+        cache.put("gardening", [{"id": "memory-1", "content": "Loves growing roses."}])
+        session_state["_prefetch_cache"] = cache
+
+        processor = ConversationDirectorProcessor(session_state=session_state)
+        processor.push_frame = capture_frame
+
+        with patch("services.memory.mark_accessed", new_callable=AsyncMock) as mock_mark:
+            await processor._inject_prefetched_memories("gardening")
+            await asyncio.sleep(0.01)
+
+        assert len(frames) == 1
+        mock_mark.assert_awaited_once_with(["memory-1"])
+
 
 class TestDirectorSpeculativeAnalysis:
     """Verify speculative pre-processing behavior."""

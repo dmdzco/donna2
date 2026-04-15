@@ -400,7 +400,7 @@ class ConversationDirectorProcessor(FrameProcessor):
             )
             self._speculative_attempts += 1
 
-            transcript = self._session_state.get("_transcript") or []
+            transcript = self._history_before_current(interim_text)
             task = asyncio.create_task(
                 self._run_speculative_analysis(interim_text, transcript)
             )
@@ -444,7 +444,7 @@ class ConversationDirectorProcessor(FrameProcessor):
         self._last_continuous_speculative_time = now
         self._last_continuous_speculative_text = text
 
-        transcript = self._session_state.get("_transcript") or []
+        transcript = self._history_before_current(text)
         task = asyncio.create_task(
             self._run_query_analysis(text, transcript)
         )
@@ -478,7 +478,7 @@ class ConversationDirectorProcessor(FrameProcessor):
         if self._fallback_analysis_task and not self._fallback_analysis_task.done():
             return
 
-        transcript = self._session_state.get("_transcript") or []
+        transcript = self._history_before_current(user_message)
         self._fallback_analysis_task = asyncio.create_task(
             self._run_fallback_analysis(user_message, transcript)
         )
@@ -573,6 +573,41 @@ class ConversationDirectorProcessor(FrameProcessor):
         intersection = len(words_i & words_f)
         union = len(words_i | words_f)
         return (intersection / union) >= threshold
+
+    @staticmethod
+    def _message_content_text(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " ".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and isinstance(block.get("text"), str)
+            )
+        return str(content)
+
+    def _history_before_current(self, user_text: str) -> list[dict]:
+        """Return transcript history without duplicating the current user turn.
+
+        The tracker sits before the Director, so final TranscriptionFrames are
+        already appended to session_state["_transcript"] when the Director asks
+        Groq/Gemini to analyze "Current message from senior". Passing the raw
+        transcript makes that same message appear twice.
+        """
+        transcript = list(self._session_state.get("_transcript") or [])
+        if not transcript:
+            return transcript
+
+        last = transcript[-1]
+        if not isinstance(last, dict) or last.get("role") != "user":
+            return transcript
+
+        last_text = self._message_content_text(last.get("content"))
+        if self._text_matches(last_text, user_text, threshold=0.8):
+            return transcript[:-1]
+        return transcript
 
     def _strip_ephemeral_messages(self):
         """Remove previous turn's ephemeral injections from LLM context.
@@ -717,16 +752,17 @@ class ConversationDirectorProcessor(FrameProcessor):
 
         cached = cache.get(user_text, threshold=0.3)
 
-        # Brief gate: wait for in-flight prefetch (500ms max)
-        # Prefetch starts on interims while user speaks, so cache is usually
-        # already populated (0ms). The gate catches late-arriving prefetches
-        # and still saves ~4.3s vs a full tool call round-trip.
-        if not cached:
+        # Brief gate: wait only when a relevant prefetch is actually in flight.
+        # If the cache exists but has no relevant entry and nothing relevant is
+        # running, skipping the wait preserves the non-blocking Director path.
+        if not cached and cache.has_relevant_inflight(user_text, threshold=0.3):
             for _ in range(10):  # 10 * 50ms = 500ms
                 await asyncio.sleep(0.05)
                 cached = cache.get(user_text, threshold=0.3)
                 if cached:
                     logger.info("[Director] Memory gate hit after wait")
+                    break
+                if not cache.has_relevant_inflight(user_text, threshold=0.3):
                     break
 
         if not cached:
@@ -734,6 +770,7 @@ class ConversationDirectorProcessor(FrameProcessor):
 
         # Format memories for injection, suppressing recent repeats.
         memory_lines: list[str] = []
+        injected_ids: list[str] = []
         injected_turns = self._session_state.setdefault("_injected_memory_turns", {})
         current_turn = self._turn_count
         explicit_memory_request = bool(
@@ -764,6 +801,8 @@ class ConversationDirectorProcessor(FrameProcessor):
             ):
                 continue
             memory_lines.append(content)
+            if result.get("id"):
+                injected_ids.append(result["id"])
             injected_turns[memory_key] = current_turn
 
         if not memory_lines:
@@ -792,6 +831,15 @@ class ConversationDirectorProcessor(FrameProcessor):
                 run_llm=False,
             )
         )
+        if injected_ids:
+            asyncio.create_task(self._mark_injected_memories_accessed(injected_ids))
+
+    async def _mark_injected_memories_accessed(self, memory_ids: list[str]) -> None:
+        try:
+            from services.memory import mark_accessed
+            await mark_accessed(memory_ids)
+        except Exception as e:
+            logger.debug("[Director] Failed to mark injected memories accessed: {err}", err=str(e))
 
     async def _inject_tracking_context(self):
         """Inject compact tracking summary so the LLM avoids repetition mid-call."""

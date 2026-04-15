@@ -193,6 +193,27 @@ class TestSearch:
             assert mock_exec.called
             assert "UPDATE memories" in mock_exec.call_args[0][0]
 
+    @pytest.mark.asyncio
+    async def test_search_can_skip_last_accessed_for_prefetch(self):
+        rows = [{"id": "m1", "type": "fact", "content": "test", "importance": 50, "metadata": None, "created_at": datetime.now(timezone.utc), "similarity": 0.8}]
+        with patch("services.memory.generate_embedding", new_callable=AsyncMock, return_value=[0.1]), \
+             patch("db.query_many", new_callable=AsyncMock, return_value=rows), \
+             patch("db.execute", new_callable=AsyncMock) as mock_exec:
+            from services.memory import search
+            result = await search("s1", "test", track_access=False)
+            assert len(result) == 1
+            mock_exec.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_mark_accessed_deduplicates_ids(self):
+        with patch("db.execute", new_callable=AsyncMock) as mock_exec:
+            from services.memory import mark_accessed
+            count = await mark_accessed(["m1", "m1", "m2"])
+
+        assert count == 2
+        mock_exec.assert_awaited_once()
+        assert mock_exec.await_args.args[1:] == ("m1", "m2")
+
 
 class TestBuildContext:
     @pytest.mark.asyncio

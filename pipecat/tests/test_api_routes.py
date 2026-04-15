@@ -2,6 +2,7 @@
 
 import base64
 import os
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
@@ -88,6 +89,45 @@ class TestHealthEndpoint:
 
 
 class TestVoiceAnswerEndpoint:
+    def test_cached_news_requires_fresh_timestamp(self):
+        from api.routes.voice import _cached_news_context_from_senior
+
+        senior = {
+            "id": "senior-1",
+            "cached_news": "- Fresh gardening story",
+            "cached_news_updated_at": datetime.now(timezone.utc) - timedelta(hours=48),
+        }
+
+        assert _cached_news_context_from_senior(senior) is None
+
+    def test_cached_news_selects_fresh_stories(self):
+        from api.routes.voice import _cached_news_context_from_senior
+
+        senior = {
+            "id": "senior-1",
+            "cached_news": "- Fresh gardening story",
+            "cached_news_updated_at": datetime.now(timezone.utc),
+            "interests": ["gardening"],
+            "interest_scores": {"gardening": 5},
+        }
+
+        with patch("services.news.select_stories_for_call", return_value="selected news") as mock_select:
+            assert _cached_news_context_from_senior(senior) == "selected news"
+
+        mock_select.assert_called_once()
+
+    def test_cached_news_must_be_from_senior_local_today(self):
+        from api.routes.voice import _cached_news_context_from_senior
+
+        senior = {
+            "id": "senior-1",
+            "timezone": "America/New_York",
+            "cached_news": "- Yesterday's gardening story",
+            "cached_news_updated_at": datetime.now(timezone.utc) - timedelta(days=1),
+        }
+
+        assert _cached_news_context_from_senior(senior) is None
+
     @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
     @patch("services.scheduler.get_prefetched_context", return_value=None)
     @patch("services.seniors.find_any_by_phone", new_callable=AsyncMock, return_value=None)

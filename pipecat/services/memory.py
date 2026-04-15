@@ -167,12 +167,14 @@ async def store(
 async def search(
     senior_id: str | None, query: str, limit: int = 5, min_similarity: float = 0.45,
     prospect_id: str | None = None,
+    track_access: bool = True,
 ) -> list[dict]:
     """Semantic search — find memories similar to *query*.
 
     Pass senior_id for subscriber memories, prospect_id for onboarding caller memories.
+    Set track_access=False for speculative searches that may never be shown.
     """
-    from db import query_many, execute
+    from db import query_many
 
     owner_col = "senior_id" if senior_id else "prospect_id"
     owner_id = senior_id or prospect_id
@@ -199,14 +201,8 @@ async def search(
         limit,
     )
 
-    if rows:
-        ids = [r["id"] for r in rows]
-        # Update last_accessed_at for retrieved memories
-        placeholders = ", ".join(f"${i+1}" for i in range(len(ids)))
-        await execute(
-            f"UPDATE memories SET last_accessed_at = NOW() WHERE id IN ({placeholders})",
-            *ids,
-        )
+    if rows and track_access:
+        await mark_accessed([r["id"] for r in rows])
 
     # Decrypt content: prefer encrypted column, fall back to original
     for r in rows:
@@ -215,6 +211,22 @@ async def search(
         r.pop("content_encrypted", None)
 
     return rows
+
+
+async def mark_accessed(memory_ids: list[str]) -> int:
+    """Update last_accessed_at for memories that were actually used."""
+    from db import execute
+
+    unique_ids = [mid for mid in dict.fromkeys(memory_ids or []) if mid]
+    if not unique_ids:
+        return 0
+
+    placeholders = ", ".join(f"${i+1}" for i in range(len(unique_ids)))
+    await execute(
+        f"UPDATE memories SET last_accessed_at = NOW() WHERE id IN ({placeholders})",
+        *unique_ids,
+    )
+    return len(unique_ids)
 
 
 async def get_recent(senior_id: str, limit: int = 10) -> list[dict]:

@@ -35,7 +35,8 @@ async def find_by_phone(phone: str, *, active_only: bool = True) -> dict | None:
                   medical_notes_encrypted, preferred_call_times_encrypted,
                   city, state, zip_code, additional_info,
                   additional_info_encrypted, call_context_snapshot,
-                  call_context_snapshot_encrypted, cached_news, call_settings,
+                  call_context_snapshot_encrypted, cached_news,
+                  cached_news_updated_at, call_settings,
                   interest_scores
            FROM seniors WHERE phone = $1""" + active_clause,
         normalized,

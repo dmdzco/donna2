@@ -9,12 +9,17 @@
  * - Critical memories (Tier 1)
  * - Important memories (with decay applied)
  * - Pre-generated greeting (templated with rotation)
+ * - Interest-based news, persisted to seniors.cached_news for Pipecat calls
  */
 
 import { memoryService } from './memory.js';
 import { conversationService } from './conversations.js';
 import { seniorService } from './seniors.js';
 import { greetingService } from './greetings.js';
+import { newsService } from './news.js';
+import { db } from '../db/client.js';
+import { seniors as seniorsTable } from '../db/schema.js';
+import { eq } from 'drizzle-orm';
 import { maskName } from '../lib/sanitize.js';
 
 // In-memory cache (could be Redis for multi-instance deployments)
@@ -193,13 +198,40 @@ async function prefetchAndCache(seniorId) {
       return null;
     }
 
+    const newsPromise = senior.interests?.length
+      ? newsService.getNewsForSenior(senior.interests, 8).catch((error) => {
+          console.error(`[ContextCache] News prefetch failed for ${seniorId.slice(0, 8)}:`, error.message);
+          return null;
+        })
+      : Promise.resolve(null);
+
     // Fetch all context in parallel (including recent memories for greeting interest weighting)
-    const [summaries, criticalMemories, importantMemories, recentMemories] = await Promise.all([
+    const [
+      summaries,
+      criticalMemories,
+      importantMemories,
+      recentMemories,
+      newsContextFull,
+    ] = await Promise.all([
       conversationService.getRecentSummaries(seniorId, 3),
       memoryService.getCritical(seniorId, 3),
       memoryService.getImportant(seniorId, 5),
-      memoryService.getRecent(seniorId, 10)
+      memoryService.getRecent(seniorId, 10),
+      newsPromise
     ]);
+
+    if (newsContextFull) {
+      await db.update(seniorsTable)
+        .set({
+          cachedNews: newsContextFull,
+          cachedNewsUpdatedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(seniorsTable.id, seniorId));
+      console.log(`[ContextCache] Persisted cached news for ${maskName(senior.name)}`);
+    } else if (senior.interests?.length) {
+      console.warn(`[ContextCache] No fresh news cached for ${maskName(senior.name)}`);
+    }
 
     // Get last call summary for context-aware greetings
     const lastCallSummary = summaries || null;
@@ -241,6 +273,9 @@ async function prefetchAndCache(seniorId) {
       importantMemories,
       memoryContext: memoryParts.join('\n'),
       greeting,
+      newsContext: newsContextFull,
+      newsContextFull,
+      newsCachedAt: newsContextFull ? Date.now() : null,
       lastGreetingIndex: templateIndex,
       cachedAt: Date.now(),
       expiresAt: Date.now() + CACHE_TTL_MS

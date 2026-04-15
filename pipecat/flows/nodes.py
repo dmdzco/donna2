@@ -126,6 +126,17 @@ def _build_senior_context(session_state: dict) -> str:
     if summaries:
         parts.append(f"\nRecent calls:\n{summaries}")
 
+    recent_turns = session_state.get("recent_turns")
+    if recent_turns:
+        turns_text = str(recent_turns)
+        if len(turns_text) > 1600:
+            turns_text = turns_text[:1600].rsplit("\n", 1)[0] + "\n..."
+        parts.append(
+            "\nRecent turn excerpts from previous calls:\n"
+            f"{turns_text}\n"
+            "Use these for continuity. Respect any dates or time labels exactly."
+        )
+
     todays_ctx = session_state.get("todays_context")
     if todays_ctx:
         parts.append(f"\n{todays_ctx}")
@@ -140,8 +151,12 @@ def _build_senior_context(session_state: dict) -> str:
     # --- Pre-cached news (fetched daily based on interests) ---
     news_ctx = session_state.get("news_context")
     if news_ctx:
-        parts.append(f"\n{news_ctx}")
-        logger.info("System prompt includes news context ({n} chars)", n=len(news_ctx))
+        parts.append(
+            "\nFresh interest-based news is available for this call. "
+            "Bring it up only if the conversation is neutral or positive, "
+            "the topic is winding down, or they ask about current events."
+        )
+        logger.info("System prompt notes fresh news availability ({n} chars)", n=len(news_ctx))
 
     # --- Insights from last call analysis ---
     analysis = session_state.get("last_call_analysis") or {}

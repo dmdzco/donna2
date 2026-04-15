@@ -20,7 +20,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from loguru import logger
 from db import execute
-from lib.sanitize import mask_name
 
 # In-memory cache: senior_id -> cached context dict
 _cache: dict[str, dict] = {}
@@ -55,7 +54,7 @@ def _get_local_hour(tz_name: str | None) -> int:
         tz = ZoneInfo(tz_name or "America/New_York")
         return datetime.now(tz).hour
     except Exception:
-        return datetime.utcnow().hour - 5
+        return datetime.now(ZoneInfo("America/New_York")).hour
 
 
 def _select_interest(
@@ -136,16 +135,19 @@ async def _fetch_conversations_consolidated(senior_id: str, limit: int = 3) -> t
     Consolidates get_recent_summaries + get_recent_turns into a single DB query.
     """
     from db import query_many
+    from lib.encryption import decrypt, decrypt_json
     import json
     import math
     from datetime import datetime, timezone
 
     rows = await query_many(
-        """SELECT summary, transcript, started_at, duration_seconds
+        """SELECT summary, summary_encrypted, transcript, transcript_encrypted,
+                  started_at, duration_seconds
            FROM conversations
            WHERE senior_id = $1
              AND status = 'completed'
-             AND (summary IS NOT NULL OR transcript IS NOT NULL)
+             AND (summary IS NOT NULL OR summary_encrypted IS NOT NULL
+                  OR transcript IS NOT NULL OR transcript_encrypted IS NOT NULL)
            ORDER BY started_at DESC
            LIMIT $2""",
         senior_id,
@@ -170,10 +172,11 @@ async def _fetch_conversations_consolidated(senior_id: str, limit: int = 3) -> t
     # Build summaries text
     summary_lines = []
     for row in rows:
-        if row.get("summary"):
+        summary = decrypt(row.get("summary_encrypted")) if row.get("summary_encrypted") else row.get("summary")
+        if summary and summary != "[encrypted]":
             time_ago = _time_label(row["started_at"])
             dur = f"({round(row['duration_seconds'] / 60)} min)" if row.get("duration_seconds") else ""
-            summary_lines.append(f"- {time_ago} {dur}: {row['summary']}")
+            summary_lines.append(f"- {time_ago} {dur}: {summary}")
     summaries_text = "\n".join(summary_lines) if summary_lines else None
 
     # Build turns text
@@ -183,7 +186,11 @@ async def _fetch_conversations_consolidated(senior_id: str, limit: int = 3) -> t
     max_turns = 20
     for row in rows:
         try:
-            transcript = row.get("transcript")
+            transcript = (
+                decrypt_json(row.get("transcript_encrypted"))
+                if row.get("transcript_encrypted")
+                else row.get("transcript")
+            )
             if not transcript:
                 continue
             if isinstance(transcript, str):
@@ -268,7 +275,7 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
 
         senior = await get_by_id(senior_id)
         if not senior:
-            logger.info("Senior {sid} not found, skipping", sid=senior_id)
+            logger.info("Senior {sid} not found, skipping", sid=str(senior_id)[:8])
             return None
 
         # Consolidated fetches: 2 queries instead of 5
@@ -302,9 +309,9 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
                         news_context_full,
                         senior_id,
                     )
-                    logger.info("Persisted cached news for {name}", name=mask_name(senior.get("name")))
+                    logger.info("Persisted cached news for senior_id={sid}", sid=str(senior_id)[:8])
                 except Exception as e:
-                    logger.error("Failed to persist news for {sid}: {err}", sid=senior_id, err=str(e))
+                    logger.error("Failed to persist news for senior_id={sid}: {err}", sid=str(senior_id)[:8], err=str(e))
 
         # Generate greeting using the greeting rotation service
         greeting_result = get_greeting(
@@ -319,11 +326,10 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
         )
 
         logger.info(
-            "Generated greeting for {name}: period={p}, template={t}, interest={i}",
-            name=senior.get("name"),
+            "Generated greeting for senior_id={sid}: period={p}, template={t}",
+            sid=str(senior_id)[:8],
             p=greeting_result["period"],
             t=greeting_result["template_index"],
-            i=greeting_result.get("selected_interest") or "none",
         )
 
         # Build memory context string
@@ -370,11 +376,11 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
         _cache[senior_id] = cached
 
         elapsed = round((time.time() - start) * 1000)
-        logger.info("Pre-cached context for {name} in {ms}ms", name=mask_name(senior.get("name")), ms=elapsed)
+        logger.info("Pre-cached context for senior_id={sid} in {ms}ms", sid=str(senior_id)[:8], ms=elapsed)
         return cached
 
     except Exception as e:
-        logger.error("Error pre-caching {sid}: {err}", sid=senior_id, err=str(e))
+        logger.error("Error pre-caching {sid}: {err}", sid=str(senior_id)[:8], err=str(e))
         return None
 
 
@@ -386,11 +392,11 @@ def get_cache(senior_id: str) -> dict | None:
 
     if time.time() > cached["expires_at"]:
         del _cache[senior_id]
-        logger.info("Cache expired for {sid}", sid=senior_id)
+        logger.info("Cache expired for {sid}", sid=str(senior_id)[:8])
         return None
 
     age_min = round((time.time() - cached["cached_at"]) / 60)
-    logger.info("Cache hit for {sid} (age: {age} min)", sid=senior_id, age=age_min)
+    logger.info("Cache hit for {sid} (age: {age} min)", sid=str(senior_id)[:8], age=age_min)
     return cached
 
 
@@ -398,7 +404,7 @@ def clear_cache(senior_id: str) -> None:
     """Clear cache for a senior (e.g., after call ends and new memories stored)."""
     if senior_id in _cache:
         del _cache[senior_id]
-        logger.info("Cleared cache for {sid}", sid=senior_id)
+        logger.info("Cleared cache for {sid}", sid=str(senior_id)[:8])
 
 
 def clear_all() -> None:

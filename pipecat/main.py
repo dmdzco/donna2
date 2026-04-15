@@ -19,11 +19,29 @@ import time
 import warnings
 
 from loguru import logger
+from config import assert_production_config, is_production_environment
 
 # Configure log level: INFO in production, DEBUG locally
-_log_level = os.getenv("LOG_LEVEL", "INFO" if os.getenv("RAILWAY_PUBLIC_DOMAIN") else "DEBUG")
+_log_level = os.getenv("LOG_LEVEL", "INFO" if is_production_environment() else "DEBUG")
+
+
+def _safe_log_filter(record) -> bool:
+    """Suppress third-party DEBUG logs that can include transcripts or credentials."""
+    name = record.get("name") or ""
+    if record["level"].no < logger.level("INFO").no and name.startswith("pipecat."):
+        return False
+
+    message = record.get("message") or ""
+    sensitive_patterns = (
+        "Generating chat from LLM-specific context",
+        "Generating TTS [",
+        "Parsed - Type:",
+    )
+    return not any(pattern in message for pattern in sensitive_patterns)
+
+
 logger.remove()
-logger.add(sys.stderr, level=_log_level)
+logger.add(sys.stderr, level=_log_level, filter=_safe_log_filter)
 
 # Route Python warnings through loguru instead of raw stderr.
 # This gives them a proper @level tag in Railway so they can be filtered.
@@ -62,7 +80,7 @@ try:
             traces_sample_rate=0,
             send_default_pii=False,
             before_send=_sentry_before_send,
-            environment="production" if os.getenv("RAILWAY_PUBLIC_DOMAIN") else "development",
+            environment="production" if is_production_environment() else "development",
         )
         logger.info("Sentry initialized")
 except ImportError:
@@ -83,7 +101,12 @@ from api.routes.data import router as data_router
 from api.routes.export import router as export_router
 from api.routes.metrics import router as metrics_router
 from api.routes.voice import router as voice_router, call_metadata
-from bot import run_bot
+from bot import (
+    WebSocketAuthError,
+    authenticate_websocket_call,
+    prepare_websocket_call,
+    run_bot,
+)
 
 app = FastAPI(title="Donna Pipecat", version="0.1.0")
 
@@ -125,7 +148,7 @@ ALLOWED_ORIGINS = [
     "https://admin-v2-liart.vercel.app",
     os.getenv("ADMIN_URL", ""),
 ]
-if not os.getenv("RAILWAY_PUBLIC_DOMAIN"):
+if not is_production_environment():
     ALLOWED_ORIGINS.extend(["http://localhost:5173", "http://localhost:3000"])
 
 app.add_middleware(
@@ -202,22 +225,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await websocket.accept()
 
-    # Admission control: reject if at capacity
-    if _call_semaphore.locked():
-        logger.warning("Rejected call: at capacity ({max})", max=MAX_CALLS)
-        await websocket.close(code=1013)  # Try Again Later
-        return
-
-    await _call_semaphore.acquire()
-    _active_calls += 1
-    if _active_calls > _peak_calls:
-        _peak_calls = _active_calls
-
-    # Track this task for graceful shutdown draining
-    current_task = asyncio.current_task()
-    if current_task:
-        register_call_task(current_task)
-
     session_state = {
         "senior_id": None,
         "senior": None,
@@ -236,8 +243,57 @@ async def websocket_endpoint(websocket: WebSocket):
         "previous_calls_summary": None,
         "todays_context": None,
         "_transcript": [],
+        "_full_transcript": [],
+        "_transcript_persistence_enabled": True,
         "_call_metadata": call_metadata,
     }
+
+    try:
+        prepared_call = await prepare_websocket_call(
+            websocket,
+            session_state,
+            consume_token=False,
+        )
+    except WebSocketAuthError as exc:
+        logger.warning("[{cs}] Rejected WebSocket before capacity: {reason}",
+                       cs=session_state.get("call_sid") or "unknown", reason=str(exc))
+        await websocket.close(code=1008)
+        return
+    except Exception as exc:
+        logger.warning("[{cs}] WebSocket handshake failed before capacity: {reason}",
+                       cs=session_state.get("call_sid") or "unknown", reason=str(exc))
+        await websocket.close(code=1008)
+        return
+
+    # Admission control: reject valid calls if no AI call slot is immediately free.
+    try:
+        await asyncio.wait_for(_call_semaphore.acquire(), timeout=0.01)
+    except asyncio.TimeoutError:
+        logger.warning("Rejected authenticated call: at capacity ({max})", max=MAX_CALLS)
+        await websocket.close(code=1013)  # Try Again Later
+        return
+
+    try:
+        prepared_call["metadata"] = await authenticate_websocket_call(
+            prepared_call["call_data"],
+            session_state,
+            consume_token=True,
+        )
+    except WebSocketAuthError as exc:
+        logger.warning("[{cs}] WebSocket auth failed at token consume: {reason}",
+                       cs=session_state.get("call_sid") or "unknown", reason=str(exc))
+        _call_semaphore.release()
+        await websocket.close(code=1008)
+        return
+
+    _active_calls += 1
+    if _active_calls > _peak_calls:
+        _peak_calls = _active_calls
+
+    # Track this task for graceful shutdown draining
+    current_task = asyncio.current_task()
+    if current_task:
+        register_call_task(current_task)
 
     try:
         import sentry_sdk as _sentry
@@ -247,7 +303,7 @@ async def websocket_endpoint(websocket: WebSocket):
         pass
 
     try:
-        await run_bot(websocket, session_state)
+        await run_bot(websocket, session_state, prepared_call=prepared_call)
     except Exception as e:
         import traceback as _tb
         logger.error("Pipeline error: {err}\n{tb}", err=str(e), tb=_tb.format_exc())
@@ -275,6 +331,8 @@ async def websocket_endpoint(websocket: WebSocket):
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup():
+    assert_production_config()
+
     port = os.getenv("PORT", "7860")
     logger.info(
         "Donna Pipecat starting on port {port} (max_concurrent_calls={max})",

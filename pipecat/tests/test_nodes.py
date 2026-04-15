@@ -7,6 +7,7 @@ from flows.nodes import (
     build_main_node,
     build_winding_down_node,
     build_closing_node,
+    build_onboarding_closing_node,
     build_initial_node,
     _build_senior_context,
     _build_reminder_context,
@@ -200,6 +201,12 @@ class TestWindingDownNode:
         assert "mark_reminder_acknowledged" in func_names
         assert "transition_to_closing" in func_names
 
+    def test_transition_node_has_no_system_prompt(self):
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_winding_down_node(state, tools)
+        assert node["role_messages"] == []
+
 
 class TestClosingNode:
     def test_node_has_end_conversation(self):
@@ -218,6 +225,24 @@ class TestClosingNode:
         node = build_closing_node(state)
         task_content = node["task_messages"][0]["content"]
         assert "Margaret" in task_content
+
+    def test_transition_node_has_no_system_prompt(self):
+        state = _make_session_state()
+        node = build_closing_node(state)
+        assert node["role_messages"] == []
+
+
+class TestOnboardingClosingNode:
+    def test_transition_node_has_no_system_prompt(self):
+        state = _make_session_state(prospect={"learned_name": "Alex"})
+        node = build_onboarding_closing_node(state)
+        assert node["role_messages"] == []
+
+    def test_node_has_end_conversation(self):
+        state = _make_session_state(prospect={"learned_name": "Alex"})
+        node = build_onboarding_closing_node(state)
+        post_actions = node.get("post_actions", [])
+        assert any(a["type"] == "end_conversation" for a in post_actions)
 
 
 class TestReminderNode:

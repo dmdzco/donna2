@@ -2,7 +2,7 @@
 
 > AI companion that makes daily phone calls to elderly people. Companionship, reminders, and peace of mind for caregivers.
 
-*Last updated: March 2026*
+*Last updated: April 2026*
 
 ---
 
@@ -63,10 +63,10 @@ No credit card required. Enough for ~12 calls.
 The senior needs time to build a relationship with Donna. On call 1-3, they're skeptical. By call 10-12, Donna knows their grandson's name, remembers their garden, asks about their doctor's appointment. That emotional bond is what converts.
 
 - **If they don't use it**: Costs us nothing. They self-selected out.
-- **If they use 30-60 min**: Light user. May convert, may not. Cost: $3-5.
-- **If they hit the cap**: Hooked. Senior is asking "when is Donna calling again?" Cost: $8-10.
+- **If they use 30-60 min**: Light user. May convert, may not. Cost: ~$2-4 current stack.
+- **If they hit the cap**: Hooked. Senior is asking "when is Donna calling again?" Cost: ~$8 current stack, ~$4-6 after TTS/carrier optimization.
 
-**No free tier.** Every call costs ~$0.50 in AI/voice infrastructure. A perpetual free user at 130 min/week costs $35/month — more than the subscription price. Free tiers destroy gross margins.
+**No free tier.** A 10-minute call currently costs about ~$0.70 in AI/voice infrastructure, mostly TTS and telephony. A perpetual free user at 130 min/week costs about ~$39/month on the current stack — more than the subscription price. Free tiers destroy gross margins.
 
 ### Conversion mechanism
 
@@ -78,7 +78,7 @@ The app sends the caregiver a notification:
 The **senior** sells the product to the **caregiver**. No ads, no hard sell. "Mom asked me when Donna is calling again" is the conversion event.
 
 **Expected metrics**:
-- Average trial cost: ~$5
+- Average trial cost: ~$5-8 depending on minutes used and TTS/carrier stack
 - Trial → paid conversion: 30-40% (seniors who hit 80+ minutes convert at 60%+)
 - Effective CAC: $5-12
 - No paid acquisition needed in early stages — word of mouth among caregivers
@@ -91,24 +91,34 @@ The **senior** sells the product to the **caregiver**. No ads, no hard sell. "Mo
 
 | Service | Cost |
 |---------|------|
-| TTS (Cartesia Sonic 3) | $0.16 |
-| Voice carrier (Twilio → Telnyx) | $0.22 → $0.02 |
-| Voice LLM (Claude Sonnet 4.5) | $0.07 |
-| STT (Deepgram Nova 3) | $0.04 |
-| Director LLM (Groq) | $0.005 |
-| Other (embeddings, search, analysis) | $0.005 |
-| **Total per call** | **$0.50 (current) → $0.30 (optimized)** |
+| TTS (ElevenLabs default) | ~$0.30 |
+| Voice carrier + stream (Twilio) | ~$0.18 |
+| Voice LLM (Claude Sonnet 4.5, cached) | ~$0.08 |
+| STT (Deepgram Nova 3) | ~$0.08 |
+| News/search + caregiver SMS | ~$0.04 |
+| Director/post-call/memory/compute | ~$0.02 |
+| **Total per call** | **~$0.70 current → ~$0.36-0.49 optimized** |
 
 ### Per-User Monthly Cost
 
-| Stack | COGS/user/mo | Gross margin at $29 |
-|-------|-------------|-------------------|
-| Current (Twilio + Cartesia) | ~$25 | 14% |
-| With Telnyx | ~$15 | 48% |
-| With Telnyx + cheaper TTS | ~$9 | 69% |
-| Target (optimized) | ~$8-9 | **70%+** |
+| Stack | 60 min/week COGS | 130 min/week COGS | Gross margin at $29, 60 min/week |
+|-------|------------------|-------------------|-------------------------------|
+| Current (Twilio + ElevenLabs) | ~$18 | ~$39 | ~37% |
+| Twilio + cheaper TTS | ~$13-15 | ~$27-32 | ~48-56% |
+| Telnyx + cheaper TTS | ~$9-12 | ~$20-25 | ~60-68% |
+| Target (optimized) | ~$9-10 | ~$20 | **65%+ at 60 min/week** |
 
-**Critical path**: Telnyx migration + TTS optimization gets gross margins from 14% → 70%. This is the difference between a fundable and unfundable business.
+### Margin Upside
+
+| Monthly price | 60 min/week user | 100 min/week user | 130 min/week user |
+|---------------|------------------|-------------------|-------------------|
+| $29 | ~68-75% optimized margin | ~46-58% optimized margin | ~30-46% optimized margin |
+| $39 | ~76-81% optimized margin | ~60-69% optimized margin | ~48-60% optimized margin |
+| $49 | ~81-85% optimized margin | ~68-75% optimized margin | ~59-68% optimized margin |
+
+The investor-safe target is **65-75% gross margin on normal 60 min/week consumer usage** after TTS and carrier optimization. Heavy 130 min/week users should be on a higher plan, usage allowance, or B2B contract so the product does not become a negative-margin unlimited calling plan.
+
+**Critical path**: TTS optimization first, then carrier optimization when call volume justifies migration risk. The $29 consumer plan is fundable only if average usage stays around 60 min/week or the optimized stack is live. Heavy 130 min/week users need a higher plan, usage allowance, or B2B pricing.
 
 ---
 
@@ -165,14 +175,14 @@ Pre-seed money is expensive (20-25% dilution for $750K-1.5M) and unnecessary if 
 | Paying users | 200-500 |
 | ARR | $70-170K |
 | Monthly churn | <5% |
-| Gross margin | 65%+ |
+| Gross margin | 65%+ after optimized TTS/carrier stack |
 | MoM growth | 15-20% |
 | Trial → paid conversion | 30%+ |
 | Cohort retention (3-mo) | 85%+ |
 
 **Raise**: $3-5M at $15-25M post-money valuation.
 
-**The pitch**: "200 families are paying us $29/month. Monthly churn is 4%. Seniors talk to Donna for 10 minutes a day. Here's a recording of Margaret telling Donna about her grandson's baseball game. Margaret's daughter hasn't missed a summary in 3 months. Our CAC is $5."
+**The pitch**: "200 families are paying us $29/month. Monthly churn is 4%. Seniors talk to Donna for 10 minutes a day. We have the optimized voice stack live, so usage scales with healthy margins. Here's a recording of Margaret telling Donna about her grandson's baseball game. Margaret's daughter hasn't missed a summary in 3 months. Our CAC is $5."
 
 ### Series A at $1M+ ARR
 
@@ -181,7 +191,7 @@ Pre-seed money is expensive (20-25% dilution for $750K-1.5M) and unnecessary if 
 | Users | 2,000-5,000 |
 | ARR | $1-2M |
 | Monthly churn | <4% |
-| Gross margin | 70%+ |
+| Gross margin | 70%+ with optimized stack and plan-level usage controls |
 | B2B channel started | Yes |
 | Team | 5-8 people |
 
@@ -222,17 +232,17 @@ Real-time voice pipeline built on Pipecat (open source):
 
 ```
 Phone call → Deepgram STT → Quick Observer (regex) → Conversation Director (Groq)
-  → Claude Sonnet 4.5 → Cartesia TTS → Phone call
+  → Claude Sonnet 4.5 → ElevenLabs TTS by default (Cartesia optional) → Phone call
 
-Background: Memory search, web search, call analysis, caregiver notifications
+Background: Memory prefetch, Claude web_search tool when needed, call analysis, caregiver notifications
 ```
 
-- **4 LLM tools** available to Claude during calls (search_memories, web_search, mark_reminder, check_caregiver_notes)
+- **2 active LLM tools** available to Claude during subscribed calls (`web_search`, `mark_reminder_acknowledged`); memories and caregiver notes are prefetched/injected outside Claude tool calls
 - **Semantic memory** with pgvector — Donna remembers across calls
 - **2-layer observer architecture** — instant regex patterns + background LLM analysis
 - **Post-call pipeline** — analysis, memory extraction, caregiver SMS, snapshot rebuild
 
-Full technical docs: [pipecat/docs/ARCHITECTURE.md](pipecat/docs/ARCHITECTURE.md) and [CLAUDE.md](CLAUDE.md)
+Full technical docs: [pipecat/docs/ARCHITECTURE.md](../pipecat/docs/ARCHITECTURE.md) and [CLAUDE.md](../CLAUDE.md)
 
 ---
 

@@ -1,6 +1,6 @@
 import "../global.css";
 import { useEffect } from "react";
-import { Stack, useRouter, useSegments } from "expo-router";
+import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";
 import { useProfile } from "@/src/hooks/useProfile";
 import { ApiError } from "@/src/lib/api";
@@ -34,6 +34,7 @@ function AuthGuard() {
   const { isLoaded, isSignedIn } = useAuth();
   const { data: profile, isLoading: profileLoading, isError: profileError, error: profileErrorObj } = useProfile();
   const segments = useSegments();
+  const pathname = usePathname();
   const router = useRouter();
 
   useEffect(() => {
@@ -42,20 +43,17 @@ function AuthGuard() {
     const firstSegment = segments?.[0];
     const inTabsGroup = firstSegment === "(tabs)";
     const inAuthGroup = firstSegment === "(auth)";
-    const inOnboardingGroup = firstSegment === "(onboarding)";
-    const isLanding = !firstSegment || firstSegment === "";
+    const isLanding = pathname === "/";
     const hasCompletedOnboarding = (profile?.seniors?.length ?? 0) > 0;
 
     if (!isSignedIn && inTabsGroup) {
       router.replace("/");
     } else if (isSignedIn && (isLanding || inAuthGroup)) {
-      // New user or returning: check if onboarding is done
       if (!profileLoading && profileError) {
         const needsOnboarding = profileErrorObj instanceof ApiError && profileErrorObj.needsOnboarding;
         if (needsOnboarding) {
           router.replace("/(onboarding)/step1" as any);
         } else {
-          // Other API error — let them into tabs
           router.replace("/(tabs)");
         }
       } else if (!profileLoading && !hasCompletedOnboarding) {
@@ -64,10 +62,9 @@ function AuthGuard() {
         router.replace("/(tabs)");
       }
     } else if (isSignedIn && inTabsGroup && !profileLoading && !profileError && !hasCompletedOnboarding) {
-      // User somehow got into tabs without completing onboarding
       router.replace("/(onboarding)/step1" as any);
     }
-  }, [isLoaded, isSignedIn, segments, profile, profileLoading, profileError, profileErrorObj]);
+  }, [isLoaded, isSignedIn, pathname, segments, profile, profileLoading, profileError, profileErrorObj]);
 
   // Register for push notifications once the user is signed in
   useEffect(() => {
@@ -75,7 +72,6 @@ function AuthGuard() {
 
     registerForPushNotifications().then((token) => {
       if (token) {
-        console.log("Push token:", token);
         // TODO: Send token to backend when endpoint exists
         // api.notifications.registerPushToken(token);
       }

@@ -6,6 +6,7 @@ daily context save, reminder cleanup, cache clearing.
 """
 
 import pytest
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 from processors.conversation_tracker import ConversationTrackerProcessor
@@ -34,7 +35,7 @@ class TestPostCallProcessing:
              patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock) as mock_update_scores, \
              patch("services.daily_context.save_call_context", new_callable=AsyncMock) as mock_daily, \
              patch("services.context_cache.clear_cache") as mock_cache_clear, \
-             patch("services.scheduler.clear_reminder_context") as mock_sched_clear:
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock) as mock_sched_clear:
 
             mock_analyze.return_value = {
                     "mood": "positive",
@@ -82,7 +83,8 @@ class TestPostCallProcessing:
              patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
              patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
              patch("services.context_cache.clear_cache"), \
-             patch("services.scheduler.clear_reminder_context"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
+             patch("services.reminder_delivery.get_delivery_status", new_callable=AsyncMock, return_value={"id": "delivery-001", "status": "delivered"}), \
              patch("services.reminder_delivery.mark_call_ended_without_acknowledgment", new_callable=AsyncMock) as mock_no_ack:
 
             mock_analyze.return_value = {
@@ -95,6 +97,114 @@ class TestPostCallProcessing:
             await run_post_call(reminder_session_state, tracker, duration_seconds=30)
 
             mock_no_ack.assert_awaited_once_with("delivery-001")
+
+    @pytest.mark.asyncio
+    async def test_post_call_rechecks_reminder_status_even_when_locally_delivered(self, reminder_session_state):
+        """Local reminder tracking should not suppress DB retry cleanup."""
+        reminder_session_state["_transcript"] = [
+            {"role": "assistant", "content": "Remember to take your metformin."},
+        ]
+        reminder_session_state["reminders_delivered"] = {"rem-001", "Take metformin"}
+
+        tracker = ConversationTrackerProcessor(session_state=reminder_session_state)
+
+        with patch("services.conversations.complete", new_callable=AsyncMock), \
+             patch("services.call_analysis.analyze_completed_call", new_callable=AsyncMock, return_value=None), \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock), \
+             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={}), \
+             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
+             patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
+             patch("services.context_cache.clear_cache"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
+             patch("services.reminder_delivery.get_delivery_status", new_callable=AsyncMock, return_value={"id": "delivery-001", "status": "delivered"}), \
+             patch("services.reminder_delivery.mark_call_ended_without_acknowledgment", new_callable=AsyncMock) as mock_no_ack:
+
+            from services.post_call import run_post_call
+            await run_post_call(reminder_session_state, tracker, duration_seconds=30)
+
+            mock_no_ack.assert_awaited_once_with("delivery-001")
+
+    @pytest.mark.asyncio
+    async def test_post_call_waits_for_reminder_ack_task_before_status_check(self, reminder_session_state):
+        """A no-latency tool ack still gets a brief post-call settlement window."""
+        reminder_session_state["_transcript"] = [
+            {"role": "assistant", "content": "Remember to take your metformin."},
+        ]
+
+        async def finished_ack():
+            reminder_session_state["_reminder_ack_persisted"] = True
+
+        reminder_session_state["_reminder_ack_task"] = asyncio.create_task(finished_ack())
+        tracker = ConversationTrackerProcessor(session_state=reminder_session_state)
+
+        with patch("services.conversations.complete", new_callable=AsyncMock), \
+             patch("services.call_analysis.analyze_completed_call", new_callable=AsyncMock, return_value=None), \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock), \
+             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={}), \
+             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
+             patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
+             patch("services.context_cache.clear_cache"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
+             patch("services.reminder_delivery.get_delivery_status", new_callable=AsyncMock, return_value={"id": "delivery-001", "status": "acknowledged"}) as mock_status, \
+             patch("services.reminder_delivery.mark_call_ended_without_acknowledgment", new_callable=AsyncMock) as mock_no_ack:
+
+            from services.post_call import run_post_call
+            await run_post_call(reminder_session_state, tracker, duration_seconds=30)
+
+            assert reminder_session_state["_reminder_ack_persisted"] is True
+            mock_status.assert_awaited_once_with("delivery-001")
+            mock_no_ack.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_post_call_marks_caregiver_note_after_assistant_delivery(self, session_state):
+        """Caregiver notes should be marked delivered only with transcript evidence."""
+        session_state["_caregiver_notes_content"] = [
+            {
+                "id": "note-001",
+                "content": "Sarah asked about your knee pain.",
+            }
+        ]
+        session_state["_transcript"] = [
+            {
+                "role": "assistant",
+                "content": "Before I forget, Sarah wanted me to ask about your knee pain.",
+            },
+            {"role": "user", "content": "It's better today."},
+        ]
+
+        tracker = ConversationTrackerProcessor(session_state=session_state)
+
+        with patch("services.conversations.complete", new_callable=AsyncMock), \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock), \
+             patch("services.caregivers.mark_note_delivered", new_callable=AsyncMock) as mock_note, \
+             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={}), \
+             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
+             patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
+             patch("services.context_cache.clear_cache"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
+             patch("lib.growthbook.is_on", return_value=False):
+
+            from services.post_call import run_post_call
+            await run_post_call(session_state, tracker, duration_seconds=60)
+
+            mock_note.assert_awaited_once_with("note-001", "CA-test-001")
+
+    def test_format_concern_for_notification_uses_node_expected_string(self):
+        from services.post_call import _format_concern_for_notification
+
+        concern = {
+            "severity": "high",
+            "description": "Margaret reported feeling dizzy.",
+            "recommended_action": "Caregiver should check in today.",
+            "evidence": "Full transcript evidence should not be needed here.",
+        }
+
+        text = _format_concern_for_notification(concern)
+
+        assert "dizzy" in text
+        assert "check in" in text
+        assert "Full transcript" not in text
+        assert len(text) <= 300
 
     @pytest.mark.asyncio
     async def test_post_call_discovers_new_interests(self, session_state):
@@ -119,7 +229,7 @@ class TestPostCallProcessing:
              patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock) as mock_update_scores, \
              patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
              patch("services.context_cache.clear_cache"), \
-             patch("services.scheduler.clear_reminder_context"):
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock):
 
             mock_analyze.return_value = {
                 "topics_discussed": ["painting"],
@@ -140,6 +250,107 @@ class TestPostCallProcessing:
             mock_update_scores.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_post_call_uses_full_transcript_not_bounded_director_transcript(self, session_state):
+        """Post-call analysis and completion should receive the complete call."""
+        full_transcript = [
+            {"role": "user", "content": "early turn"},
+            {"role": "assistant", "content": "early response"},
+            {"role": "user", "content": "latest turn"},
+        ]
+        session_state["_full_transcript"] = full_transcript
+        session_state["_transcript"] = full_transcript[-1:]
+
+        tracker = ConversationTrackerProcessor(session_state=session_state)
+
+        with patch("services.conversations.complete", new_callable=AsyncMock) as mock_complete, \
+             patch("services.call_analysis.analyze_completed_call", new_callable=AsyncMock) as mock_analyze, \
+             patch("services.call_analysis.save_call_analysis", new_callable=AsyncMock), \
+             patch("services.conversations.update_summary", new_callable=AsyncMock), \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock), \
+             patch("services.interest_discovery.discover_new_interests", return_value=[]), \
+             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={}), \
+             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
+             patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
+             patch("services.context_cache.clear_cache"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
+             patch("services.post_call._trigger_caregiver_notification", new_callable=AsyncMock), \
+             patch("lib.growthbook.is_on", return_value=True):
+
+            mock_analyze.return_value = {"summary": "Full call summary"}
+
+            from services.post_call import run_post_call
+            await run_post_call(session_state, tracker, duration_seconds=120)
+
+            complete_payload = mock_complete.await_args.args[1]
+            assert complete_payload["transcript"] == full_transcript
+            assert mock_analyze.await_args.args[0] == full_transcript
+
+    @pytest.mark.asyncio
+    async def test_post_call_falls_back_to_persisted_transcript(self, session_state):
+        """If in-memory transcript is missing, load the Neon draft by call SID."""
+        persisted_transcript = [
+            {"role": "user", "content": "persisted hello"},
+            {"role": "assistant", "content": "persisted response"},
+        ]
+        session_state["_transcript"] = []
+        session_state["_full_transcript"] = []
+
+        with patch("services.conversations.get_transcript_by_call_sid", new_callable=AsyncMock, return_value=persisted_transcript) as mock_get, \
+             patch("services.conversations.complete", new_callable=AsyncMock) as mock_complete, \
+             patch("services.call_analysis.analyze_completed_call", new_callable=AsyncMock) as mock_analyze, \
+             patch("services.call_analysis.save_call_analysis", new_callable=AsyncMock), \
+             patch("services.conversations.update_summary", new_callable=AsyncMock), \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock), \
+             patch("services.interest_discovery.discover_new_interests", return_value=[]), \
+             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={}), \
+             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
+             patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
+             patch("services.context_cache.clear_cache"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
+             patch("services.post_call._trigger_caregiver_notification", new_callable=AsyncMock), \
+             patch("lib.growthbook.is_on", return_value=True):
+
+            mock_analyze.return_value = {"summary": "Recovered call"}
+
+            from services.post_call import run_post_call
+            await run_post_call(session_state, None, duration_seconds=90)
+
+            mock_get.assert_awaited_once_with("CA-test-001")
+            complete_payload = mock_complete.await_args.args[1]
+            assert complete_payload["transcript"] == persisted_transcript
+            assert mock_analyze.await_args.args[0] == persisted_transcript
+
+    @pytest.mark.asyncio
+    async def test_onboarding_post_call_falls_back_to_persisted_transcript(self, session_state):
+        """Onboarding post-call should also recover from the durable transcript."""
+        persisted_transcript = [
+            {"role": "user", "content": "Hi, I'm Lisa calling about my mom."},
+            {"role": "assistant", "content": "Nice to meet you, Lisa."},
+        ]
+        session_state.update({
+            "call_type": "onboarding",
+            "senior_id": None,
+            "senior": None,
+            "prospect_id": "prospect-001",
+            "_transcript": [],
+            "_full_transcript": [],
+        })
+
+        with patch("services.conversations.get_transcript_by_call_sid", new_callable=AsyncMock, return_value=persisted_transcript) as mock_get, \
+             patch("services.conversations.complete", new_callable=AsyncMock) as mock_complete, \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock) as mock_memory, \
+             patch("services.post_call._summarize_onboarding_call", new_callable=AsyncMock, return_value="Lisa called about her mom."), \
+             patch("services.prospects.extract_prospect_details", new_callable=AsyncMock, return_value={}), \
+             patch("services.prospects.update_after_call", new_callable=AsyncMock):
+
+            from services.post_call import run_post_call
+            await run_post_call(session_state, None, duration_seconds=90)
+
+            mock_get.assert_awaited_once_with("CA-test-001")
+            assert mock_complete.await_args.args[1]["transcript"] == persisted_transcript
+            mock_memory.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_post_call_handles_errors_gracefully(self, session_state):
         """Post-call should not crash if a service fails."""
         session_state["_transcript"] = [
@@ -154,3 +365,54 @@ class TestPostCallProcessing:
             from services.post_call import run_post_call
             # Should not raise
             await run_post_call(session_state, tracker, duration_seconds=10)
+
+    @pytest.mark.asyncio
+    async def test_onboarding_post_call_extracts_prospect_details_once(self, session_state):
+        """Onboarding calls extract prospect details post-call and update once."""
+        session_state.update({
+            "call_type": "onboarding",
+            "senior_id": None,
+            "senior": None,
+            "prospect_id": "prospect-001",
+            "_transcript": [
+                {"role": "user", "content": "Hi, I'm Lisa. I'm calling about my mom, Maria."},
+                {"role": "assistant", "content": "Nice to meet you, Lisa. What is Maria like?"},
+                {"role": "user", "content": "She loves gardening, and I worry she gets lonely."},
+            ],
+        })
+
+        tracker = ConversationTrackerProcessor(session_state=session_state)
+
+        with patch("services.conversations.complete", new_callable=AsyncMock) as mock_complete, \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock) as mock_memory, \
+             patch("services.post_call._summarize_onboarding_call", new_callable=AsyncMock) as mock_summary, \
+             patch("services.prospects.extract_prospect_details", new_callable=AsyncMock) as mock_details, \
+             patch("services.prospects.update_after_call", new_callable=AsyncMock) as mock_update:
+
+            mock_summary.return_value = "Lisa called about her mom Maria, who loves gardening."
+            mock_details.return_value = {
+                "learned_name": "Lisa",
+                "relationship": "daughter",
+                "loved_one_name": "Maria",
+                "caller_context": {
+                    "interests": ["gardening"],
+                    "concerns": ["loneliness"],
+                },
+            }
+
+            from services.post_call import run_post_call
+            await run_post_call(session_state, tracker, duration_seconds=90)
+
+            mock_complete.assert_awaited_once()
+            mock_memory.assert_awaited_once()
+            mock_details.assert_awaited_once()
+            mock_update.assert_awaited_once()
+
+            prospect_id, update_data = mock_update.await_args.args
+            assert prospect_id == "prospect-001"
+            assert update_data["learned_name"] == "Lisa"
+            assert update_data["relationship"] == "daughter"
+            assert update_data["loved_one_name"] == "Maria"
+            assert update_data["caller_context"]["call_summary"].startswith("Lisa called")
+            assert update_data["caller_context"]["interests"] == ["gardening"]
+            assert update_data["caller_context"]["concerns"] == ["loneliness"]

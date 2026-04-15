@@ -14,6 +14,21 @@ export interface Call {
   senior_phone?: string;
   turn_count?: number;
   call_metrics?: CallMetrics | null;
+  analysis?: CallAnalysis | null;
+}
+
+export interface CallAnalysis {
+  id: string;
+  conversationId: string;
+  seniorId: string;
+  summary?: string | null;
+  topics?: string[];
+  engagementScore?: number | null;
+  concerns?: Array<string | Record<string, unknown>>;
+  positiveObservations?: string[];
+  followUpSuggestions?: string[];
+  callQuality?: Record<string, unknown> | null;
+  createdAt?: string;
 }
 
 export interface TimelineEvent {

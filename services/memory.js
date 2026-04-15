@@ -100,7 +100,11 @@ export const memoryService = {
 
     if (duplicates.rows.length > 0) {
       const existing = duplicates.rows[0];
-      log.info('Dedup: similar to existing', { content, similarity: `${(existing.similarity * 100).toFixed(0)}%` });
+      log.info('Dedup: similar to existing', {
+        seniorRef: String(seniorId).slice(0, 8),
+        type,
+        similarity: `${(existing.similarity * 100).toFixed(0)}%`,
+      });
 
       // If new memory is more important, update the existing one
       if (importance > existing.importance) {
@@ -123,7 +127,7 @@ export const memoryService = {
       metadata,
     }).returning();
 
-    log.info('Stored', { seniorId, content });
+    log.info('Stored', { seniorRef: String(seniorId).slice(0, 8), type, contentLength: content.length });
     return memory;
   },
 

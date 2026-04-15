@@ -15,7 +15,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 
 from processors.quick_observer import QuickObserverProcessor
 from processors.conversation_director import ConversationDirectorProcessor
-from processors.conversation_tracker import ConversationTrackerProcessor
+from processors.conversation_tracker import ConversationState, ConversationTrackerProcessor
 from processors.guidance_stripper import GuidanceStripperProcessor
 
 from tests.mocks.mock_llm import MockLLMProcessor, ScriptedResponse
@@ -33,6 +33,7 @@ class TestPipelineComponents:
     input_transport: TestInputTransport
     output_transport: TestOutputTransport
     quick_observer: QuickObserverProcessor
+    user_conversation_tracker: ConversationTrackerProcessor
     conversation_director: ConversationDirectorProcessor
     conversation_tracker: ConversationTrackerProcessor
     guidance_stripper: GuidanceStripperProcessor
@@ -52,9 +53,9 @@ def build_test_pipeline(
     """Build a full test pipeline matching production layout.
 
     Pipeline layout (matches bot.py):
-        input_transport -> quick_observer -> conversation_director ->
-        context_aggregator.user() -> llm -> conversation_tracker ->
-        guidance_stripper -> tts -> output_transport ->
+        input_transport -> quick_observer -> user_conversation_tracker ->
+        conversation_director -> context_aggregator.user() -> llm -> guidance_stripper ->
+        conversation_tracker -> tts -> output_transport ->
         context_aggregator.assistant() -> frame_capture
 
     Returns TestPipelineComponents with references to all components.
@@ -69,7 +70,17 @@ def build_test_pipeline(
 
     quick_observer = QuickObserverProcessor(session_state=session_state)
     conversation_director = ConversationDirectorProcessor(session_state=session_state)
-    conversation_tracker = ConversationTrackerProcessor(session_state=session_state)
+    conversation_state = ConversationState()
+    user_conversation_tracker = ConversationTrackerProcessor(
+        session_state=session_state,
+        state=conversation_state,
+        track_assistant=False,
+    )
+    conversation_tracker = ConversationTrackerProcessor(
+        session_state=session_state,
+        state=conversation_state,
+        track_user=False,
+    )
     guidance_stripper = GuidanceStripperProcessor()
 
     llm = MockLLMProcessor(
@@ -86,6 +97,8 @@ def build_test_pipeline(
     if include_quick_observer:
         processors.append(quick_observer)
 
+    processors.append(user_conversation_tracker)
+
     if include_director:
         processors.append(conversation_director)
 
@@ -93,8 +106,8 @@ def build_test_pipeline(
     # For tests, the MockLLMProcessor handles context accumulation directly.
     processors.extend([
         llm,
-        conversation_tracker,
         guidance_stripper,
+        conversation_tracker,
         tts,
         output_transport,
         frame_capture,
@@ -123,6 +136,7 @@ def build_test_pipeline(
         input_transport=input_transport,
         output_transport=output_transport,
         quick_observer=quick_observer,
+        user_conversation_tracker=user_conversation_tracker,
         conversation_director=conversation_director,
         conversation_tracker=conversation_tracker,
         guidance_stripper=guidance_stripper,

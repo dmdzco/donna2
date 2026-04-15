@@ -47,10 +47,12 @@ const cronSchema = z.string()
   )
   .optional();
 
-// ISO date string
+// ISO date string — validates format only, no transform.
+// Drizzle and PostgreSQL accept ISO strings for timestamp columns natively.
+// A previous .transform(date => new Date(date)) silently converted strings
+// to Date objects, causing type mismatches in route handlers.
 const isoDateSchema = z.string()
-  .refine(date => !isNaN(Date.parse(date)), 'Invalid date format')
-  .transform(date => new Date(date));
+  .refine(date => !isNaN(Date.parse(date)), 'Invalid date format');
 
 // =============================================================================
 // Senior Schemas
@@ -68,6 +70,10 @@ export const createSeniorSchema = z.object({
   medicalNotes: z.string().max(10000).optional(),
   preferredCallTimes: z.record(z.unknown()).optional(),
   isActive: z.boolean().default(true),
+  city: z.string().max(100).optional(),
+  state: z.string().max(50).optional(),
+  zipCode: z.string().max(20).optional(),
+  additionalInfo: z.string().max(5000).optional(),
 });
 
 export const updateSeniorSchema = z.object({
@@ -158,7 +164,7 @@ export const updateReminderSchema = z.object({
 // =============================================================================
 
 export const initiateCallSchema = z.object({
-  phoneNumber: phoneSchema,
+  seniorId: uuidSchema,
 });
 
 // =============================================================================
@@ -237,9 +243,21 @@ const structuredInterestSchema = z.object({
   details: z.string().max(1000).optional(),
 });
 
+const callScheduleDaySchema = z.enum(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+
 const callScheduleSchema = z.object({
-  days: z.array(z.enum(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])).min(1),
+  frequency: z.enum(['daily', 'recurring', 'one-time']).default('daily'),
+  days: z.array(callScheduleDaySchema).max(7).optional(),
   time: z.string().regex(/^\d{2}:\d{2}$/, 'Time must be in HH:MM format'),
+  date: z.string().max(50).optional(),
+}).superRefine((data, ctx) => {
+  if (data.frequency === 'recurring' && (!data.days || data.days.length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['days'],
+      message: 'Recurring schedules require at least one day',
+    });
+  }
 });
 
 export const onboardingSchema = z.object({

@@ -1,10 +1,7 @@
-"""Tests for web_search_query service (used by Director web search gating).
+"""Tests for web_search_query service used by the active web_search tool.
 
-Mocks the OpenAI client to test the full chain:
-  Director → web_search_query → OpenAI Responses API → formatted result
-
-Note: The web_search LLM tool was removed — the Director now owns web
-searches entirely and injects results into Claude's context directly.
+Mocks the search clients to test the full chain:
+  Claude web_search tool → web_search_query → Tavily/OpenAI → formatted result
 """
 
 import pytest
@@ -40,7 +37,8 @@ class TestWebSearchQuery:
     @pytest.mark.asyncio
     async def test_no_openai_key_returns_none(self):
         with patch.dict("os.environ", {}, clear=True):
-            with patch("services.news._openai_client", None):
+            with patch("services.news._openai_client", None), \
+                 patch("services.news._tavily_search", new_callable=AsyncMock, return_value=None):
                 result = await web_search_query("weather in Seattle")
                 assert result is None
 
@@ -52,7 +50,8 @@ class TestWebSearchQuery:
         mock_client = MagicMock()
         mock_client.responses.create.return_value = mock_response
 
-        with patch("services.news._get_openai", return_value=mock_client):
+        with patch("services.news._tavily_search", new_callable=AsyncMock, return_value=None), \
+             patch("services.news._get_openai", return_value=mock_client):
             result = await web_search_query("weather in Seattle")
 
         assert result is not None
@@ -66,20 +65,21 @@ class TestWebSearchQuery:
         assert "news stories" not in prompt
 
     @pytest.mark.asyncio
-    async def test_search_uses_cache(self):
+    async def test_live_search_does_not_cache(self):
         mock_response = MagicMock()
         mock_response.output_text = "The answer is 42."
 
         mock_client = MagicMock()
         mock_client.responses.create.return_value = mock_response
 
-        with patch("services.news._get_openai", return_value=mock_client):
+        with patch("services.news._tavily_search", new_callable=AsyncMock, return_value=None), \
+             patch("services.news._get_openai", return_value=mock_client):
             result1 = await web_search_query("meaning of life")
             result2 = await web_search_query("meaning of life")
 
         assert result1 == result2
-        # Should only call API once — second call hits cache
-        assert mock_client.responses.create.call_count == 1
+        # Live searches should not reuse an arbitrary previous answer.
+        assert mock_client.responses.create.call_count == 2
 
     @pytest.mark.asyncio
     async def test_empty_response_returns_none(self):
@@ -89,7 +89,8 @@ class TestWebSearchQuery:
         mock_client = MagicMock()
         mock_client.responses.create.return_value = mock_response
 
-        with patch("services.news._get_openai", return_value=mock_client):
+        with patch("services.news._tavily_search", new_callable=AsyncMock, return_value=None), \
+             patch("services.news._get_openai", return_value=mock_client):
             result = await web_search_query("some question")
 
         assert result is None
@@ -99,7 +100,8 @@ class TestWebSearchQuery:
         mock_client = MagicMock()
         mock_client.responses.create.side_effect = Exception("API error")
 
-        with patch("services.news._get_openai", return_value=mock_client):
+        with patch("services.news._tavily_search", new_callable=AsyncMock, return_value=None), \
+             patch("services.news._get_openai", return_value=mock_client):
             result = await web_search_query("some question")
 
         assert result is None
@@ -151,7 +153,8 @@ class TestGetNewsForSenior:
 
             _news_cache.clear()  # Clear so search doesn't hit news cache
 
-            await web_search_query("best ski resorts")
+            with patch("services.news._tavily_search", new_callable=AsyncMock, return_value=None):
+                await web_search_query("best ski resorts")
             search_call = mock_client.responses.create.call_args_list[1]
 
         news_prompt = news_call[1].get("input", news_call.kwargs.get("input", ""))

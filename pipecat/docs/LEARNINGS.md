@@ -7,17 +7,17 @@ Hard-won lessons from building and optimizing the real-time voice pipeline. Each
 ## Pipeline Architecture
 
 ### LLM Tool Calls Are Unreliable for Critical Actions
-Claude says "goodbye" in text but inconsistently calls the `transition_to_winding_down` tool. The call stays open and the senior hears silence. **Solution:** Quick Observer detects goodbye via regex (0ms) and injects `EndFrame` programmatically after a 2s delay. Never rely on Claude tool calls for call-ending logic.
+Claude says "goodbye" in text but inconsistently calls the `transition_to_winding_down` tool. The call stays open and the senior hears silence. **Solution:** Quick Observer detects goodbye via regex (0ms) and injects `EndFrame` programmatically after the configured goodbye delay. Never rely on Claude tool calls for call-ending logic.
 
 ### Non-Blocking Director Is Essential
 The Conversation Director must NEVER block the pipeline. It passes frames through instantly and runs analysis in `asyncio.create_task()`. A blocking Director would add 200-700ms to every turn. The tradeoff: guidance is injected same-turn (via speculative) or previous-turn (fallback), never synchronously.
 
 ### Two-Director Split: Query vs Guidance
 A single Director prompt doing everything (query extraction + guidance + phase detection + reminders) costs ~700ms. Splitting into two specialized calls halves the latency on the critical path:
-- **Query Director** (~200ms): Extracts `memory_queries` + `web_queries` only. Fires continuously on interims.
+- **Query Director** (~200ms): Extracts `memory_queries` only. Fires continuously on interims.
 - **Guidance Director** (~400ms): Conversation guidance, phase, reminders. Fires on silence-based speculative only.
 
-The key insight: query extraction needs to happen mid-speech for web search gating. Guidance can wait until a natural pause.
+The key insight: memory query extraction can happen mid-speech. Guidance can wait until a natural pause.
 
 ### Regular Analysis on Final Transcription Is Redundant
 The silence-based speculative already runs full guidance analysis during the 250ms pause before the final transcription arrives. Running another analysis on the final text doesn't help the current turn (Claude already started responding) and only marginally helps the next turn. Removing it simplifies the architecture with no quality loss.
@@ -33,7 +33,7 @@ Quick Observer (Layer 1) and Director (Layer 2) can inject contradictory guidanc
 ## Web Search
 
 ### Regex-Based Question Detection Fails on Conversational Speech
-Detecting factual questions via `?` character or regex patterns triggers on conversational speech: "How much? I'm about to..." and "from India. Remember?" both fired false web searches. Blocklist approaches (listing social questions to skip) can't cover all cases. **Solution:** Let the Query Director (Groq LLM) decide — it understands conversational context and only returns `web_queries` for genuine factual questions.
+Detecting factual questions via `?` character or regex patterns triggers on conversational speech: "How much? I'm about to..." and "from India. Remember?" both fired false web searches. Blocklist approaches (listing social questions to skip) can't cover all cases. **Current decision:** do not run Director-owned web search gating. In-call factual questions go through Claude's explicit `web_search` tool, while the Query Director only returns `memory_queries`.
 
 ### Web Search Caching Causes More Harm Than Good
 Caching web search results to prevent duplicate API calls seems smart but is dangerous: one wrong answer from Tavily poisons all subsequent similar queries for the entire call. The containment-matching algorithm also caused cross-topic false matches ("2026" appearing in both "Orlando Magic score 2026" and "Austin weather 2026"). **Decision:** Remove web search caching entirely. The in-flight dedup (`if task not done: return`) prevents rapid-fire duplicates without caching stale results.
@@ -44,8 +44,8 @@ Simple word overlap fails on shared generic tokens (years, dates). TF-IDF requir
 ### Tavily `include_answer` Hallucinates — Use Raw Results Only
 Tavily's `include_answer=True` parameter runs an LLM on top of search results to generate a synthesized answer. This answer hallucinated incorrect data in production (e.g., wrong NBA standings — "Lakers leading Western Conference" when they weren't). The raw `results` array contains real snippets from actual web pages and is accurate. **Decision:** Removed `include_answer`, return raw result snippets (title + content) to Claude. Claude already synthesizes the result into speech anyway, so the extra LLM layer adds hallucination risk with no benefit. Same speed (Tavily's answer generation actually adds latency), more accurate.
 
-### Web Search Gating Timeline
-The ideal flow: Query Director detects a factual question mid-speech → starts web search → final transcription arrives → search already in-flight → filler TTS plays → result injected → Claude responds with answer. This saves ~4.3s vs Claude calling the `web_search` tool (two LLM round trips). The gating only works if the Query Director completes before the final transcription, which requires the continuous speculative to fire early enough.
+### Web Search Path
+The active flow is simpler: Claude calls the `web_search` tool, the tool tells the senior it is checking, and `services.news.web_search_query()` uses Tavily raw snippets first with OpenAI web search as fallback. The previous Director-gating design was removed from the active pipeline because false positives and stale cached results created worse answers than an explicit tool call.
 
 ---
 
@@ -74,7 +74,7 @@ Two sequential LLM round trips: one to generate the tool call, one to generate t
 - `check_caregiver_notes` → Pre-fetched at call start, injected into system prompt
 
 ### Fire-and-Forget for Non-Critical DB Writes
-`mark_reminder_acknowledged` handler returns immediately with a success response. The actual DB write runs in `asyncio.create_task()`. Claude gets its response instantly; the database update happens in the background. Same pattern used for marking caregiver notes as delivered.
+`mark_reminder_acknowledged` handler returns immediately with a success response. The actual DB write runs in `asyncio.create_task()` so Claude's next spoken response is not delayed, but post-call processing waits briefly and re-reads `reminder_deliveries.status` before deciding whether to retry. Caregiver notes are no longer marked delivered on connect; post-call marks them only when the assistant transcript contains delivery evidence.
 
 ### Memory Gate: 500ms Wait Saves 4.3s
 Before passing the final transcription to Claude, wait up to 500ms for the memory prefetch cache to populate. The prefetch started on interim transcriptions while the user was still speaking — most of the time it's already cached. Worst case: 500ms delay. Best case: 0ms (cache hit). Compared to Claude calling `search_memories` tool: ~4.3s saved.
@@ -124,10 +124,10 @@ Only one scheduler instance should run across all environments. Set `SCHEDULER_E
 ## Testing
 
 ### Mock Both Directors in Tests
-Tests that run the pipeline need to mock both `analyze_turn_speculative` (Guidance Director, silence-based) and `analyze_queries` (Query Director, continuous). Mocking only one leaves the other making real Groq API calls. Pre-set `processor._last_result` to simulate previous-turn guidance when testing guidance injection.
+Tests that run the pipeline need to mock `analyze_turn_speculative` (Guidance Director, silence-based), `analyze_queries` (Query Director, continuous), and `analyze_turn` when the test can hit the full-analysis fallback path. Pre-set `processor._last_result` to simulate previous-turn guidance when testing guidance injection.
 
 ### Regression Tests Need Pre-Set Guidance State
-Tests that verify Director actions (force end at 12 minutes, force winding-down at 9 minutes) depend on `_take_actions()` being called, which only happens during guidance injection. Without the regular analysis path (removed), tests must pre-set `_last_result` on the Director processor so previous-turn guidance triggers actions.
+Tests that verify Director actions (force end and force winding-down) no longer need pre-seeded guidance state. `_take_actions()` is checked on every final transcription, even when no guidance was injected.
 
 ---
 
@@ -159,4 +159,4 @@ The Director's ephemeral context injection (via `LLMMessagesAppendFrame`) has no
 
 ---
 
-*Last updated: April 2026 — Gemini Live evaluation, Split Director architecture, ephemeral context, web search gating*
+*Last updated: April 2026 — Gemini Live evaluation, Split Director architecture, ephemeral context, active web_search tool path*

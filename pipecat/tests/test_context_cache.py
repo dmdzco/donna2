@@ -33,6 +33,26 @@ class TestGetLocalHour:
         result = _get_local_hour("Invalid/Timezone")
         assert isinstance(result, int)
 
+    def test_invalid_timezone_falls_back_to_new_york_not_fixed_est(self):
+        class FakeZoneInfo:
+            def __init__(self, name):
+                if name == "Invalid/Timezone":
+                    raise ValueError("invalid timezone")
+                self.name = name
+
+        class FakeDateTime:
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 7, 1, 8 if tz else 12, 0)
+
+            @classmethod
+            def utcnow(cls):
+                return datetime(2026, 7, 1, 12, 0)
+
+        with patch("services.context_cache.ZoneInfo", FakeZoneInfo), \
+             patch("services.context_cache.datetime", FakeDateTime):
+            assert _get_local_hour("Invalid/Timezone") == 8
+
 
 class TestSelectInterest:
     def test_empty_returns_none(self):

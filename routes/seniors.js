@@ -12,10 +12,29 @@ import {
   updateScheduleSchema,
   seniorIdParamSchema,
 } from '../validators/schemas.js';
-import { getAccessibleSeniorIds, canAccessSenior } from './helpers.js';
+import { getAccessibleSeniorIds, canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
+import { decrypt, decryptJson } from '../lib/encryption.js';
 
 const router = Router();
+
+function decryptExportConversation(row) {
+  const summary = row.summaryEncrypted ? decrypt(row.summaryEncrypted) : row.summary;
+  const transcript = row.transcriptEncrypted ? decryptJson(row.transcriptEncrypted) : row.transcript;
+  const transcriptText = row.transcriptTextEncrypted ? decrypt(row.transcriptTextEncrypted) : undefined;
+  const {
+    summaryEncrypted,
+    transcriptEncrypted,
+    transcriptTextEncrypted,
+    ...rest
+  } = row;
+  return {
+    ...rest,
+    summary,
+    transcript,
+    ...(transcriptText ? { transcriptText } : {}),
+  };
+}
 
 // Create a senior profile (admin only)
 router.post('/api/seniors', requireAdmin, writeLimiter, validateBody(createSeniorSchema), async (req, res) => {
@@ -64,7 +83,7 @@ router.get('/api/seniors', requireAuth, async (req, res) => {
     const filtered = allSeniors.filter(s => accessibleIds.includes(s.id));
     res.json(filtered);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/seniors');
   }
 });
 
@@ -89,7 +108,7 @@ router.get('/api/seniors/:id', requireAuth, validateParams(seniorIdParamSchema),
     }
     res.json(senior);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/seniors/:id');
   }
 });
 
@@ -112,7 +131,7 @@ router.patch('/api/seniors/:id', requireAuth, writeLimiter, validateParams(senio
     const senior = await seniorService.update(req.params.id, req.body);
     res.json(senior);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'PATCH /api/seniors/:id');
   }
 });
 
@@ -134,7 +153,7 @@ router.get('/api/seniors/:id/schedule', requireAuth, validateParams(seniorIdPara
       topicsToAvoid: senior.preferredCallTimes?.topicsToAvoid || [],
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/seniors/:id/schedule');
   }
 });
 
@@ -166,7 +185,7 @@ router.patch('/api/seniors/:id/schedule', requireAuth, writeLimiter, validatePar
       topicsToAvoid: updated.preferredCallTimes?.topicsToAvoid || [],
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'PATCH /api/seniors/:id/schedule');
   }
 });
 
@@ -230,9 +249,12 @@ router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamS
         durationSeconds: conversations.durationSeconds,
         status: conversations.status,
         summary: conversations.summary,
+        summaryEncrypted: conversations.summaryEncrypted,
         sentiment: conversations.sentiment,
         concerns: conversations.concerns,
         transcript: conversations.transcript,
+        transcriptEncrypted: conversations.transcriptEncrypted,
+        transcriptTextEncrypted: conversations.transcriptTextEncrypted,
         callMetrics: conversations.callMetrics,
       }).from(conversations)
         .where(eq(conversations.seniorId, seniorId))
@@ -286,7 +308,7 @@ router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamS
     res.json({
       exportedAt: new Date().toISOString(),
       senior,
-      conversations: seniorConversations,
+      conversations: seniorConversations.map(decryptExportConversation),
       memories: seniorMemories,
       reminders: seniorReminders,
       callAnalyses: seniorAnalyses,

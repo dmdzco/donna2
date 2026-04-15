@@ -8,12 +8,13 @@ import { authLimiter } from '../middleware/rate-limit.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { tokenRevocationService } from '../services/token-revocation.js';
 import { logAudit } from '../services/audit.js';
+import { DEFAULT_JWT_SECRET, isProductionEnv } from '../lib/security-config.js';
 
 const router = Router();
-if (!process.env.JWT_SECRET && process.env.RAILWAY_PUBLIC_DOMAIN) {
-  throw new Error('JWT_SECRET environment variable is required in production');
+if (isProductionEnv() && (!process.env.JWT_SECRET || process.env.JWT_SECRET === DEFAULT_JWT_SECRET)) {
+  throw new Error('JWT_SECRET environment variable is required in production (do not use the default)');
 }
-const JWT_SECRET = process.env.JWT_SECRET || 'donna-admin-secret-change-me';
+const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_JWT_SECRET;
 const JWT_SECRET_PREVIOUS = process.env.JWT_SECRET_PREVIOUS || '';
 
 /**

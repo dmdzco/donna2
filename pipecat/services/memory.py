@@ -147,7 +147,13 @@ async def store(
         emb_str,
         json.dumps(metadata) if metadata else None,
     )
-    logger.info("Stored memory for {col}={sid}: {c}", col=owner_col, sid=owner_id, c=content)
+    logger.info(
+        "Stored memory for {col}={sid} type={type} chars={chars}",
+        col=owner_col,
+        sid=str(owner_id)[:8],
+        type=type_,
+        chars=len(content),
+    )
     return row
 
 
@@ -307,7 +313,7 @@ async def build_context(
 ) -> str:
     """Build memory context for the system prompt.
 
-    Loads top 20 memories by importance — enough to feel personal without
+    Loads top memories by effective importance - enough to feel personal without
     duplicating recent turns/summaries that are already in the prompt.
     Speculative prefetch fills in the rest mid-conversation.
     """
@@ -315,13 +321,13 @@ async def build_context(
 
     parts: list[str] = []
 
-    # Top memories by importance + recency (prefetch supplements mid-call)
+    # Pull a slightly wider candidate set, then rank with decay/access boosts.
     all_memories = await query_many(
-        """SELECT id, type, content, content_encrypted, importance, metadata, created_at
+        """SELECT id, type, content, content_encrypted, importance, metadata, created_at, last_accessed_at
            FROM memories
            WHERE senior_id = $1
            ORDER BY importance DESC, created_at DESC
-           LIMIT 20""",
+           LIMIT 50""",
         senior_id,
     )
 
@@ -329,6 +335,25 @@ async def build_context(
         if r.get("content_encrypted"):
             r["content"] = decrypt(r["content_encrypted"])
         r.pop("content_encrypted", None)
+        r["effective_importance"] = _calculate_effective_importance(
+            r.get("importance", 50),
+            r.get("created_at"),
+            r.get("last_accessed_at"),
+        )
+
+    def _created_sort_value(memory: dict) -> float:
+        created = memory.get("created_at")
+        if isinstance(created, datetime):
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            return created.timestamp()
+        return 0.0
+
+    all_memories.sort(
+        key=lambda m: (m.get("effective_importance", 0), _created_sort_value(m)),
+        reverse=True,
+    )
+    all_memories = all_memories[:20]
 
     logger.info(
         "build_context({sid}): loaded {n} memories",
@@ -396,8 +421,12 @@ async def transfer_to_senior(prospect_id: str, senior_id: str) -> int:
         senior_id,
         prospect_id,
     )
-    logger.info("Transferred {n} memories from prospect {pid} to senior {sid}",
-                n=len(rows), pid=prospect_id, sid=senior_id)
+    logger.info(
+        "Transferred {n} memories from prospect {pid} to senior {sid}",
+        n=len(rows),
+        pid=str(prospect_id)[:8],
+        sid=str(senior_id)[:8],
+    )
     return len(rows)
 
 
@@ -407,7 +436,7 @@ async def extract_from_conversation(
 ) -> None:
     """Extract and store memories from a conversation transcript via OpenAI."""
     owner_id = senior_id or prospect_id
-    logger.info("extract_from_conversation({sid}): transcript_len={n}", sid=str(owner_id)[:8] if owner_id else "none", n=len(transcript) if transcript else 0)
+    logger.info("extract_from_conversation: transcript_len={n}", n=len(transcript) if transcript else 0)
     client = _get_openai()
     if client is None:
         logger.warning("Skipping extraction — OPENAI_API_KEY not set")

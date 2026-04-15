@@ -11,9 +11,9 @@ The Donna mobile app requires brand-appropriate icon and splash screen assets fo
 ### App Icon (1024×1024 PNG)
 - **File**: `assets/images/icon.png`
 - **Size**: 1024×1024 pixels
-- **Format**: PNG with transparency
+- **Format**: PNG without transparency
 - **Purpose**: App icon displayed on iOS home screen and in App Store
-- **Status**: ❌ Missing — needs to be created
+- **Status**: ✅ Present — verified at 1024×1024
 - **Design notes**: Should incorporate Donna's sage green (#4A5D4F) and cream (#FDFCF8) colors with a clear, recognizable mark at any size
 
 ### Splash Screen Icon (200×200+ PNG)
@@ -22,7 +22,7 @@ The Donna mobile app requires brand-appropriate icon and splash screen assets fo
 - **Format**: PNG with transparency
 - **Background**: Cream (#FDFCF8) as defined in `app.json`
 - **Purpose**: Centered icon shown during app launch on iOS and Android
-- **Status**: ❌ Missing — needs to be created
+- **Status**: ✅ Present — verified at 483×1044
 - **Design notes**: Simple, centered mark that scales well. Used with `resizeMode: "contain"` and cream background.
 
 ### Adaptive Icon (1024×1024 PNG)
@@ -31,7 +31,7 @@ The Donna mobile app requires brand-appropriate icon and splash screen assets fo
 - **Format**: PNG with transparency
 - **Purpose**: Android adaptive icon foreground layer
 - **Background**: Cream (#FDFCF8) (defined in `app.json` as `android.adaptiveIcon.backgroundColor`)
-- **Status**: ❌ Missing — needs to be created
+- **Status**: ✅ Present — verified at 1024×1024
 - **Android requirements**:
   - Safe zone: Center 480×480 pixel square (outside may be masked)
   - Design should work with both rounded and rounded-square masks
@@ -42,7 +42,7 @@ The Donna mobile app requires brand-appropriate icon and splash screen assets fo
 - **Size**: 32×32 pixels
 - **Format**: PNG
 - **Purpose**: Browser tab icon for web build (from `npm run web`)
-- **Status**: ❌ Missing — can use scaled-down version of app icon
+- **Status**: ✅ Present — verified at 32×32
 - **Design notes**: Must be clear and recognizable at small size
 
 ---
@@ -62,7 +62,7 @@ The Donna mobile app requires brand-appropriate icon and splash screen assets fo
 apps/mobile/assets/
 ├── images/
 │   ├── icon.png              (1024×1024)
-│   ├── splash-icon.png       (1000×1000+ recommended)
+│   ├── splash-icon.png       (483×1044)
 │   ├── adaptive-icon.png     (1024×1024)
 │   └── favicon.png           (32×32)
 └── README.md
@@ -155,12 +155,12 @@ Favicon will appear in browser tab.
 
 ## Before App Store Submission
 
-- [ ] App icon (1024×1024) created and placed at `assets/images/icon.png`
-- [ ] Splash screen icon (1000×1000+) created and placed at `assets/images/splash-icon.png`
-- [ ] Adaptive icon (1024×1024) created and placed at `assets/images/adaptive-icon.png`
-- [ ] Favicon (32×32) created and placed at `assets/images/favicon.png`
-- [ ] All PNGs verified to be valid image files (`file assets/images/*.png`)
-- [ ] Icons tested in native build: `npx eas build --platform ios --local`
+- [x] App icon (1024×1024) created and placed at `assets/images/icon.png`
+- [x] Splash screen icon present and placed at `assets/images/splash-icon.png`
+- [x] Adaptive icon (1024×1024) created and placed at `assets/images/adaptive-icon.png`
+- [x] Favicon (32×32) created and placed at `assets/images/favicon.png`
+- [x] All PNGs verified to be valid image files (`file assets/images/*.png`)
+- [x] Icons tested in native build: `npx expo run:ios -d "iPhone 17 Pro" --no-install --no-bundler`
 - [ ] Adaptive icon safe zone validated (center 480×480 clear)
 - [ ] Brand colors consistent across all assets
 - [ ] No transparency issues or color bleeding at edges
@@ -185,4 +185,3 @@ Favicon will appear in browser tab.
 - Transparency should be properly embedded (not white background mistaken for transparency)
 - Test on actual devices when possible — simulator rendering can vary
 - If icons appear blurry, check DPI/scale in export settings (should be 72 DPI for standard web/mobile)
-

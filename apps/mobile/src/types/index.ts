@@ -42,6 +42,7 @@ export interface Conversation {
   summary?: string;
   sentiment?: string;
   concerns?: string[];
+  analysis?: CallAnalysis | null;
 }
 
 export interface CallAnalysis {
@@ -51,10 +52,10 @@ export interface CallAnalysis {
   summary?: string;
   topics?: string[];
   engagementScore?: number;
-  concerns?: string[];
+  concerns?: Array<string | Record<string, unknown>>;
   positiveObservations?: string[];
   followUpSuggestions?: string[];
-  callQuality?: string;
+  callQuality?: Record<string, unknown> | string | null;
 }
 
 /**
@@ -98,8 +99,10 @@ export interface OnboardingInput {
   reminders?: string[];
   topicsToAvoid?: string[];
   callSchedule?: {
+    frequency?: "daily" | "recurring" | "one-time";
     days?: ("Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun")[];
     time?: string;
+    date?: string;
   };
 }
 

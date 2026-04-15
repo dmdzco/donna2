@@ -7,6 +7,13 @@ import { contextCacheService } from './context-cache.js';
 import { runDailyPurgeIfNeeded } from './data-retention.js';
 import { createLogger } from '../lib/logger.js';
 import { resolveFlags, getValue } from '../lib/growthbook.js';
+import {
+  DEFAULT_TIMEZONE,
+  getDatePartsInTimezone,
+  parseDailyCronExpression,
+  resolveTimezoneFromProfile,
+  zonedWallTimeToUtcDate,
+} from '../lib/timezone.js';
 
 const log = createLogger('Scheduler');
 
@@ -56,7 +63,7 @@ function isInCallWindow(timezone, { earlyAllowed = false } = {}) {
   try {
     const now = new Date();
     const localHour = parseInt(
-      now.toLocaleString('en-US', { timeZone: timezone || 'America/New_York', hour: 'numeric', hour12: false })
+      now.toLocaleString('en-US', { timeZone: timezone || DEFAULT_TIMEZONE, hour: 'numeric', hour12: false })
     );
     const earliest = earlyAllowed ? 5 : 9;
     return localHour >= earliest && localHour < 19;
@@ -65,30 +72,71 @@ function isInCallWindow(timezone, { earlyAllowed = false } = {}) {
   }
 }
 
+function getSeniorTimezone(senior) {
+  return resolveTimezoneFromProfile(senior || {});
+}
+
+function minutesSinceMidnight({ hours, minutes }) {
+  return hours * 60 + minutes;
+}
+
+function minutesApart(a, b) {
+  const diff = Math.abs(a - b);
+  return Math.min(diff, 24 * 60 - diff);
+}
+
+export function getReminderWallTime(reminder, senior) {
+  const cronTime = reminder.isRecurring
+    ? parseDailyCronExpression(reminder.cronExpression)
+    : null;
+  if (cronTime) return cronTime;
+  if (!reminder.scheduledTime) return null;
+
+  const scheduled = new Date(reminder.scheduledTime);
+  if (Number.isNaN(scheduled.getTime())) return null;
+  return getDatePartsInTimezone(scheduled, getSeniorTimezone(senior));
+}
+
+export function getScheduledForTimeInTimezone(reminder, senior, now = new Date()) {
+  if (!reminder.scheduledTime && !reminder.cronExpression) return null;
+
+  if (reminder.isRecurring) {
+    const wallTime = getReminderWallTime(reminder, senior);
+    if (!wallTime) return null;
+    const timezone = getSeniorTimezone(senior);
+    const localToday = getDatePartsInTimezone(now, timezone);
+    return zonedWallTimeToUtcDate({
+      year: localToday.year,
+      month: localToday.month,
+      day: localToday.day,
+      hours: wallTime.hours,
+      minutes: wallTime.minutes,
+    }, timezone);
+  }
+
+  const scheduled = new Date(reminder.scheduledTime);
+  return Number.isNaN(scheduled.getTime()) ? null : scheduled;
+}
+
+function isRecurringReminderDueNow(reminder, senior, now) {
+  const wallTime = getReminderWallTime(reminder, senior);
+  if (!wallTime) return false;
+
+  const nowLocal = getDatePartsInTimezone(now, getSeniorTimezone(senior));
+  return minutesApart(
+    minutesSinceMidnight(wallTime),
+    minutesSinceMidnight(nowLocal)
+  ) <= 5;
+}
+
 export const schedulerService = {
   /**
    * Calculate the "scheduled for" time for a reminder instance.
    * For recurring reminders, this is today's date with the scheduled time.
    * For non-recurring, it's just the scheduled time.
    */
-  getScheduledForTime(reminder) {
-    if (!reminder.scheduledTime) return null;
-    const scheduled = new Date(reminder.scheduledTime);
-
-    if (reminder.isRecurring) {
-      // Use today's date with the scheduled time-of-day
-      const now = new Date();
-      return new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate(),
-        scheduled.getHours(),
-        scheduled.getMinutes(),
-        0,
-        0
-      );
-    }
-    return scheduled;
+  getScheduledForTime(reminder, senior, now = new Date()) {
+    return getScheduledForTimeInTimezone(reminder, senior, now);
   },
 
   /**
@@ -130,20 +178,14 @@ export const schedulerService = {
       ));
 
     // Filter recurring to those whose time-of-day matches now (within 5 min window)
-    const recurringDue = recurring.filter(r => {
-      if (!r.reminder.scheduledTime) return false;
-      const scheduled = new Date(r.reminder.scheduledTime);
-      const scheduledMinutes = scheduled.getHours() * 60 + scheduled.getMinutes();
-      const nowMinutes = now.getHours() * 60 + now.getMinutes();
-      return Math.abs(scheduledMinutes - nowMinutes) <= 5;
-    });
+    const recurringDue = recurring.filter(r => isRecurringReminderDueNow(r.reminder, r.senior, now));
 
     const allCandidates = [...nonRecurring, ...recurringDue];
 
     // Filter out reminders that already have acknowledged/confirmed delivery for this instance
     const dueReminders = [];
     for (const candidate of allCandidates) {
-      const scheduledFor = this.getScheduledForTime(candidate.reminder);
+      const scheduledFor = this.getScheduledForTime(candidate.reminder, candidate.senior, now);
       if (!scheduledFor) continue;
 
       // Check if there's already an acknowledged/confirmed delivery for this instance
@@ -259,8 +301,9 @@ export const schedulerService = {
     // Gate ALL outbound calls through the timezone call window.
     // Reminder calls with an explicit caregiver-set time are allowed as early as 5 AM.
     const earlyAllowed = type === 'reminder' && !!spec.reminder?.scheduledTime;
-    if (!isInCallWindow(senior.timezone, { earlyAllowed })) {
-      log.info('Outside call window, skipping', { type, name: senior.name, timezone: senior.timezone || 'America/New_York', earlyAllowed });
+    const timezone = getSeniorTimezone(senior);
+    if (!isInCallWindow(timezone, { earlyAllowed })) {
+      log.info('Outside call window, skipping', { type, name: senior.name, timezone, earlyAllowed });
       return null;
     }
 
@@ -306,7 +349,7 @@ export const schedulerService = {
     });
 
     // Calculate scheduledFor if not provided
-    const targetScheduledFor = scheduledFor || this.getScheduledForTime(reminder) || new Date();
+    const targetScheduledFor = scheduledFor || this.getScheduledForTime(reminder, senior) || new Date();
 
     // Create or update delivery record
     let delivery;

@@ -3,8 +3,24 @@ import { db } from '../db/client.js';
 import { seniors, conversations } from '../db/schema.js';
 import { eq, desc, and, sql } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
+import { decrypt, decryptJson } from '../lib/encryption.js';
+import { callAnalysisService } from '../services/call-analyses.js';
 
 const router = Router();
+
+function readSummary(call, analysis = null) {
+  const summary = call.summaryEncrypted ? decrypt(call.summaryEncrypted) : call.summary;
+  return summary || analysis?.summary || null;
+}
+
+function readTranscript(call) {
+  return call.transcriptEncrypted ? decryptJson(call.transcriptEncrypted) : call.transcript;
+}
+
+function readConcerns(call, analysis = null) {
+  if (Array.isArray(call.concerns) && call.concerns.length > 0) return call.concerns;
+  return Array.isArray(analysis?.concerns) ? analysis.concerns : [];
+}
 
 // One-time cleanup: mark stale in_progress calls (older than 1 hour) as completed
 db.update(conversations)
@@ -35,33 +51,42 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
       durationSeconds: conversations.durationSeconds,
       status: conversations.status,
       summary: conversations.summary,
+      summaryEncrypted: conversations.summaryEncrypted,
       sentiment: conversations.sentiment,
       concerns: conversations.concerns,
       callMetrics: conversations.callMetrics,
       transcript: conversations.transcript,
+      transcriptEncrypted: conversations.transcriptEncrypted,
     })
     .from(conversations)
     .leftJoin(seniors, eq(conversations.seniorId, seniors.id))
     .orderBy(desc(conversations.startedAt))
     .limit(limit);
 
+    const analyses = await callAnalysisService.getLatestByConversationIds(calls.map(call => call.id));
+
     // Transform to match dashboard expected format
-    const formattedCalls = calls.map(call => ({
-      id: call.id,
-      call_sid: call.callSid,
-      senior_id: call.seniorId,
-      senior_name: call.seniorName,
-      senior_phone: call.seniorPhone,
-      started_at: call.startedAt,
-      ended_at: call.endedAt,
-      duration_seconds: call.durationSeconds,
-      status: call.status || 'completed',
-      summary: call.summary,
-      sentiment: call.sentiment,
-      concerns: call.concerns,
-      call_metrics: call.callMetrics || null,
-      turn_count: Array.isArray(call.transcript) ? call.transcript.length : 0,
-    }));
+    const formattedCalls = calls.map(call => {
+      const analysis = analyses.get(call.id) || null;
+      const transcript = readTranscript(call);
+      return {
+        id: call.id,
+        call_sid: call.callSid,
+        senior_id: call.seniorId,
+        senior_name: call.seniorName,
+        senior_phone: call.seniorPhone,
+        started_at: call.startedAt,
+        ended_at: call.endedAt,
+        duration_seconds: call.durationSeconds,
+        status: call.status || 'completed',
+        summary: readSummary(call, analysis),
+        sentiment: call.sentiment,
+        concerns: readConcerns(call, analysis),
+        call_metrics: call.callMetrics || null,
+        turn_count: Array.isArray(transcript) ? transcript.length : 0,
+        analysis,
+      };
+    });
 
     res.json({ calls: formattedCalls });
   } catch (error) {
@@ -89,9 +114,11 @@ router.get('/api/observability/calls/:id', requireAdmin, async (req, res) => {
       durationSeconds: conversations.durationSeconds,
       status: conversations.status,
       summary: conversations.summary,
+      summaryEncrypted: conversations.summaryEncrypted,
       sentiment: conversations.sentiment,
       concerns: conversations.concerns,
       transcript: conversations.transcript,
+      transcriptEncrypted: conversations.transcriptEncrypted,
     })
     .from(conversations)
     .leftJoin(seniors, eq(conversations.seniorId, seniors.id))
@@ -100,6 +127,10 @@ router.get('/api/observability/calls/:id', requireAdmin, async (req, res) => {
     if (!call) {
       return res.status(404).json({ error: 'Call not found' });
     }
+
+    const analyses = await callAnalysisService.getLatestByConversationIds([call.id]);
+    const analysis = analyses.get(call.id) || null;
+    const transcript = readTranscript(call);
 
     res.json({
       id: call.id,
@@ -111,10 +142,11 @@ router.get('/api/observability/calls/:id', requireAdmin, async (req, res) => {
       ended_at: call.endedAt,
       duration_seconds: call.durationSeconds,
       status: call.status || 'completed',
-      summary: call.summary,
+      summary: readSummary(call, analysis),
       sentiment: call.sentiment,
-      concerns: call.concerns,
-      transcript: call.transcript,
+      concerns: readConcerns(call, analysis),
+      transcript,
+      analysis,
     });
   } catch (error) {
     console.error('Error fetching call:', error);
@@ -134,6 +166,7 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
       durationSeconds: conversations.durationSeconds,
       status: conversations.status,
       transcript: conversations.transcript,
+      transcriptEncrypted: conversations.transcriptEncrypted,
     })
     .from(conversations)
     .where(eq(conversations.id, req.params.id));
@@ -144,6 +177,7 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
 
     // Build timeline from transcript
     const timeline = [];
+    const transcript = readTranscript(call);
 
     // Add call start event
     timeline.push({
@@ -153,8 +187,8 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
     });
 
     // Add transcript events if available
-    if (call.transcript && Array.isArray(call.transcript)) {
-      call.transcript.forEach((turn, index) => {
+    if (Array.isArray(transcript)) {
+      transcript.forEach((turn, index) => {
         if (turn.role === 'user') {
           timeline.push({
             type: 'turn.transcribed',
@@ -208,6 +242,7 @@ router.get('/api/observability/calls/:id/turns', requireAdmin, async (req, res) 
   try {
     const [call] = await db.select({
       transcript: conversations.transcript,
+      transcriptEncrypted: conversations.transcriptEncrypted,
     })
     .from(conversations)
     .where(eq(conversations.id, req.params.id));
@@ -216,7 +251,8 @@ router.get('/api/observability/calls/:id/turns', requireAdmin, async (req, res) 
       return res.status(404).json({ error: 'Call not found' });
     }
 
-    const turns = (call.transcript || []).map((turn, index) => ({
+    const transcript = readTranscript(call);
+    const turns = (Array.isArray(transcript) ? transcript : []).map((turn, index) => ({
       id: index,
       role: turn.role,
       content: turn.content,
@@ -235,6 +271,7 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
   try {
     const [call] = await db.select({
       transcript: conversations.transcript,
+      transcriptEncrypted: conversations.transcriptEncrypted,
       concerns: conversations.concerns,
       sentiment: conversations.sentiment,
     })
@@ -252,8 +289,9 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
     const allConcerns = [];
     let totalConfidence = 0;
 
-    if (call.transcript && Array.isArray(call.transcript)) {
-      call.transcript.forEach((turn, index) => {
+    const transcript = readTranscript(call);
+    if (Array.isArray(transcript)) {
+      transcript.forEach((turn, index) => {
         if (turn.observer) {
           const engagementLevel = turn.observer.engagement_level || turn.observer.engagementLevel || 'medium';
           const emotionalState = turn.observer.emotional_state || turn.observer.emotionalState || 'neutral';
@@ -307,6 +345,7 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
   try {
     const [call] = await db.select({
       transcript: conversations.transcript,
+      transcriptEncrypted: conversations.transcriptEncrypted,
       callMetrics: conversations.callMetrics,
       durationSeconds: conversations.durationSeconds,
     })
@@ -319,8 +358,9 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
 
     // Extract per-turn metrics from transcript
     const turnMetrics = [];
-    if (call.transcript && Array.isArray(call.transcript)) {
-      call.transcript.forEach((turn, index) => {
+    const transcript = readTranscript(call);
+    if (Array.isArray(transcript)) {
+      transcript.forEach((turn, index) => {
         if (turn.metrics) {
           turnMetrics.push({
             turnIndex: index,

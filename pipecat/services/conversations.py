@@ -35,11 +35,14 @@ async def complete(call_sid: str, data: dict) -> dict | None:
     """Update a conversation when a call ends.
 
     Accepts snake_case keys: duration_seconds, status, summary, transcript,
-    call_metrics, sentiment, concerns.
+    transcript_text, call_metrics, sentiment, concerns.
 
-    Writes both original columns (backward compat) and *_encrypted columns.
+    Writes encrypted structured JSON and encrypted text transcript columns.
+    The legacy plaintext transcript column remains read-only fallback for rows
+    written before field encryption was available.
     """
-    transcript_raw = json.dumps(data["transcript"]) if data.get("transcript") else None
+    transcript = data.get("transcript")
+    transcript_text = data.get("transcript_text") or format_transcript_text(transcript)
     summary_raw = data.get("summary")
     row = await query_one(
         """UPDATE conversations SET
@@ -47,28 +50,160 @@ async def complete(call_sid: str, data: dict) -> dict | None:
              duration_seconds = $1,
              status = $2,
              summary = $3,
-             transcript = $4,
-             call_metrics = $5,
-             sentiment = $6,
-             concerns = $7,
-             summary_encrypted = $8,
-             transcript_encrypted = $9
+             call_metrics = $4,
+             sentiment = $5,
+             concerns = $6,
+             summary_encrypted = $7,
+             transcript_encrypted = $8,
+             transcript_text_encrypted = $9
            WHERE call_sid = $10
            RETURNING *""",
         data.get("duration_seconds"),
         data.get("status", "completed"),
         summary_raw,
-        transcript_raw,
         json.dumps(data["call_metrics"]) if data.get("call_metrics") else None,
         data.get("sentiment"),
         data.get("concerns"),
         encrypt(summary_raw),
-        encrypt_json(data["transcript"]) if data.get("transcript") else None,
+        encrypt_json(transcript) if transcript else None,
+        encrypt(transcript_text),
         call_sid,
     )
     if row:
         logger.info("Completed conversation {id} ({dur}s)", id=row["id"], dur=data.get("duration_seconds"))
     return row
+
+
+def _content_to_text(content) -> str:
+    """Convert Pipecat/OpenAI-style content blocks to plain text."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = str(block.get("text") or "")
+                if text.startswith("[EPHEMERAL") or text.startswith("[Internal"):
+                    continue
+                parts.append(text)
+        return " ".join(parts)
+    return str(content)
+
+
+def format_transcript_text(transcript) -> str | None:
+    """Format a transcript as readable text for encrypted storage/analysis."""
+    if transcript is None:
+        return None
+    if isinstance(transcript, str):
+        text = transcript.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return text
+        return format_transcript_text(parsed)
+    if not isinstance(transcript, list):
+        text = str(transcript).strip()
+        return text or None
+
+    lines: list[str] = []
+    for turn in transcript:
+        if not isinstance(turn, dict):
+            continue
+        text = _content_to_text(turn.get("content")).strip()
+        if not text or text.startswith("[EPHEMERAL") or text.startswith("[Internal"):
+            continue
+        role = str(turn.get("role") or "unknown").lower()
+        if role == "assistant":
+            label = "Donna"
+        elif role == "user":
+            label = "Senior"
+        else:
+            label = role.title()
+        lines.append(f"{label}: {text}")
+    return "\n".join(lines) if lines else None
+
+
+def _parse_transcript(value):
+    """Normalize stored JSON transcript values into list/string form."""
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return text
+    return value
+
+
+async def update_transcript(call_sid: str, transcript: list[dict]) -> dict | None:
+    """Persist the latest in-call transcript snapshot without completing call.
+
+    Draft writes intentionally update encrypted transcript fields only. The
+    legacy plaintext JSON column is read-only fallback for pre-encryption rows.
+    """
+    if not call_sid or not transcript:
+        return None
+
+    transcript_text = format_transcript_text(transcript)
+    row = await query_one(
+        """UPDATE conversations SET
+             transcript_encrypted = $1,
+             transcript_text_encrypted = $2
+           WHERE call_sid = $3
+           RETURNING id, call_sid""",
+        encrypt_json(transcript),
+        encrypt(transcript_text),
+        call_sid,
+    )
+    if row:
+        logger.info(
+            "Updated transcript draft callSid={cs} turns={turns} text_chars={chars}",
+            cs=call_sid,
+            turns=len(transcript),
+            chars=len(transcript_text or ""),
+        )
+    return row
+
+
+async def get_transcript_by_call_sid(call_sid: str):
+    """Fetch a persisted transcript for post-call fallback/retrieval.
+
+    Prefers encrypted structured JSON, then legacy JSON, then encrypted text.
+    """
+    row = await query_one(
+        """SELECT transcript, transcript_encrypted, transcript_text_encrypted
+           FROM conversations WHERE call_sid = $1""",
+        call_sid,
+    )
+    if not row:
+        return None
+
+    encrypted_transcript = row.get("transcript_encrypted")
+    if encrypted_transcript:
+        parsed = _parse_transcript(decrypt_json(encrypted_transcript))
+        if parsed:
+            return parsed
+
+    parsed = _parse_transcript(row.get("transcript"))
+    if parsed:
+        return parsed
+
+    encrypted_text = row.get("transcript_text_encrypted")
+    if encrypted_text:
+        text = decrypt(encrypted_text)
+        if text and text != "[encrypted]":
+            return text
+
+    return None
 
 
 async def get_by_call_sid(call_sid: str) -> dict | None:

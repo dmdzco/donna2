@@ -9,6 +9,7 @@ from flows.tools import (
     WEB_SEARCH_SCHEMA,
     make_tool_handlers,
     make_flows_tools,
+    make_onboarding_flows_tools,
 )
 
 
@@ -25,7 +26,7 @@ class TestToolSchemas:
 
 
 class TestToolHandlerFactory:
-    def test_make_tool_handlers_returns_active_handlers(self):
+    def test_make_tool_handlers_returns_active_and_retired_handlers(self):
         session_state = {"senior_id": "test-123", "senior": {"name": "Test"}}
         handlers = make_tool_handlers(session_state)
         assert "web_search" in handlers
@@ -66,3 +67,9 @@ class TestFlowsTools:
         tools = make_flows_tools(session_state)
         for name, tool in tools.items():
             assert tool.handler is not None, f"{name} has no handler"
+
+    def test_onboarding_tools_only_include_web_search(self):
+        session_state = {"call_type": "onboarding", "prospect_id": "prospect-123"}
+        tools = make_onboarding_flows_tools(session_state)
+        assert list(tools) == ["web_search"]
+        assert tools["web_search"].handler is not None

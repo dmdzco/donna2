@@ -258,7 +258,7 @@ pipecat/
 │   ├── growthbook.js           ← GrowthBook feature flag SDK helper (Node.js)
 │   └── encryption.js           ← AES-256-GCM field encryption for PHI (mirrors pipecat/lib/encryption.py)
 ├── services/                   ← 12 service files (dual implementation with pipecat/services/)
-├── routes/                     ← 16 route modules (all /api/* endpoints)
+├── routes/                     ← 16 route modules (all /api/* endpoints) + helpers.js (routeError, canAccessSenior)
 ├── middleware/                  ← 7 middleware files (auth w/ dual-key JWT + revocation, rate-limit, security)
 └── apps/                       ← Frontend apps (still active)
     ├── admin-v2/               ← Admin dashboard (Vercel)
@@ -395,6 +395,8 @@ Use `--environment dev` or `--environment staging` flags for other environments.
 - **Frontend E2E tests:** `npm run test:e2e` — Playwright browser tests across all 3 frontend apps (31 tests, ~15s)
 - **Regression:** `make test-regression` — scenario-based tests run in CI on every PR
 
+- **LLM-to-LLM Voice Simulation:** `cd pipecat && python -m pytest tests/test_live_simulation.py -v -m llm_simulation` — Haiku caller vs real Donna pipeline (real Claude, Director, Observer, DB). Tests web_search, memory injection, reminder processing across multiple calls. Requires ANTHROPIC_API_KEY + dev DATABASE_URL. Design doc: `docs/plans/2026-04-05-llm-voice-simulation-testing.md`
+
 **Do NOT** test voice features locally with ngrok — always deploy to Railway dev environment
 
 ### Frontend E2E Tests (Playwright)
@@ -481,6 +483,10 @@ npx playwright install chromium
 | Update admin UI (v2) | `apps/admin-v2/src/pages/` |
 | Update admin API client | `apps/admin-v2/src/lib/api.ts` |
 | Add/modify frontend E2E tests | `tests/e2e/` — see [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) |
+| Add/modify route error handling | `routes/helpers.js` (`routeError()`) — all route catch blocks use this |
+| Add/modify mobile error display | `apps/mobile/src/lib/api.ts` (`getErrorMessage()`) — all screens use this |
+| Add/modify Zod validation schemas | `validators/schemas.js` — **do NOT add `.transform()` for DB-bound fields** |
+| Add/modify LLM voice simulation tests | `pipecat/tests/simulation/` (framework) + `pipecat/tests/test_live_simulation.py` (tests) |
 
 ### Commit Messages & PR Titles
 
@@ -548,6 +554,8 @@ Live: https://admin-v2-liart.vercel.app
 ```bash
 # Server
 PORT=7860
+ENVIRONMENT=production                  # Enables production fail-closed security checks
+PIPECAT_PUBLIC_URL=https://...          # Public Pipecat URL; used for Twilio signatures + wss:// streams
 
 # Twilio
 TWILIO_ACCOUNT_SID=...
@@ -572,13 +580,14 @@ CEREBRAS_API_KEY=...             # Cerebras (Director primary, speculative pre-p
 # Auth
 JWT_SECRET=...
 JWT_SECRET_PREVIOUS=...          # Old JWT secret during credential rotation (remove after 7d)
-DONNA_API_KEY=...
+DONNA_API_KEYS=pipecat:...,scheduler:... # Labeled service-to-service API keys
+CLERK_SECRET_KEY=...             # Required for Clerk-authenticated Node routes in production
 
 # HIPAA Compliance
 FIELD_ENCRYPTION_KEY=...         # 32-byte base64url key for AES-256-GCM PHI encryption
 RETENTION_CONVERSATIONS_DAYS=365 # Data retention periods (configurable)
 RETENTION_MEMORIES_DAYS=730
-RETENTION_AUDIT_LOGS_DAYS=730
+RETENTION_AUDIT_LOGS_DAYS=2190   # 6 years
 
 # Scheduler
 SCHEDULER_ENABLED=false          # MUST be false (Node.js runs scheduler)
@@ -595,7 +604,20 @@ FAST_OBSERVER_MODEL=gemini-3-flash-preview   # Director model (Gemini fallback)
 CEREBRAS_DIRECTOR_MODEL=gpt-oss-120b         # Director model (Cerebras primary)
 CALL_ANALYSIS_MODEL=gemini-3-flash-preview   # Post-call analysis model
 LOG_LEVEL=INFO                               # DEBUG for verbose pipecat logs
+REDIS_URL=redis://...                        # Required before multiple Pipecat instances
+PIPECAT_REQUIRE_REDIS=true                   # Enforce Redis when horizontally scaled
 ```
+
+Production boot intentionally fails closed if required security env vars are missing or unsafe. `DONNA_API_KEY` is only a local/test compatibility fallback; production must use labeled `DONNA_API_KEYS`.
+
+Security deploy smoke tests before promotion:
+- unsigned `/voice/answer` and `/voice/status` reject;
+- valid Twilio-signed `/voice/answer` returns TwiML with `ws_token`;
+- `/ws` rejects missing/invalid/expired/reused tokens;
+- calls longer than five minutes continue normally after connection;
+- manual call initiation uses `seniorId` and resolves the phone server-side after authZ.
+
+Security follow-up: staged PHI encryption/export migration is intentionally separate. Do not mix it into ingress/auth hardening. The migration should add encrypted companions for the highest-risk plaintext fields, backfill in batches, switch reads/exports to encrypted-first decrypt-at-boundary behavior, and stop/null plaintext only after verification.
 
 ---
 

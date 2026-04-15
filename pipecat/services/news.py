@@ -76,7 +76,7 @@ async def get_news_for_senior(interests: list[str], limit: int = 3) -> str | Non
 
     try:
         interest_list = ", ".join(interests[:5])
-        logger.info("Fetching news for interests: {il}", il=interest_list)
+        logger.info("Fetching news for {n} interests", n=min(len(interests), 5))
 
         async def _news_call():
             return await asyncio.to_thread(
@@ -175,19 +175,14 @@ async def web_search_query(query: str) -> str | None:
     """General-purpose web search for answering a senior's question.
 
     Tries Tavily first (fast, ~1-3s), falls back to OpenAI web search.
+    Live call searches are not cached because stale answers are worse than an
+    extra API call for current-events and weather-style questions.
     """
     if not query:
         return None
 
-    # Check cache (short TTL for general queries)
-    key = f"ws:{query.lower().strip()}"
-    cached = _news_cache.get(key)
-    if cached and time.time() - cached["timestamp"] < CACHE_TTL:
-        logger.info("Using cached web search result")
-        return cached["news"]
-
     try:
-        logger.info("Web search query: {q}", q=query)
+        logger.info("Web search query requested (query_chars={n})", n=len(query))
 
         # Try Tavily first (fast)
         content = await _tavily_search(query)
@@ -204,9 +199,6 @@ async def web_search_query(query: str) -> str | None:
             logger.info("No web search content returned")
             return None
 
-        if len(_news_cache) >= _MAX_CACHE_ENTRIES:
-            _evict_expired()
-        _news_cache[key] = {"news": content, "timestamp": time.time()}
         return content
 
     except Exception as e:

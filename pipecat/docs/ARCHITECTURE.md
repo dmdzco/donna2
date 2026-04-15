@@ -18,8 +18,9 @@
                                    │ WebSocket
                     ┌──────────────▼──────────────┐
                     │        main.py /ws            │
-                    │   Accepts WS, creates         │
-                    │   session_state, calls bot.py  │
+                    │   Accepts WS, validates       │
+                    │   Twilio start frame + token  │
+                    │   before active-call capacity │
                     └──────────────┬───────────────┘
                                    │
                     ┌──────────────▼──────────────┐
@@ -30,7 +31,7 @@
 
 ## Pipecat Pipeline (bot.py)
 
-Linear pipeline of `FrameProcessor`s. The Conversation Director sits in the pipeline but is **non-blocking** — it passes frames through instantly while running Gemini analysis in a background `asyncio.create_task()`.
+Linear pipeline of `FrameProcessor`s. The Conversation Director sits in the pipeline but is **non-blocking** — it passes frames through instantly while running Groq/Gemini analysis in a background `asyncio.create_task()`.
 
 ```
 Twilio Audio ──► FastAPIWebsocketTransport
@@ -43,10 +44,10 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1: Instant regex (0ms)
-              │   (BLOCKING)         │  → 268 patterns: health, goodbye,
-              │   (268 patterns)     │    emotion, cognitive, activity
+              │   (BLOCKING)         │  → patterns: health, goodbye,
+              │   (regex patterns)   │    emotion, cognitive, activity
               │                      │  → Injects guidance for THIS turn
-              │   Goodbye detected → │  → EndFrame after 2s delay
+              │   Goodbye detected → │  → EndFrame after configurable delay
               └─────────┬───────────┘
                         │
                         ▼
@@ -54,21 +55,21 @@ Twilio Audio ──► FastAPIWebsocketTransport
               │ Conversation         │     │  Background Analysis      │
               │ Director             │────►│  (asyncio.create_task)    │
               │ (PASS-THROUGH)       │     │                           │
-              │                      │     │  Groq/Cerebras (~70ms)    │
-              │ 1. Injects guidance  │     │  Gemini fallback (~150ms) │
+              │                      │     │  Groq primary             │
+              │ 1. Injects guidance  │     │  Gemini fallback          │
               │    (same-turn via    │     │  Result cached → injected │
               │    speculative, or   │     │  on NEXT turn (or same    │
               │    previous-turn)    │     │  via speculative)         │
               │ 2. Injects news when │     │                           │
               │    Director signals  │     │  Also handles:            │
-              │ 3. Passes frame      │     │  • Predictive prefetch    │
+              │ 3. Passes frame      │     │  • Memory prefetch        │
               │    immediately       │     │    (2 waves + interim)    │
-              │ 4. Fires background  │     │  • Director-owned web     │
-              │    analysis ────────►│     │    search (filler + gate) │
-              │ 5. Web search gate:  │     │  • Mid-call memory refresh│
-              │    holds frame if    │     │    (after 5+ min)         │
-              │    search in-flight, │     │  • Force winding-down 9min│
-              │    pushes filler TTS │     │                           │
+              │ 4. Fires background  │     │  • Mid-call memory refresh│
+              │    analysis ────────►│     │    (after 5+ min)         │
+              │ 5. Passes frames     │     │  • Force winding-down 9min│
+              │    immediately       │     │                           │
+              │                      │     │                           │
+              │                      │     │                           │
               └─────────┬───────────┘     └──────────────────────────┘
                         │ (no delay)
                         ▼
@@ -80,21 +81,21 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Anthropic LLM      │  Claude Sonnet 4.5 (streaming)
-              │   + Flow Manager     │  2 tools, 3-phase state machine
+              │   + Flow Manager     │  2 tools, conditional reminder + main/wind-down/closing
               └─────────┬───────────┘
                         │ TextFrame
                         ▼
               ┌─────────────────────┐
-              │ Conversation Tracker │  Tracks topics, questions,
-              │                      │  advice per call. Shares
-              │                      │  transcript via session_state
+              │  Guidance Stripper   │  Removes <guidance>...</guidance>
+              │                      │  tags and [BRACKETED] directives
+              │                      │  before TTS and transcript
               └─────────┬───────────┘
                         │
                         ▼
               ┌─────────────────────┐
-              │  Guidance Stripper   │  Removes <guidance>...</guidance>
-              │                      │  tags and [BRACKETED] directives
-              │                      │  before TTS
+              │ Conversation Tracker │  Tracks topics, questions,
+              │                      │  advice per call. Stores
+              │                      │  stripped transcript text
               └─────────┬───────────┘
                         │
                         ▼
@@ -119,11 +120,11 @@ The pipeline processors don't call each other directly. They communicate through
 1. **Frame injection** — Quick Observer and Conversation Director inject guidance into the LLM context by pushing `LLMMessagesAppendFrame` frames. These get appended to Claude's message history before it generates a response, but they don't trigger an LLM call on their own (`run_llm=False`). The next `TranscriptionFrame` reaching the Context Aggregator triggers the actual LLM call, at which point all injected guidance is already in context.
 
 2. **Shared `session_state` dict** — A mutable dictionary initialized in `main.py` and passed to every processor. Key shared state:
-   - `_transcript` — Rolling conversation history (max 40 turns), written by ConversationTracker, read by ConversationDirector for its Gemini analysis
+   - `_transcript` — Rolling conversation history (max 40 turns), written by ConversationTracker after guidance stripping, read by ConversationDirector for its Groq/Gemini analysis
    - `_goodbye_in_progress` — Set by QuickObserver when strong goodbye detected, read by Director to suppress stale guidance injection
    - `_call_start_time` — Set in bot.py, read by Director for time-based fallbacks
    - `_conversation_tracker` — Reference to the ConversationTracker processor, read by Flow nodes to build tracking summaries
-   - `_prefetch_cache` — `PrefetchCache` instance, written by Director prefetch, read by `search_memories` tool handler
+   - `_prefetch_cache` — `PrefetchCache` instance, written by Director memory prefetch and read by proactive memory injection
    - `_news_injected` — Boolean flag, set by Director after injecting news context (one-shot per call)
    - `news_context` — Pre-fetched news string, read by Director for dynamic injection when `should_mention_news` is true
    - `_last_quick_analysis` — `AnalysisResult` from Quick Observer, read by prefetch engine for family/health/activity signals
@@ -136,7 +137,7 @@ The pipeline processors don't call each other directly. They communicate through
 
 ### Layer 1: Quick Observer (0ms)
 
-Instant regex-based analysis with 268 patterns across 19 categories:
+Instant regex-based analysis across Quick Observer categories:
 
 | Category | Patterns | Effect |
 |----------|----------|--------|
@@ -145,21 +146,21 @@ Instant regex-based analysis with 268 patterns across 19 categories:
 | **Family** | 25+ relationship patterns including pets | Context enrichment |
 | **Safety** | Scams, strangers, emergencies | Safety concern flags |
 | **Engagement** | Response length analysis | Engagement level tracking |
-| **Goodbye** | Strong/weak goodbye detection | **EndFrame after 2s delay** |
-| **Factual/Curiosity** | 18 patterns ("what year", "how tall") | Web search trigger |
+| **Goodbye** | Strong/weak goodbye detection | **EndFrame after configurable delay** |
+| **Factual/Curiosity** | Question patterns ("what year", "how tall") | Direct-answer guidance |
 | **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 
 **Guidance injection**: When patterns match, Quick Observer builds a guidance string (e.g., `[HEALTH] They mentioned pain. Ask how they are feeling.`) and pushes it as an `LLMMessagesAppendFrame` with `run_llm=False`. This appends a user-role message to Claude's context before the next LLM call, steering the response without adding latency.
 
 **Model recommendations**: Quick Observer also generates token budget recommendations based on signal priority (16 ordered rules). Crisis situations get 350 tokens; simple questions get 100. This data is available on the `AnalysisResult` but is not currently consumed by the pipeline — it's designed for future dynamic token routing.
 
-**Programmatic Goodbye**: When a strong goodbye signal is detected (e.g., "goodbye", "talk to you later"), Quick Observer schedules an `EndFrame` after 2 seconds via the pipeline task reference. This bypasses unreliable LLM tool-calling for call termination. It also sets `session_state["_goodbye_in_progress"] = True` to suppress Director guidance injection during the goodbye.
+**Programmatic Goodbye**: When a strong goodbye signal is detected (e.g., "goodbye", "talk to you later"), Quick Observer schedules an `EndFrame` after `call_settings.goodbye_delay_seconds` or the 5-second default via the pipeline task reference. This bypasses unreliable LLM tool-calling for call termination. It also sets `session_state["_goodbye_in_progress"] = True` to suppress Director guidance injection during the goodbye.
 
 ### Layer 2: Conversation Director (non-blocking, speculative pre-processing)
 
-Primary LLM: **Groq** (gpt-oss-20b, ~70ms) / **Cerebras** (gpt-oss-120b, ~70ms) — random selection per call. Fallback: **Gemini Flash**. Runs via `asyncio.create_task()` — never blocks the pipeline.
+Primary LLM: **Groq** (`gpt-oss-20b`). Fallback for full guidance: **Gemini Flash**. Runs via `asyncio.create_task()` — never blocks the pipeline.
 
-The Director receives the senior's **location (city/state)** and **today's date** in every turn template, enabling specific predictions like `"Austin Texas weather March 2026"` instead of generic `"weather tomorrow"`. This dramatically improves web search prefetch cache hit rates.
+The Director receives the senior's **location (city/state)** and **today's date** in every turn template, improving guidance and memory query specificity.
 
 **Dynamic news injection**: News context is NOT in the system prompt (saves ~300 tokens/turn). Instead, the Director signals `should_mention_news: true` when contextually appropriate, and the processor injects news into the guidance. One-shot: injected at most once per call.
 
@@ -170,14 +171,14 @@ The Director receives the senior's **location (city/state)** and **today's date*
    - Cancels any running speculative analysis (text changed)
    - Debounced memory prefetch (1s gap, 15+ chars)
 2. After 250ms gap in interims (silence detected):
-   - Starts speculative Cerebras analysis using last interim text
+   - Starts speculative Groq analysis using last interim text
 3. On `TranscriptionFrame` (after VAD 1.2s silence):
    - **Checks speculative result**: if done + Jaccard(interim, final) ≥ 0.7 → injects **SAME-TURN** guidance
    - Otherwise falls back to **PREVIOUS-TURN** cached guidance (original behavior)
    - Takes fallback actions (force end, wrap-up injection)
    - If speculative wasn't used → starts regular background analysis
    - Starts 1st-wave regex prefetch (non-blocking)
-4. Background analysis calls Cerebras (→ Gemini fallback) with full conversation context
+4. Background analysis calls Groq (→ Gemini fallback for full guidance) with full conversation context
 5. After analysis completes, starts 2nd-wave director-driven prefetch
 
 **Metrics** (logged on EndFrame): `[Director] Call summary: 8 turns, 6/7 speculative hits (86%), 1 cancels`
@@ -222,9 +223,7 @@ The Director classifies calls into 5 analytical phases (including "rapport" betw
     "reason": "why this token count"
   },
   "prefetch": {
-    "memory_queries": ["keyword1", "keyword2"],
-    "web_queries": ["Austin Texas weather March 2026"],
-    "anticipated_tools": ["search_memories", "save_important_detail"]
+    "memory_queries": ["gardening", "grandson Jake"]
   }
 }
 ```
@@ -241,7 +240,7 @@ closing/medium/warm | CLOSING: Say a warm goodbye. Keep it brief.
 
 ### Predictive Context Engine (Speculative Prefetch)
 
-The Director orchestrates a 2-wave speculative memory prefetch that eliminates tool-call latency. Memories are pre-fetched in the background and cached in `session_state["_prefetch_cache"]` so that when Claude calls `search_memories`, results return instantly from cache.
+The Director orchestrates a 2-wave speculative memory prefetch that eliminates memory tool-call latency. Memories are pre-fetched in the background and cached in `session_state["_prefetch_cache"]` so relevant memory context can be injected before Claude responds.
 
 **Implementation**: `services/prefetch.py` (cache + extraction + runner), orchestrated by `conversation_director.py`.
 
@@ -263,13 +262,12 @@ User speaking...
       │   Quick Observer signals (family, health, activity)
       │   → memory.search() → cache
       │
-      └─ 2nd wave (~70ms): Director analysis (Groq/Cerebras)
+      └─ 2nd wave (~70ms): Query Director analysis (Groq)
           next_topic → anticipatory memory prefetch
           which_reminder → reminder context prefetch
           news_topic → personal connection prefetch
           current_topic (2+ turns) → sustained topic prefetch
-          web_queries → web search prefetch (OpenAI, Jaccard 0.4 match)
-          → memory.search() + web_search_query() → cache
+          memory_queries → memory.search() → cache
 ```
 
 #### Cache Design (PrefetchCache)
@@ -281,39 +279,20 @@ User speaking...
 - **Concurrency**: Max 2 concurrent `memory.search()` calls per wave
 - **Metrics**: Hits/misses/hit rate logged at call end via MetricsLogger
 
-#### Cache-First Tool Handlers
+#### Proactive Memory Injection
 
-The `search_memories` tool in `flows/tools.py` checks the prefetch cache before making live calls:
+The Director checks the prefetch cache before passing the final transcription onward:
 
 ```
-Claude calls search_memories("gardening")
+Senior mentions gardening
   → _prefetch_cache.get("gardening")  (Jaccard fuzzy match, threshold=0.3)
-  → HIT: return cached results (~0ms)
-  → MISS: fall through to live memory.search() (200-300ms)
+  → HIT: inject memory context (~0ms)
+  → MISS: continue naturally
 ```
 
-#### Director-Owned Web Search (Gating)
+#### Active Web Search Tool
 
-Web search is handled entirely by the Conversation Director, not Claude. The Director runs web searches during speculative analysis and gates the TranscriptionFrame until results are ready:
-
-```
-User speaks → 250ms silence → Groq speculative starts
-                               ↓ (~500-800ms)
-                          Groq returns with web_queries
-                          → web search starts immediately
-                               ↓
-VAD fires (1.2s) → TranscriptionFrame arrives at Director
-                               ↓
-Director checks: web search in-flight?
-  YES → push TTSSpeakFrame("Let me check on that for you.")
-        hold TranscriptionFrame
-        await web search (max 10s)
-        inject [WEB RESULT] into context
-        release TranscriptionFrame → Claude responds with data
-  NO  → push TranscriptionFrame normally
-```
-
-The Director's location/date context enables specific queries like `"Austin Texas weather March 2026"` instead of generic `"weather tomorrow"`.
+Web search is handled by Claude's active `web_search` tool, not Director gating. The tool asks `services.news.web_search_query()` to use Tavily raw snippets first and OpenAI web search as fallback.
 
 #### Director Guidance Hints
 
@@ -321,7 +300,7 @@ When the prefetch cache has entries, the Director attaches hints to its guidance
 ```
 main/medium/warm | CONTEXT AVAILABLE: Memories about gardening, grandson
 ```
-This nudges Claude to call `search_memories` — knowing the call will be instant.
+This gives Claude the relevant memory directly without requiring a separate `search_memories` tool call.
 
 ## Pipecat Flows — Call Phase Management
 
@@ -369,12 +348,12 @@ The opening phase is merged into main — the bot starts directly in main (or re
 
 | Phase | Tools |
 |-------|-------|
-| **Reminder** *(conditional)* | `mark_reminder_acknowledged`, `save_important_detail`, `transition_to_main` |
-| **Main** | `search_memories`, `save_important_detail`, `mark_reminder_acknowledged`, `check_caregiver_notes`, `transition_to_winding_down` |
-| **Winding Down** | `mark_reminder_acknowledged`, `save_important_detail`, `check_caregiver_notes`, `transition_to_closing` |
+| **Reminder** *(conditional)* | `mark_reminder_acknowledged`, `transition_to_main` |
+| **Main** | `web_search`, `mark_reminder_acknowledged`, `transition_to_winding_down` |
+| **Winding Down** | `web_search`, `mark_reminder_acknowledged`, `transition_to_closing` |
 | **Closing** | *(none — post_action ends call)* |
 
-*Note: Web search is handled by the Conversation Director, not Claude. The Director runs web searches during speculative analysis and injects results as `[WEB RESULT]` messages into Claude's context.*
+*Note: Memory and caregiver-note context is prefetched/injected. Web search remains an active Claude tool.*
 
 ### Context Strategies Per Phase
 
@@ -390,10 +369,8 @@ The opening phase is merged into main — the bot starts directly in main (or re
 
 | Tool | Purpose |
 |------|---------|
-| `search_memories` | Semantic search of senior's memory bank (pgvector + HNSW) |
-| `save_important_detail` | Store new memories (health, family, preference, life_event, emotional, activity) |
 | `mark_reminder_acknowledged` | Track reminder delivery with acknowledgment status |
-| `check_caregiver_notes` | Retrieve and deliver pending notes from caregivers |
+| `web_search` | Search current information via Tavily first, OpenAI fallback |
 
 ## Post-Call Processing
 
@@ -401,13 +378,13 @@ When the Twilio client disconnects, `run_post_call()` in `services/post_call.py`
 
 1. **Complete conversation** — Updates DB with duration, status, transcript
 2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions. Now also includes `mood` (e.g., happy, lonely, anxious) and `caregiver_sms` (a privacy-respecting, mood-aware message for caregivers)
-2.5. **Caregiver notification** — POST to Node.js API for call_completed + concern_detected alerts. The `caregiver_sms` from analysis is sent to caregivers via this pipeline; if the senior seems down, it subtly suggests the caregiver give them a call
+2.5. **Caregiver notes + notifications** — Marks caregiver notes delivered only when assistant transcript evidence shows Donna delivered them. POSTs to Node.js API for call_completed + concern_detected alerts, raising on non-2xx responses and retrying transient failures once. The `caregiver_sms` from analysis is sent to caregivers via this pipeline; if the senior seems down, it subtly suggests the caregiver give them a call
 3. **Summary persistence** — Writes analysis summary to `conversations.summary` (enables `get_recent_summaries()` and cross-call context)
 3.5. **Interest discovery** — Extracts new interests from conversation, updates senior profile
 3.6. **Interest scores** — Computes engagement scores per interest topic
 4. **Memory extraction** — OpenAI extracts facts/preferences/events from transcript, stores with embeddings
 5. **Daily context** — Saves topics, advice, reminders, and summary for same-day cross-call memory
-6. **Reminder cleanup** — Marks unacknowledged reminders for retry
+6. **Reminder cleanup** — Waits briefly for any in-flight reminder acknowledgment write, re-reads `reminder_deliveries.status`, and marks unacknowledged reminders for retry
 7. **Cache clearing** — Clears senior context cache and reminder context
 8. **Snapshot rebuild** — Rebuilds `seniors.call_context_snapshot` JSONB (analysis, summaries, turns, daily context) so next call reads a single column instead of 6 queries
 
@@ -438,9 +415,9 @@ pipecat/
 │   └── tools.py                     ← LLM tool schemas + async handlers (2 active tools: web_search, mark_reminder_acknowledged)
 │
 ├── processors/
-│   ├── patterns.py                  ← 268 regex patterns, 19 categories (data only)
+│   ├── patterns.py                  ← Regex pattern data (503 LOC)
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame
-│   ├── conversation_director.py     ← Layer 2: Gemini Flash guidance (non-blocking)
+│   ├── conversation_director.py     ← Layer 2: Groq/Gemini guidance (non-blocking)
 │   ├── conversation_tracker.py      ← In-call topic/question/advice tracking + transcript
 │   ├── metrics_logger.py            ← Call metrics logging processor
 │   ├── goodbye_gate.py              ← False-goodbye grace period (NOT in active pipeline — available but unused)
@@ -448,7 +425,7 @@ pipecat/
 │
 ├── services/
 │   ├── prefetch.py                  ← Predictive Context Engine: cache, extraction, runner
-│   ├── director_llm.py              ← Gemini Flash analysis for Director + prefetch hints (374 LOC)
+│   ├── director_llm.py              ← Groq/Gemini Director analysis + prefetch hints (593 LOC)
 │   ├── post_call.py                 ← Post-call orchestration (analysis, memory, cleanup, snapshot rebuild)
 │   ├── reminder_delivery.py         ← Reminder delivery CRUD + prompt formatting
 │   ├── call_analysis.py             ← Post-call analysis + call quality scoring (246 LOC)
@@ -501,7 +478,7 @@ pipecat/
 │                                  │    │                                   │
 │  • Pipecat FrameProcessor pipe   │    │  • REST APIs for frontends       │
 │  • Pipecat Flows (4 phases)      │    │  • Reminder scheduler            │
-│  • Quick Observer (268 patterns) │    │  • Call initiation (Twilio)      │
+│  • Quick Observer (patterns)     │    │  • Call initiation (Twilio)      │
 │  • Conversation Director (L2)    │    │  • Admin/consumer/observability  │
 │  • ElevenLabs TTS (Pipecat)      │    │    API endpoints                 │
 │  • Deepgram STT (Pipecat)        │    │                                   │
@@ -537,7 +514,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **LLM** | Claude (streaming, sentence-by-sentence) | AnthropicLLMService (Pipecat managed) |
 | **TTS** | ElevenLabs WebSocket (custom) | ElevenLabs via Pipecat |
 | **STT** | Deepgram (custom integration) | DeepgramSTTService (Pipecat managed) |
-| **Goodbye** | Custom timer in v1-advanced.js | Quick Observer → EndFrame (2s delay) |
+| **Goodbye** | Custom timer in v1-advanced.js | Quick Observer → EndFrame after configured delay |
 | **Scheduler** | Active (SCHEDULER_ENABLED=true) | Disabled (prevents dual-scheduler) |
 
 ## Tech Stack
@@ -550,8 +527,8 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
 | **Voice LLM** | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | AnthropicLLMService (prompt caching enabled) |
-| **Director** | Groq (`gpt-oss-20b`) / Cerebras (`gpt-oss-120b`) | ~70ms primary, random selection |
-| **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | ~150ms when Groq/Cerebras unavailable |
+| **Director** | Groq (`gpt-oss-20b`) | Primary fast provider |
+| **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Full guidance fallback when Groq unavailable |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
 | **STT** | Deepgram Nova 3 | Real-time, interim results |
 | **TTS** | ElevenLabs | `eleven_turbo_v2_5` |
@@ -621,10 +598,9 @@ COFOUNDER_API_KEY_2=...          # Cofounder auth
 # Scheduler (MUST be false to prevent conflicts)
 SCHEDULER_ENABLED=false
 
-# Director models (optional — Groq/Cerebras are primary when available)
+# Director models
 FAST_OBSERVER_MODEL=gemini-3-flash-preview   # Gemini fallback model
 GROQ_API_KEY=...                             # Groq primary Director
-CEREBRAS_API_KEY=...                         # Cerebras primary Director
 
 # Testing
 RUN_DB_TESTS=1                   # Set to run DB integration tests
@@ -632,4 +608,4 @@ RUN_DB_TESTS=1                   # Set to run DB integration tests
 
 ---
 
-*Last updated: March 2026 — v5.2 with multi-provider Director, web search prefetch, GrowthBook feature flags, call metrics observability, enhanced health endpoint*
+*Last updated: April 2026 — current Groq/Gemini Director, memory prefetch, active web_search tool, GrowthBook feature flags, call metrics observability, enhanced health endpoint*

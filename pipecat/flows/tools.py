@@ -2,7 +2,7 @@
 
 Active tools exposed to Claude (2 tools — Director-first architecture):
 - web_search: Real-time web search with spoken filler UX
-- mark_reminder_acknowledged: Track reminder delivery status (fire-and-forget)
+- mark_reminder_acknowledged: Track reminder delivery status with post-call DB verification
 
 Retired tools (handlers kept for Gemini / future use):
 - search_memories → Director injects memories as ephemeral context (500ms gate)
@@ -137,14 +137,14 @@ def make_tool_handlers(session_state: dict) -> dict:
             return {"status": "success", "result": "No memories available right now. Continue naturally."}
 
         query = args.get("query", "")
-        logger.info("Tool: search_memories query={q} senior={sid}", q=query, sid=senior_id)
+        logger.info("Tool: search_memories senior={sid}", sid=str(senior_id)[:8])
 
         # Check prefetch cache first (instant return on hit)
         cache = session_state.get("_prefetch_cache")
         if cache:
             cached = cache.get(query)
             if cached:
-                logger.info("Tool: search_memories CACHE HIT query={q}", q=query)
+                logger.info("Tool: search_memories CACHE HIT")
                 formatted = "[MEMORY] " + "\n[MEMORY] ".join(
                     r["content"] for r in cached if r.get("content")
                 )
@@ -171,7 +171,7 @@ def make_tool_handlers(session_state: dict) -> dict:
             return {"status": "success", "result": "Search unavailable. Continue naturally."}
 
         query = args.get("query", "")
-        logger.info("Tool: web_search CALLED query={q}", q=query)
+        logger.info("Tool: web_search CALLED query_chars={n}", n=len(query))
 
         if not query:
             return {"status": "success", "result": "No query provided."}
@@ -182,18 +182,18 @@ def make_tool_handlers(session_state: dict) -> dict:
             result = await asyncio.wait_for(web_search_query(query), timeout=15.0)
             elapsed_ms = round((_time.time() - start) * 1000)
             if not result:
-                logger.info("Tool: web_search empty result ({ms}ms) query={q}", ms=elapsed_ms, q=query)
+                logger.info("Tool: web_search empty result ({ms}ms)", ms=elapsed_ms)
                 return {"status": "success", "result": f"I couldn't find information about {query}."}
-            logger.info("Tool: web_search SUCCESS ({ms}ms, {n} chars) query={q}", ms=elapsed_ms, n=len(result), q=query)
+            logger.info("Tool: web_search SUCCESS ({ms}ms, {n} chars)", ms=elapsed_ms, n=len(result))
             return {"status": "success", "result": f"[NEWS] {result}"}
         except asyncio.TimeoutError:
             elapsed_ms = round((_time.time() - start) * 1000)
-            logger.warning("Tool: web_search TIMEOUT ({ms}ms) query={q}", ms=elapsed_ms, q=query)
+            logger.warning("Tool: web_search TIMEOUT ({ms}ms)", ms=elapsed_ms)
             return {"status": "success", "result": "Search took too long. Continue naturally."}
         except Exception as e:
             import traceback
             elapsed_ms = round((_time.time() - start) * 1000)
-            logger.error("Tool: web_search ERROR ({ms}ms) query={q}: {err}\n{tb}", ms=elapsed_ms, q=query, err=str(e), tb=traceback.format_exc())
+            logger.error("Tool: web_search ERROR ({ms}ms): {err}\n{tb}", ms=elapsed_ms, err=str(e), tb=traceback.format_exc())
             return {"status": "success", "result": "Search unavailable. Continue naturally."}
 
     async def handle_mark_reminder(args: dict) -> dict:
@@ -202,33 +202,61 @@ def make_tool_handlers(session_state: dict) -> dict:
         user_response = args.get("user_response", "")
         logger.info("Tool: mark_reminder id={rid} status={s}", rid=reminder_id, s=status)
 
-        reminder_label = user_response or reminder_id
+        # Local tracking is synchronous (critical for prompt context), but
+        # post-call cleanup verifies the DB status before skipping retries.
+        delivered = session_state.setdefault("reminders_delivered", set())
+        if reminder_id:
+            delivered.add(reminder_id)
+        delivery = session_state.get("reminder_delivery") or {}
+        title = delivery.get("title")
+        if title:
+            delivered.add(title)
 
-        # Local tracking is synchronous (critical for prompt context)
-        session_state.setdefault("reminders_delivered", set()).add(reminder_label)
+        session_state["_reminder_ack_attempted"] = True
 
-        # Fire-and-forget: DB write in background (don't block Claude's response)
-        async def _background_ack():
+        async def _persist_ack():
             try:
                 from services.reminder_delivery import mark_reminder_acknowledged
-                delivery = session_state.get("reminder_delivery")
                 delivery_id = delivery.get("id") if delivery else None
-                if delivery_id:
-                    await mark_reminder_acknowledged(delivery_id, status, user_response)
-                    logger.info("Background mark_reminder completed: {rid}", rid=reminder_id)
-                else:
+                if not delivery_id:
+                    session_state["_reminder_ack_persisted"] = False
                     logger.warning("mark_reminder: no delivery_id in session")
-            except Exception as e:
-                logger.error("Background mark_reminder failed: {err}", err=str(e))
+                    return None
 
-        asyncio.create_task(_background_ack())
+                row = await mark_reminder_acknowledged(delivery_id, status, user_response)
+                session_state["_reminder_ack_persisted"] = bool(row)
+                if row:
+                    logger.info("mark_reminder persisted: {rid}", rid=reminder_id)
+                else:
+                    logger.warning("mark_reminder persistence returned no row: {rid}", rid=reminder_id)
+                return row
+            except Exception as e:
+                session_state["_reminder_ack_persisted"] = False
+                logger.error("mark_reminder persistence failed: {err}", err=str(e))
+                return None
+
+        if not (delivery.get("id") if delivery else None):
+            session_state["_reminder_ack_persisted"] = False
+            logger.warning("mark_reminder: no delivery_id in session")
+            return {"status": "success", "result": "Reminder response noted."}
+
+        try:
+            task = asyncio.create_task(_persist_ack())
+            session_state["_reminder_ack_task"] = task
+            ack_tasks = session_state.setdefault("_reminder_ack_tasks", set())
+            ack_tasks.add(task)
+            task.add_done_callback(ack_tasks.discard)
+        except Exception as e:
+            session_state["_reminder_ack_persisted"] = False
+            logger.error("mark_reminder scheduling failed: {err}", err=str(e))
+
         return {"status": "success", "result": f"Reminder marked as {status}."}
 
     async def handle_save_detail(args: dict) -> dict:
         detail = args.get("detail", "")
         category = args.get("category", "life_event")
         senior_id = session_state.get("senior_id")
-        logger.info("Tool: save_important_detail cat={c} detail={d}", c=category, d=detail[:50])
+        logger.info("Tool: save_important_detail cat={c} detail_chars={n}", c=category, n=len(detail))
 
         if not detail or not senior_id:
             return {"status": "success", "result": "Detail noted."}
@@ -252,7 +280,7 @@ def make_tool_handlers(session_state: dict) -> dict:
                     source="conversation",
                     importance=70,
                 )
-                logger.info("Background save_detail completed: {d}", d=detail[:50])
+                logger.info("Background save_detail completed")
             except Exception as e:
                 logger.error("Background save_detail failed: {err}", err=str(e))
 
@@ -302,14 +330,14 @@ def make_tool_handlers(session_state: dict) -> dict:
         async def tracked(args):
             if name not in tools_used:
                 tools_used.append(name)
-            logger.info("Tool CALL: {name}({args})", name=name, args=args)
+            logger.info("Tool CALL: {name}", name=name)
             result = await fn(args)
-            # Log truncated result to avoid flooding logs
-            result_str = str(result.get("result", ""))
-            if len(result_str) > 200:
-                result_str = result_str[:200] + "..."
-            logger.info("Tool RESULT: {name} → {status} | {result}",
-                        name=name, status=result.get("status", "?"), result=result_str)
+            logger.info(
+                "Tool RESULT: {name} -> {status} result_chars={n}",
+                name=name,
+                status=result.get("status", "?"),
+                n=len(str(result.get("result", ""))),
+            )
             return result
         return tracked
 
@@ -360,114 +388,14 @@ def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
     return schemas
 
 
-# ---------------------------------------------------------------------------
-# Onboarding tool: save_prospect_detail
-# ---------------------------------------------------------------------------
-
-SAVE_PROSPECT_DETAIL_SCHEMA = {
-    "name": "save_prospect_detail",
-    "description": (
-        "Save information learned about the caller during an onboarding call. "
-        "Call this whenever you learn the caller's name, their relationship to a senior, "
-        "the senior's name, their interests, concerns, or any other useful detail. "
-        "Save early and often — this persists across calls."
-    ),
-    "properties": {
-        "detail_type": {
-            "type": "string",
-            "enum": ["name", "relationship", "loved_one_name", "interest", "concern", "context"],
-            "description": (
-                "Type of detail: 'name' (caller's name), 'relationship' (daughter, son, self, etc.), "
-                "'loved_one_name' (name of the senior they're calling about), 'interest' (hobbies, likes), "
-                "'concern' (worries about the senior), 'context' (other useful information)"
-            ),
-        },
-        "value": {
-            "type": "string",
-            "description": "The detail to save (e.g., 'Lisa', 'daughter', 'loves gardening')",
-        },
-    },
-    "required": ["detail_type", "value"],
-}
-
-
-def _make_onboarding_tool_handlers(session_state: dict) -> dict:
-    """Create tool handlers for onboarding calls."""
-
-    async def handle_save_prospect_detail(args: dict) -> dict:
-        detail_type = args.get("detail_type", "context")
-        value = args.get("value", "")
-        prospect_id = session_state.get("prospect_id")
-        prospect = session_state.get("prospect") or {}
-
-        logger.info("Tool: save_prospect_detail type={t} value={v} prospect={pid}",
-                     t=detail_type, v=value, pid=prospect_id)
-
-        if not value:
-            return {"status": "success", "result": "Detail noted."}
-
-        # Direct fields: update prospect table
-        if detail_type in ("name", "relationship", "loved_one_name") and prospect_id:
-            try:
-                from services.prospects import update_after_call
-                field_map = {
-                    "name": "learned_name",
-                    "relationship": "relationship",
-                    "loved_one_name": "loved_one_name",
-                }
-                await update_after_call(prospect_id, {field_map[detail_type]: value})
-                prospect[field_map[detail_type]] = value
-            except Exception as e:
-                logger.error("save_prospect_detail DB error: {err}", err=str(e))
-
-        # All types: store as memory for return call recognition
-        if prospect_id:
-            try:
-                from services.memory import store
-                type_map = {
-                    "name": "fact",
-                    "relationship": "relationship",
-                    "loved_one_name": "relationship",
-                    "interest": "preference",
-                    "concern": "concern",
-                    "context": "fact",
-                }
-                await store(
-                    senior_id=None,
-                    type_=type_map.get(detail_type, "fact"),
-                    content=f"[{detail_type}] {value}",
-                    source="onboarding_conversation",
-                    importance=70,
-                    prospect_id=prospect_id,
-                )
-            except Exception as e:
-                logger.error("save_prospect_detail memory error: {err}", err=str(e))
-
-        return {"status": "success", "result": f"[SAVED] {detail_type}: {value}"}
-
-    return {
-        "save_prospect_detail": handle_save_prospect_detail,
-    }
-
-
 def make_onboarding_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
     """Create FlowsFunctionSchema instances for onboarding calls.
 
-    Returns: save_prospect_detail + web_search.
+    Returns: web_search only (prospect details are extracted post-call).
     """
-    onboarding_handlers = _make_onboarding_tool_handlers(session_state)
     subscriber_handlers = make_tool_handlers(session_state)
 
     schemas = {}
-
-    # save_prospect_detail
-    schemas["save_prospect_detail"] = FlowsFunctionSchema(
-        name=SAVE_PROSPECT_DETAIL_SCHEMA["name"],
-        description=SAVE_PROSPECT_DETAIL_SCHEMA["description"],
-        properties=SAVE_PROSPECT_DETAIL_SCHEMA["properties"],
-        required=SAVE_PROSPECT_DETAIL_SCHEMA["required"],
-        handler=onboarding_handlers["save_prospect_detail"],
-    )
 
     # web_search (for onboarding too)
     schemas["web_search"] = FlowsFunctionSchema(

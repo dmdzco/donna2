@@ -55,6 +55,11 @@ export class ApiError extends Error {
   get needsOnboarding() {
     return this.status === 404 && this.body?.needsOnboarding === true;
   }
+
+  /** Human-readable message including status code for debugging */
+  get displayMessage() {
+    return `${this.message} (${this.status})`;
+  }
 }
 
 /** A single notification record from the backend */
@@ -70,10 +75,39 @@ export interface DonnaNotification {
   readAt?: string | null;
 }
 
+export interface AccountDeletionResult {
+  success: boolean;
+  clerkUserDeleted: boolean;
+  deletedSeniors: string[];
+  unlinkedSeniors: string[];
+  deletionCounts: Record<string, Record<string, number>>;
+  message?: string;
+}
+
+/**
+ * Extract a user-facing error message from a React Query error.
+ * Shows the API error message + status code for debugging.
+ * Falls back to a generic message for non-API errors.
+ */
+export function getErrorMessage(error: unknown, fallback = "Something went wrong"): string {
+  if (error instanceof ApiError) return error.displayMessage;
+  if (error instanceof Error) return error.message;
+  return fallback;
+}
+
 export const api = {
   caregivers: {
     /** GET /api/caregivers/me -- returns current user's profile + linked seniors */
     me: (token: string) => fetchJson<CaregiverProfile>("/api/caregivers/me", { token }),
+  },
+
+  account: {
+    /** DELETE /api/caregivers/me/account -- deletes the current caregiver account */
+    delete: (token: string) =>
+      fetchJson<AccountDeletionResult>("/api/caregivers/me/account", {
+        method: "DELETE",
+        token,
+      }),
   },
 
   onboarding: {
@@ -161,11 +195,11 @@ export const api = {
   },
 
   calls: {
-    /** POST /api/call -- initiate an outbound call to a phone number */
-    initiate: (phoneNumber: string, token: string) =>
+    /** POST /api/call -- initiate an outbound call for an authorized senior */
+    initiate: (seniorId: string, token: string) =>
       fetchJson<{ success: boolean; callSid: string }>("/api/call", {
         method: "POST",
-        body: JSON.stringify({ phoneNumber }),
+        body: JSON.stringify({ seniorId }),
         token,
       }),
   },

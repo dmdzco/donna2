@@ -143,11 +143,27 @@ fi
 echo ""
 info "Reading production env vars from Railway..."
 
-# Get production vars for each service to replicate
-get_prod_var() {
+# Get Railway vars for a service/environment.
+get_railway_var() {
   local SERVICE=$1
-  local VAR=$2
-  railway variables get "$VAR" --service "$SERVICE" --environment production 2>/dev/null || echo ""
+  local ENVIRONMENT=$2
+  local VAR=$3
+  railway variable list --kv --service "$SERVICE" --environment "$ENVIRONMENT" 2>/dev/null | \
+    awk -F= -v key="$VAR" '$1 == key {print substr($0, length(key) + 2); exit}'
+}
+
+get_prod_var() {
+  get_railway_var "$1" production "$2"
+}
+
+get_public_url() {
+  local SERVICE=$1
+  local ENVIRONMENT=$2
+  local DOMAIN
+  DOMAIN=$(get_railway_var "$SERVICE" "$ENVIRONMENT" RAILWAY_PUBLIC_DOMAIN)
+  if [ -n "$DOMAIN" ]; then
+    echo "https://$DOMAIN"
+  fi
 }
 
 # Read key production vars from Pipecat service
@@ -160,21 +176,47 @@ OPENAI_API_KEY=$(get_prod_var donna-pipecat OPENAI_API_KEY)
 TWILIO_ACCOUNT_SID=$(get_prod_var donna-pipecat TWILIO_ACCOUNT_SID)
 TWILIO_AUTH_TOKEN=$(get_prod_var donna-pipecat TWILIO_AUTH_TOKEN)
 JWT_SECRET=$(get_prod_var donna-pipecat JWT_SECRET)
-DONNA_API_KEY=$(get_prod_var donna-pipecat DONNA_API_KEY)
+DONNA_API_KEYS=$(get_prod_var donna-pipecat DONNA_API_KEYS)
+if [ -z "$DONNA_API_KEYS" ]; then
+  DONNA_API_KEYS=$(get_prod_var donna-api DONNA_API_KEYS)
+fi
+FIELD_ENCRYPTION_KEY=$(get_prod_var donna-pipecat FIELD_ENCRYPTION_KEY)
+if [ -z "$FIELD_ENCRYPTION_KEY" ]; then
+  FIELD_ENCRYPTION_KEY=$(get_prod_var donna-api FIELD_ENCRYPTION_KEY)
+fi
+CLERK_SECRET_KEY=$(get_prod_var donna-api CLERK_SECRET_KEY)
 
-if [ -z "$ANTHROPIC_API_KEY" ]; then
+DEV_PIPECAT_PUBLIC_URL=$(get_public_url donna-pipecat dev)
+DEV_NODE_API_URL=$(get_public_url donna-api dev)
+STAGING_PIPECAT_PUBLIC_URL=$(get_public_url donna-pipecat staging)
+STAGING_NODE_API_URL=$(get_public_url donna-api staging)
+MISSING_PUBLIC_URLS=false
+
+if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$DONNA_API_KEYS" ] || [ -z "$FIELD_ENCRYPTION_KEY" ]; then
   warn "Could not read production vars. You may need to set vars manually in Railway dashboard."
   warn "The dev environment and Neon branches have been created — set vars in Railway UI."
   echo ""
   echo "Railway env vars to set for dev environment (both services):"
+  echo "  ENVIRONMENT           = production"
   echo "  DATABASE_URL          = $DEV_DB_URL"
+  echo "  PIPECAT_PUBLIC_URL    = https://<dev-pipecat-domain>"
+  echo "  DONNA_API_KEYS        = pipecat:<key>,scheduler:<key>,notifications:<key>"
+  echo "  FIELD_ENCRYPTION_KEY  = <32-byte base64url key>"
+  echo "  JWT_SECRET            = <non-default secret>"
+  echo "  TWILIO_ACCOUNT_SID    = <Twilio account SID>"
+  echo "  TWILIO_AUTH_TOKEN     = <Twilio auth token>"
   echo "  TWILIO_PHONE_NUMBER   = $DEV_TWILIO_NUMBER"
+  echo "  NODE_API_URL          = https://<dev-node-domain>   (on donna-pipecat)"
+  echo "  CLERK_SECRET_KEY      = <Clerk secret>              (on donna-api)"
   echo "  SCHEDULER_ENABLED     = false   (on donna-pipecat)"
-  echo "  SCHEDULER_ENABLED     = true    (on donna-nodejs, if you want reminders)"
+  echo "  SCHEDULER_ENABLED     = true    (on donna-api, if you want reminders)"
+  echo "  LOG_LEVEL             = INFO    (on donna-pipecat)"
   echo "  + copy all API keys from production"
   echo ""
   echo "For staging environment:"
+  echo "  ENVIRONMENT           = production"
   echo "  DATABASE_URL          = $STAGING_DB_URL"
+  echo "  PIPECAT_PUBLIC_URL    = https://<staging-pipecat-domain>"
   echo "  + same API keys and Twilio dev number"
   echo ""
   ok "Neon branches created. Set Railway vars manually, then run: make deploy-dev"
@@ -182,6 +224,30 @@ if [ -z "$ANTHROPIC_API_KEY" ]; then
 fi
 
 ok "Read production env vars"
+
+warn_missing_public_url() {
+  local SERVICE=$1
+  local ENVIRONMENT=$2
+  local VAR=$3
+  warn "$SERVICE $ENVIRONMENT has no RAILWAY_PUBLIC_DOMAIN; $VAR must be set manually after Railway creates the domain."
+  MISSING_PUBLIC_URLS=true
+}
+
+if [ -z "$DEV_PIPECAT_PUBLIC_URL" ]; then
+  warn_missing_public_url donna-pipecat dev PIPECAT_PUBLIC_URL
+fi
+if [ -z "$DEV_NODE_API_URL" ]; then
+  warn_missing_public_url donna-api dev NODE_API_URL
+fi
+if [ -z "$STAGING_PIPECAT_PUBLIC_URL" ]; then
+  warn_missing_public_url donna-pipecat staging PIPECAT_PUBLIC_URL
+fi
+if [ -z "$STAGING_NODE_API_URL" ]; then
+  warn_missing_public_url donna-api staging NODE_API_URL
+fi
+if [ "$MISSING_PUBLIC_URLS" = "true" ]; then
+  warn "The script will continue, but URL-dependent vars must be set before live call testing."
+fi
 
 # ─────────────────────────────────────────────
 # Step 5: Set dev environment variables
@@ -195,7 +261,7 @@ set_dev_var() {
   local KEY=$2
   local VALUE=$3
   if [ -n "$VALUE" ]; then
-    railway variables set "$KEY=$VALUE" --service "$SERVICE" --environment dev 2>/dev/null && \
+    railway variable set --service "$SERVICE" --environment dev --skip-deploys "$KEY=$VALUE" 2>/dev/null && \
       echo "  Set $KEY on $SERVICE" || \
       warn "Failed to set $KEY on $SERVICE"
   fi
@@ -203,7 +269,10 @@ set_dev_var() {
 
 # Pipecat dev vars
 info "Setting donna-pipecat dev vars..."
+set_dev_var donna-pipecat ENVIRONMENT "production"
 set_dev_var donna-pipecat DATABASE_URL "$DEV_DB_URL"
+set_dev_var donna-pipecat PIPECAT_PUBLIC_URL "$DEV_PIPECAT_PUBLIC_URL"
+set_dev_var donna-pipecat NODE_API_URL "$DEV_NODE_API_URL"
 set_dev_var donna-pipecat TWILIO_ACCOUNT_SID "$TWILIO_ACCOUNT_SID"
 set_dev_var donna-pipecat TWILIO_AUTH_TOKEN "$TWILIO_AUTH_TOKEN"
 set_dev_var donna-pipecat TWILIO_PHONE_NUMBER "$DEV_TWILIO_NUMBER"
@@ -214,20 +283,26 @@ set_dev_var donna-pipecat ELEVENLABS_VOICE_ID "$ELEVENLABS_VOICE_ID"
 set_dev_var donna-pipecat GOOGLE_API_KEY "$GOOGLE_API_KEY"
 set_dev_var donna-pipecat OPENAI_API_KEY "$OPENAI_API_KEY"
 set_dev_var donna-pipecat JWT_SECRET "$JWT_SECRET"
-set_dev_var donna-pipecat DONNA_API_KEY "$DONNA_API_KEY"
+set_dev_var donna-pipecat DONNA_API_KEYS "$DONNA_API_KEYS"
+set_dev_var donna-pipecat FIELD_ENCRYPTION_KEY "$FIELD_ENCRYPTION_KEY"
 set_dev_var donna-pipecat SCHEDULER_ENABLED "false"
-set_dev_var donna-pipecat LOG_LEVEL "DEBUG"
+set_dev_var donna-pipecat LOG_LEVEL "INFO"
 
 # Node.js dev vars
-info "Setting donna-nodejs dev vars..."
-set_dev_var donna-nodejs DATABASE_URL "$DEV_DB_URL"
-set_dev_var donna-nodejs TWILIO_ACCOUNT_SID "$TWILIO_ACCOUNT_SID"
-set_dev_var donna-nodejs TWILIO_AUTH_TOKEN "$TWILIO_AUTH_TOKEN"
-set_dev_var donna-nodejs TWILIO_PHONE_NUMBER "$DEV_TWILIO_NUMBER"
-set_dev_var donna-nodejs GOOGLE_API_KEY "$GOOGLE_API_KEY"
-set_dev_var donna-nodejs OPENAI_API_KEY "$OPENAI_API_KEY"
-set_dev_var donna-nodejs JWT_SECRET "$JWT_SECRET"
-set_dev_var donna-nodejs DONNA_API_KEY "$DONNA_API_KEY"
+info "Setting donna-api dev vars..."
+set_dev_var donna-api ENVIRONMENT "production"
+set_dev_var donna-api DATABASE_URL "$DEV_DB_URL"
+set_dev_var donna-api PIPECAT_PUBLIC_URL "$DEV_PIPECAT_PUBLIC_URL"
+set_dev_var donna-api TWILIO_ACCOUNT_SID "$TWILIO_ACCOUNT_SID"
+set_dev_var donna-api TWILIO_AUTH_TOKEN "$TWILIO_AUTH_TOKEN"
+set_dev_var donna-api TWILIO_PHONE_NUMBER "$DEV_TWILIO_NUMBER"
+set_dev_var donna-api GOOGLE_API_KEY "$GOOGLE_API_KEY"
+set_dev_var donna-api OPENAI_API_KEY "$OPENAI_API_KEY"
+set_dev_var donna-api JWT_SECRET "$JWT_SECRET"
+set_dev_var donna-api DONNA_API_KEYS "$DONNA_API_KEYS"
+set_dev_var donna-api FIELD_ENCRYPTION_KEY "$FIELD_ENCRYPTION_KEY"
+set_dev_var donna-api CLERK_SECRET_KEY "$CLERK_SECRET_KEY"
+set_dev_var donna-api SCHEDULER_ENABLED "true"
 
 # ─────────────────────────────────────────────
 # Step 6: Set staging environment variables
@@ -241,16 +316,43 @@ set_staging_var() {
   local KEY=$2
   local VALUE=$3
   if [ -n "$VALUE" ]; then
-    railway variables set "$KEY=$VALUE" --service "$SERVICE" --environment staging 2>/dev/null && \
+    railway variable set --service "$SERVICE" --environment staging --skip-deploys "$KEY=$VALUE" 2>/dev/null && \
       echo "  Set $KEY on $SERVICE" || \
       warn "Failed to set $KEY on $SERVICE"
   fi
 }
 
+set_staging_var donna-pipecat ENVIRONMENT "production"
 set_staging_var donna-pipecat DATABASE_URL "$STAGING_DB_URL"
+set_staging_var donna-pipecat PIPECAT_PUBLIC_URL "$STAGING_PIPECAT_PUBLIC_URL"
+set_staging_var donna-pipecat NODE_API_URL "$STAGING_NODE_API_URL"
+set_staging_var donna-pipecat TWILIO_ACCOUNT_SID "$TWILIO_ACCOUNT_SID"
+set_staging_var donna-pipecat TWILIO_AUTH_TOKEN "$TWILIO_AUTH_TOKEN"
 set_staging_var donna-pipecat TWILIO_PHONE_NUMBER "$DEV_TWILIO_NUMBER"
-set_staging_var donna-nodejs DATABASE_URL "$STAGING_DB_URL"
-set_staging_var donna-nodejs TWILIO_PHONE_NUMBER "$DEV_TWILIO_NUMBER"
+set_staging_var donna-pipecat ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
+set_staging_var donna-pipecat DEEPGRAM_API_KEY "$DEEPGRAM_API_KEY"
+set_staging_var donna-pipecat ELEVENLABS_API_KEY "$ELEVENLABS_API_KEY"
+set_staging_var donna-pipecat ELEVENLABS_VOICE_ID "$ELEVENLABS_VOICE_ID"
+set_staging_var donna-pipecat GOOGLE_API_KEY "$GOOGLE_API_KEY"
+set_staging_var donna-pipecat OPENAI_API_KEY "$OPENAI_API_KEY"
+set_staging_var donna-pipecat JWT_SECRET "$JWT_SECRET"
+set_staging_var donna-pipecat DONNA_API_KEYS "$DONNA_API_KEYS"
+set_staging_var donna-pipecat FIELD_ENCRYPTION_KEY "$FIELD_ENCRYPTION_KEY"
+set_staging_var donna-pipecat SCHEDULER_ENABLED "false"
+set_staging_var donna-pipecat LOG_LEVEL "INFO"
+set_staging_var donna-api ENVIRONMENT "production"
+set_staging_var donna-api DATABASE_URL "$STAGING_DB_URL"
+set_staging_var donna-api PIPECAT_PUBLIC_URL "$STAGING_PIPECAT_PUBLIC_URL"
+set_staging_var donna-api TWILIO_ACCOUNT_SID "$TWILIO_ACCOUNT_SID"
+set_staging_var donna-api TWILIO_AUTH_TOKEN "$TWILIO_AUTH_TOKEN"
+set_staging_var donna-api TWILIO_PHONE_NUMBER "$DEV_TWILIO_NUMBER"
+set_staging_var donna-api GOOGLE_API_KEY "$GOOGLE_API_KEY"
+set_staging_var donna-api OPENAI_API_KEY "$OPENAI_API_KEY"
+set_staging_var donna-api JWT_SECRET "$JWT_SECRET"
+set_staging_var donna-api DONNA_API_KEYS "$DONNA_API_KEYS"
+set_staging_var donna-api FIELD_ENCRYPTION_KEY "$FIELD_ENCRYPTION_KEY"
+set_staging_var donna-api CLERK_SECRET_KEY "$CLERK_SECRET_KEY"
+set_staging_var donna-api SCHEDULER_ENABLED "true"
 
 # ─────────────────────────────────────────────
 # Step 7: Summary
@@ -269,8 +371,12 @@ echo ""
 echo "Next steps:"
 echo ""
 echo "  1. Configure Twilio webhook for dev number ($DEV_TWILIO_NUMBER):"
-echo "     Voice URL → https://<dev-pipecat-domain>/voice/answer"
-echo "     (Get domain after first deploy: make deploy-dev)"
+if [ -n "$DEV_PIPECAT_PUBLIC_URL" ]; then
+  echo "     Voice URL → $DEV_PIPECAT_PUBLIC_URL/voice/answer"
+else
+  echo "     Voice URL → https://<dev-pipecat-domain>/voice/answer"
+  echo "     Set PIPECAT_PUBLIC_URL and NODE_API_URL after Railway creates domains."
+fi
 echo ""
 echo "  2. Deploy to dev:"
 echo "     make deploy-dev"

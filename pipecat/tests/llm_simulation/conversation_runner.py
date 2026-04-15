@@ -317,8 +317,8 @@ class ConversationRunner:
                 context_reset_detector,
                 context_aggregator.user(),
                 llm,
-                conversation_tracker,
                 guidance_stripper,
+                conversation_tracker,
                 response_collector,
                 tts,
                 output_transport,
@@ -569,12 +569,12 @@ class ConversationRunner:
                     # Patch Director imports at the point of USE (processors.conversation_director)
                     # not just at the source module — Python's `from X import Y` binds Y locally.
                     ("processors.conversation_director.analyze_turn_speculative", AsyncMock(return_value=default_direction), False),
-                    ("processors.conversation_director.analyze_queries", AsyncMock(return_value={"memory_queries": [], "web_queries": []}), False),
+                    ("processors.conversation_director.analyze_queries", AsyncMock(return_value={"memory_queries": []}), False),
                     ("processors.conversation_director.format_director_guidance", MagicMock(return_value="main/medium/warm | Continue naturally"), False),
                     ("processors.conversation_director.get_default_direction", MagicMock(return_value=default_direction), False),
                     # Also patch at source module for any other callers
                     ("services.director_llm.analyze_turn_speculative", AsyncMock(return_value=default_direction), False),
-                    ("services.director_llm.analyze_queries", AsyncMock(return_value={"memory_queries": [], "web_queries": []}), False),
+                    ("services.director_llm.analyze_queries", AsyncMock(return_value={"memory_queries": []}), False),
                     ("services.director_llm.format_director_guidance", MagicMock(return_value="main/medium/warm | Continue naturally"), False),
                     ("services.memory.search", self.memory_search_mock, False),
                     ("services.memory.store", self.memory_store_mock, False),
@@ -583,7 +583,7 @@ class ConversationRunner:
                     ("services.news.web_search_query", self.web_search_mock, False),
                     ("services.reminder_delivery.mark_reminder_acknowledged", self.mark_reminder_mock, False),
                     ("services.reminder_delivery.mark_call_ended_without_acknowledgment", AsyncMock(return_value=None), False),
-                    ("services.scheduler.clear_reminder_context", AsyncMock(return_value=None), False),
+                    ("services.scheduler.clear_reminder_context_async", AsyncMock(return_value=None), False),
                     ("services.conversations.complete", AsyncMock(return_value=None), False),
                     ("services.call_analysis.analyze_completed_call", AsyncMock(return_value={"mood": "positive", "caregiver_sms": "Donna chatted with the senior today. They seemed cheerful!", "summary": "Good call"}), False),
                     ("services.call_analysis.save_call_analysis", AsyncMock(return_value=None), False),

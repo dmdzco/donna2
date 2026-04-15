@@ -5,14 +5,14 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
+from twilio.request_validator import RequestValidator
 
 # Set required env vars before importing app
 os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ.setdefault("TWILIO_ACCOUNT_SID", "ACtest")
 os.environ.setdefault("TWILIO_AUTH_TOKEN", "test-token")
 os.environ.setdefault("TWILIO_PHONE_NUMBER", "+15551234567")
-os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/testdb")
-os.environ.setdefault("SKIP_TWILIO_VALIDATION", "true")
+os.environ.setdefault("ALLOW_UNSIGNED_TWILIO_WEBHOOKS", "true")
 
 from main import app
 
@@ -47,10 +47,11 @@ class TestHealthEndpoint:
 
 
 class TestVoiceAnswerEndpoint:
-    @patch("services.scheduler.get_reminder_context", return_value=None)
+    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
     @patch("services.scheduler.get_prefetched_context", return_value=None)
+    @patch("services.seniors.find_any_by_phone", new_callable=AsyncMock, return_value=None)
     @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
-    def test_voice_answer_returns_twiml(self, mock_find, mock_prefetch, mock_reminder, client):
+    def test_voice_answer_returns_twiml(self, mock_find, mock_find_any, mock_prefetch, mock_reminder, client):
         """Test that /voice/answer returns valid TwiML XML."""
         response = client.post(
             "/voice/answer",
@@ -66,13 +67,36 @@ class TestVoiceAnswerEndpoint:
         assert "<Response>" in response.text
         assert "<Stream" in response.text
         assert "/ws" in response.text
+        assert "ws_token" in response.text
 
-    @patch("services.scheduler.get_reminder_context", return_value=None)
+    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
     @patch("services.scheduler.get_prefetched_context", return_value=None)
     @patch("services.reminder_delivery.get_reminder_by_call_sid", new_callable=AsyncMock, return_value=None)
-    @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
-    def test_voice_answer_includes_params(self, mock_find, mock_reminder_db, mock_prefetch, mock_reminder, client):
+    @patch("services.conversations.create", new_callable=AsyncMock, return_value={"id": "conv-456"})
+    @patch("api.routes.voice._hydrate_senior_call_context", new_callable=AsyncMock)
+    @patch("services.seniors.find_by_phone", new_callable=AsyncMock)
+    def test_voice_answer_includes_params(self, mock_find, mock_hydrate, mock_create, mock_reminder_db, mock_prefetch, mock_reminder, client):
         """Test that TwiML includes stream parameters."""
+        mock_find.return_value = {
+            "id": "senior-456",
+            "name": "Margaret",
+            "phone": "5559876543",
+            "timezone": "America/New_York",
+            "is_active": True,
+        }
+        mock_hydrate.return_value = {
+            "memory_context": "memory",
+            "pre_generated_greeting": "Hello Margaret",
+            "news_context": None,
+            "recent_turns": None,
+            "previous_calls_summary": None,
+            "todays_context": None,
+            "last_call_analysis": None,
+            "call_settings": {},
+            "has_caregiver_notes": False,
+            "caregiver_notes_content": [],
+        }
+
         response = client.post(
             "/voice/answer",
             data={
@@ -85,6 +109,135 @@ class TestVoiceAnswerEndpoint:
         assert response.status_code == 200
         assert "call_sid" in response.text
         assert "CA456test" in response.text
+        assert "ws_token" in response.text
+
+    @pytest.mark.asyncio
+    async def test_bot_loads_metadata_from_local_state_first(self):
+        """WebSocket setup should use local metadata before shared state."""
+        from bot import _load_call_metadata
+
+        metadata = {"ws_token": "local-token", "call_type": "check-in"}
+        session_state = {"_call_metadata": {"CAlocal": metadata}}
+
+        with patch("lib.redis_client.get_shared_state") as mock_shared:
+            loaded = await _load_call_metadata("CAlocal", session_state)
+
+        assert loaded is metadata
+        mock_shared.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_bot_loads_metadata_from_shared_state(self):
+        """WebSocket setup should recover metadata when local call map misses."""
+        from bot import _load_call_metadata
+
+        class FakeRedisState:
+            is_shared = True
+
+            async def get(self, key):
+                assert key == "call_metadata:CAredis"
+                return {"ws_token": "token-123", "call_type": "check-in"}
+
+        session_state = {"_call_metadata": {}}
+        with patch("lib.redis_client.get_shared_state", return_value=FakeRedisState()):
+            metadata = await _load_call_metadata("CAredis", session_state)
+
+        assert metadata["ws_token"] == "token-123"
+        assert session_state["_call_metadata"]["CAredis"] == metadata
+
+    @pytest.mark.asyncio
+    async def test_bot_metadata_missing_without_shared_state(self):
+        """Missing metadata should stay missing when Redis is not configured."""
+        from bot import _load_call_metadata
+
+        class FakeInMemoryState:
+            pass
+
+        session_state = {"_call_metadata": {}}
+        with patch("lib.redis_client.get_shared_state", return_value=FakeInMemoryState()):
+            metadata = await _load_call_metadata("CAmissing", session_state)
+
+        assert metadata == {}
+
+    def test_voice_answer_rejects_unsigned_webhook_in_production(self, client, monkeypatch):
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("PIPECAT_PUBLIC_URL", "https://pipecat.test")
+        monkeypatch.setenv("TWILIO_AUTH_TOKEN", "test-token")
+        monkeypatch.delenv("ALLOW_UNSIGNED_TWILIO_WEBHOOKS", raising=False)
+        monkeypatch.delenv("SKIP_TWILIO_VALIDATION", raising=False)
+
+        response = client.post(
+            "/voice/answer",
+            data={
+                "CallSid": "CAunsigned",
+                "From": "+15559876543",
+                "To": "+15551234567",
+                "Direction": "inbound",
+            },
+        )
+
+        assert response.status_code == 403
+
+    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
+    @patch("services.scheduler.get_prefetched_context", return_value=None)
+    @patch("services.seniors.find_any_by_phone", new_callable=AsyncMock, return_value=None)
+    @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
+    def test_voice_answer_accepts_valid_twilio_signature(
+        self, mock_find, mock_find_any, mock_prefetch, mock_reminder, client, monkeypatch
+    ):
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("PIPECAT_PUBLIC_URL", "https://pipecat.test")
+        monkeypatch.setenv("TWILIO_AUTH_TOKEN", "test-token")
+        monkeypatch.delenv("ALLOW_UNSIGNED_TWILIO_WEBHOOKS", raising=False)
+        monkeypatch.delenv("SKIP_TWILIO_VALIDATION", raising=False)
+
+        data = {
+            "CallSid": "CAsigned",
+            "From": "+15559876543",
+            "To": "+15551234567",
+            "Direction": "inbound",
+        }
+        signature = RequestValidator("test-token").compute_signature(
+            "https://pipecat.test/voice/answer",
+            data,
+        )
+
+        response = client.post(
+            "/voice/answer",
+            data=data,
+            headers={"X-Twilio-Signature": signature},
+        )
+
+        assert response.status_code == 200
+        assert "wss://pipecat.test/ws" in response.text
+        assert "ws_token" in response.text
+
+    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
+    @patch("services.scheduler.get_prefetched_context", return_value=None)
+    @patch("services.seniors.find_any_by_phone", new_callable=AsyncMock)
+    @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
+    def test_voice_answer_inactive_senior_uses_no_phi_hangup(
+        self, mock_find, mock_find_any, mock_prefetch, mock_reminder, client
+    ):
+        """Inactive seniors should not create conversations or load PHI context."""
+        mock_find_any.return_value = {
+            "id": "senior-inactive",
+            "phone": "5559876543",
+            "is_active": False,
+        }
+
+        response = client.post(
+            "/voice/answer",
+            data={
+                "CallSid": "CAinactive",
+                "From": "+15559876543",
+                "To": "+15551234567",
+                "Direction": "inbound",
+            },
+        )
+
+        assert response.status_code == 200
+        assert "<Hangup/>" in response.text
+        assert "<Stream" not in response.text
 
 
 class TestVoiceStatusEndpoint:
@@ -121,7 +274,7 @@ class TestCallsEndpointAuth:
         """POST /api/call should require auth."""
         response = client.post(
             "/api/call",
-            json={"phone_number": "+15559876543"},
+            json={"seniorId": "senior-test"},
         )
         assert response.status_code == 401
 

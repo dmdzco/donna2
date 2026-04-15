@@ -168,7 +168,7 @@ async def _try_acquire_leader_lock() -> bool:
 
 **File**: `pipecat/lib/redis_client.py`
 
-Optional Redis layer for multi-instance deployment. Activated by setting `REDIS_URL` env var.
+Optional Redis layer for multi-instance deployment. Activated by setting `REDIS_URL`, or by setting both `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
 
 ### Dual Implementation
 
@@ -176,6 +176,15 @@ Optional Redis layer for multi-instance deployment. Activated by setting `REDIS_
 |-------|---------|-----------|
 | `InMemoryState` | Python dict | Default (single instance) |
 | `RedisState` | Redis asyncio | When `REDIS_URL` is set |
+| `UpstashRestState` | Upstash Redis REST API | When `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set |
+
+Dev and production are wired to Railway Redis through `REDIS_URL` service references:
+- dev: `REDIS_URL=${{Redis.REDIS_URL}}`
+- production: `REDIS_URL=${{Redis-sJE8.REDIS_URL}}`
+
+Those URLs resolve on Railway private networking, so local `railway run` commands cannot use them directly from a developer machine. Use `railway ssh --service donna-pipecat --environment <env> ...` for Redis smoke tests that need to run inside the Railway network.
+
+`UpstashRestState` remains available as a code-level fallback for non-Railway deployments. It is not the active dev or production path. If an Upstash endpoint returns an HTTP/DNS error, it marks itself temporarily unavailable and callers continue on local state until the retry window passes. That keeps a single-replica deployment functional, but multi-replica routing still requires a valid Redis or Upstash endpoint.
 
 Both implement the same async interface:
 - `set(key, value, ttl)` / `get(key)` / `delete(key)`
@@ -184,12 +193,14 @@ Both implement the same async interface:
 
 ### What's Stored in Redis
 - `call_metadata:{call_sid}` — Call context for WebSocket handler (TTL: 30 min)
-- `pending_reminder:{call_sid}` — Reminder context for outbound calls (TTL: 30 min)
+- `reminder_ctx:{call_sid}` — Pipecat-scheduler reminder context for outbound reminder calls (TTL: 30 min)
 
 ### Cross-Instance Flow
 1. `/voice/answer` stores call metadata in local dict + Redis
 2. `/ws` reads metadata from local dict first, falls back to Redis
-3. On call completion, metadata cleaned from both local dict and Redis
+3. Pipecat-side reminder initiation stores reminder context in local dict + Redis
+4. `/voice/answer` reads reminder context from local dict first, falls back to Redis, then falls back to the database delivery row for Node-scheduled reminders
+5. On call completion, metadata and reminder context are cleaned from both local dict and Redis
 
 ---
 
@@ -198,6 +209,7 @@ Both implement the same async interface:
 | Requirement | Status | How |
 |-------------|--------|-----|
 | Shared call metadata | Ready | Redis client module |
+| Shared reminder context | Ready | Pipecat scheduler writes `reminder_ctx:{call_sid}` with TTL; `/voice/answer` loads local-first, Redis-second |
 | Scheduler deduplication | Ready | PostgreSQL advisory locks |
 | Connection pool per instance | Ready | Each instance creates own pool |
 | Health monitoring | Ready | Per-instance `/health` endpoint |
@@ -246,7 +258,9 @@ Each cohort transition:
 | `MAX_CONCURRENT_CALLS` | 50 | Semaphore limit for concurrent WebSocket sessions |
 | `DB_POOL_MIN` | 5 | Minimum warm database connections |
 | `DB_POOL_MAX` | 50 | Maximum database connections |
-| `REDIS_URL` | *(empty)* | Optional — enables multi-instance shared state |
+| `REDIS_URL` | *(empty)* | Optional — enables Redis protocol shared state. Dev and production use Railway Redis service references. |
+| `UPSTASH_REDIS_REST_URL` | *(empty)* | Optional fallback for non-Railway deployments — enables Upstash REST shared state when paired with token |
+| `UPSTASH_REDIS_REST_TOKEN` | *(empty)* | Optional fallback for non-Railway deployments — Upstash REST bearer token |
 | `SCHEDULER_ENABLED` | false | Only one instance should run the scheduler |
 
 ---
@@ -290,7 +304,7 @@ The ~700ms at 500 users includes network round-trip from macOS to us-east-1 Neon
 
 ---
 
-## External Provider Capacity Audit (March 2026)
+## External Provider Capacity Audit (April 2026)
 
 ### Current Limits vs. 500 Concurrent Calls
 
@@ -301,8 +315,8 @@ The ~700ms at 500 users includes network round-trip from macOS to us-east-1 Neon
 | **Deepgram** | STT Streaming (Nova 3) | Unknown (pay-as-you-go) | 500 concurrent streams | **VERIFY** — contact Deepgram |
 | **Twilio** | Voice Calls | Full account, active | 500 concurrent | **LIKELY OK** — verify account capacity |
 | **OpenAI** | Embeddings | 3,000 RPM / 1M TPM | ~2,000-4,000 RPM | **AT RISK** — prefetch cache mitigates |
-| **Gemini** | Director fallback + Analysis | 1,500 RPM (free tier) | ~500 RPM (Director) + ~500 post-call burst | **OK if Cerebras is primary** |
-| **Cerebras** | Director primary | **NOT SET in production** | 500 concurrent Director calls | **BLOCKER** — key not configured |
+| **Groq** | Director primary | Verify account limits | 500 concurrent Director calls | **VERIFY** — current primary Director provider |
+| **Gemini** | Director fallback + Analysis | 1,500 RPM (free tier) | Fallback Director + ~500 post-call burst | **AT RISK** — post-call bursts can contend with fallback Director |
 
 ### Anthropic — HARD BLOCKER
 
@@ -334,11 +348,11 @@ Current plan: Creator ($22/mo)
 
 **Fix**: Upgrade to Enterprise plan. Even Scale tier (25 concurrent) is insufficient. Need custom agreement for 500 concurrent WebSocket streams.
 
-### Cerebras — CONFIGURATION GAP
+### Groq/Gemini Director Capacity — VERIFY
 
-`CEREBRAS_API_KEY` is not set in production. The Director falls back to Gemini for all calls, which works but is slower (~150ms vs ~50ms) and will hit Gemini rate limits at scale.
+Groq is the current primary Director provider (`GROQ_API_KEY`, `GROQ_DIRECTOR_MODEL`). Gemini remains the fallback for full guidance analysis and is also used for post-call analysis, so fallback Director traffic can contend with post-call bursts.
 
-**Fix**: Set `CEREBRAS_API_KEY` in Railway production environment.
+**Fix**: Verify Groq RPM/concurrency limits for the Director workload and ensure Gemini limits cover fallback plus post-call analysis, or move Director fallback to a HIPAA-eligible paid tier.
 
 ### OpenAI Embeddings — AT RISK
 
@@ -355,7 +369,7 @@ Mitigated by predictive prefetch cache (most `search_memories` calls hit cache a
 |--------|----------|-----|----------------|
 | Upgrade Anthropic tier to Build/Scale | **P0** | Account admin | ~$1,000-5,000/mo |
 | Upgrade ElevenLabs to Enterprise | **P0** | Account admin | Custom pricing |
-| Set `CEREBRAS_API_KEY` in production | **P0** | DevOps | $0 (free tier or paid) |
+| Verify Groq Director limits and Gemini fallback/post-call headroom | **P0** | DevOps | Depends on plan |
 | Verify Deepgram concurrent stream limit | **P1** | Account admin | Contact sales |
 | Verify Twilio concurrent call capacity | **P1** | Account admin | Check dashboard |
 | Set Railway instance to 8GB+ RAM | **P1** | DevOps | ~$20-40/mo |

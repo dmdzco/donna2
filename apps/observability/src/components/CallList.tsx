@@ -107,7 +107,11 @@ function CallListItem({ call, isSelected, onClick }: CallListItemProps) {
         {call.call_metrics?.estimatedCost != null && (
           <span className="call-cost">${call.call_metrics.estimatedCost.toFixed(3)}</span>
         )}
+        {call.analysis && <span className="analysis-badge">analysis</span>}
       </div>
+      {call.summary && (
+        <p className="call-summary-snippet">{call.summary}</p>
+      )}
       {call.concerns && call.concerns.length > 0 && (
         <div className="call-concerns">
           <span className="concern-badge">{call.concerns.length} concerns</span>

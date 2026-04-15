@@ -21,7 +21,7 @@
 ### Onboarding Calls
 - Unrecognized callers get a warm onboarding conversation
 - Learns caller name, relationship to senior, senior's name, interests, concerns
-- Saves details progressively via `save_prospect_detail` tool
+- Extracts and saves prospect details after the call to avoid in-call tool latency
 - Return callers recognized and greeted by name with prior context
 
 ---
@@ -48,15 +48,14 @@
 - Rotation to prevent repetitive greetings
 
 ### 2-Layer Conversation Director
-- **Layer 1: Quick Observer** — 268 regex patterns (0ms), instant guidance injection
+- **Layer 1: Quick Observer** — regex patterns (0ms), instant guidance injection
   - Health signal detection (pain, falls, medication, symptoms)
   - Emotion detection with valence/intensity
   - Family/relationship pattern matching
   - Safety concern flagging (scams, strangers, emergencies)
   - Cognitive signal detection (confusion, repetition)
-  - Factual curiosity detection (triggers web search)
-  - Goodbye detection → programmatic call end (2s EndFrame)
-- **Layer 2: Conversation Director** — Multi-provider LLM analysis (non-blocking)
+  - Goodbye detection → programmatic call end after configured delay
+- **Layer 2: Conversation Director** — Groq primary, Gemini fallback LLM analysis (non-blocking)
   - Call phase tracking and pacing guidance
   - Topic management (stay, transition, or wrap up)
   - Engagement monitoring with re-engagement suggestions
@@ -140,7 +139,7 @@
 
 ### Caregiver Notes
 - Caregivers can leave notes for Donna to deliver during calls
-- `check_caregiver_notes` tool retrieves pending notes
+- Caregiver notes are pre-fetched at call start and injected into the system prompt
 - Natural delivery ("Oh, by the way, your daughter wanted me to ask about...")
 - Notes marked as delivered with call reference
 
@@ -155,10 +154,10 @@
 
 Runs automatically after every call disconnect:
 
-1. **Conversation completion** — Duration, status, transcript saved to DB
+1. **Conversation completion** — Duration, status, encrypted transcript saved to DB
 2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions
 3. **Caregiver notification** — Alerts sent for completed calls and detected concerns
-4. **Summary persistence** — Enables cross-call context
+4. **Summary persistence** — Encrypted at rest; enables cross-call context and caregiver call summaries
 5. **Interest discovery** — Extracts new interests, computes engagement scores
 6. **Memory extraction** — OpenAI extracts facts/preferences/events, stores with embeddings
 7. **Daily context save** — Topics, advice, reminders for same-day cross-call memory
@@ -192,7 +191,7 @@ Runs automatically after every call disconnect:
 - PII-safe logging (phone/name masking)
 
 ### Reliability
-- Circuit breakers for all external services (Groq, Cerebras, Gemini, OpenAI, news)
+- Circuit breakers for all external services (Groq, Gemini, OpenAI, Tavily/news)
 - DB-backed feature flags with 5-minute in-memory cache
 - Graceful shutdown with active call tracking (7s drain on SIGTERM)
 - Enhanced /health endpoint (database + circuit breaker states)
@@ -215,16 +214,16 @@ Runs automatically after every call disconnect:
 ### Predictive Context Engine (Speculative Prefetch)
 Eliminates tool-call latency by pre-fetching results before Claude asks for them:
 
-- **1st wave (0ms)** — Regex extraction of topics, entities, names, activities from transcription. Fires background `memory.search()` calls → results cached in `PrefetchCache`
-- **2nd wave (~70ms)** — Director analysis predicts `memory_queries`, `web_queries`, and `anticipated_tools`. Fires anticipatory prefetches for next_topic, reminders, web searches
+- **1st wave (0ms)** — Raw/interim utterance extraction from transcription. Fires background `memory.search()` calls → results cached in `PrefetchCache`
+- **2nd wave (~70ms)** — Query Director predicts `memory_queries`. Fires anticipatory memory prefetches
 - **Interim prefetch** — Debounced prefetch during user speech (1s gap, 15+ chars)
-- **Cache-first tool handlers** — `search_memories` and `web_search` check prefetch caches before live calls. Cache hit = ~0ms vs 200-300ms (memory) or 4-10s (web search)
-- **Jaccard matching** — Cache lookup uses word-overlap similarity (memory: 0.3 threshold, web: 0.4 threshold) with stop-word removal. No embedding calls needed
+- **Proactive memory injection** — Director injects cached memory context before Claude responds. Cache hit = ~0ms vs 200-300ms memory search
+- **Jaccard matching** — Cache lookup uses word-overlap similarity (memory: 0.3 threshold). No embedding calls needed for cache lookup
 
 ### Speculative Director Analysis
 Starts Director analysis before the user finishes speaking:
 
-- **Silence detection** — 250ms gap in interim transcriptions triggers speculative Groq/Cerebras analysis
+- **Silence detection** — 250ms gap in interim transcriptions triggers speculative Groq analysis
 - **Same-turn injection** — If speculative result completes before final transcription + Jaccard overlap ≥ 0.7, guidance is injected for the CURRENT turn (not one turn behind)
 - **Typical hit rate** — 70-90% of turns get same-turn guidance
 - **Automatic cancellation** — New interim text cancels stale speculative analysis
@@ -235,15 +234,14 @@ Starts Director analysis before the user finishes speaking:
 - Conversation Director processor injects news into guidance (one-shot per call)
 - Reduces per-turn token count while keeping news contextually relevant
 
-### Location & Date Context for Prefetch
+### Location & Date Context for Director
 - Senior's city/state and today's date passed in every Director turn template
-- Enables specific predictions: `"Austin Texas weather March 2026"` instead of `"weather tomorrow"`
-- Dramatically improves web search prefetch cache hit rates (Jaccard overlap 0.85+ vs 0.25)
+- Improves guidance and memory query specificity
 
-### Multi-Provider Director with Fallback Chain
-- **Groq** (`gpt-oss-20b`, ~70ms) and **Cerebras** (`gpt-oss-120b`, ~70ms) randomly selected per call
-- **Gemini Flash** (`gemini-3-flash-preview`, ~150ms) as fallback when fast providers unavailable
-- Separate circuit breakers per provider (Groq 5s, Cerebras 5s/3s speculative, Gemini 10s)
+### Director Provider Chain
+- **Groq** (`gpt-oss-20b`) is the primary fast provider
+- **Gemini Flash** (`gemini-3-flash-preview`) is the fallback for full guidance analysis
+- Separate circuit breakers per provider (Groq and Gemini)
 - System instruction separated from per-turn content for Gemini caching
 - Trimmed system instruction: 429 → 144 tokens
 
@@ -254,10 +252,10 @@ Starts Director analysis before the user finishes speaking:
 
 ### Programmatic Call Ending
 - LLM tool calls for ending calls are unreliable (Claude says "goodbye" but doesn't call transition tools)
-- Quick Observer detects strong goodbye patterns via regex → queues EndFrame after 2s delay
+- Quick Observer detects strong goodbye patterns via regex → queues EndFrame after the configured goodbye delay
 - Bypasses the LLM entirely for call termination
 - `_goodbye_in_progress` flag suppresses stale Director guidance during goodbye sequence
 
 ---
 
-*Last updated: March 2026 — v5.2*
+*Last updated: April 2026 — current Director/provider and tool architecture*

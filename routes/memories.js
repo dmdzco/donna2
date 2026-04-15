@@ -4,7 +4,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { createMemorySchema, seniorIdParamSchema } from '../validators/schemas.js';
-import { canAccessSenior } from './helpers.js';
+import { canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
@@ -62,7 +62,7 @@ router.get('/api/seniors/:id/memories/search', requireAuth, validateParams(senio
     );
     res.json(memories);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/seniors/:id/memories/search');
   }
 });
 
@@ -84,7 +84,7 @@ router.get('/api/seniors/:id/memories', requireAuth, validateParams(seniorIdPara
     const memories = await memoryService.getRecent(req.params.id, 20);
     res.json(memories);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/seniors/:id/memories');
   }
 });
 

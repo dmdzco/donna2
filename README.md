@@ -6,20 +6,19 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ### Voice Pipeline (Pipecat)
 - **2-Layer Conversation Director Architecture**
-  - Layer 1: Quick Observer (0ms) — 268 regex patterns for health, emotion, safety, goodbye
-  - Layer 2: Conversation Director — Multi-provider non-blocking call guidance (Groq/Cerebras primary, Gemini fallback)
+  - Layer 1: Quick Observer (0ms) — 250+ regex patterns across health, emotion, safety, goodbye, and other categories
+  - Layer 2: Conversation Director — non-blocking Groq fast path with Gemini fallback for non-speculative analysis
   - Post-Call Analysis — Summary, concerns, engagement score (Gemini Flash)
-- **Pipecat Flows** — 4-phase call state machine (opening → main → winding_down → closing)
-- **2 LLM Tools** — web_search (fallback, Director handles most searches), mark_reminder_acknowledged (fire-and-forget)
-- **Director-First Architecture** — Memory search, caregiver notes, and web search moved from Claude tool calls to Director injection (saves ~14s/call)
-- **Programmatic Call Ending** — Goodbye detection → EndFrame after 2s delay (bypasses unreliable LLM tool calls)
+- **Pipecat Flows** — conditional reminder phase, main, winding_down, closing, plus onboarding flows
+- **2 Active LLM Tools** — web_search and mark_reminder_acknowledged
+- **Director-First Memory Architecture** — Memory search and caregiver notes moved from Claude tool calls to prefetch/context injection
+- **Programmatic Call Ending** — Goodbye detection → EndFrame after configured delay, 5s by default (bypasses unreliable LLM tool calls)
 - **Director Fallback Actions** — Force winding-down at 9min, force call end at 12min
-- **Predictive Context Engine** — Speculative prefetch with 2-wave pipeline:
-  - 1st wave: Regex topic/entity extraction → background memory search (~0ms added latency)
-  - 2nd wave: Director analysis → anticipatory prefetch (next_topic, reminders, web queries)
-  - Web search prefetch: Director predicts questions with location/date context → pre-fetched via OpenAI
+- **Predictive Context Engine** — Speculative memory prefetch with 2-wave pipeline:
+  - 1st wave: raw/interim utterance extraction → background memory search (~0ms added latency)
+  - 2nd wave: Query Director analysis → anticipatory memory prefetch
   - Interim transcription prefetch while user speaks (debounced)
-  - Cache-first tool handlers (~0ms hit vs 200-300ms memory search, ~0ms vs 4-10s web search)
+  - Proactive memory injection (~0ms hit vs 200-300ms memory search)
 - **Director-Driven News Injection** — News context injected dynamically when Director signals relevance (saves ~300 tokens/turn vs static system prompt)
 - **Barge-in support** — Interrupt detection via Silero VAD
 
@@ -27,7 +26,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3)
 - LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
-- Text-to-speech (ElevenLabs via Pipecat)
+- Text-to-speech (ElevenLabs by default; Cartesia available behind provider flag)
 - Semantic memory with decay + deduplication (pgvector + HNSW index)
 - Full in-call context retention (APPEND strategy, no summary truncation)
 - Cross-call turn history (recent turns from previous calls in system prompt)
@@ -36,18 +35,18 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Same-day cross-call memory (timezone-aware daily context + call summaries)
 - Sentiment-aware greetings (uses last call's engagement/rapport for tone)
 - News via OpenAI web search (1hr cache, Director-driven injection)
-- Web search via OpenAI (async, prefetch-accelerated)
+- In-call web search via Claude `web_search` tool (Tavily first, OpenAI fallback)
 - Scheduled reminder calls with delivery tracking
 - Call context snapshot (pre-computed JSONB, eliminates 6 DB queries per call)
 - Context + news pre-caching at 5 AM local time
 - Caregiver notes delivery (family can leave notes read during calls)
 - Per-senior call settings (configurable time limits, greeting style, memory decay)
-- 2 LLM tools: web_search (Claude fallback), mark_reminder_acknowledged (fire-and-forget)
+- 2 active LLM tools: web_search and mark_reminder_acknowledged (fire-and-forget)
 - Ephemeral context model (Director injections stripped each turn, prevents prompt bloat)
 
 ### Infrastructure & Reliability
-- Circuit breakers for external services (Groq, Cerebras, Gemini, OpenAI embeddings, news)
-- DB-backed feature flags with 5-minute cache
+- Circuit breakers for external services (Groq, Gemini, OpenAI embeddings/news, Tavily)
+- GrowthBook feature flags with default fallback behavior
 - Graceful shutdown with active call tracking (7s drain on SIGTERM)
 - Enhanced /health endpoint (database + circuit breaker states)
 - Multi-environment workflow (dev/staging/production with Neon branching)
@@ -59,11 +58,11 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ### Security
 - JWT admin authentication + Cofounder API keys
-- API key authentication (DONNA_API_KEY)
+- Labeled service API key authentication (`DONNA_API_KEYS`; legacy `DONNA_API_KEY` only outside production)
 - Twilio webhook signature verification
-- Rate limiting (slowapi)
+- Rate limiting in Node and Pipecat middleware
 - Security headers (HSTS, X-Frame-Options)
-- Pydantic input validation
+- Zod/Pydantic input validation
 
 ## Quick Start
 
@@ -124,8 +123,8 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                                        ▼
                              ┌─────────────────────┐
                              │   Quick Observer     │  Layer 1 (0ms, BLOCKING)
-                             │   268 regex patterns │  Injects guidance for THIS turn
-                             │                      │  Goodbye → EndFrame (2s)
+                             │   250+ regex patterns│  Injects guidance for THIS turn
+                             │                      │  Goodbye → EndFrame
                              └─────────┬───────────┘
                                        │
                                        ▼
@@ -134,14 +133,13 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                              │   Director           │   │                        │
                              │   (PASS-THROUGH)     │   │ 1. Query Director      │
                              │                      │   │    (~200ms, continuous) │
-                             │ • Strips ephemeral   │   │    memory + web queries│
+                             │ • Strips ephemeral   │   │    memory queries      │
                              │   context each turn  │   │                        │
                              │ • Injects guidance   │   │ 2. Guidance Director   │
                              │ • Injects memories   │   │    (~400ms, on silence)│
-                             │ • Web search gating  │   │    same-turn guidance  │
-                             │   (filler + inject)  │   │                        │
-                             │                      │   │ + Predictive prefetch  │
-                             │                      │   │ + Web search gating    │
+                             │                      │   │    same-turn guidance  │
+                             │                      │   │                        │
+                             │                      │   │ + Memory prefetch      │
                              │                      │   └───────────────────────┘
                              └─────────┬───────────┘
                                        │ (no delay)
@@ -165,20 +163,20 @@ The Director is split into two specialized Groq calls for optimal latency:
 
 | Director | Latency | Fires | Purpose |
 |----------|---------|-------|---------|
-| **Query Director** | ~200ms | Continuously on interims (45 chars first, 60+25 re-fire) | Extract `memory_queries` + `web_queries` |
+| **Query Director** | ~200ms | Continuously on interims (45 chars first, 60+25 re-fire) | Extract `memory_queries` |
 | **Guidance Director** | ~400ms | On 250ms silence (speculative) | Phase, engagement, reminders, guidance |
 
-Both run non-blocking via `asyncio.create_task()`. The Query Director enables web search gating: it detects factual questions mid-speech, starts the search before the user finishes, and injects the result into Claude's context with filler TTS.
+Both run non-blocking via `asyncio.create_task()`. The Query Director feeds memory prefetch only; in-call factual questions go through Claude's active `web_search` tool.
 
 | Feature | Description |
 |---------|-------------|
 | **Ephemeral Context** | All injections tagged `[EPHEMERAL:`, stripped each turn (prevents prompt bloat) |
-| **Web Search Gating** | Query Director → Tavily search → filler TTS → inject result (saves ~4.3s vs tool call) |
+| **Web Search** | Claude `web_search` tool → Tavily raw snippets → OpenAI fallback |
 | **Memory Injection** | Prefetched memories injected as ephemeral context (500ms gate) |
 | **Same-Turn Guidance** | Silence-based speculative enables guidance before Claude responds |
 | **Goodbye Suppression** | `_goodbye_in_progress` flag skips all Director injection during goodbye |
 | **Time-Based Fallbacks** | Force winding-down at 9min, force end at 12min |
-| **Predictive Prefetch** | Regex first-wave + Query Director second-wave memory prefetch |
+| **Predictive Prefetch** | Raw utterance first-wave + Query Director second-wave memory prefetch |
 
 See [`pipecat/docs/LEARNINGS.md`](pipecat/docs/LEARNINGS.md) for engineering learnings and debugging insights.
 
@@ -201,11 +199,11 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 ├── prompts.py                          # System prompts + phase instructions
 ├── flows/
 │   ├── nodes.py                        # 4 call phase NodeConfigs
-│   └── tools.py                        # 5 LLM tool schemas + async handlers
+│   └── tools.py                        # 2 active Claude tools + retired handlers
 ├── processors/
-│   ├── patterns.py                     # 268 regex patterns, 19 categories
+│   ├── patterns.py                     # 250+ regex patterns, 19 categories
 │   ├── quick_observer.py               # Layer 1: analysis + goodbye EndFrame
-│   ├── conversation_director.py        # Layer 2: Gemini Flash non-blocking
+│   ├── conversation_director.py        # Layer 2: Groq speculative guidance + memory/news injection
 │   ├── conversation_tracker.py         # Topic/question/advice tracking
 │   ├── metrics_logger.py              # Call metrics logging
 │   ├── goodbye_gate.py                 # False-goodbye grace period (not in active pipeline)
@@ -214,9 +212,9 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── post_call.py                    # Post-call orchestration + snapshot rebuild
 │   ├── call_analysis.py                # Post-call analysis (Gemini Flash)
 │   ├── prefetch.py                     # Predictive Context Engine (speculative prefetch)
-│   ├── director_llm.py                 # Gemini Flash analysis for Director
+│   ├── director_llm.py                 # Groq Director analysis with Gemini fallback helper
 │   ├── memory.py                       # Semantic memory (pgvector, decay)
-│   ├── scheduler.py                    # Reminder scheduling + outbound calls
+│   ├── scheduler.py                    # Pipecat-side scheduling helpers; Node scheduler is active
 │   ├── reminder_delivery.py            # Delivery CRUD + prompt formatting
 │   ├── call_snapshot.py                # Pre-computed call context snapshot
 │   ├── context_cache.py                # Pre-cache at 5 AM local + news persistence
@@ -226,17 +224,17 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── interest_discovery.py           # Interest extraction from conversations
 │   ├── seniors.py                      # Senior profile CRUD
 │   ├── caregivers.py                   # Caregiver-senior relationships
-│   └── news.py                         # OpenAI web search (1hr cache)
+│   └── news.py                         # OpenAI cached news + Tavily/OpenAI web_search
 ├── api/
-│   ├── routes/                         # voice.py, calls.py
+│   ├── routes/                         # voice.py, calls.py, auth.py, metrics.py, export.py, data.py
 │   ├── middleware/                      # auth, api_auth, rate_limit, security, twilio
 │   └── validators/schemas.py           # Pydantic input validation
 ├── db/
 │   ├── client.py                       # asyncpg pool + query helpers + health check
-│   └── migrations/                     # SQL migrations (HNSW index, feature_flags, call_context_snapshot)
+│   └── migrations/                     # SQL migrations (HNSW index, snapshots, metrics, audit, encryption)
 ├── lib/
 │   ├── circuit_breaker.py              # Async circuit breaker for external services
-│   ├── feature_flags.py                # DB-backed feature flags (5-min cache)
+│   ├── growthbook.py                   # GrowthBook feature flags
 │   └── sanitize.py                     # PII-safe logging
 ├── tests/                              # 61 test files + helpers/mocks/scenarios
 ├── pyproject.toml                      # Python 3.12, Pipecat v0.0.101+
@@ -244,9 +242,9 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 
 /                                       # Node.js admin API (Express, Railway port 3001)
 ├── index.js                            # Express server entry
-├── routes/                             # 16 route modules (all /api/* endpoints)
-├── services/                           # 9 service files (DB access for admin APIs)
-├── middleware/                          # auth, rate-limit, security, twilio
+├── routes/                             # 17 route modules (frontend APIs, health, waitlist)
+├── services/                           # DB access and scheduler services for admin/consumer APIs
+├── middleware/                          # auth, api-auth, rate-limit, security, validation
 └── db/                                 # Drizzle ORM schema + client
 
 apps/                                   # Frontend apps (Vercel)
@@ -260,6 +258,8 @@ apps/                                   # Frontend apps (Vercel)
 ```bash
 # Server
 PORT=7860
+ENVIRONMENT=production                  # Required in production; enables fail-closed security checks
+PIPECAT_PUBLIC_URL=https://...          # Public Pipecat URL used for Twilio webhooks and wss:// streams
 
 # Twilio
 TWILIO_ACCOUNT_SID=...
@@ -275,20 +275,33 @@ GOOGLE_API_KEY=...                      # Gemini 3 Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...                    # STT (Nova 3)
 ELEVENLABS_API_KEY=...                  # TTS
 OPENAI_API_KEY=...                      # Embeddings + news search
+TAVILY_API_KEY=...                      # Optional fast in-call web search
 
 # Auth
 JWT_SECRET=...                          # Admin JWT signing
-DONNA_API_KEY=...                       # API key auth
+JWT_SECRET_PREVIOUS=...                 # Optional old JWT secret during rotation
+DONNA_API_KEYS=pipecat:...,scheduler:... # Labeled service-to-service API keys
+CLERK_SECRET_KEY=...                    # Required for Clerk-authenticated routes in production
+
+# HIPAA / PHI
+FIELD_ENCRYPTION_KEY=...                # 32-byte base64url key for AES-256-GCM PHI encryption
+RETENTION_AUDIT_LOGS_DAYS=2190          # 6 years by default
 
 # Scheduler
 SCHEDULER_ENABLED=false                 # Must be false (Node.js runs scheduler)
 
 # Optional
 FAST_OBSERVER_MODEL=gemini-3-flash-preview  # Director fallback model
-GROQ_API_KEY=...                        # Groq (primary Director provider)
-CEREBRAS_API_KEY=...                    # Cerebras (primary Director provider)
+GROQ_API_KEY=...                        # Groq active fast Director provider
 ELEVENLABS_VOICE_ID=...                 # Voice ID (has default)
+TTS_PROVIDER=elevenlabs                 # Optional: cartesia when enabled/configured
+GROWTHBOOK_API_HOST=...                 # Optional GrowthBook feature flag host
+GROWTHBOOK_CLIENT_KEY=...               # Optional GrowthBook client key
+REDIS_URL=redis://...                   # Required before running multiple Pipecat instances
+PIPECAT_REQUIRE_REDIS=true              # Set true when Pipecat is scaled horizontally
 ```
+
+Production boot is intentionally fail-closed. Node and Pipecat refuse to start if required production secrets are missing or unsafe. `DONNA_API_KEY` is a local/test compatibility fallback only; production must use labeled `DONNA_API_KEYS`.
 
 ## API Endpoints (Pipecat)
 
@@ -313,6 +326,29 @@ make deploy-prod             # Both services to production
 ```
 
 > **Do NOT test voice/call features locally.** Deploy to Railway dev and test with real Twilio calls.
+
+Before promoting to production, verify production-like env readiness in Railway:
+
+- `ENVIRONMENT=production`
+- `PIPECAT_PUBLIC_URL=https://...`
+- `JWT_SECRET` is non-default
+- `DONNA_API_KEYS` contains labeled keys, including a Pipecat/notification key
+- `FIELD_ENCRYPTION_KEY` decodes to 32 bytes
+- `TWILIO_AUTH_TOKEN` is present on Pipecat and Node
+- `CLERK_SECRET_KEY` is present on Node
+- `REDIS_URL` is present before scaling Pipecat beyond one instance
+- Pipecat `LOG_LEVEL=INFO` is set before Railway dev/staging/prod smoke tests
+
+Live Twilio smoke test checklist:
+
+- Unsigned `/voice/answer` and `/voice/status` requests are rejected.
+- A valid Twilio-signed `/voice/answer` returns TwiML containing a `ws_token`.
+- `/ws` rejects missing, invalid, expired, and reused tokens.
+- A normal call lasting longer than five minutes does not drop because the token only gates connection startup.
+- Manual call initiation uses `seniorId`; the server resolves the phone number after authorization.
+- Railway logs from the smoke call do not include prompt context, transcripts, medical notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
+
+Security follow-up: the staged PHI encryption/export migration remains a separate action item. It should add encrypted companion columns for the highest-risk remaining plaintext fields, backfill in batches, switch reads to encrypted-first, update exports to decrypt only at the authorized boundary, and only then stop writing/null plaintext after verification.
 
 **CI/CD:** PRs to main → tests → staging deploy → smoke tests. Push to main → production deploy.
 

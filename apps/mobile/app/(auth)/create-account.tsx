@@ -13,20 +13,50 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Chrome } from "lucide-react-native";
 import { Button } from "@/src/components/ui/Button";
 import { Input } from "@/src/components/ui/Input";
-import { api } from "@/src/lib/api";
 import { COLORS } from "@/src/constants/theme";
-import { useOnboardingStore } from "@/src/stores/onboarding";
+import { api } from "@/src/lib/api";
+import { getClerkErrorMessage, getClerkFieldErrors } from "@/src/lib/clerkErrors";
 
 WebBrowser.maybeCompleteAuthSession();
+
+type CreateAccountStep = "form" | "verify_email";
+
+const MIN_PASSWORD_LENGTH = 10;
+
+function isBreachedPasswordError(error: unknown): boolean {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    Array.isArray((error as { errors?: unknown[] }).errors)
+  ) {
+    return (error as {
+      errors: Array<{ code?: string; message?: string; longMessage?: string }>;
+    }).errors.some(
+      (entry) => {
+        const text = `${entry.code ?? ""} ${entry.message ?? ""} ${
+          entry.longMessage ?? ""
+        }`.toLowerCase();
+        return (
+          text.includes("pwn") ||
+          text.includes("breach") ||
+          text.includes("data leak") ||
+          text.includes("compromised")
+        );
+      },
+    );
+  }
+
+  return error instanceof Error
+    ? /pwn|breach|data leak|compromised/i.test(error.message)
+    : false;
+}
 
 export default function CreateAccountScreen() {
   const router = useRouter();
   const { signUp, setActive, isLoaded } = useSignUp();
   const { getToken } = useAuth();
-  const setOnboardingField = useOnboardingStore((s) => s.setField);
   const { startOAuthFlow: startGoogleOAuth } = useOAuth({
     strategy: "oauth_google",
   });
@@ -34,8 +64,11 @@ export default function CreateAccountScreen() {
     strategy: "oauth_apple",
   });
 
+  const [step, setStep] = useState<CreateAccountStep>("form");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [verificationError, setVerificationError] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<
     "google" | "apple" | null
@@ -43,9 +76,6 @@ export default function CreateAccountScreen() {
   const [errors, setErrors] = useState<{ email?: string; password?: string }>(
     {}
   );
-  const [pendingVerification, setPendingVerification] = useState(false);
-  const [verificationCode, setVerificationCode] = useState("");
-  const [verificationError, setVerificationError] = useState("");
 
   async function navigateAfterAuth() {
     const token = await getToken();
@@ -61,18 +91,36 @@ export default function CreateAccountScreen() {
     }
   }
 
-  async function handleCreateAccount() {
-    const newErrors: { email?: string; password?: string } = {};
-    if (!email.trim()) newErrors.email = "Email is required";
-    if (!password) newErrors.password = "Password is required";
-    if (password && password.length < 8)
-      newErrors.password = "Password must be at least 8 characters";
-    setErrors(newErrors);
-    if (Object.keys(newErrors).length > 0) return;
+  function resetVerificationState() {
+    setVerificationCode("");
+    setVerificationError(undefined);
+  }
 
+  function handleBack() {
+    if (step === "verify_email") {
+      setStep("form");
+      resetVerificationState();
+      return;
+    }
+
+    router.back();
+  }
+
+  async function handleCreateAccount() {
+    const nextErrors: { email?: string; password?: string } = {};
+
+    if (!email.trim()) nextErrors.email = "Email is required";
+    if (!password) nextErrors.password = "Password is required";
+    if (password && password.length < MIN_PASSWORD_LENGTH) {
+      nextErrors.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
+    }
+
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
     if (!isLoaded) return;
+
     setLoading(true);
-    setOnboardingField("email", email.trim());
+    setVerificationError(undefined);
 
     try {
       const result = await signUp.create({
@@ -80,44 +128,85 @@ export default function CreateAccountScreen() {
         password,
       });
 
-      if (result.status === "complete") {
+      if (result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
         await navigateAfterAuth();
-      } else {
-        await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
-        setPendingVerification(true);
+        return;
       }
+
+      await result.prepareEmailAddressVerification({ strategy: "email_code" });
+      resetVerificationState();
+      setStep("verify_email");
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Could not create account";
-      Alert.alert("Sign Up Failed", message);
+      const clerkFieldErrors = getClerkFieldErrors(err);
+      const nextFieldErrors = {
+        email: clerkFieldErrors.emailAddress,
+        password: isBreachedPasswordError(err)
+          ? "That password has appeared in a public breach. Use the suggested strong password, or choose a unique passphrase."
+          : clerkFieldErrors.password,
+      };
+
+      if (nextFieldErrors.email || nextFieldErrors.password) {
+        setErrors((current) => ({
+          ...current,
+          ...nextFieldErrors,
+        }));
+      } else {
+        Alert.alert(
+          "Sign Up Failed",
+          getClerkErrorMessage(err, "Could not create account")
+        );
+      }
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleVerifyCode() {
-    if (!verificationCode.trim()) {
-      setVerificationError("Please enter the verification code");
+  async function handleEmailVerification() {
+    const normalizedCode = verificationCode.replace(/\s+/g, "");
+
+    if (!normalizedCode) {
+      setVerificationError("Verification code is required");
       return;
     }
+
+    if (!isLoaded) return;
     setLoading(true);
-    setVerificationError("");
+    setVerificationError(undefined);
+
     try {
       const result = await signUp.attemptEmailAddressVerification({
-        code: verificationCode.trim(),
+        code: normalizedCode,
       });
-      if (result.status === "complete") {
+
+      if (result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
-        router.replace("/(onboarding)/step1" as any);
+        await navigateAfterAuth();
+        return;
       }
+
+      setVerificationError("Verification is not complete yet. Try again.");
     } catch (err: unknown) {
-      const clerkErr = err as any;
-      const message =
-        clerkErr?.errors?.[0]?.longMessage ??
-        clerkErr?.errors?.[0]?.message ??
-        (err instanceof Error ? err.message : "Invalid verification code");
-      setVerificationError(message);
+      setVerificationError(
+        getClerkErrorMessage(err, "Could not verify that code")
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResendVerificationCode() {
+    if (!isLoaded) return;
+    setLoading(true);
+    setVerificationError(undefined);
+
+    try {
+      await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+      Alert.alert("Code Sent", `We sent a fresh verification code to ${email.trim()}.`);
+    } catch (err: unknown) {
+      setVerificationError(
+        getClerkErrorMessage(err, "Could not resend the verification code")
+      );
     } finally {
       setLoading(false);
     }
@@ -125,6 +214,7 @@ export default function CreateAccountScreen() {
 
   async function handleOAuth(provider: "google" | "apple") {
     setOauthLoading(provider);
+
     try {
       const startFlow =
         provider === "google" ? startGoogleOAuth : startAppleOAuth;
@@ -136,79 +226,21 @@ export default function CreateAccountScreen() {
         await navigateAfterAuth();
       }
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : `${provider} sign up failed`;
-      Alert.alert("OAuth Error", message);
+      Alert.alert(
+        "OAuth Error",
+        getClerkErrorMessage(err, `${provider} sign up failed`)
+      );
     } finally {
       setOauthLoading(null);
     }
   }
 
-  if (pendingVerification) {
-    return (
-      <SafeAreaView className="flex-1 bg-cream">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          className="flex-1"
-        >
-          <ScrollView
-            contentContainerStyle={{ flexGrow: 1 }}
-            keyboardShouldPersistTaps="handled"
-            className="px-6"
-          >
-            <Pressable
-              onPress={() => setPendingVerification(false)}
-              className="mt-2 mb-6 min-h-[48px] justify-center self-start"
-              accessibilityRole="button"
-              accessibilityLabel="Go back"
-            >
-              <Text className="text-sage text-[16px] font-medium">{"<"} Back</Text>
-            </Pressable>
-
-            <Text className="text-[28px] font-semibold text-charcoal mb-2">
-              Verify your email
-            </Text>
-            <Text className="text-[15px] text-muted mb-8">
-              We sent a 6-digit code to {email}. Enter it below to continue.
-            </Text>
-
-            <View className="mb-6">
-              <Input
-                label="Verification Code"
-                placeholder="123456"
-                value={verificationCode}
-                onChangeText={setVerificationCode}
-                error={verificationError}
-                keyboardType="number-pad"
-                autoCapitalize="none"
-                autoCorrect={false}
-                textContentType="oneTimeCode"
-              />
-            </View>
-
-            <Button
-              title="Verify"
-              onPress={handleVerifyCode}
-              loading={loading}
-              disabled={loading}
-              className="mb-4"
-            />
-
-            <Pressable
-              onPress={async () => {
-                await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
-                Alert.alert("Code resent", "A new code has been sent to your email.");
-              }}
-              className="min-h-[48px] justify-center items-center"
-              accessibilityRole="button"
-            >
-              <Text className="text-sage text-[15px] font-medium">Resend code</Text>
-            </Pressable>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    );
-  }
+  const title =
+    step === "verify_email" ? "Verify Your Email" : "Create Account";
+  const subtitle =
+    step === "verify_email"
+      ? `Enter the code we sent to ${email.trim()}.`
+      : "Set up your Donna account to get started";
 
   return (
     <SafeAreaView className="flex-1 bg-cream">
@@ -221,9 +253,8 @@ export default function CreateAccountScreen() {
           keyboardShouldPersistTaps="handled"
           className="px-6"
         >
-          {/* Back button */}
           <Pressable
-            onPress={() => router.back()}
+            onPress={handleBack}
             className="mt-2 mb-6 min-h-[48px] justify-center self-start"
             accessibilityRole="button"
             accessibilityLabel="Go back"
@@ -233,102 +264,179 @@ export default function CreateAccountScreen() {
             </Text>
           </Pressable>
 
-          {/* Header */}
           <Text className="text-[28px] font-semibold text-charcoal mb-2">
-            Create Account
+            {title}
           </Text>
-          <Text className="text-[15px] text-muted mb-8">
-            Set up your Donna account to get started
-          </Text>
+          <Text className="text-[15px] text-muted mb-8">{subtitle}</Text>
 
-          {/* Email input */}
-          <View className="mb-4">
-            <Input
-              label="Email Address"
-              placeholder="your@email.com"
-              value={email}
-              onChangeText={setEmail}
-              error={errors.email}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              textContentType="emailAddress"
-              autoComplete="email"
-            />
-          </View>
-
-          {/* Password input */}
-          <View className="mb-6">
-            <Input
-              label="Password"
-              placeholder="••••••••"
-              value={password}
-              onChangeText={setPassword}
-              error={errors.password}
-              secureTextEntry
-              textContentType="newPassword"
-              autoComplete="new-password"
-            />
-          </View>
-
-          {/* Continue button */}
-          <Button
-            title="Continue"
-            onPress={handleCreateAccount}
-            loading={loading}
-            disabled={loading || oauthLoading !== null}
-            className="mb-6"
-          />
-
-          {/* Divider */}
-          <View className="flex-row items-center mb-6">
-            <View className="flex-1 h-[1px] bg-charcoal/10" />
-            <Text className="mx-3 text-muted text-[13px]">or</Text>
-            <View className="flex-1 h-[1px] bg-charcoal/10" />
-          </View>
-
-          {/* OAuth buttons */}
-          <View className="gap-3 mb-8">
-            <Button
-              title="Continue with Apple"
-              onPress={() => handleOAuth("apple")}
-              variant="secondary"
-              loading={oauthLoading === "apple"}
-              disabled={loading || oauthLoading !== null}
-              icon={
-                <Ionicons
-                  name="logo-apple"
-                  size={20}
-                  color={COLORS.charcoal}
+          {step === "form" ? (
+            <>
+              <View className="mb-4">
+                <Input
+                  label="Email Address"
+                  placeholder="your@email.com"
+                  value={email}
+                  onChangeText={(value) => {
+                    setEmail(value);
+                    if (errors.email) {
+                      setErrors((current) => ({ ...current, email: undefined }));
+                    }
+                  }}
+                  error={errors.email}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  textContentType="emailAddress"
+                  autoComplete="email"
+                  testID="create-account-email"
                 />
-              }
-            />
-            <Button
-              title="Continue with Google"
-              onPress={() => handleOAuth("google")}
-              variant="secondary"
-              loading={oauthLoading === "google"}
-              disabled={loading || oauthLoading !== null}
-              icon={<Chrome size={18} color={COLORS.charcoal} />}
-            />
-          </View>
+              </View>
 
-          {/* Footer link */}
-          <View className="flex-row justify-center mb-8">
-            <Text className="text-muted text-[15px]">
-              Already have an account?{" "}
-            </Text>
-            <Pressable
-              onPress={() => router.replace("/(auth)/sign-in")}
-              className="min-h-[48px] justify-center"
-              accessibilityRole="link"
-              accessibilityLabel="Sign In"
-            >
-              <Text className="text-sage text-[15px] font-semibold">
-                Sign In
-              </Text>
-            </Pressable>
-          </View>
+              <View className="mb-6">
+                <Input
+                  label="Password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChangeText={(value) => {
+                    setPassword(value);
+                    if (errors.password) {
+                      setErrors((current) => ({
+                        ...current,
+                        password: undefined,
+                      }));
+                    }
+                  }}
+                  error={errors.password}
+                  secureTextEntry
+                  textContentType="oneTimeCode"
+                  autoComplete="one-time-code"
+                  testID="create-account-password"
+                />
+                {!errors.password && (
+                  <Text className="text-muted text-[13px] mt-2 leading-5">
+                    Use at least {MIN_PASSWORD_LENGTH} characters with a mix of
+                    letters and numbers.
+                  </Text>
+                )}
+              </View>
+
+              <Button
+                title="Continue"
+                onPress={handleCreateAccount}
+                loading={loading}
+                disabled={loading || oauthLoading !== null}
+                className="mb-6"
+                testID="create-account-submit"
+              />
+
+              <View className="flex-row items-center mb-6">
+                <View className="flex-1 h-[1px] bg-charcoal/10" />
+                <Text className="mx-3 text-muted text-[13px]">or</Text>
+                <View className="flex-1 h-[1px] bg-charcoal/10" />
+              </View>
+
+              <View className="gap-3 mb-8">
+                <Button
+                  title="Continue with Apple"
+                  onPress={() => handleOAuth("apple")}
+                  variant="secondary"
+                  loading={oauthLoading === "apple"}
+                  disabled={loading || oauthLoading !== null}
+                  icon={
+                    <Ionicons
+                      name="logo-apple"
+                      size={20}
+                      color={COLORS.charcoal}
+                    />
+                  }
+                />
+                <Button
+                  title="Continue with Google"
+                  onPress={() => handleOAuth("google")}
+                  variant="secondary"
+                  loading={oauthLoading === "google"}
+                  disabled={loading || oauthLoading !== null}
+                  icon={
+                    <Ionicons
+                      name="logo-google"
+                      size={18}
+                      color={COLORS.charcoal}
+                    />
+                  }
+                />
+              </View>
+
+              <View className="flex-row justify-center mb-8">
+                <Text className="text-muted text-[15px]">
+                  Already have an account?{" "}
+                </Text>
+                <Pressable
+                  onPress={() => router.replace("/(auth)/sign-in")}
+                  className="min-h-[48px] justify-center"
+                  accessibilityRole="link"
+                  accessibilityLabel="Sign In"
+                >
+                  <Text className="text-sage text-[15px] font-semibold">
+                    Sign In
+                  </Text>
+                </Pressable>
+              </View>
+            </>
+          ) : (
+            <>
+              <View className="mb-4">
+                <Input
+                  label="Verification Code"
+                  placeholder="123456"
+                  value={verificationCode}
+                  onChangeText={(value) => {
+                    setVerificationCode(value);
+                    if (verificationError) {
+                      setVerificationError(undefined);
+                    }
+                  }}
+                  error={verificationError}
+                  keyboardType="number-pad"
+                  textContentType="oneTimeCode"
+                  autoComplete="one-time-code"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  testID="create-account-verification-code"
+                />
+              </View>
+
+              <Button
+                title="Verify Email"
+                onPress={handleEmailVerification}
+                loading={loading}
+                disabled={loading}
+                className="mb-4"
+                testID="create-account-verify-submit"
+              />
+
+              <Button
+                title="Resend Code"
+                onPress={handleResendVerificationCode}
+                variant="secondary"
+                disabled={loading}
+                className="mb-4"
+              />
+
+              <Pressable
+                onPress={() => {
+                  setStep("form");
+                  resetVerificationState();
+                }}
+                className="min-h-[48px] justify-center self-center mb-8"
+                accessibilityRole="button"
+                accessibilityLabel="Edit email address"
+              >
+                <Text className="text-sage text-[15px] font-medium">
+                  Edit email address
+                </Text>
+              </Pressable>
+            </>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

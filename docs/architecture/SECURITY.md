@@ -43,11 +43,17 @@ async def list_seniors(auth: AuthContext = Depends(require_auth)):
 - `user_id: str` — authenticated user identifier
 - `clerk_user_id: str | None` — Clerk-specific ID
 
-### API Key Auth (`api/middleware/api_auth.py`)
-- `DONNA_API_KEY` env var for service-to-service calls
-- Constant-time comparison via `hmac.compare_digest()`
-- Exempt prefixes: `/admin/`, `/observability/` (use JWT instead)
-- Disabled in development when key not set
+### Cofounder API Key Auth (`pipecat/api/middleware/auth.py`)
+- `COFOUNDER_API_KEY_1` / `COFOUNDER_API_KEY_2` env vars provide full-access cofounder bypass
+- Checked before admin JWT and Clerk session auth
+- Use only for trusted operator/service access
+
+### Node API Key Auth (`middleware/api-auth.js`)
+- Production uses labeled `DONNA_API_KEYS` entries such as `pipecat:<key>,scheduler:<key>` for service-to-service calls
+- `DONNA_API_KEY` is accepted only as a local/test compatibility fallback outside production
+- Constant-time comparison via `crypto.timingSafeEqual()`
+- Route prefixes that own JWT/Clerk auth are exempt
+- Missing service keys fail closed in production
 
 ---
 
@@ -58,10 +64,18 @@ async def list_seniors(auth: AuthContext = Depends(require_auth)):
 All `/voice/*` endpoints verify Twilio's `X-Twilio-Signature` header:
 
 - Uses `twilio.request_validator.RequestValidator` with `TWILIO_AUTH_TOKEN`
-- Respects proxy headers (`X-Forwarded-Proto`, `X-Forwarded-Host`) for URL reconstruction
+- Uses `PIPECAT_PUBLIC_URL` for stable production URL reconstruction
 - **Production**: Rejects unsigned or invalid requests with 403
-- **Development**: Logs warning but allows through for localhost testing
+- **Development/test**: Allows unsigned webhooks only when `ALLOW_UNSIGNED_TWILIO_WEBHOOKS=true`
 - Required env var: `TWILIO_AUTH_TOKEN` (500 error if missing)
+
+Twilio Media Stream WebSockets are gated separately:
+
+- `/voice/answer` generates a random single-use `ws_token` and includes it in TwiML `<Stream>` parameters
+- `/ws` parses the Twilio start frame with a short timeout and validates `call_sid` + `ws_token` before consuming active-call capacity
+- After capacity is reserved, `/ws` consumes the single-use token before constructing STT/LLM/TTS services
+- Tokens expire after five minutes only if unused; active calls are not disconnected by token expiry
+- Redis-backed metadata is used when configured so multi-instance Pipecat can validate call state
 
 ---
 
@@ -110,10 +124,10 @@ All API inputs validated via Pydantic models before reaching handlers:
 | `UpdateSeniorRequest` | Same fields, all optional |
 | `CreateMemoryRequest` | type (10 allowed values), content (1-5000 chars), importance (0-100) |
 | `CreateReminderRequest` | type (5 allowed values), title (1-255), scheduled_time, cron |
-| `InitiateCallRequest` | phone_number (E.164 normalized) |
+| `InitiateCallRequest` | seniorId/senior_id; server resolves phone after authorization |
 | `AdminLoginRequest` | email, password |
 
-Phone numbers are automatically normalized to E.164 format (`+1XXXXXXXXXX`).
+Caregiver/admin call initiation does not accept arbitrary client-supplied phone numbers. The API accepts a senior ID, checks authorization, then resolves the stored senior phone number server-side.
 
 ---
 
@@ -130,6 +144,22 @@ All log output passes through sanitization:
 | `truncate("long content", 30)` | Full text | `long content...` (truncated) |
 
 Used across all service modules for Railway log output.
+
+---
+
+## Field-Level PHI Encryption
+
+**Files**: `pipecat/lib/encryption.py`, `lib/encryption.js`
+
+Donna stores newly persisted conversation transcripts and call summaries in AES-256-GCM encrypted companion columns:
+
+- `conversations.transcript_encrypted` stores the structured turn list for authorized admin/export/post-call use. Assistant turns are recorded after internal guidance stripping so `<guidance>` tags and bracketed directives are not persisted.
+- `conversations.transcript_text_encrypted` stores a plain-text transcript rendering for future retrieval and analysis.
+- `conversations.summary_encrypted` stores call summaries used by caregiver and admin views.
+
+The legacy plaintext `conversations.transcript` and `conversations.summary` columns remain read fallbacks for rows created before the encrypted migration and are included in retention purges. New transcript writes should not populate `conversations.transcript`.
+
+Caregiver clients do not receive encrypted blobs or decryption keys. The Node API authenticates the caregiver, verifies per-senior access, decrypts the summary server-side, and returns summary-only call records via `/api/seniors/:id/calls`. Admin conversation routes may return decrypted transcripts for the admin transcript viewer.
 
 ---
 
@@ -163,9 +193,39 @@ Global exception handlers prevent internal details from leaking:
 
 - All env vars centralized in a `frozen=True` dataclass (immutable after load)
 - `lru_cache(maxsize=1)` ensures single-load behavior
-- `JWT_SECRET` required in production (raises `RuntimeError` if missing)
+- `ENVIRONMENT=production` or `RAILWAY_PUBLIC_DOMAIN` enables production fail-closed behavior
+- `JWT_SECRET`, `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `TWILIO_AUTH_TOKEN`, and `PIPECAT_PUBLIC_URL` are required in production
+- Node also requires `CLERK_SECRET_KEY` for Clerk-authenticated routes in production
+- `PIPECAT_REQUIRE_REDIS=true` requires `REDIS_URL` before horizontal scaling
 - API keys stored as env vars, never committed to code
 - Sentry configured with `send_default_pii=False`
+
+### Deployment Checklist
+
+Before promoting a production deployment:
+
+- Set `ENVIRONMENT=production` on Railway services.
+- Set `PIPECAT_PUBLIC_URL=https://...` to the public Pipecat service URL.
+- Set labeled `DONNA_API_KEYS`; do not rely on legacy `DONNA_API_KEY` in production.
+- Verify `FIELD_ENCRYPTION_KEY` decodes to 32 bytes.
+- Verify `TWILIO_AUTH_TOKEN` exists on both Pipecat and Node services.
+- Verify `CLERK_SECRET_KEY` exists on Node.
+- Set `REDIS_URL` before running more than one Pipecat instance.
+- Set Pipecat `LOG_LEVEL=INFO` for Railway dev/staging/prod before smoke testing or promotion.
+- Verify Railway logs do not contain prompt context, transcripts, medical notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
+- Smoke test real Twilio signatures, signed TwiML with `ws_token`, `/ws` token rejection/reuse, and a call longer than five minutes.
+
+### Remaining PHI Encryption Action Item
+
+The staged PHI encryption/export migration is intentionally separate from ingress/auth hardening.
+
+Scope for that follow-up:
+
+- Add encrypted companion columns for highest-risk plaintext PHI fields that are not yet covered, starting with senior medical notes, family info, additional info, call context snapshots, reminders, daily context, notifications, and caregiver notes.
+- Backfill encrypted values in batches and log counts only.
+- Change reads to prefer encrypted columns and fall back to plaintext only during the migration window.
+- Update exports to decrypt only at the authorized boundary and fail on decryption errors rather than silently falling back to stale plaintext.
+- Stop writing remaining plaintext PHI fields, then null/drop plaintext columns only after backfill verification and release validation.
 
 ---
 
@@ -192,7 +252,7 @@ Global exception handlers prevent internal details from leaking:
 | File | Purpose |
 |------|---------|
 | `pipecat/api/middleware/auth.py` | 3-tier authentication (109 LOC) |
-| `pipecat/api/middleware/api_auth.py` | API key auth with constant-time comparison (42 LOC) |
+| `middleware/api-auth.js` | Node service API key auth with constant-time comparison |
 | `pipecat/api/middleware/twilio.py` | Twilio webhook signature validation (53 LOC) |
 | `pipecat/api/middleware/rate_limit.py` | 5-tier rate limiting config (17 LOC) |
 | `pipecat/api/middleware/security.py` | Security headers (31 LOC) |

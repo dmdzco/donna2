@@ -15,12 +15,12 @@ import { clerkMiddleware, getAuth, clerkClient } from '@clerk/express';
 import jwt from 'jsonwebtoken';
 import { logAudit } from '../services/audit.js';
 import { tokenRevocationService } from '../services/token-revocation.js';
+import { DEFAULT_JWT_SECRET, isProductionEnv, timingSafeEqual } from '../lib/security-config.js';
 
-const _DEFAULT_SECRET = 'donna-admin-secret-change-me';
-if (process.env.RAILWAY_PUBLIC_DOMAIN && (!process.env.JWT_SECRET || process.env.JWT_SECRET === _DEFAULT_SECRET)) {
+if (isProductionEnv() && (!process.env.JWT_SECRET || process.env.JWT_SECRET === DEFAULT_JWT_SECRET)) {
   throw new Error('JWT_SECRET environment variable is required in production (do not use the default)');
 }
-const JWT_SECRET = process.env.JWT_SECRET || _DEFAULT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_JWT_SECRET;
 const JWT_SECRET_PREVIOUS = process.env.JWT_SECRET_PREVIOUS || '';
 
 // Cofounder API keys from environment (comma-separated)
@@ -34,7 +34,7 @@ const COFOUNDER_API_KEYS = [
  */
 function isCofounderRequest(req) {
   const apiKey = req.headers['x-api-key'];
-  return apiKey && COFOUNDER_API_KEYS.includes(apiKey);
+  return Boolean(apiKey && COFOUNDER_API_KEYS.some(key => timingSafeEqual(apiKey, key)));
 }
 
 /**
@@ -94,6 +94,7 @@ export async function requireAuth(req, res, next) {
       isCofounder: true,
       isAdmin: true,
       userId: 'cofounder',
+      provider: 'api_key',
     };
     return next();
   }
@@ -113,6 +114,7 @@ export async function requireAuth(req, res, next) {
         isCofounder: false,
         isAdmin: true,
         userId: decoded.adminId,
+        provider: 'admin_jwt',
       };
       return next();
     }
@@ -151,6 +153,7 @@ export async function requireAuth(req, res, next) {
       isCofounder: false,
       isAdmin,
       userId: auth.userId,
+      provider: 'clerk',
     };
 
     next();
@@ -181,6 +184,7 @@ export async function optionalAuth(req, res, next) {
       isCofounder: true,
       isAdmin: true,
       userId: 'cofounder',
+      provider: 'api_key',
     };
     return next();
   }
@@ -198,6 +202,7 @@ export async function optionalAuth(req, res, next) {
           isCofounder: false,
           isAdmin: true,
           userId: decoded.adminId,
+          provider: 'admin_jwt',
         };
         return next();
       }
@@ -218,6 +223,7 @@ export async function optionalAuth(req, res, next) {
         isCofounder: false,
         isAdmin,
         userId: auth.userId,
+        provider: 'clerk',
       };
     }
   } catch {

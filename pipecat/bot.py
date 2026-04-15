@@ -2,7 +2,7 @@
 
 Assembles the full Pipecat pipeline for a single call session:
   Twilio WebSocket → Deepgram STT → Quick Observer → LLM Context →
-  Anthropic Claude → Conversation Tracker → Guidance Stripper →
+  Anthropic Claude → Guidance Stripper → Conversation Tracker →
   ElevenLabs TTS → Twilio output
 
 Called once per incoming WebSocket connection from Twilio.
@@ -18,7 +18,6 @@ import time
 from deepgram import LiveOptions
 from loguru import logger
 from starlette.websockets import WebSocket
-from lib.sanitize import mask_name
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -42,11 +41,88 @@ from pipecat_flows import FlowManager
 from flows.nodes import build_initial_node
 from flows.tools import make_flows_tools
 from processors.conversation_director import ConversationDirectorProcessor
-from processors.conversation_tracker import ConversationTrackerProcessor
+from processors.conversation_tracker import ConversationState, ConversationTrackerProcessor
 from processors.guidance_stripper import GuidanceStripperProcessor
 from processors.metrics_logger import MetricsLoggerProcessor
 from processors.quick_observer import QuickObserverProcessor
 from services.post_call import run_post_call
+
+
+class WebSocketAuthError(Exception):
+    """Raised when a Twilio media WebSocket cannot be admitted."""
+
+
+HANDSHAKE_TIMEOUT_SECONDS = float(os.getenv("TWILIO_WS_HANDSHAKE_TIMEOUT_SECONDS", "5"))
+
+
+async def authenticate_websocket_call(
+    call_data: dict,
+    session_state: dict,
+    *,
+    consume_token: bool = True,
+) -> dict:
+    """Authenticate the Twilio media WebSocket before any AI services start."""
+    call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "")
+    if not call_sid:
+        raise WebSocketAuthError("missing call_sid")
+
+    from api.routes.voice import get_call_metadata, mark_ws_token_consumed
+
+    metadata = await get_call_metadata(call_sid)
+    if not metadata:
+        raise WebSocketAuthError("unknown call_sid")
+
+    expected_token = metadata.get("ws_token")
+    provided_token = (call_data.get("body") or {}).get("ws_token", "")
+    if not expected_token:
+        raise WebSocketAuthError("missing expected token")
+    if metadata.get("ws_token_consumed"):
+        raise WebSocketAuthError("token already consumed")
+    if time.time() > float(metadata.get("ws_token_expires_at") or 0):
+        raise WebSocketAuthError("token expired")
+    if not provided_token or not hmac.compare_digest(str(expected_token), str(provided_token)):
+        raise WebSocketAuthError("invalid token")
+
+    if consume_token:
+        await mark_ws_token_consumed(call_sid, metadata)
+    return metadata
+
+
+async def prepare_websocket_call(
+    websocket: WebSocket,
+    session_state: dict,
+    *,
+    consume_token: bool = True,
+) -> dict:
+    """Parse and authenticate the Twilio start frame with a short timeout.
+
+    This can run before active-call capacity is acquired so stalled or invalid
+    WebSockets do not occupy an AI call slot.
+    """
+    try:
+        transport_type, call_data = await asyncio.wait_for(
+            parse_telephony_websocket(websocket),
+            timeout=HANDSHAKE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise WebSocketAuthError("handshake timeout") from exc
+
+    stream_sid = call_data.get("stream_id", "")
+    call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "unknown")
+    session_state["call_sid"] = call_sid
+
+    logger.info("[{cs}] Stream connected: {ss} (type={tt})", cs=call_sid, ss=stream_sid, tt=transport_type)
+
+    metadata = await authenticate_websocket_call(
+        call_data,
+        session_state,
+        consume_token=consume_token,
+    )
+    return {
+        "transport_type": transport_type,
+        "call_data": call_data,
+        "metadata": metadata,
+    }
 
 
 def create_tts_service(session_state: dict):
@@ -86,22 +162,54 @@ async def _safe_post_call(session_state: dict, conversation_tracker, elapsed: in
         logger.error("[{cs}] Background post-call failed: {err}", cs=call_sid, err=str(e))
 
 
-async def _mark_caregiver_notes_delivered(session_state: dict, call_sid: str):
-    """Fire-and-forget: mark pre-fetched caregiver notes as delivered."""
+def _start_post_call_once(
+    session_state: dict,
+    conversation_tracker,
+    elapsed: int,
+    call_sid: str,
+    trigger: str,
+) -> asyncio.Task:
+    """Start post-call processing once, regardless of how the pipeline ended."""
+    existing = session_state.get("_post_call_task")
+    if existing is not None:
+        return existing
+
+    conversation_tracker.flush()
+    logger.info("[{cs}] Scheduling post-call processing ({trigger})", cs=call_sid, trigger=trigger)
+    task = asyncio.create_task(
+        _safe_post_call(session_state, conversation_tracker, elapsed, call_sid)
+    )
+    session_state["_post_call_task"] = task
+    return task
+
+
+async def _load_call_metadata(call_sid: str, session_state: dict) -> dict:
+    """Load call metadata from local state, then Redis for multi-instance routing."""
+    call_meta = session_state.get("_call_metadata", {})
+    metadata = call_meta.get(call_sid, {}) if isinstance(call_meta, dict) else {}
+    if metadata:
+        return metadata
+
     try:
-        from services.caregivers import mark_note_delivered
-        notes = session_state.get("_caregiver_notes_content") or []
-        for note in notes:
-            note_id = note.get("id") if isinstance(note, dict) else None
-            if note_id:
-                await mark_note_delivered(note_id, call_sid)
-        if notes:
-            logger.info("[{cs}] Marked {n} caregiver notes as delivered", cs=call_sid, n=len(notes))
+        from lib.redis_client import get_shared_state
+
+        state = get_shared_state()
+        if not getattr(state, "is_shared", False):
+            return {}
+
+        metadata = await state.get(f"call_metadata:{call_sid}") or {}
+        if isinstance(metadata, dict) and metadata:
+            if isinstance(call_meta, dict):
+                call_meta[call_sid] = metadata
+            logger.info("[{cs}] Loaded call metadata from shared state", cs=call_sid)
+            return metadata
     except Exception as e:
-        logger.error("[{cs}] Error marking caregiver notes delivered: {err}", cs=call_sid, err=str(e))
+        logger.warning("[{cs}] Shared call metadata lookup failed: {err}", cs=call_sid, err=str(e))
+
+    return {}
 
 
-async def run_bot(websocket: WebSocket, session_state: dict) -> None:
+async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict | None = None) -> None:
     """Run the Donna voice pipeline for a single call.
 
     Args:
@@ -125,21 +233,19 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     # -------------------------------------------------------------------------
     # Parse Twilio WebSocket handshake
     # -------------------------------------------------------------------------
-    transport_type, call_data = await parse_telephony_websocket(websocket)
+    if prepared_call is None:
+        try:
+            prepared_call = await prepare_websocket_call(websocket, session_state)
+        except WebSocketAuthError as exc:
+            logger.warning("[unknown] WebSocket auth failed: {reason}", reason=str(exc))
+            return
+
+    transport_type = prepared_call["transport_type"]
+    call_data = prepared_call["call_data"]
+    metadata = prepared_call["metadata"]
     stream_sid = call_data.get("stream_id", "")
     call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "unknown")
     session_state["call_sid"] = call_sid
-
-    logger.info("[{cs}] Stream connected: {ss} (type={tt})", cs=call_sid, ss=stream_sid, tt=transport_type)
-
-    # Validate WebSocket token (generated by /voice/answer, passed via TwiML <Parameter>)
-    call_meta = session_state.get("_call_metadata", {})
-    metadata = call_meta.get(call_sid, {})
-    expected_token = metadata.get("ws_token")
-    provided_token = (call_data.get("body") or {}).get("ws_token", "")
-    if expected_token and not hmac.compare_digest(expected_token, provided_token):
-        logger.warning("[{cs}] WebSocket auth failed: invalid token", cs=call_sid)
-        return  # Pipeline won't start — WebSocket will close
 
     # Populate session_state from call_metadata (pre-fetched by /voice/answer)
     if metadata:
@@ -209,9 +315,9 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             except Exception as e:
                 logger.error("[{cs}] Error generating greeting: {err}", cs=call_sid, err=str(e))
         logger.info(
-            "[{cs}] Populated session: senior={name}, memory={mem_len}ch, greeting={gr}, reminder={rem}",
+            "[{cs}] Populated session: senior_present={has_senior}, memory={mem_len}ch, greeting={gr}, reminder={rem}",
             cs=call_sid,
-            name=(session_state.get("senior") or {}).get("name", "none"),
+            has_senior=bool(session_state.get("senior")),
             mem_len=len(session_state.get("memory_context") or ""),
             gr=bool(session_state.get("greeting")),
             rem=bool(session_state.get("reminder_prompt")),
@@ -238,8 +344,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     except Exception as e:
         logger.warning("[{cs}] Flag resolution failed — using defaults: {err}", cs=call_sid, err=str(e))
 
-    senior_name = (session_state.get("senior") or {}).get("name", "unknown")
-    logger.info("[{cs}] Starting pipeline for {name}", cs=call_sid, name=mask_name(senior_name))
+    logger.info("[{cs}] Starting pipeline senior_id={sid}", cs=call_sid, sid=str(session_state.get("senior_id") or "")[:8])
 
     # -------------------------------------------------------------------------
     # Transport (Twilio ↔ FastAPI WebSocket)
@@ -335,7 +440,17 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     # -------------------------------------------------------------------------
     quick_observer = QuickObserverProcessor(session_state=session_state)
     conversation_director = ConversationDirectorProcessor(session_state=session_state)
-    conversation_tracker = ConversationTrackerProcessor(session_state=session_state)
+    conversation_state = ConversationState()
+    user_conversation_tracker = ConversationTrackerProcessor(
+        session_state=session_state,
+        state=conversation_state,
+        track_assistant=False,
+    )
+    conversation_tracker = ConversationTrackerProcessor(
+        session_state=session_state,
+        state=conversation_state,
+        track_user=False,
+    )
     guidance_stripper = GuidanceStripperProcessor()
     metrics_logger = MetricsLoggerProcessor(session_state=session_state)
 
@@ -365,11 +480,12 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             transport.input(),
             stt,
             quick_observer,
+            user_conversation_tracker,
             conversation_director,
             context_aggregator.user(),
             pipeline_llm,
-            conversation_tracker,
             guidance_stripper,
+            conversation_tracker,
             tts,
             transport.output(),
             context_aggregator.assistant(),
@@ -420,12 +536,9 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     @transport.event_handler("on_client_connected")
     async def on_connected(transport_ref, websocket_ref):
         logger.info("[{cs}] Client connected, initializing flow", cs=call_sid)
-        # Warm up Groq/Cerebras TCP+TLS immediately — before greeting plays
+        # Warm up Groq TCP+TLS immediately before greeting plays.
         from services.director_llm import warmup_fast_providers
         asyncio.create_task(warmup_fast_providers())
-        # Fire-and-forget: mark pre-fetched caregiver notes as delivered
-        if session_state.get("_caregiver_notes_content"):
-            asyncio.create_task(_mark_caregiver_notes_delivered(session_state, call_sid))
         await flow_manager.initialize(initial_node)
 
     @transport.event_handler("on_client_disconnected")
@@ -434,13 +547,17 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
         logger.info("[{cs}] Client disconnected after {s}s", cs=call_sid, s=elapsed)
         # Set end_reason if not already set by Quick Observer or Director
         session_state.setdefault("_end_reason", "user_hangup")
-        # Flush any buffered assistant text before post-call reads transcript
-        conversation_tracker.flush()
         # End pipeline first so runner.run() unblocks, then run post-call in background.
         # Previously run_post_call was awaited before EndFrame, so if Gemini/OpenAI
         # hung during analysis the pipeline would never terminate.
         await task.queue_frame(EndFrame())
-        asyncio.create_task(_safe_post_call(session_state, conversation_tracker, elapsed, call_sid))
+        _start_post_call_once(
+            session_state,
+            conversation_tracker,
+            elapsed,
+            call_sid,
+            "client_disconnected",
+        )
 
     # -------------------------------------------------------------------------
     # Run pipeline
@@ -452,4 +569,13 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
 
     logger.info("[{cs}] Pipeline ended", cs=call_sid)
 
-
+    elapsed = round(time.time() - start_time)
+    session_state.setdefault("_end_reason", "pipeline_ended")
+    post_call_task = _start_post_call_once(
+        session_state,
+        conversation_tracker,
+        elapsed,
+        call_sid,
+        "pipeline_ended",
+    )
+    await post_call_task

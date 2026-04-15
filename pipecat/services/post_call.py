@@ -9,8 +9,83 @@ Extracted from bot.py to keep the pipeline assembly module focused.
 from __future__ import annotations
 
 import asyncio
+import re
 
 from loguru import logger
+
+
+def _transcript_has_content(transcript) -> bool:
+    if isinstance(transcript, list):
+        return any(isinstance(t, dict) and t.get("content") for t in transcript)
+    if isinstance(transcript, str):
+        return bool(transcript.strip())
+    return bool(transcript)
+
+
+async def _get_post_call_transcript(
+    session_state: dict,
+    conversation_tracker,
+):
+    """Return full transcript, falling back to persisted Neon draft."""
+    call_sid = session_state.get("call_sid", "unknown")
+
+    if conversation_tracker:
+        try:
+            conversation_tracker.flush()
+        except Exception as e:
+            logger.warning("[{cs}] Transcript flush failed: {err}", cs=call_sid, err=str(e))
+        if hasattr(conversation_tracker, "flush_pending_persistence"):
+            await conversation_tracker.flush_pending_persistence()
+
+    transcript = session_state.get("_full_transcript") or session_state.get("_transcript") or []
+    if _transcript_has_content(transcript):
+        return transcript
+
+    if not call_sid or call_sid == "unknown":
+        return transcript
+
+    try:
+        from services.conversations import get_transcript_by_call_sid
+
+        persisted = await get_transcript_by_call_sid(call_sid)
+        if _transcript_has_content(persisted):
+            if isinstance(persisted, list):
+                session_state["_full_transcript"] = persisted
+                session_state["_transcript"] = persisted[-40:]
+            logger.info(
+                "[{cs}] Loaded persisted transcript fallback (turns={turns}, chars={chars})",
+                cs=call_sid,
+                turns=len(persisted) if isinstance(persisted, list) else 0,
+                chars=len(persisted) if isinstance(persisted, str) else 0,
+            )
+            return persisted
+    except Exception as e:
+        logger.error("[{cs}] Persisted transcript fallback failed: {err}", cs=call_sid, err=str(e))
+
+    return transcript
+
+
+async def _wait_for_reminder_ack_task(session_state: dict, timeout: float = 5.0) -> None:
+    """Wait briefly for any in-flight reminder ack write to settle."""
+    task = session_state.get("_reminder_ack_task")
+    if task is None:
+        return
+    if task.done():
+        try:
+            task.result()
+        except Exception:
+            pass
+        return
+
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "[{cs}] Reminder ack persistence still pending after post-call wait",
+            cs=session_state.get("call_sid", "unknown"),
+        )
+    except Exception:
+        pass
 
 
 async def run_post_call(
@@ -38,8 +113,8 @@ async def run_post_call(
             session_state, conversation_tracker, duration_seconds
         )
 
-    # Collect transcript from session
-    transcript = session_state.get("_transcript", [])
+    # Collect full transcript from session, falling back to persisted Neon draft.
+    transcript = await _get_post_call_transcript(session_state, conversation_tracker)
     analysis = None
 
     # Step 1: Complete conversation (must run first — prerequisite for all)
@@ -54,10 +129,17 @@ async def run_post_call(
     except Exception as e:
         logger.error("[{cs}] Post-call step 1 (complete conversation) failed: {err}", cs=call_sid, err=str(e))
 
+    # Mark caregiver notes only when Donna actually appears to have delivered
+    # the content. A skipped mark is safer than a false delivery receipt.
+    try:
+        await _mark_delivered_caregiver_notes(session_state, transcript)
+    except Exception as e:
+        logger.error("[{cs}] Post-call caregiver note delivery check failed: {err}", cs=call_sid, err=str(e))
+
     # --- Parallel group: independent steps (2, 3, 5, 6) ---
     async def _step2_analysis():
         from lib.growthbook import is_on
-        if not (transcript and senior and is_on("post_call_analysis_enabled", session_state)):
+        if not (_transcript_has_content(transcript) and senior and is_on("post_call_analysis_enabled", session_state)):
             return None
         from services.call_analysis import analyze_completed_call, save_call_analysis
         result = await analyze_completed_call(transcript, senior)
@@ -71,7 +153,7 @@ async def run_post_call(
         return result
 
     async def _step3_memory():
-        if not (transcript and senior_id):
+        if not (_transcript_has_content(transcript) and senior_id):
             return
         from services.memory import extract_from_conversation
         if isinstance(transcript, list):
@@ -97,19 +179,30 @@ async def run_post_call(
 
     async def _step5_reminder():
         reminder_delivery = session_state.get("reminder_delivery")
-        if reminder_delivery:
-            delivered_set = session_state.get("reminders_delivered", set())
-            if not delivered_set:
-                from services.reminder_delivery import mark_call_ended_without_acknowledgment
-                await mark_call_ended_without_acknowledgment(reminder_delivery["id"])
+        if not reminder_delivery:
+            return
+
+        delivery_id = reminder_delivery.get("id")
+        if not delivery_id:
+            return
+
+        from services.reminder_delivery import (
+            get_delivery_status,
+            mark_call_ended_without_acknowledgment,
+        )
+        await _wait_for_reminder_ack_task(session_state)
+        current = await get_delivery_status(delivery_id)
+        if current and current.get("status") in ("acknowledged", "confirmed"):
+            return
+        await mark_call_ended_without_acknowledgment(delivery_id)
 
     async def _step6_cache():
         if senior_id:
             from services.context_cache import clear_cache
             clear_cache(senior_id)
         if call_sid:
-            from services.scheduler import clear_reminder_context
-            clear_reminder_context(call_sid)
+            from services.scheduler import clear_reminder_context_async
+            await clear_reminder_context_async(call_sid)
 
     results = await asyncio.gather(
         _step2_analysis(),
@@ -291,6 +384,21 @@ async def _persist_call_metrics(
     )
 
 
+def _content_to_text(content) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+            and not b.get("text", "").startswith("[EPHEMERAL")
+            and not b.get("text", "").startswith("[Internal")
+        )
+    return str(content)
+
+
 def _format_transcript(transcript: list | str) -> str:
     """Convert transcript (list of message dicts or string) to readable text."""
     if isinstance(transcript, str):
@@ -298,30 +406,86 @@ def _format_transcript(transcript: list | str) -> str:
     if not isinstance(transcript, list):
         return str(transcript)
 
-    def _text(content):
-        if content is None:
-            return ""
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            return " ".join(
-                b.get("text", "") for b in content
-                if isinstance(b, dict) and b.get("type") == "text"
-                and not b.get("text", "").startswith("[EPHEMERAL")
-                and not b.get("text", "").startswith("[Internal")
-            )
-        return str(content)
-
     lines = []
     for turn in transcript:
         if not isinstance(turn, dict):
             continue
         role = turn.get("role", "unknown")
-        text = _text(turn.get("content")).strip()
+        text = _content_to_text(turn.get("content")).strip()
         if text and not text.startswith("[EPHEMERAL") and not text.startswith("[Internal"):
             label = "Donna" if role == "assistant" else "Caller"
             lines.append(f"{label}: {text}")
     return "\n".join(lines)
+
+
+_NOTE_WORD_RE = re.compile(r"[a-z0-9']+")
+_NOTE_STOP_WORDS = {
+    "about", "after", "again", "also", "and", "are", "ask", "asked", "but",
+    "can", "could", "for", "from", "have", "her", "him", "his", "how",
+    "into", "just", "let", "message", "note", "please", "she", "that",
+    "the", "their", "them", "then", "there", "they", "this", "want",
+    "wanted", "was", "were", "what", "when", "with", "would", "you",
+    "your",
+}
+
+
+def _assistant_transcript_text(transcript: list | str) -> str:
+    if isinstance(transcript, str):
+        return transcript
+    if not isinstance(transcript, list):
+        return ""
+    return " ".join(
+        _content_to_text(turn.get("content"))
+        for turn in transcript
+        if isinstance(turn, dict) and turn.get("role") == "assistant"
+    )
+
+
+def _meaningful_words(text: str) -> set[str]:
+    return {
+        word
+        for word in _NOTE_WORD_RE.findall((text or "").lower())
+        if len(word) > 2 and word not in _NOTE_STOP_WORDS
+    }
+
+
+def _note_was_delivered(note: dict, assistant_text: str) -> bool:
+    content = note.get("content") if isinstance(note, dict) else ""
+    if not content or not assistant_text:
+        return False
+
+    note_words = _meaningful_words(content)
+    assistant_words = _meaningful_words(assistant_text)
+    if not note_words or not assistant_words:
+        return False
+
+    overlap = note_words & assistant_words
+    required = 2 if len(note_words) <= 4 else 4
+    return len(overlap) >= required and (len(overlap) / len(note_words)) >= 0.55
+
+
+async def _mark_delivered_caregiver_notes(session_state: dict, transcript: list | str) -> None:
+    notes = session_state.get("_caregiver_notes_content") or []
+    if not notes:
+        return
+
+    assistant_text = _assistant_transcript_text(transcript)
+    if not assistant_text:
+        return
+
+    from services.caregivers import mark_note_delivered
+
+    marked = 0
+    call_sid = session_state.get("call_sid", "unknown")
+    for note in notes:
+        if not isinstance(note, dict) or not note.get("id"):
+            continue
+        if _note_was_delivered(note, assistant_text):
+            await mark_note_delivered(note["id"], call_sid)
+            marked += 1
+
+    if marked:
+        logger.info("[{cs}] Marked caregiver notes delivered after transcript evidence (count={n})", cs=call_sid, n=marked)
 
 
 async def _summarize_onboarding_call(transcript: list | str, call_sid: str) -> str | None:
@@ -368,7 +532,7 @@ async def _summarize_onboarding_call(transcript: list | str, call_sid: str) -> s
             ),
         )
         summary = response.text.strip()
-        logger.info("[{cs}] Onboarding summary: {s}", cs=call_sid, s=summary[:100])
+        logger.info("[{cs}] Onboarding summary generated ({n} chars)", cs=call_sid, n=len(summary))
         return summary
     except Exception as e:
         logger.error("[{cs}] Onboarding summary failed: {err}", cs=call_sid, err=str(e))
@@ -391,7 +555,7 @@ async def _run_onboarding_post_call(
 
     logger.info("[{cs}] Running onboarding post-call processing", cs=call_sid)
 
-    transcript = session_state.get("_transcript", [])
+    transcript = await _get_post_call_transcript(session_state, conversation_tracker)
 
     # 1. Complete conversation record
     try:
@@ -406,26 +570,107 @@ async def _run_onboarding_post_call(
         logger.error("[{cs}] Onboarding post-call step 1 (complete conversation) failed: {err}",
                      cs=call_sid, err=str(e))
 
-    # 2. Summarize conversation and store on prospect record
-    try:
-        if transcript and prospect_id:
-            summary = await _summarize_onboarding_call(transcript, call_sid)
-            if summary:
-                from services.prospects import update_after_call
-                await update_after_call(prospect_id, {
-                    "caller_context": {"call_summary": summary},
-                })
-                logger.info("[{cs}] Stored onboarding call summary ({n} chars)",
-                            cs=call_sid, n=len(summary))
-            else:
-                # Still increment call_count even without summary
-                from services.prospects import update_after_call
-                await update_after_call(prospect_id, {})
-    except Exception as e:
-        logger.error("[{cs}] Onboarding post-call step 2 (summary + update) failed: {err}",
-                     cs=call_sid, err=str(e))
+    formatted_transcript = _format_transcript(transcript)
+
+    async def _step2_memory():
+        if not (formatted_transcript and prospect_id):
+            return
+        from services.memory import extract_from_conversation
+        await extract_from_conversation(
+            None,
+            formatted_transcript,
+            conversation_id or "unknown",
+            prospect_id=prospect_id,
+        )
+
+    async def _step3_prospect_update():
+        if not prospect_id:
+            return
+
+        from services.prospects import extract_prospect_details, update_after_call
+
+        update_data: dict = {}
+        if formatted_transcript:
+            summary_result, details_result = await asyncio.gather(
+                _summarize_onboarding_call(transcript, call_sid),
+                extract_prospect_details(formatted_transcript),
+                return_exceptions=True,
+            )
+
+            if isinstance(summary_result, Exception):
+                logger.error(
+                    "[{cs}] Onboarding summary failed: {err}",
+                    cs=call_sid,
+                    err=str(summary_result),
+                )
+            elif summary_result:
+                update_data.setdefault("caller_context", {})["call_summary"] = summary_result
+                logger.info(
+                    "[{cs}] Stored onboarding call summary ({n} chars)",
+                    cs=call_sid,
+                    n=len(summary_result),
+                )
+
+            if isinstance(details_result, Exception):
+                logger.error(
+                    "[{cs}] Prospect detail extraction failed: {err}",
+                    cs=call_sid,
+                    err=str(details_result),
+                )
+            elif details_result:
+                extracted_keys = list(details_result.keys())
+                detail_context = details_result.pop("caller_context", None)
+                update_data.update(details_result)
+                if detail_context:
+                    update_data.setdefault("caller_context", {}).update(detail_context)
+                logger.info(
+                    "[{cs}] Extracted prospect detail fields: {keys}",
+                    cs=call_sid,
+                    keys=extracted_keys,
+                )
+
+        # update_after_call increments call_count once, even if no transcript/details.
+        await update_after_call(prospect_id, update_data)
+
+    results = await asyncio.gather(
+        _step2_memory(),
+        _step3_prospect_update(),
+        return_exceptions=True,
+    )
+    for step_name, result in zip(["memory extraction", "prospect update"], results):
+        if isinstance(result, Exception):
+            logger.error(
+                "[{cs}] Onboarding post-call ({step}) failed: {err}",
+                cs=call_sid,
+                step=step_name,
+                err=str(result),
+            )
 
     logger.info("[{cs}] Onboarding post-call processing complete", cs=call_sid)
+
+
+async def _post_notification_with_retry(
+    client,
+    url: str,
+    payload: dict,
+    headers: dict,
+):
+    """POST a notification trigger with one retry for transient failures."""
+    last_error = None
+    for attempt in range(2):
+        try:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            return response
+        except Exception as exc:
+            last_error = exc
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            retryable = status is None or status >= 500
+            if attempt == 0 and retryable:
+                await asyncio.sleep(0.5)
+                continue
+            raise
+    raise last_error
 
 
 async def _trigger_caregiver_notification(
@@ -441,10 +686,12 @@ async def _trigger_caregiver_notification(
     node_url = os.environ.get(
         "NODE_API_URL", "https://donna-api-production-2450.up.railway.app"
     )
-    api_key = os.environ.get("DONNA_API_KEY", "")
+    from config import get_service_api_key
+
+    api_key = get_service_api_key("pipecat") or get_service_api_key("notifications") or ""
 
     if not api_key:
-        logger.warning("DONNA_API_KEY not set, skipping caregiver notification")
+        logger.warning("DONNA_API_KEYS has no pipecat/notifications key, skipping caregiver notification")
         return
 
     headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
@@ -452,9 +699,10 @@ async def _trigger_caregiver_notification(
     async with httpx.AsyncClient(timeout=10.0) as client:
         # Trigger call_completed notification
         try:
-            await client.post(
+            response = await _post_notification_with_retry(
+                client,
                 f"{node_url}/api/notifications/trigger",
-                json={
+                {
                     "event_type": "call_completed",
                     "senior_id": str(senior_id),
                     "data": {
@@ -471,10 +719,12 @@ async def _trigger_caregiver_notification(
                         ),
                     },
                 },
-                headers=headers,
+                headers,
             )
             logger.info(
-                "[{cs}] Triggered call_completed notification", cs=call_sid
+                "[{cs}] Triggered call_completed notification status={status}",
+                cs=call_sid,
+                status=response.status_code,
             )
         except Exception as e:
             logger.error(
@@ -487,18 +737,26 @@ async def _trigger_caregiver_notification(
         for concern in analysis.get("concerns") or []:
             if isinstance(concern, dict) and concern.get("severity") == "high":
                 try:
-                    await client.post(
+                    response = await _post_notification_with_retry(
+                        client,
                         f"{node_url}/api/notifications/trigger",
-                        json={
+                        {
                             "event_type": "concern_detected",
-                            "senior_id": senior_id,
-                            "data": concern,
+                            "senior_id": str(senior_id),
+                            "data": {
+                                "call_sid": call_sid,
+                                "concern": _format_concern_for_notification(concern),
+                                "severity": concern.get("severity"),
+                                "type": concern.get("type") or concern.get("category"),
+                                "recommended_action": concern.get("recommended_action"),
+                            },
                         },
-                        headers=headers,
+                        headers,
                     )
                     logger.info(
-                        "[{cs}] Triggered concern_detected notification",
+                        "[{cs}] Triggered concern_detected notification status={status}",
                         cs=call_sid,
+                        status=response.status_code,
                     )
                 except Exception as e:
                     logger.error(
@@ -506,3 +764,20 @@ async def _trigger_caregiver_notification(
                         cs=call_sid,
                         err=str(e),
                     )
+
+
+def _format_concern_for_notification(concern: dict) -> str:
+    """Build the Node-expected privacy-bounded concern string."""
+    if not isinstance(concern, dict):
+        return str(concern or "")[:300]
+
+    text_parts = [
+        concern.get("description"),
+        concern.get("summary"),
+        concern.get("concern"),
+        concern.get("recommended_action"),
+    ]
+    text = " ".join(str(part).strip() for part in text_parts if part).strip()
+    if not text:
+        text = "High-severity concern detected during Donna's call."
+    return text[:300]

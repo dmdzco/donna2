@@ -55,7 +55,7 @@ env:
 - tapOn: "Next week"
 - tapOn: "Previous week"
 
-# --- Add a new call ---
+# --- Open add call modal, verify it works, close without saving ---
 - tapOn: "Add new call"
 - assertVisible: "Add Call"
 
@@ -66,17 +66,9 @@ env:
 - inputText: "E2E Clickthrough Call"
 - pressKey: enter
 
-# Save (index 1 skips modal title "Add Call", hits the save button)
-- tapOn:
-    text: "Add Call"
-    index: 1
-
-# Verify new call card appears
-- extendedWaitUntil:
-    visible: "E2E Clickthrough Call"
-    timeout: 10000
-
-# Edit/delete tested in individual flow 03 — skipping here to keep clickthrough moving
+# Schedule create/edit/delete is covered in flow 03. Avoid persisting an
+# extra live E2E call from this broad clickthrough.
+- tapOn: "Close"
 
 - takeScreenshot: 00_02_schedule
 

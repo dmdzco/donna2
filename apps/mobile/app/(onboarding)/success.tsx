@@ -16,7 +16,10 @@ import Animated, {
 import { Button } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
 import { api } from "@/src/lib/api";
-import { useOnboardingStore } from "@/src/stores/onboarding";
+import {
+  useOnboardingStore,
+  type OnboardingCall,
+} from "@/src/stores/onboarding";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const ALL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -31,6 +34,34 @@ function to24h(time12: string): string {
   if (period === "AM" && hour === 12) hour = 0;
   else if (period === "PM" && hour !== 12) hour += 12;
   return `${hour.toString().padStart(2, "0")}:${minute}`;
+}
+
+function buildCallSchedule(call?: OnboardingCall) {
+  if (!call) return undefined;
+
+  const base = {
+    frequency: call.frequency,
+    time: to24h(call.callTime),
+  };
+
+  if (call.frequency === "daily") {
+    return {
+      ...base,
+      days: [...ALL_DAYS],
+    };
+  }
+
+  if (call.frequency === "recurring") {
+    return {
+      ...base,
+      days: call.selectedDays.map((i) => DAY_LABELS[i]),
+    };
+  }
+
+  return {
+    ...base,
+    date: call.selectedDate,
+  };
 }
 
 // Simple confetti circles
@@ -172,15 +203,7 @@ export default function SuccessScreen() {
         topicsToAvoid: store.topicsToAvoid
           ? [store.topicsToAvoid]
           : undefined,
-        callSchedule: store.calls[0]
-          ? {
-              time: to24h(store.calls[0].callTime),
-              days:
-                store.calls[0].frequency === "daily"
-                  ? [...ALL_DAYS]
-                  : store.calls[0].selectedDays.map((i) => DAY_LABELS[i]),
-            }
-          : undefined,
+        callSchedule: buildCallSchedule(store.calls[0]),
       };
 
       await api.onboarding.complete(payload, token!);

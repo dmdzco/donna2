@@ -10,10 +10,36 @@ import {
   updateReminderSchema,
   reminderIdParamSchema,
 } from '../validators/schemas.js';
-import { getAccessibleSeniorIds, canAccessSenior } from './helpers.js';
+import { getAccessibleSeniorIds, canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
+import { getDatePartsInTimezone, resolveTimezoneFromProfile } from '../lib/timezone.js';
 
 const router = Router();
+
+function dailyCronFromScheduledTime(scheduledTime, senior) {
+  if (!scheduledTime) return undefined;
+  const date = new Date(scheduledTime);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const parts = getDatePartsInTimezone(date, resolveTimezoneFromProfile(senior));
+  return `${parts.minutes} ${parts.hours} * * *`;
+}
+
+function dateFromScheduledTime(scheduledTime) {
+  if (!scheduledTime) return null;
+  const date = new Date(scheduledTime);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+async function getSeniorTimezoneProfile(seniorId) {
+  const [senior] = await db.select({
+    id: seniors.id,
+    timezone: seniors.timezone,
+    city: seniors.city,
+    state: seniors.state,
+    zipCode: seniors.zipCode,
+  }).from(seniors).where(eq(seniors.id, seniorId)).limit(1);
+  return senior || {};
+}
 
 // List all reminders with senior info (admins see all, caregivers see their seniors')
 router.get('/api/reminders', requireAuth, async (req, res) => {
@@ -54,7 +80,7 @@ router.get('/api/reminders', requireAuth, async (req, res) => {
     const filtered = result.filter(r => accessibleIds.includes(r.seniorId));
     res.json(filtered);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/reminders');
   }
 });
 
@@ -66,14 +92,18 @@ router.post('/api/reminders', requireAuth, writeLimiter, validateBody(createRemi
     if (!await canAccessSenior(req.auth, seniorId)) {
       return res.status(403).json({ error: 'Access denied to this senior' });
     }
+    const seniorProfile = await getSeniorTimezoneProfile(seniorId);
+    const reminderCronExpression = cronExpression ||
+      (isRecurring ? dailyCronFromScheduledTime(scheduledTime, seniorProfile) : undefined);
+    const reminderScheduledTime = dateFromScheduledTime(scheduledTime);
     const [reminder] = await db.insert(reminders).values({
       seniorId,
       type,
       title,
       description,
-      scheduledTime: scheduledTime || null,
+      scheduledTime: reminderScheduledTime,
       isRecurring,
-      cronExpression,
+      cronExpression: reminderCronExpression,
     }).returning();
     logAudit({
       userId: req.auth.userId,
@@ -87,7 +117,7 @@ router.post('/api/reminders', requireAuth, writeLimiter, validateBody(createRemi
     });
     res.json(reminder);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'POST /api/reminders');
   }
 });
 
@@ -95,7 +125,11 @@ router.post('/api/reminders', requireAuth, writeLimiter, validateBody(createRemi
 router.patch('/api/reminders/:id', requireAuth, writeLimiter, validateParams(reminderIdParamSchema), validateBody(updateReminderSchema), async (req, res) => {
   try {
     // Get the reminder to check senior access
-    const [existing] = await db.select({ seniorId: reminders.seniorId })
+    const [existing] = await db.select({
+      seniorId: reminders.seniorId,
+      scheduledTime: reminders.scheduledTime,
+      isRecurring: reminders.isRecurring,
+    })
       .from(reminders).where(eq(reminders.id, req.params.id));
     if (!existing) {
       return res.status(404).json({ error: 'Reminder not found' });
@@ -108,9 +142,19 @@ router.patch('/api/reminders/:id', requireAuth, writeLimiter, validateParams(rem
     const updateData = {};
     if (title !== undefined) updateData.title = title;
     if (description !== undefined) updateData.description = description;
-    if (scheduledTime !== undefined) updateData.scheduledTime = scheduledTime;
+    if (scheduledTime !== undefined) updateData.scheduledTime = dateFromScheduledTime(scheduledTime);
     if (isRecurring !== undefined) updateData.isRecurring = isRecurring;
-    if (cronExpression !== undefined) updateData.cronExpression = cronExpression;
+    if (cronExpression !== undefined) {
+      updateData.cronExpression = cronExpression;
+    } else {
+      const nextIsRecurring = isRecurring !== undefined ? isRecurring : existing.isRecurring;
+      const nextScheduledTime = scheduledTime !== undefined ? scheduledTime : existing.scheduledTime;
+      if (nextIsRecurring && nextScheduledTime) {
+        const seniorProfile = await getSeniorTimezoneProfile(existing.seniorId);
+        const nextCronExpression = dailyCronFromScheduledTime(nextScheduledTime, seniorProfile);
+        if (nextCronExpression) updateData.cronExpression = nextCronExpression;
+      }
+    }
     if (isActive !== undefined) updateData.isActive = isActive;
 
     logAudit({
@@ -130,7 +174,7 @@ router.patch('/api/reminders/:id', requireAuth, writeLimiter, validateParams(rem
       .returning();
     res.json(reminder);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'PATCH /api/reminders/:id');
   }
 });
 
@@ -160,7 +204,7 @@ router.delete('/api/reminders/:id', requireAuth, writeLimiter, validateParams(re
     await db.delete(reminders).where(eq(reminders.id, req.params.id));
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'DELETE /api/reminders/:id');
   }
 });
 

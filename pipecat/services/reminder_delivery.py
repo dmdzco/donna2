@@ -51,6 +51,21 @@ async def mark_reminder_acknowledged(
         return None
 
 
+async def get_delivery_status(delivery_id: str) -> dict | None:
+    """Fetch the current status for a reminder delivery."""
+    if not delivery_id:
+        return None
+
+    try:
+        return await query_one(
+            "SELECT id, status, attempt_count FROM reminder_deliveries WHERE id = $1",
+            delivery_id,
+        )
+    except Exception as e:
+        logger.error("Failed to fetch delivery status: {err}", err=str(e))
+        return None
+
+
 async def mark_call_ended_without_acknowledgment(delivery_id: str) -> None:
     """Handle call end without acknowledgment — set retry_pending or max_attempts."""
     if not delivery_id:
@@ -102,7 +117,7 @@ async def get_reminder_by_call_sid(call_sid: str) -> dict | None:
         call_sid,
     )
     if row:
-        logger.info("Found reminder for call {cs}: {title}", cs=call_sid, title=row.get("title"))
+        logger.info("Found reminder for call {cs}", cs=call_sid)
     return row
 
 

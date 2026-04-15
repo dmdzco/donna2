@@ -1,0 +1,4 @@
+interface:
+  display_name: "Senior UX Review"
+  short_description: "Review Donna flows for older-adult usability"
+  default_prompt: "Use $senior-ux-review to review Donna from the perspective of an older adult user."

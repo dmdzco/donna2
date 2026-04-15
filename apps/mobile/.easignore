@@ -1,0 +1,30 @@
+node_modules/
+.expo/
+dist/
+web-build/
+npm-debug.*
+*.log
+.DS_Store
+
+# Local environment and test credentials
+.env
+.env.local
+.env.production
+.maestro/.env
+
+# Signing credentials and certificates
+credentials.json
+ios/certs/
+*.jks
+*.p8
+*.p12
+*.key
+*.cer
+*.pem
+*.mobileprovision
+*.provisionprofile
+*.certSigningRequest
+
+# Generated local test screenshots at the app root.
+# App store assets should live under assets/ or ios/ and are not matched here.
+/*.png

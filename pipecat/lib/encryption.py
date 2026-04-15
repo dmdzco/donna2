@@ -19,6 +19,7 @@ import os
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from loguru import logger
+from config import is_production_environment
 
 _KEY: bytes | None = None
 _aes: AESGCM | None = None
@@ -31,19 +32,26 @@ def _get_aes() -> AESGCM | None:
         return _aes
     raw = os.getenv("FIELD_ENCRYPTION_KEY", "")
     if not raw:
+        if is_production_environment():
+            raise RuntimeError("FIELD_ENCRYPTION_KEY is required for PHI encryption in production")
         return None
     try:
-        _KEY = base64.urlsafe_b64decode(raw)
+        padded = raw + "=" * (-len(raw) % 4)
+        _KEY = base64.urlsafe_b64decode(padded)
         if len(_KEY) != 32:
             logger.error(
                 "FIELD_ENCRYPTION_KEY must decode to 32 bytes, got {n}",
                 n=len(_KEY),
             )
+            if is_production_environment():
+                raise RuntimeError("FIELD_ENCRYPTION_KEY must decode to 32 bytes")
             return None
         _aes = AESGCM(_KEY)
         return _aes
     except Exception as e:
         logger.error("Invalid FIELD_ENCRYPTION_KEY: {err}", err=str(e))
+        if is_production_environment():
+            raise
         return None
 
 

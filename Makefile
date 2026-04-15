@@ -36,10 +36,10 @@ setup: ## One-time setup: create Neon branches + Railway dev environment
 deploy-dev: deploy-dev-pipecat deploy-dev-nodejs ## Deploy both services to dev
 
 deploy-dev-pipecat: ## Deploy Pipecat to dev environment
-	cd pipecat && railway up --service donna-pipecat --environment dev
+	railway up --service donna-pipecat --environment dev --path-as-root $(CURDIR)/pipecat
 
 deploy-dev-nodejs: ## Deploy Node.js to dev environment
-	railway up --service donna-api --environment dev
+	railway up --service donna-api --environment dev --path-as-root $(CURDIR)
 
 # ──────────────────────────────────────────────
 # Deploy — Staging (pre-merge validation)
@@ -48,10 +48,10 @@ deploy-dev-nodejs: ## Deploy Node.js to dev environment
 deploy-staging: deploy-staging-pipecat deploy-staging-nodejs ## Deploy both services to staging
 
 deploy-staging-pipecat: ## Deploy Pipecat to staging
-	cd pipecat && railway up --service donna-pipecat --environment staging
+	railway up --service donna-pipecat --environment staging --path-as-root $(CURDIR)/pipecat
 
 deploy-staging-nodejs: ## Deploy Node.js to staging
-	railway up --service donna-api --environment staging
+	railway up --service donna-api --environment staging --path-as-root $(CURDIR)
 
 # ──────────────────────────────────────────────
 # Deploy — Production (from main branch only)
@@ -60,10 +60,10 @@ deploy-staging-nodejs: ## Deploy Node.js to staging
 deploy-prod: deploy-prod-pipecat deploy-prod-nodejs ## Deploy both services to production
 
 deploy-prod-pipecat: ## Deploy Pipecat to production
-	cd pipecat && railway up --service donna-pipecat --environment production
+	railway up --service donna-pipecat --environment production --path-as-root $(CURDIR)/pipecat
 
 deploy-prod-nodejs: ## Deploy Node.js to production
-	railway up --service donna-api --environment production
+	railway up --service donna-api --environment production --path-as-root $(CURDIR)
 
 # ──────────────────────────────────────────────
 # Health Checks
@@ -71,15 +71,19 @@ deploy-prod-nodejs: ## Deploy Node.js to production
 
 health-dev: ## Health check dev environment
 	@echo "Checking dev Pipecat..."
-	@curl -sf "$$(railway variables get RAILWAY_PUBLIC_DOMAIN --service donna-pipecat --environment dev 2>/dev/null | sed 's/^/https:\/\//')"/health && echo " ✓" || echo " ✗ unreachable"
+	@domain="$$(railway variable list --kv --service donna-pipecat --environment dev 2>/dev/null | awk -F= '$$1=="RAILWAY_PUBLIC_DOMAIN"{print $$2; exit}')"; \
+		if [ -n "$$domain" ]; then curl -sf "https://$$domain/health" && echo " ✓" || echo " ✗ unreachable"; else echo " ✗ missing domain"; fi
 	@echo "Checking dev Node.js..."
-	@curl -sf "$$(railway variables get RAILWAY_PUBLIC_DOMAIN --service donna-api --environment dev 2>/dev/null | sed 's/^/https:\/\//')"/health && echo " ✓" || echo " ✗ unreachable"
+	@domain="$$(railway variable list --kv --service donna-api --environment dev 2>/dev/null | awk -F= '$$1=="RAILWAY_PUBLIC_DOMAIN"{print $$2; exit}')"; \
+		if [ -n "$$domain" ]; then curl -sf "https://$$domain/health" && echo " ✓" || echo " ✗ unreachable"; else echo " ✗ missing domain"; fi
 
 health-staging: ## Health check staging environment
 	@echo "Checking staging Pipecat..."
-	@curl -sf "$$(railway variables get RAILWAY_PUBLIC_DOMAIN --service donna-pipecat --environment staging 2>/dev/null | sed 's/^/https:\/\//')"/health && echo " ✓" || echo " ✗ unreachable"
+	@domain="$$(railway variable list --kv --service donna-pipecat --environment staging 2>/dev/null | awk -F= '$$1=="RAILWAY_PUBLIC_DOMAIN"{print $$2; exit}')"; \
+		if [ -n "$$domain" ]; then curl -sf "https://$$domain/health" && echo " ✓" || echo " ✗ unreachable"; else echo " ✗ missing domain"; fi
 	@echo "Checking staging Node.js..."
-	@curl -sf "$$(railway variables get RAILWAY_PUBLIC_DOMAIN --service donna-api --environment staging 2>/dev/null | sed 's/^/https:\/\//')"/health && echo " ✓" || echo " ✗ unreachable"
+	@domain="$$(railway variable list --kv --service donna-api --environment staging 2>/dev/null | awk -F= '$$1=="RAILWAY_PUBLIC_DOMAIN"{print $$2; exit}')"; \
+		if [ -n "$$domain" ]; then curl -sf "https://$$domain/health" && echo " ✓" || echo " ✗ unreachable"; else echo " ✗ missing domain"; fi
 
 health-prod: ## Health check production
 	@echo "Checking production Pipecat..."

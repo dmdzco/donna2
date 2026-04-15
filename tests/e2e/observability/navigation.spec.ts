@@ -30,6 +30,13 @@ test.describe('Observability Navigation', () => {
     await page.locator('.call-list-item').first().click();
     await page.waitForTimeout(500);
 
+    const analysisBtn = page.locator('.view-toggle').getByText('Analysis');
+    if (await analysisBtn.isVisible()) {
+      await analysisBtn.click();
+      await expect(page.locator('.analysis-panel')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('Post-Call Analysis')).toBeVisible();
+    }
+
     const observerBtn = page.locator('.view-toggle').getByText('Observer');
     if (await observerBtn.isVisible()) {
       await observerBtn.click();

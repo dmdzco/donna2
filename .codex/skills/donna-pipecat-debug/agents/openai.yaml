@@ -1,0 +1,4 @@
+interface:
+  display_name: "Donna Pipecat Debug"
+  short_description: "Debug Donna voice pipeline regressions and latency issues"
+  default_prompt: "Use $donna-pipecat-debug to investigate a Donna voice pipeline bug or latency regression."

@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from db import query_one, query_many, execute
-from lib.sanitize import mask_name
+from lib.sanitize import mask_phone
 from services.reminder_delivery import mark_delivered, format_reminder_prompt
 
 # Lazy-loaded Twilio client
@@ -24,6 +24,7 @@ _twilio_client = None
 # Pre-fetched context maps (shared state — same semantics as Node.js Maps)
 pending_reminder_calls: dict[str, dict] = {}
 prefetched_context_by_phone: dict[str, dict] = {}
+REMINDER_CONTEXT_TTL_SECONDS = 30 * 60
 
 
 def _get_twilio_client():
@@ -39,6 +40,44 @@ def _get_twilio_client():
 
 def _normalize_phone(phone: str) -> str:
     return re.sub(r"\D", "", phone)[-10:]
+
+
+def _reminder_context_key(call_sid: str) -> str:
+    return f"reminder_ctx:{call_sid}"
+
+
+def _coerce_datetime(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
+async def _delete_shared_reminder_context(call_sid: str) -> None:
+    try:
+        from lib.redis_client import get_shared_state
+        state = get_shared_state()
+        if getattr(state, "is_shared", False):
+            await state.delete(_reminder_context_key(call_sid))
+    except Exception as exc:
+        logger.warning("[{cs}] Shared reminder context delete failed: {err}", cs=call_sid, err=str(exc))
+
+
+async def store_reminder_context(call_sid: str, context: dict) -> None:
+    """Store reminder call context locally and in shared state when configured."""
+    pending_reminder_calls[call_sid] = context
+    try:
+        from lib.redis_client import get_shared_state
+        state = get_shared_state()
+        if getattr(state, "is_shared", False):
+            await state.set(_reminder_context_key(call_sid), context, ttl=REMINDER_CONTEXT_TTL_SECONDS)
+    except Exception as exc:
+        logger.warning("[{cs}] Shared reminder context write failed: {err}", cs=call_sid, err=str(exc))
 
 
 def get_scheduled_for_time(reminder: dict) -> datetime | None:
@@ -221,7 +260,7 @@ async def trigger_reminder_call(
         return None
 
     try:
-        logger.info("Pre-fetching context for {name}", name=mask_name(senior.get("name")))
+        logger.info("Pre-fetching context for senior_id={sid}", sid=str(senior.get("id", ""))[:8])
 
         from services.memory import build_context
         memory_context = await build_context(senior["id"], None, senior)
@@ -272,7 +311,7 @@ async def trigger_reminder_call(
             )
             logger.info("Created delivery {did}", did=delivery["id"])
 
-        pending_reminder_calls[call.sid] = {
+        reminder_context = {
             "reminder": reminder,
             "senior": senior,
             "memory_context": memory_context,
@@ -281,6 +320,7 @@ async def trigger_reminder_call(
             "delivery": delivery,
             "scheduled_for": target_scheduled_for,
         }
+        await store_reminder_context(call.sid, reminder_context)
 
         logger.info("Call initiated callSid={cs}", cs=call.sid)
         return {"sid": call.sid, "delivery": delivery}
@@ -292,7 +332,7 @@ async def trigger_reminder_call(
 
 async def prefetch_for_phone(phone_number: str, senior: dict | None) -> dict:
     """Pre-fetch context for a manual outbound call."""
-    logger.info("Pre-fetching for manual call: {name}", name=mask_name(senior.get("name")) if senior else "unknown")
+    logger.info("Pre-fetching for manual call has_senior={has}", has=bool(senior))
 
     memory_context = None
     pre_generated_greeting = None
@@ -308,7 +348,7 @@ async def prefetch_for_phone(phone_number: str, senior: dict | None) -> dict:
         if cached:
             memory_context = cached.get("memory_context")
             pre_generated_greeting = cached.get("greeting")
-            logger.info("Using cached context for {name}", name=mask_name(senior.get("name")))
+            logger.info("Using cached context for senior_id={sid}", sid=str(senior.get("id", ""))[:8])
         else:
             from services.memory import build_context
             memory_context = await build_context(senior["id"], None, senior)
@@ -326,7 +366,7 @@ async def prefetch_for_phone(phone_number: str, senior: dict | None) -> dict:
         "fetched_at": datetime.now(timezone.utc),
     }
 
-    logger.info("Pre-fetch complete phone={p} greeting_ready={g}", p=normalized, g=bool(pre_generated_greeting))
+    logger.info("Pre-fetch complete phone={p} greeting_ready={g}", p=mask_phone(phone_number), g=bool(pre_generated_greeting))
     return {"senior": senior, "memory_context": memory_context, "pre_generated_greeting": pre_generated_greeting}
 
 
@@ -337,32 +377,62 @@ def get_prefetched_context(phone_number: str) -> dict | None:
 
 
 def get_reminder_context(call_sid: str) -> dict | None:
-    """Get reminder context for a call (if triggered by a reminder)."""
+    """Get locally cached reminder context for a call."""
     return pending_reminder_calls.get(call_sid)
 
 
-def clear_reminder_context(call_sid: str) -> None:
-    """Clear reminder context after call ends (local + Redis)."""
-    pending_reminder_calls.pop(call_sid, None)
+async def get_reminder_context_async(call_sid: str) -> dict | None:
+    """Get reminder context from local memory, then Redis shared state."""
+    context = pending_reminder_calls.get(call_sid)
+    if context:
+        return context
+
     try:
         from lib.redis_client import get_shared_state
-        import asyncio
         state = get_shared_state()
-        if hasattr(state, '_url'):
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(state.delete(f"reminder_ctx:{call_sid}"))
-    except Exception:
-        pass
+        if not getattr(state, "is_shared", False):
+            return None
+
+        context = await state.get(_reminder_context_key(call_sid))
+        if isinstance(context, dict) and context:
+            pending_reminder_calls[call_sid] = context
+            logger.info("[{cs}] Loaded reminder context from shared state", cs=call_sid)
+            return context
+    except Exception as exc:
+        logger.warning("[{cs}] Shared reminder context lookup failed: {err}", cs=call_sid, err=str(exc))
+
+    return None
+
+
+def clear_reminder_context(call_sid: str) -> None:
+    """Clear reminder context after call ends.
+
+    Synchronous compatibility wrapper. Async callers should prefer
+    clear_reminder_context_async() so Redis cleanup is awaited.
+    """
+    pending_reminder_calls.pop(call_sid, None)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(_delete_shared_reminder_context(call_sid))
+    else:
+        loop.create_task(_delete_shared_reminder_context(call_sid))
+
+
+async def clear_reminder_context_async(call_sid: str) -> None:
+    """Clear reminder context from local memory and shared state."""
+    pending_reminder_calls.pop(call_sid, None)
+    await _delete_shared_reminder_context(call_sid)
 
 
 def cleanup_stale_contexts(max_age_minutes: int = 30) -> int:
     """Remove pending_reminder_calls entries older than max_age_minutes."""
     now = datetime.now(timezone.utc)
-    stale = [
-        sid for sid, ctx in pending_reminder_calls.items()
-        if (now - ctx.get("triggered_at", now)).total_seconds() > max_age_minutes * 60
-    ]
+    stale = []
+    for sid, ctx in pending_reminder_calls.items():
+        triggered_at = _coerce_datetime(ctx.get("triggered_at")) or now
+        if (now - triggered_at).total_seconds() > max_age_minutes * 60:
+            stale.append(sid)
     for sid in stale:
         pending_reminder_calls.pop(sid, None)
     if stale:

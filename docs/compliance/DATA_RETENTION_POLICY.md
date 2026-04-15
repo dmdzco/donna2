@@ -56,7 +56,7 @@ This policy applies to all data stored in:
 
 | Data Type | Table(s) | Contains PHI? | Retention Period | Trigger | Destruction Method |
 |-----------|----------|---------------|-----------------|---------|-------------------|
-| **Conversation transcripts** | `conversations.transcript`, `.summary` | Yes (HIGH) | 1 year from call date | `conversations.started_at` | Automated purge job: set transcript/summary to NULL, retain metadata |
+| **Conversation transcripts and summaries** | `conversations.transcript_encrypted`, `transcript_text_encrypted`, `summary_encrypted`; legacy `conversations.transcript` / `.summary` read fallback | Yes (HIGH) | 1 year from call date | `conversations.started_at` | Automated purge job: set transcript/summary fields to NULL, retain metadata |
 | **Conversation metadata** | `conversations` (non-PHI fields: id, senior_id, started_at, ended_at, duration, status, sentiment) | Low | 3 years from call date | `conversations.started_at` | Automated purge job: DELETE row |
 | **Semantic memories** | `memories` | Yes (HIGH) | 2 years from creation OR 1 year after senior becomes inactive | `memories.created_at` or `seniors.is_active` + last call date | Automated purge job: DELETE row (including embedding vector) |
 | **Call analyses** | `call_analyses` | Yes (MEDIUM) | 1 year from creation | `call_analyses.created_at` | Automated purge job: DELETE row |
@@ -84,7 +84,7 @@ This policy applies to all data stored in:
 | **Call recordings** | Twilio (if enabled) | Yes (CRITICAL) | **Do not enable call recording** unless required; if enabled, 30 days max | Twilio auto-delete or API deletion |
 | **Voice audio (real-time)** | Deepgram (transient) | Yes | Not retained by Deepgram (streaming STT) | Verify with Deepgram BAA; ensure no log retention |
 | **TTS requests** | ElevenLabs / Cartesia | Yes (text content) | Verify vendor policy | Request deletion or confirm no-retention via BAA |
-| **LLM request logs** | Anthropic, Google, Cerebras, Groq | Yes (conversation content) | Verify vendor policy (Anthropic: 30 days default) | Opt out of training data retention; confirm via BAA |
+| **LLM request logs** | Anthropic, Google, Groq (Cerebras legacy/not active) | Yes (conversation content) | Verify vendor policy (Anthropic: 30 days default) | Opt out of training data retention; confirm via BAA |
 | **Search queries** | Tavily, OpenAI | Possible | Verify vendor policy | Confirm via BAA or remove vendor |
 | **Dev/staging databases** | Neon (branches) | Yes (copies of production) | Refresh quarterly; purge unused branches | `neonctl branches delete` |
 
@@ -94,7 +94,8 @@ This policy applies to all data stored in:
 
 ### Conversations (1 year transcript, 3 years metadata)
 
-- **Transcript (1 year)**: Conversation content is the most sensitive PHI. One year provides adequate time for quality review, dispute resolution, and caregiver inquiries about past calls. After 1 year, the transcript and summary are NULLed but metadata (date, duration, sentiment) is retained for longitudinal analysis.
+- **Transcript and summary (1 year)**: Conversation content is the most sensitive PHI. One year provides adequate time for quality review, dispute resolution, and caregiver inquiries about past calls. New transcript writes use encrypted-only fields (`transcript_encrypted`, `transcript_text_encrypted`) and summary writes prefer `summary_encrypted`; legacy plaintext columns are read fallbacks for existing rows during migration. After 1 year, transcript and summary fields are NULLed but metadata (date, duration, sentiment) is retained for longitudinal analysis.
+- **Caregiver call summaries**: Caregiver-facing APIs decrypt summaries server-side only after authentication and per-senior authorization, then return summary-only call records. Transcript fields and encryption keys are not returned to caregiver clients.
 - **Metadata (3 years)**: Non-PHI call metadata (when calls happened, duration, sentiment score) supports operational analytics and care pattern tracking without retaining sensitive content.
 
 ### Memories (2 years)
@@ -148,9 +149,13 @@ Implement a scheduled purge job that runs daily during off-peak hours (e.g., 3:0
 -- Example: Purge conversation transcripts older than 1 year
 -- Phase 1: NULL out PHI fields (retain metadata)
 UPDATE conversations
-SET transcript = NULL, summary = NULL
+SET transcript = NULL,
+    transcript_encrypted = NULL,
+    transcript_text_encrypted = NULL,
+    summary = NULL,
+    summary_encrypted = NULL
 WHERE started_at < NOW() - INTERVAL '1 year'
-  AND transcript IS NOT NULL
+  AND (transcript IS NOT NULL OR transcript_encrypted IS NOT NULL OR transcript_text_encrypted IS NOT NULL OR summary IS NOT NULL OR summary_encrypted IS NOT NULL)
   AND id NOT IN (SELECT resource_id FROM legal_holds WHERE resource_type = 'conversation');
 
 -- Phase 2: Delete full conversation records older than 3 years
@@ -338,8 +343,8 @@ Donna sends PHI to multiple vendors. Each vendor's data retention policy must be
 | **Deepgram** | Audio stream | Streaming (not retained); confirm no log retention | Confirm via BAA |
 | **ElevenLabs** | TTS text input | Check vendor policy | Confirm via BAA or vendor inquiry |
 | **Cartesia** | TTS text input | Check vendor policy | Confirm via BAA or vendor inquiry |
-| **Cerebras** | Conversation turns | Check vendor policy | Confirm via vendor inquiry |
-| **Groq** | Conversation turns | Check vendor policy | Confirm via vendor inquiry |
+| **Groq** | Conversation turns | Check vendor policy | Confirm via vendor inquiry/BAA |
+| **Cerebras** | Legacy/not active; conversation turns only if re-enabled | Check vendor policy before any re-enable | Keep disabled/remove stale env references unless BAA is signed |
 | **OpenAI** | Memory text, search queries | API: not used for training (opt-out); check retention | Confirm via BAA |
 | **Tavily** | Search queries | Check vendor policy | Confirm via vendor inquiry |
 | **Twilio** | Audio, phone numbers, SMS | Configurable; default varies | Configure retention limits in Twilio console; confirm via BAA |

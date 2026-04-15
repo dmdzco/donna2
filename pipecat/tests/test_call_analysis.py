@@ -44,6 +44,10 @@ class TestFormatTranscript:
         assert _format_transcript(None) == "No transcript available"
         assert _format_transcript([]) == "No transcript available"
 
+    def test_accepts_persisted_text_transcript(self):
+        transcript = "Senior: Hello\nDonna: Hi there"
+        assert _format_transcript(transcript) == transcript
+
 
 class TestDefaultAnalysis:
     def test_has_required_fields(self):

@@ -35,6 +35,7 @@ export const conversations = pgTable('conversations', {
   concerns: text('concerns').array(),
   transcript: json('transcript'),
   transcriptEncrypted: text('transcript_encrypted'),
+  transcriptTextEncrypted: text('transcript_text_encrypted'),
   callMetrics: json('call_metrics'),
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -205,4 +206,3 @@ export const auditLogs = pgTable('audit_logs', {
   metadata: json('metadata').default({}),
   createdAt: timestamp('created_at').defaultNow(),
 });
-

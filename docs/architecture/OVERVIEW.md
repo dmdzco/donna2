@@ -1,6 +1,6 @@
 # Donna Architecture Overview
 
-This document describes the Donna v5.2 system architecture with the **Pipecat voice pipeline**, **multi-provider Conversation Director** (Groq/Cerebras/Gemini), **Predictive Context Engine** (speculative prefetch), **Pipecat Flows** call state machine, and **infrastructure reliability** features (circuit breakers, feature flags, graceful shutdown).
+This document describes the Donna v5.3 system architecture with the **Pipecat voice pipeline**, **Conversation Director** (Groq fast path, Gemini fallback for non-speculative analysis), **Predictive Context Engine** (memory prefetch), **Pipecat Flows** call state machine, and **infrastructure reliability** features (circuit breakers, GrowthBook feature flags, graceful shutdown).
 
 > For detailed Pipecat implementation specifics, see [pipecat/docs/ARCHITECTURE.md](../../pipecat/docs/ARCHITECTURE.md).
 
@@ -24,7 +24,7 @@ This document describes the Donna v5.2 system architecture with the **Pipecat vo
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│              DONNA v5.2 — PIPECAT VOICE PIPELINE                            │
+│              DONNA v5.3 — PIPECAT VOICE PIPELINE                            │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐            │
@@ -35,8 +35,8 @@ This document describes the Donna v5.2 system architecture with the **Pipecat vo
 │            ▼                     ▼                     ▼                     │
 │   ┌──────────────────────────────────────────────────────────────┐          │
 │   │                  Node.js API (Railway)                        │          │
-│   │    routes/ (16 modules) — consumed by all frontend apps      │          │
-│   │    services/scheduler.js — reminder polling (still active)   │          │
+│   │    routes/ (17 files) — frontend APIs, health, waitlist      │          │
+│   │    services/scheduler.js — active reminder polling           │          │
 │   └──────────────────────────────────────────────────────────────┘          │
 │                                                                              │
 │   ┌──────────────┐                                                          │
@@ -60,32 +60,32 @@ This document describes the Donna v5.2 system architecture with the **Pipecat vo
 │   │                     ▼                                                │   │
 │   │         ┌───────────────────────┐                                    │   │
 │   │         │  Layer 1: Quick       │  0ms — BLOCKING                    │   │
-│   │         │  Observer             │  268 regex patterns                │   │
+│   │         │  Observer             │  250+ regex patterns               │   │
 │   │         │                       │  Injects guidance for THIS turn    │   │
-│   │         │                       │  Goodbye → EndFrame (2s)           │   │
+│   │         │                       │  Goodbye → EndFrame                │   │
 │   │         └───────────┬───────────┘                                    │   │
 │   │                     ▼                                                │   │
 │   │         ┌───────────────────────┐  ┌─────────────────────────┐      │   │
-│   │         │  Layer 2: Conversation│─►│ Groq/Cerebras (~70ms)   │      │   │
-│   │         │  Director             │  │ Gemini fallback (~150ms)│      │   │
+│   │         │  Layer 2: Conversation│─►│ Groq fast path          │      │   │
+│   │         │  Director             │  │ Gemini fallback helper  │      │   │
 │   │         │  (PASS-THROUGH)       │  │ asyncio.create_task     │      │   │
 │   │         │                       │  │ Same-turn (speculative) │      │   │
 │   │         │  Injects guidance +   │  │ or prev-turn (fallback) │      │   │
 │   │         │  dynamic news context │  │ + predictive prefetch   │      │   │
-│   │         │                       │  │ + web search prefetch   │      │   │
+│   │         │                       │  │ + memory prefetch       │      │   │
 │   │         │                       │  │ + force end at 9/12min  │      │   │
 │   │         └───────────┬───────────┘  └─────────────────────────┘      │   │
 │   │                     │ (no delay)                                     │   │
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (user) ← builds LLM context              │   │
 │   │                     ▼                                                │   │
-│   │         Claude Sonnet 4.5 + FlowManager (5 tools)                   │   │
-│   │         (4 phases: opening → main → winding_down → closing)         │   │
+│   │         Claude Sonnet 4.5 + FlowManager (2 active tools)            │   │
+│   │         (conditional reminder → main → winding_down → closing)      │   │
 │   │                     │ TextFrame                                      │   │
 │   │                     ▼                                                │   │
-│   │         Conversation Tracker (topics + shared transcript)            │   │
-│   │                     ▼                                                │   │
 │   │         Guidance Stripper (strips <guidance> + [BRACKETED])          │   │
+│   │                     ▼                                                │   │
+│   │         Conversation Tracker (topics + stripped transcript)          │   │
 │   │                     ▼                                                │   │
 │   │         ElevenLabs TTS → Audio Out → Twilio (mulaw 8kHz)            │   │
 │   │                     ▼                                                │   │
@@ -118,8 +118,8 @@ This document describes the Donna v5.2 system architecture with the **Pipecat vo
 │   │  └──────────────┘  └──────────────┘  └──────────────┘               │  │
 │   │  ┌──────────────┐  ┌──────────────┐                                 │  │
 │   │  │Circuit Breaker│  │Feature Flags │                                 │  │
-│   │  │(Groq,Cerebras │  │ (DB-backed)  │                                 │  │
-│   │  │ Gemini, OAI)  │  │              │                                 │  │
+│   │  │(Groq, Gemini, │  │ (GrowthBook) │                                 │  │
+│   │  │ OAI, news)    │  │              │                                 │  │
 │   │  └──────────────┘  └──────────────┘                                 │  │
 │   └────────────────────────────────────┬─────────────────────────────────┘  │
 │                                        ▼                                     │
@@ -127,7 +127,7 @@ This document describes the Donna v5.2 system architecture with the **Pipecat vo
 │   │                     PostgreSQL (Neon + pgvector)                      │  │
 │   │  seniors | conversations | memories | reminders | reminder_deliveries │  │
 │   │  caregivers | caregiver_notes | call_analyses | daily_call_context    │  │
-│   │  feature_flags | admin_users                                          │  │
+│   │  notifications | audit_logs | waitlist | admin_users                  │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -139,8 +139,8 @@ This document describes the Donna v5.2 system architecture with the **Pipecat vo
 
 | Layer | File | Model | Latency | Purpose |
 |-------|------|-------|---------|---------|
-| **1** | `processors/quick_observer.py` + `processors/patterns.py` | Regex | 0ms | 268 patterns: health, goodbye, emotion, safety + programmatic call end (2s EndFrame) |
-| **2** | `processors/conversation_director.py` + `services/director_llm.py` | Groq/Cerebras (Gemini fallback) | ~70ms (~150ms fallback) | Non-blocking call guidance, speculative analysis, predictive prefetch, news injection |
+| **1** | `processors/quick_observer.py` + `processors/patterns.py` | Regex | 0ms | 250+ patterns: health, goodbye, emotion, safety + programmatic call end after configured delay |
+| **2** | `processors/conversation_director.py` + `services/director_llm.py` | Groq fast path, Gemini fallback helper | Non-blocking | Same-turn/previous-turn guidance, memory prefetch, news injection |
 
 ### Post-Call Analysis (Async)
 
@@ -153,13 +153,13 @@ This document describes the Donna v5.2 system architecture with the **Pipecat vo
 
 ## Conversation Director (Layer 2)
 
-The Director runs **non-blocking** via `asyncio.create_task()`. Multi-provider: Groq/Cerebras (~70ms) primary, Gemini Flash (~150ms) fallback.
+The Director runs **non-blocking** via `asyncio.create_task()`. The active speculative/query path uses Groq; `director_llm.py` also has a Gemini Flash fallback for regular non-speculative analysis.
 
-1. **Per-turn analysis** — Calls Groq/Cerebras with conversation context + senior location + date
+1. **Per-turn analysis** — Calls Groq with conversation context + senior location + date
 2. **Speculative analysis** — Starts during silence gaps (250ms) for same-turn guidance injection
 3. **Cached injection** — Same-turn (speculative hit) or previous-turn guidance as `[Director guidance]` message
 4. **Dynamic news** — Injects news context when `should_mention_news` is signaled (one-shot per call)
-5. **Predictive prefetch** — 2-wave memory + web search prefetch based on Director predictions
+5. **Predictive prefetch** — 2-wave memory prefetch based on raw/interim transcript and Query Director memory queries
 6. **Fallback actions** — Force winding-down at 9min, force call end at 12min
 7. **Goodbye suppression** — Skips guidance injection when Quick Observer detects goodbye
 
@@ -197,16 +197,14 @@ The Director runs **non-blocking** via `asyncio.create_task()`. Multi-provider: 
     "reason": "why this token count"
   },
   "prefetch": {
-    "memory_queries": ["keyword1", "keyword2"],
-    "web_queries": ["Austin Texas weather March 2026"],
-    "anticipated_tools": ["search_memories", "web_search"]
+    "memory_queries": ["gardening", "grandson Jake"]
   }
 }
 ```
 
 ### Quick Observer (Layer 1)
 
-268 regex patterns across 19 categories:
+Quick Observer pattern categories:
 
 | Category | Patterns | Effect |
 |----------|----------|--------|
@@ -214,8 +212,8 @@ The Director runs **non-blocking** via `asyncio.create_task()`. Multi-provider: 
 | **Emotion** | 25+ patterns with valence/intensity | Emotional tone detection |
 | **Family** | 25+ relationship patterns including pets | Context enrichment |
 | **Safety** | Scams, strangers, emergencies | Safety concern flags |
-| **Goodbye** | Strong goodbye detection (bye, gotta go, take care) | **Notifies GoodbyeGate** |
-| **Factual/Curiosity** | 18 patterns ("what year", "how tall") | Web search trigger |
+| **Goodbye** | Strong goodbye detection (bye, gotta go, take care) | Schedules programmatic EndFrame after goodbye audio |
+| **Factual/Curiosity** | Question patterns ("what year", "how tall") | Direct-answer guidance |
 | **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 
 ---
@@ -224,9 +222,9 @@ The Director runs **non-blocking** via `asyncio.create_task()`. Multi-provider: 
 
 | Phase | Tools | Context Strategy |
 |-------|-------|-----------------|
-| **Reminder** *(conditional)* | mark_reminder_acknowledged, save_important_detail, transition_to_main | APPEND, respond_immediately |
-| **Main** | search_memories, web_search, save_important_detail, mark_reminder_acknowledged, check_caregiver_notes, transition_to_winding_down | APPEND |
-| **Winding Down** | mark_reminder_acknowledged, save_important_detail, web_search, check_caregiver_notes, transition_to_closing | APPEND |
+| **Reminder** *(conditional)* | mark_reminder_acknowledged, transition_to_main | APPEND, respond_immediately |
+| **Main** | web_search, mark_reminder_acknowledged, transition_to_winding_down | APPEND |
+| **Winding Down** | mark_reminder_acknowledged, transition_to_closing | APPEND |
 | **Closing** | *(none — post_action: end_conversation)* | APPEND |
 
 ---
@@ -241,17 +239,15 @@ The Director runs **non-blocking** via `asyncio.create_task()`. Multi-provider: 
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
 | **Voice LLM** | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | AnthropicLLMService (prompt caching enabled) |
-| **Director** | Groq (`gpt-oss-20b`) / Cerebras (`gpt-oss-120b`) | ~70ms primary, random selection per call |
-| **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | ~150ms when Groq/Cerebras unavailable |
+| **Director** | Groq (`gpt-oss-20b`) | Active fast provider for query/speculative guidance |
+| **Director Fallback Helper** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Regular non-speculative fallback in `director_llm.py` |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
 | **STT** | Deepgram Nova 3 (`nova-3-general`) | Real-time, interim results, 8kHz |
-| **TTS** | ElevenLabs (`eleven_turbo_v2_5`) | Streaming voice synthesis |
+| **TTS** | ElevenLabs (`eleven_turbo_v2_5`) by default; Cartesia behind provider flag | Streaming voice synthesis |
 | **VAD** | Silero | confidence=0.6, stop_secs=1.2, min_volume=0.5 |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
-| **News** | OpenAI GPT-4o-mini | Web search tool, 1hr cache |
-
-### Frontend Apps
+| **News / Web Search** | OpenAI GPT-4o-mini for cached news; Tavily first/OpenAI fallback for in-call web_search | 1hr cache for news/search results |
 
 ### Frontend Apps
 
@@ -271,20 +267,20 @@ pipecat/
 ├── bot.py                           ← Pipeline assembly + run_bot() + _run_post_call()
 ├── flows/
 │   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts
-│   └── tools.py                     ← 5 LLM tool schemas + cache-first async handlers
+│   └── tools.py                     ← 2 active Claude tools + retired handlers
 ├── processors/
-│   ├── patterns.py                  ← 268 regex patterns, 19 categories (data only)
+│   ├── patterns.py                  ← 250+ regex patterns, 19 categories
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame
-│   ├── conversation_director.py     ← Layer 2: Multi-provider non-blocking + news injection
+│   ├── conversation_director.py     ← Layer 2: Groq speculative guidance + memory/news injection
 │   ├── conversation_tracker.py      ← In-call topic/question/advice tracking
 │   ├── metrics_logger.py            ← Call metrics logging processor
 │   ├── goodbye_gate.py              ← False-goodbye grace period (NOT in active pipeline)
 │   └── guidance_stripper.py         ← Strip <guidance> tags before TTS
 ├── services/
-│   ├── director_llm.py              ← Multi-provider Director analysis (Groq/Cerebras/Gemini)
+│   ├── director_llm.py              ← Groq Director analysis + Gemini fallback helper
 │   ├── call_analysis.py             ← Post-call analysis (Gemini Flash)
 │   ├── memory.py                    ← Semantic memory (pgvector, decay, dedup)
-│   ├── scheduler.py                 ← Reminder scheduling + outbound calls
+│   ├── scheduler.py                 ← Pipecat-side scheduling helpers; Node scheduler is active
 │   ├── call_snapshot.py             ← Pre-computed call context snapshot
 │   ├── context_cache.py             ← Pre-cache at 5 AM local + news persistence
 │   ├── conversations.py             ← Conversation CRUD + transcripts
@@ -293,12 +289,12 @@ pipecat/
 │   ├── interest_discovery.py        ← Interest extraction from conversations
 │   ├── seniors.py                   ← Senior profile CRUD
 │   ├── caregivers.py                ← Caregiver relationships
-│   └── news.py                      ← News via OpenAI web search
+│   └── news.py                      ← Cached news + live web_search provider fallback
 ├── api/
 │   ├── routes/                      ← voice.py, calls.py
 │   └── middleware/                   ← auth, api_auth, rate_limit, security, twilio
 ├── db/client.py                     ← asyncpg pool + query helpers
-├── tests/                           ← 36 test files + helpers/mocks/scenarios
+├── tests/                           ← 61 test files + helpers/mocks/scenarios
 ├── pyproject.toml                   ← Python 3.12, dependencies
 └── Dockerfile                       ← python:3.12-slim + uv
 ```
@@ -312,7 +308,7 @@ pipecat/
 | Table | Purpose | Key Fields |
 |-------|---------|------------|
 | **seniors** | User profiles | name, phone, interests, familyInfo, medicalNotes, timezone, call_settings (JSONB), call_context_snapshot (JSONB), cached_news (TEXT) |
-| **conversations** | Call records | callSid, transcript, duration, status, summary |
+| **conversations** | Call records | callSid, encrypted transcript, duration, status, encrypted summary |
 | **memories** | Long-term memory | content, type, importance, embedding (1536d, HNSW index) |
 | **reminders** | Scheduled reminders | title, scheduledTime, isRecurring, type |
 | **reminder_deliveries** | Delivery tracking | status, attemptCount, userResponse, callSid |
@@ -320,7 +316,9 @@ pipecat/
 | **caregiver_notes** | Notes from caregivers | content, is_delivered, delivered_at, call_sid |
 | **call_analyses** | Post-call results | summary, engagementScore, concerns, followUps |
 | **daily_call_context** | Same-day cross-call memory | seniorId, callDate, topicsDiscussed, remindersDelivered |
-| **feature_flags** | Feature flag toggles | key (PK), enabled, description |
+| **notifications** | Caregiver notification log | caregiverId, seniorId, eventType, channel |
+| **waitlist** | Public waitlist signups | name, email, phone, whoFor |
+| **audit_logs** | HIPAA audit events | userId, userRole, action, resourceType |
 | **admin_users** | Admin dashboard accounts | email, passwordHash (bcrypt) |
 
 ### Memory System
@@ -341,8 +339,8 @@ pipecat/
 
 | Feature | Implementation | Details |
 |---------|---------------|---------|
-| **Circuit Breakers** | `lib/circuit_breaker.py` | Groq (5s), Cerebras (5s), Gemini (10s), OpenAI embedding (10s), news (10s) |
-| **Feature Flags** | `lib/feature_flags.py` | DB-backed with 5-minute in-memory cache |
+| **Circuit Breakers** | `lib/circuit_breaker.py` | Groq, Gemini, OpenAI embedding/news, Tavily |
+| **Feature Flags** | `lib/growthbook.py` | GrowthBook SDK wrapper with defaults when unavailable |
 | **Graceful Shutdown** | `main.py` | Tracks active calls, 7s drain on SIGTERM |
 | **Enhanced /health** | `main.py` | Database connectivity + circuit breaker states |
 | **Per-Senior Settings** | `seniors.call_settings` | JSONB column for time limits, greeting style, etc. |
@@ -366,4 +364,4 @@ Three environments: **dev** (experiments), **staging** (CI), **production** (cus
 
 ---
 
-*Last updated: March 2026 — v5.2 with multi-provider Director (Groq/Cerebras), web search prefetch, Director-driven news injection, location/date context*
+*Last updated: April 2026 — v5.3 with Groq Director fast path, memory prefetch, GrowthBook feature flags, and updated active-tool surface*

@@ -10,6 +10,7 @@ from services.greetings import (
     get_local_hour,
     select_interest,
     _extract_news_topic,
+    _summary_needs_future_caution,
     MORNING_TEMPLATES,
     AFTERNOON_TEMPLATES,
     EVENING_TEMPLATES,
@@ -112,6 +113,27 @@ class TestGetGreeting:
         )
         assert isinstance(result, dict)
         assert "Margaret" in result["greeting"]
+
+    def test_future_last_call_summary_uses_non_completion_followup(self):
+        def choose_first(options):
+            return options[0]
+
+        summary = "Earlier today, David said he was busy today and planned to work out tomorrow."
+        with patch("services.greetings.random.random", return_value=0.0), \
+             patch("services.greetings.random.choice", side_effect=choose_first):
+            result = get_greeting(
+                senior_name="David",
+                interests=[],
+                last_call_summary=summary,
+                followup_chance=1.0,
+            )
+
+        assert "Is that still the plan" in result["greeting"]
+        assert "How did" not in result["greeting"]
+
+    def test_future_summary_detection(self):
+        assert _summary_needs_future_caution("They planned to work out tomorrow")
+        assert not _summary_needs_future_caution("They enjoyed working out yesterday")
 
 
 class TestSelectInterestWithScores:

@@ -1,5 +1,10 @@
 """Tests for call analysis — JSON repair, transcript formatting, default analysis."""
 
+import json
+import pytest
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
+
 from services.call_analysis import (
     _repair_json,
     _format_transcript,
@@ -119,3 +124,31 @@ class TestHighSeverityConcerns:
 
     def test_no_concerns_key(self):
         assert get_high_severity_concerns({}) == []
+
+
+class TestGetLatestAnalysis:
+    @pytest.mark.asyncio
+    async def test_adds_local_call_time_label(self):
+        from services.call_analysis import get_latest_analysis
+
+        row = {
+            "engagement_score": 7,
+            "call_quality": None,
+            "summary": None,
+            "analysis_encrypted": json.dumps({
+                "summary": "Planned to work out tomorrow.",
+                "call_quality": {"rapport": "strong"},
+                "follow_up_suggestions": ["Ask if the workout is still planned."],
+            }),
+            "created_at": datetime(2026, 4, 14, 20, 40, tzinfo=timezone.utc),
+            "call_started_at": datetime(2026, 4, 14, 20, 30, tzinfo=timezone.utc),
+        }
+
+        with patch("services.call_analysis.query_one", new_callable=AsyncMock, return_value=row) as mock_query:
+            result = await get_latest_analysis("senior-1", "America/Chicago")
+
+        assert "LEFT JOIN conversations" in mock_query.call_args[0][0]
+        assert result["summary"] == "Planned to work out tomorrow."
+        assert result["call_quality"] == {"rapport": "strong"}
+        assert result["call_datetime"] == "Tuesday, April 14, 2026 at 3:30 PM"
+        assert result["call_time_label"] != "previous call"

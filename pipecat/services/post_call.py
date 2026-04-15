@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from datetime import datetime, timezone
 
 from loguru import logger
 
@@ -20,6 +21,13 @@ def _transcript_has_content(transcript) -> bool:
     if isinstance(transcript, str):
         return bool(transcript.strip())
     return bool(transcript)
+
+
+def _call_started_at(session_state: dict) -> datetime | None:
+    raw = session_state.get("_call_start_time")
+    if isinstance(raw, (int, float)):
+        return datetime.fromtimestamp(raw, timezone.utc)
+    return None
 
 
 async def _get_post_call_transcript(
@@ -104,6 +112,7 @@ async def run_post_call(
     conversation_id = session_state.get("conversation_id")
     senior_id = session_state.get("senior_id")
     senior = session_state.get("senior")
+    call_started_at = _call_started_at(session_state)
 
     logger.info("[{cs}] Running post-call processing", cs=call_sid)
 
@@ -145,7 +154,11 @@ async def run_post_call(
         if not (_transcript_has_content(transcript) and senior and is_on("post_call_analysis_enabled", session_state)):
             return None
         from services.call_analysis import analyze_completed_call, save_call_analysis
-        result = await analyze_completed_call(transcript, senior)
+        result = await analyze_completed_call(
+            transcript,
+            senior,
+            call_started_at=call_started_at,
+        )
         if conversation_id and senior_id:
             await save_call_analysis(conversation_id, senior_id, result)
         summary = result.get("summary") if result else None
@@ -178,7 +191,13 @@ async def run_post_call(
             )
         else:
             formatted = str(transcript)
-        await extract_from_conversation(senior_id, formatted, conversation_id or "unknown")
+        await extract_from_conversation(
+            senior_id,
+            formatted,
+            conversation_id or "unknown",
+            call_started_at=call_started_at,
+            timezone_name=(senior or {}).get("timezone", "America/New_York"),
+        )
 
     async def _step5_reminder():
         reminder_delivery = session_state.get("reminder_delivery")
@@ -307,7 +326,12 @@ async def run_post_call(
         if senior_id:
             from services.call_snapshot import build_snapshot, save_snapshot
             tz = (senior or {}).get("timezone", "America/New_York")
-            snapshot = await build_snapshot(senior_id, tz, analysis)
+            snapshot = await build_snapshot(
+                senior_id,
+                tz,
+                analysis,
+                last_call_started_at=call_started_at,
+            )
             await save_snapshot(senior_id, snapshot)
     except Exception as e:
         post_call_error_steps.append("call snapshot")
@@ -568,6 +592,7 @@ async def _run_onboarding_post_call(
     call_sid = session_state.get("call_sid", "unknown")
     conversation_id = session_state.get("conversation_id")
     prospect_id = session_state.get("prospect_id")
+    call_started_at = _call_started_at(session_state)
 
     logger.info("[{cs}] Running onboarding post-call processing", cs=call_sid)
 
@@ -597,6 +622,7 @@ async def _run_onboarding_post_call(
             formatted_transcript,
             conversation_id or "unknown",
             prospect_id=prospect_id,
+            call_started_at=call_started_at,
         )
 
     async def _step3_prospect_update():

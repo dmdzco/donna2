@@ -20,6 +20,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from loguru import logger
 from db import execute
+from services.time_context import format_call_time_label
 
 # In-memory cache: senior_id -> cached context dict
 _cache: dict[str, dict] = {}
@@ -129,7 +130,11 @@ def generate_templated_greeting(
     }
 
 
-async def _fetch_conversations_consolidated(senior_id: str, limit: int = 3) -> tuple:
+async def _fetch_conversations_consolidated(
+    senior_id: str,
+    limit: int = 3,
+    timezone_name: str = "America/New_York",
+) -> tuple:
     """Fetch recent conversations once, return (summaries_text, turns_text).
 
     Consolidates get_recent_summaries + get_recent_turns into a single DB query.
@@ -138,7 +143,6 @@ async def _fetch_conversations_consolidated(senior_id: str, limit: int = 3) -> t
     from lib.encryption import decrypt, decrypt_json
     import json
     import math
-    from datetime import datetime, timezone
 
     rows = await query_many(
         """SELECT summary, summary_encrypted, transcript, transcript_encrypted,
@@ -157,17 +161,8 @@ async def _fetch_conversations_consolidated(senior_id: str, limit: int = 3) -> t
     if not rows:
         return None, None
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-
     def _time_label(started_at):
-        if started_at.tzinfo is not None:
-            started_at = started_at.replace(tzinfo=None)
-        days_ago = (now - started_at).days
-        if days_ago == 0:
-            return "Earlier today"
-        elif days_ago == 1:
-            return "Yesterday"
-        return f"{days_ago} days ago"
+        return format_call_time_label(started_at, timezone_name)
 
     # Build summaries text
     summary_lines = []
@@ -228,22 +223,32 @@ async def _fetch_conversations_consolidated(senior_id: str, limit: int = 3) -> t
     return summaries_text, turns_text
 
 
-async def _fetch_memories_consolidated(senior_id: str) -> tuple:
+async def _fetch_memories_consolidated(
+    senior_id: str,
+    timezone_name: str = "America/New_York",
+) -> tuple:
     """Fetch memories once, return (critical, important, recent).
 
     Consolidates get_critical + get_important + get_recent into a single DB query.
     """
     from db import query_many
-    from services.memory import _calculate_effective_importance
+    from lib.encryption import decrypt
+    from services.memory import _calculate_effective_importance, format_memory_for_context
 
     rows = await query_many(
-        """SELECT id, type, content, importance, metadata, created_at, last_accessed_at
+        """SELECT id, type, content, content_encrypted, importance, metadata, created_at, last_accessed_at
            FROM memories
            WHERE senior_id = $1
            ORDER BY importance DESC, created_at DESC
            LIMIT 30""",
         senior_id,
     )
+
+    for row in rows:
+        if row.get("content_encrypted"):
+            row["content"] = decrypt(row["content_encrypted"])
+        row.pop("content_encrypted", None)
+        row["content"] = format_memory_for_context(row, timezone_name)
 
     # Split into tiers
     critical = [m for m in rows if m.get("type") == "concern" or (m.get("importance") or 0) >= 80][:3]
@@ -280,8 +285,15 @@ async def prefetch_and_cache(senior_id: str) -> dict | None:
 
         # Consolidated fetches: 2 queries instead of 5
         (summaries, recent_turns), (critical, important, recent_mems) = await asyncio.gather(
-            _fetch_conversations_consolidated(senior_id, 3),
-            _fetch_memories_consolidated(senior_id),
+            _fetch_conversations_consolidated(
+                senior_id,
+                3,
+                senior.get("timezone") or "America/New_York",
+            ),
+            _fetch_memories_consolidated(
+                senior_id,
+                senior.get("timezone") or "America/New_York",
+            ),
         )
 
         # Fetch news for seniors with interests (fetch full set, pick subset for prompt)

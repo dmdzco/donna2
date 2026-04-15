@@ -14,6 +14,7 @@ from loguru import logger
 from db import query_one
 from lib.circuit_breaker import CircuitBreaker
 from lib.encryption import encrypt, decrypt, encrypt_json, decrypt_json
+from services.time_context import format_call_time_label, format_local_datetime
 
 _breaker = CircuitBreaker("gemini_analysis", failure_threshold=3, recovery_timeout=60.0, call_timeout=15.0)
 
@@ -40,10 +41,16 @@ Return JSON with:
 - follow_up_suggestions: caregiver-actionable suggestions for future calls or family follow-up
 - call_quality: rapport strong/moderate/weak, goals_achieved bool, duration_appropriate bool
 
+Temporal grounding:
+- The transcript is anchored to the call date/time provided below.
+- If the senior says "tomorrow", "next week", "later today", or similar, preserve that future timing in summaries and follow-up suggestions.
+- Do not write a follow-up that implies a future plan already happened unless the transcript says it happened.
+
 Output ONLY valid JSON: {"summary":"str","sentiment":"positive|neutral|concerned|worried|distressed","topics_discussed":["str"],"reminders_delivered":["str"],"engagement_score":0,"mood":"str","caregiver_sms":"str","caregiver_takeaways":["str"],"recommended_caregiver_action":"str","concerns":[{"type":"health|cognitive|emotional|safety","severity":"low|medium|high","description":"str","evidence":"str","recommended_action":"str"}],"positive_observations":["str"],"follow_up_suggestions":["str"],"call_quality":{"rapport":"strong|moderate|weak","goals_achieved":true,"duration_appropriate":true}}"""
 
 # Dynamic per-call content — passed as contents
 ANALYSIS_TURN_TEMPLATE = """Senior: {{SENIOR_NAME}}
+Call date/time: {{CALL_DATETIME}}
 Conditions: {{HEALTH_CONDITIONS}}
 Family: {{FAMILY_MEMBERS}}
 
@@ -194,12 +201,23 @@ def _get_default_analysis() -> dict:
 
 
 async def analyze_completed_call(
-    transcript: list[dict] | str, senior_context: dict | None
+    transcript: list[dict] | str,
+    senior_context: dict | None,
+    *,
+    call_started_at=None,
 ) -> dict:
     """Analyze a completed call using Gemini Flash."""
+    call_datetime = (
+        format_local_datetime(
+            call_started_at,
+            (senior_context or {}).get("timezone") or "America/New_York",
+        )
+        or "Unknown"
+    )
     turn_content = (
         ANALYSIS_TURN_TEMPLATE
         .replace("{{SENIOR_NAME}}", (senior_context or {}).get("name") or "Unknown")
+        .replace("{{CALL_DATETIME}}", call_datetime)
         .replace("{{HEALTH_CONDITIONS}}", (senior_context or {}).get("medical_notes") or "None known")
         .replace(
             "{{FAMILY_MEMBERS}}",
@@ -304,13 +322,19 @@ def get_high_severity_concerns(analysis: dict) -> list[dict]:
     return [c for c in concerns if c.get("severity") == "high"]
 
 
-async def get_latest_analysis(senior_id: str) -> dict | None:
+async def get_latest_analysis(
+    senior_id: str,
+    timezone_name: str = "America/New_York",
+) -> dict | None:
     """Get the most recent call analysis for a senior."""
     row = await query_one(
-        """SELECT engagement_score, call_quality, summary, analysis_encrypted
-           FROM call_analyses
-           WHERE senior_id = $1
-           ORDER BY created_at DESC LIMIT 1""",
+        """SELECT ca.engagement_score, ca.call_quality, ca.summary,
+                  ca.analysis_encrypted, ca.created_at,
+                  c.started_at AS call_started_at
+           FROM call_analyses ca
+           LEFT JOIN conversations c ON c.id = ca.conversation_id
+           WHERE ca.senior_id = $1
+           ORDER BY ca.created_at DESC LIMIT 1""",
         senior_id,
     )
     if row and row.get("analysis_encrypted"):
@@ -323,4 +347,8 @@ async def get_latest_analysis(senior_id: str) -> dict | None:
         row.pop("analysis_encrypted", None)
     elif row:
         row.pop("analysis_encrypted", None)
+    if row:
+        call_started_at = row.get("call_started_at") or row.get("created_at")
+        row["call_time_label"] = format_call_time_label(call_started_at, timezone_name)
+        row["call_datetime"] = format_local_datetime(call_started_at, timezone_name)
     return row

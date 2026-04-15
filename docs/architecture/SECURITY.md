@@ -161,6 +161,8 @@ The legacy plaintext `conversations.transcript`, `conversations.summary`, and `c
 
 New semantic memory writes store the memory body in `memories.content_encrypted` and use a non-PHI placeholder in the legacy non-null `memories.content` column. New call analysis writes store PHI-bearing analysis details in `call_analyses.analysis_encrypted`; legacy plaintext analysis columns remain read fallbacks for older rows.
 
+Redis/shared-state call payloads are also treated as PHI. Pipecat writes `call_metadata:{call_sid}` and `reminder_ctx:{call_sid}` through `pipecat/lib/shared_state_phi.py`, storing encrypted strings in Redis with short TTLs while preserving read compatibility for legacy raw dict entries during deployment.
+
 The remaining high-risk PHI fields now follow the same companion-column pattern:
 
 - Senior profile PHI: `family_info_encrypted`, `medical_notes_encrypted`, `preferred_call_times_encrypted`, `additional_info_encrypted`, and `call_context_snapshot_encrypted`.

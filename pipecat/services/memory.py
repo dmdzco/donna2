@@ -9,11 +9,13 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from datetime import datetime, timezone
 from loguru import logger
 
 from lib.circuit_breaker import CircuitBreaker
 from lib.encryption import encrypt, decrypt
+from services.time_context import format_call_time_label, format_local_datetime
 
 _embedding_breaker = CircuitBreaker("openai_embedding", failure_threshold=3, recovery_timeout=60.0, call_timeout=10.0)
 
@@ -22,6 +24,11 @@ _openai_client = None
 DECAY_HALF_LIFE_DAYS = 30
 ACCESS_BOOST = 10
 MAX_IMPORTANCE = 100
+_TEMPORAL_REFERENCE_RE = re.compile(
+    r"\b(today|tomorrow|yesterday|tonight|this morning|this afternoon|this evening|"
+    r"next (day|week|month|time)|last (night|week|month)|later today|upcoming)\b",
+    re.IGNORECASE,
+)
 
 
 def _get_openai():
@@ -305,6 +312,18 @@ def format_grouped_memories(groups: dict[str, list[str]]) -> str:
     return "\n".join(lines)
 
 
+def format_memory_for_context(memory: dict, timezone_name: str = "America/New_York") -> str:
+    """Return memory content with a recorded-time anchor when it uses relative time."""
+    content = memory.get("content") or ""
+    if not content:
+        return ""
+    if _TEMPORAL_REFERENCE_RE.search(content):
+        label = format_call_time_label(memory.get("created_at"), timezone_name)
+        if label != "previous call":
+            return f"{content} (recorded {label})"
+    return content
+
+
 async def build_context(
     senior_id: str,
     current_topic: str | None = None,
@@ -363,6 +382,10 @@ async def build_context(
     if not all_memories:
         return ""
 
+    timezone_name = (senior or {}).get("timezone") or "America/New_York"
+    for memory in all_memories:
+        memory["content"] = format_memory_for_context(memory, timezone_name)
+
     # Group by type for readable presentation
     groups = group_by_type(all_memories)
     formatted = format_grouped_memories(groups)
@@ -389,14 +412,14 @@ async def refresh_context(senior_id: str, current_topics: list[str]) -> str | No
         relevant = await search(senior_id, topic, 3, 0.45)
         for m in relevant:
             if m["id"] not in included_ids:
-                parts.append(f"- {m['content']}")
+                parts.append(f"- {format_memory_for_context(m)}")
                 included_ids.add(m["id"])
 
     # Then critical (always)
     critical = await get_critical(senior_id, 3)
     for m in critical:
         if m["id"] not in included_ids:
-            parts.append(f"- {m['content']}")
+            parts.append(f"- {format_memory_for_context(m)}")
             included_ids.add(m["id"])
 
     logger.info("refresh_context({sid}): {n} memories for {t} topics",
@@ -433,6 +456,8 @@ async def transfer_to_senior(prospect_id: str, senior_id: str) -> int:
 async def extract_from_conversation(
     senior_id: str | None, transcript: str, conversation_id: str,
     prospect_id: str | None = None,
+    call_started_at=None,
+    timezone_name: str = "America/New_York",
 ) -> None:
     """Extract and store memories from a conversation transcript via OpenAI."""
     owner_id = senior_id or prospect_id
@@ -442,9 +467,11 @@ async def extract_from_conversation(
         logger.warning("Skipping extraction — OPENAI_API_KEY not set")
         return
 
+    call_datetime = format_local_datetime(call_started_at, timezone_name) or "Unknown"
     prompt = (
         "Analyze this conversation between Donna (AI companion) and an elderly person. "
         "Extract important memories that will help personalize future calls.\n\n"
+        f"Call date/time: {call_datetime}\n\n"
         f"Conversation:\n{transcript}\n\n"
         'Respond with a json object in this format:\n{{"memories": [\n  {{"type": "fact|preference|event|concern|relationship", '
         '"content": "...", "importance": 50-100}}\n]}}\n\n'
@@ -458,6 +485,11 @@ async def extract_from_conversation(
         "- Use synonyms and related terms (helps semantic matching)\n"
         "- Be a complete sentence that stands alone without conversation context\n"
         "- Reference the person naturally (e.g., \"Has a grandson named Jake who plays baseball\")\n\n"
+        "TEMPORAL GROUNDING:\n"
+        "- Resolve relative dates against the call date/time above.\n"
+        "- If they say \"tomorrow\", store it as an upcoming plan with the actual date, not as something already done.\n"
+        "- If they say they are postponing something, preserve that it is planned for the future.\n"
+        "- Avoid standalone memories like \"plans to work out tomorrow\" because future calls won't know which tomorrow that meant.\n\n"
         "Extract 5-15 memories per conversation. Include both big life facts and "
         "small personal details that show you were really listening."
     )

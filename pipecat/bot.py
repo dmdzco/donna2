@@ -263,7 +263,12 @@ async def _load_call_metadata(call_sid: str, session_state: dict) -> dict:
         if not getattr(state, "is_shared", False):
             return {}
 
-        metadata = await state.get(f"call_metadata:{call_sid}") or {}
+        from lib.shared_state_phi import decode_phi_payload
+
+        metadata = decode_phi_payload(
+            await state.get(f"call_metadata:{call_sid}"),
+            label="call metadata",
+        ) or {}
         if isinstance(metadata, dict) and metadata:
             if isinstance(call_meta, dict):
                 call_meta[call_sid] = metadata
@@ -370,7 +375,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
                     senior_name=senior_data.get("name", ""),
                     timezone=senior_data.get("timezone"),
                     interests=senior_data.get("interests"),
-                    last_call_summary=analysis_data.get("summary"),
+                    last_call_summary=session_state.get("previous_calls_summary") or analysis_data.get("summary"),
                     senior_id=senior_data.get("id"),
                     news_context=session_state.get("news_context"),
                     interest_scores=senior_data.get("interest_scores"),

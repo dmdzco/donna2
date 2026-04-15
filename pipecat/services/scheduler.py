@@ -70,13 +70,18 @@ async def _delete_shared_reminder_context(call_sid: str) -> None:
 
 
 async def store_reminder_context(call_sid: str, context: dict) -> None:
-    """Store reminder call context locally and in shared state when configured."""
+    """Store reminder call context locally and encrypted in shared state."""
     pending_reminder_calls[call_sid] = context
     try:
         from lib.redis_client import get_shared_state
+        from lib.shared_state_phi import encode_phi_payload
         state = get_shared_state()
         if getattr(state, "is_shared", False):
-            await state.set(_reminder_context_key(call_sid), context, ttl=REMINDER_CONTEXT_TTL_SECONDS)
+            await state.set(
+                _reminder_context_key(call_sid),
+                encode_phi_payload(context),
+                ttl=REMINDER_CONTEXT_TTL_SECONDS,
+            )
     except Exception as exc:
         logger.warning("[{cs}] Shared reminder context write failed: {err}", cs=call_sid, err=str(exc))
 
@@ -412,7 +417,12 @@ async def get_reminder_context_async(call_sid: str) -> dict | None:
         if not getattr(state, "is_shared", False):
             return None
 
-        context = await state.get(_reminder_context_key(call_sid))
+        from lib.shared_state_phi import decode_phi_payload
+
+        context = decode_phi_payload(
+            await state.get(_reminder_context_key(call_sid)),
+            label="reminder context",
+        )
         if isinstance(context, dict) and context:
             pending_reminder_calls[call_sid] = context
             logger.info("[{cs}] Loaded reminder context from shared state", cs=call_sid)

@@ -17,11 +17,12 @@ import json
 import os
 import re
 import time
-from datetime import date
+from datetime import datetime
 
 from loguru import logger
 
 from lib.circuit_breaker import CircuitBreaker
+from services.time_context import get_timezone
 
 # ---------------------------------------------------------------------------
 # Circuit breakers
@@ -188,6 +189,10 @@ def _format_location(senior: dict) -> str:
     return city or state or "unknown location"
 
 
+def _today_for_senior(senior: dict) -> str:
+    return datetime.now(get_timezone(senior.get("timezone"))).strftime("%B %d, %Y")
+
+
 def _format_reminders(reminders: list, delivered: set) -> str:
     remaining = [
         r
@@ -218,7 +223,7 @@ def _build_turn_content(
     return DIRECTOR_TURN_TEMPLATE.format(
         senior_name=(senior.get("name") or "").split(" ")[0] or "Friend",
         location=_format_location(senior),
-        today_date=date.today().strftime("%B %d, %Y"),
+        today_date=_today_for_senior(senior),
         minutes_elapsed=f"{minutes_elapsed:.1f}",
         max_duration=max_duration,
         call_type=session_state.get("call_type", "check-in"),
@@ -248,7 +253,7 @@ def _build_query_content(
     ]
     return QUERY_TURN_TEMPLATE.format(
         location=_format_location(senior),
-        today_date=date.today().strftime("%B %d, %Y"),
+        today_date=_today_for_senior(senior),
         conversation_history="\n".join(hist_lines) if hist_lines else "",
         user_message=user_message,
     )

@@ -12,10 +12,12 @@ Sits in the pipeline after guidance stripping and reads both:
 
 import asyncio
 import re
+import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from loguru import logger
-from pipecat.frames.frames import EndFrame, TextFrame, TranscriptionFrame
+from pipecat.frames.frames import EndFrame, LLMFullResponseEndFrame, TextFrame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameProcessor
 
 
@@ -253,7 +255,22 @@ class ConversationTrackerProcessor(FrameProcessor):
         if self._session_state is None:
             return
 
-        turn = {"role": role, "content": content}
+        seq = int(self._session_state.get("_transcript_turn_seq") or 0)
+        self._session_state["_transcript_turn_seq"] = seq + 1
+
+        call_start = self._session_state.get("_call_start_time")
+        offset_ms = None
+        if isinstance(call_start, (int, float)):
+            offset_ms = max(0, int((time.time() - call_start) * 1000))
+
+        turn = {
+            "role": role,
+            "content": content,
+            "sequence": seq,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if offset_ms is not None:
+            turn["timestamp_offset_ms"] = offset_ms
 
         full_transcript = self._session_state.setdefault("_full_transcript", [])
         full_transcript.append(turn)
@@ -318,6 +335,11 @@ class ConversationTrackerProcessor(FrameProcessor):
         # Flush remaining assistant buffer on call end so the last
         # bot utterance is included in the transcript for post-call analysis.
         if isinstance(frame, EndFrame):
+            self._flush_assistant_buffer()
+            await self.push_frame(frame, direction)
+            return
+
+        if isinstance(frame, LLMFullResponseEndFrame):
             self._flush_assistant_buffer()
             await self.push_frame(frame, direction)
             return

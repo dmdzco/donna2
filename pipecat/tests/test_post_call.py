@@ -268,7 +268,7 @@ class TestPostCallProcessing:
             await _persist_call_metrics(session_state, 60, None, error_count=3)
 
         args = mock_execute.await_args.args
-        assert args[-1] == 3
+        assert args[-2] == 3
 
     @pytest.mark.asyncio
     async def test_post_call_discovers_new_interests(self, session_state):

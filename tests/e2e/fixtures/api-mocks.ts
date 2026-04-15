@@ -11,6 +11,7 @@ import {
   mockTimeline,
   mockObserverData,
   mockMetricsData,
+  mockContextTraceData,
 } from './test-data';
 
 /**
@@ -147,10 +148,6 @@ export async function mockConsumerAPIs(page: Page): Promise<void> {
  * Set up all API mocks for the observability dashboard.
  */
 export async function mockObservabilityAPIs(page: Page): Promise<void> {
-  await page.route('**/api/observability/calls*', route =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ calls: mockObservabilityCalls }) })
-  );
-
   await page.route('**/api/observability/active', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ activeCalls: [] }) })
   );
@@ -165,5 +162,17 @@ export async function mockObservabilityAPIs(page: Page): Promise<void> {
 
   await page.route('**/api/observability/calls/*/metrics', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(mockMetricsData) })
+  );
+
+  await page.route('**/api/observability/calls/*/context', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(mockContextTraceData) })
+  );
+
+  await page.route('**/api/observability/calls?*', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ calls: mockObservabilityCalls }) })
+  );
+
+  await page.route('**/api/observability/calls', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ calls: mockObservabilityCalls }) })
   );
 }

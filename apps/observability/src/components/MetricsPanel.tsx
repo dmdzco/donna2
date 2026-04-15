@@ -1,5 +1,4 @@
 import { useCallMetrics } from '../hooks/useApi';
-
 interface MetricsPanelProps {
   callId: string;
 }
@@ -25,7 +24,7 @@ export function MetricsPanel({ callId }: MetricsPanelProps) {
   }
 
   const { callMetrics, turnMetrics } = data;
-
+  const hasTokenUsage = Boolean(callMetrics && callMetrics.totalTokens > 0);
   const maxTokens = Math.max(...turnMetrics.map(t => t.inputTokens + t.outputTokens), 1);
   const maxResponseTime = Math.max(...turnMetrics.map(t => t.responseTime), 1);
 
@@ -34,51 +33,36 @@ export function MetricsPanel({ callId }: MetricsPanelProps) {
       <h3>Call Metrics</h3>
 
       {callMetrics && (
-        <div className="metrics-summary">
-          <div className="summary-card">
-            <div className="summary-label">Total Tokens</div>
-            <div className="summary-value">{callMetrics.totalTokens.toLocaleString()}</div>
-            <div className="summary-detail">
-              {callMetrics.totalInputTokens.toLocaleString()} in / {callMetrics.totalOutputTokens.toLocaleString()} out
-            </div>
+        <>
+          <div className="metrics-summary">
+            <MetricCard label="Duration" value={formatDuration(callMetrics.durationSeconds ?? data.durationSeconds)} />
+            <MetricCard label="Turns" value={formatNumber(callMetrics.turnCount)} />
+            <MetricCard label="Errors" value={formatNumber(callMetrics.errorCount ?? 0)} tone={callMetrics.errorCount ? 'bad' : 'good'} />
+            <MetricCard label="End Reason" value={formatToken(callMetrics.endReason)} />
+            <MetricCard label="LLM TTFB" value={formatMs(callMetrics.llmTtfbAvgMs)} />
+            <MetricCard label="TTS TTFB" value={formatMs(callMetrics.ttsTtfbAvgMs ?? callMetrics.avgTtfa)} />
+            <MetricCard label="Turn Latency" value={formatMs(callMetrics.avgResponseTime)} />
+            <MetricCard label="Tools" value={formatTools(callMetrics.toolsUsed)} />
           </div>
-          <div className="summary-card">
-            <div className="summary-label">Est. Cost</div>
-            <div className="summary-value">
-              {callMetrics.estimatedCost != null ? `$${callMetrics.estimatedCost.toFixed(4)}` : '--'}
-            </div>
-          </div>
-          <div className="summary-card">
-            <div className="summary-label">Avg Response</div>
-            <div className="summary-value">
-              {callMetrics.avgResponseTime != null ? `${callMetrics.avgResponseTime}ms` : '--'}
-            </div>
-          </div>
-          {callMetrics.avgTtfa != null && (
-            <div className="summary-card">
-              <div className="summary-label">Avg TTFA</div>
-              <div className="summary-value">{callMetrics.avgTtfa}ms</div>
+
+          {!hasTokenUsage && (
+            <div className="analysis-empty metrics-note">
+              Token and cost details were not captured for this call. Infrastructure timing and outcome metrics are shown instead.
             </div>
           )}
-          <div className="summary-card">
-            <div className="summary-label">Models</div>
-            <div className="summary-value summary-value-small">
-              {callMetrics.modelsUsed.length > 0 ? callMetrics.modelsUsed.join(', ') : '--'}
-            </div>
-          </div>
-          {callMetrics.llmTtfbAvgMs != null && (
-            <div className="summary-card">
-              <div className="summary-label">Avg LLM TTFB</div>
-              <div className="summary-value">{callMetrics.llmTtfbAvgMs}ms</div>
+
+          {hasTokenUsage && (
+            <div className="metrics-summary metrics-summary-secondary">
+              <MetricCard label="Total Tokens" value={callMetrics.totalTokens.toLocaleString()} detail={`${callMetrics.totalInputTokens.toLocaleString()} in / ${callMetrics.totalOutputTokens.toLocaleString()} out`} />
+              <MetricCard label="Est. Cost" value={callMetrics.estimatedCost != null ? `$${callMetrics.estimatedCost.toFixed(4)}` : '--'} />
+              <MetricCard label="Models" value={callMetrics.modelsUsed.length > 0 ? callMetrics.modelsUsed.join(', ') : '--'} />
             </div>
           )}
-          {callMetrics.endReason && (
-            <div className="summary-card">
-              <div className="summary-label">End Reason</div>
-              <div className="summary-value summary-value-small">{callMetrics.endReason}</div>
-            </div>
+
+          {callMetrics.breakerStates && Object.keys(callMetrics.breakerStates).length > 0 && (
+            <MetricsObjectSection title="Circuit Breakers" values={callMetrics.breakerStates} />
           )}
-        </div>
+        </>
       )}
 
       {turnMetrics.length > 0 && (
@@ -180,4 +164,79 @@ export function MetricsPanel({ callId }: MetricsPanelProps) {
       )}
     </div>
   );
+}
+
+function MetricCard({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  tone?: 'good' | 'bad';
+}) {
+  return (
+    <div className="summary-card">
+      <div className="summary-label">{label}</div>
+      <div className={`summary-value summary-value-small ${tone ? `summary-${tone}` : ''}`}>{value}</div>
+      {detail && <div className="summary-detail">{detail}</div>}
+    </div>
+  );
+}
+
+function MetricsObjectSection({
+  title,
+  values,
+  formatter = formatToken,
+}: {
+  title: string;
+  values: Record<string, unknown>;
+  formatter?: (value: unknown) => string;
+}) {
+  return (
+    <section className="metrics-section">
+      <h4>{title}</h4>
+      <dl className="quality-grid">
+        {Object.entries(values).map(([key, value]) => (
+          <div className="quality-item" key={key}>
+            <dt>{formatLabel(key)}</dt>
+            <dd>{formatter(value)}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function formatDuration(seconds?: number | null): string {
+  if (seconds == null || !Number.isFinite(Number(seconds))) return '--';
+  const total = Math.max(0, Math.round(Number(seconds)));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function formatMs(value: unknown): string {
+  if (value == null || !Number.isFinite(Number(value))) return '--';
+  return `${Math.round(Number(value))}ms`;
+}
+
+function formatNumber(value?: number | null): string {
+  if (value == null || !Number.isFinite(Number(value))) return '--';
+  return Number(value).toLocaleString();
+}
+
+function formatToken(value: unknown): string {
+  if (value == null || value === '') return '--';
+  return String(value).replace(/_/g, ' ');
+}
+
+function formatTools(value?: string[] | null): string {
+  return value && value.length > 0 ? value.join(', ') : 'none';
+}
+
+function formatLabel(key: string): string {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
 }

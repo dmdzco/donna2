@@ -48,6 +48,7 @@ interface TimelineEventItemProps {
 function TimelineEventItem({ event, startTime }: TimelineEventItemProps) {
   const eventConfig = getEventConfig(event.type);
   const offset = getTimeOffset(startTime, event.timestamp);
+  const estimated = Boolean(event.data?.estimatedTimestamp);
 
   return (
     <div className={`timeline-event ${eventConfig.className}`}>
@@ -57,7 +58,7 @@ function TimelineEventItem({ event, startTime }: TimelineEventItemProps) {
       <div className="event-content">
         <div className="event-header">
           <span className="event-type">{eventConfig.label}</span>
-          <span className="event-time">{offset}</span>
+          <span className="event-time">{offset}{estimated ? ' est' : ''}</span>
         </div>
         <div className="event-body">
           {renderEventContent(event)}

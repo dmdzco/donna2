@@ -32,7 +32,8 @@ export async function loginAsObserver(page: Page): Promise<void> {
   );
 
   await page.addInitScript((token) => {
-    localStorage.setItem('donna_obs_token', token);
+    localStorage.setItem('donna_obs_environment', 'dev');
+    localStorage.setItem('donna_obs_token_dev', token);
   }, MOCK_JWT);
 }
 

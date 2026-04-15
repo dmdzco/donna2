@@ -15,11 +15,12 @@ test.describe('Observability History', () => {
     await expect(page.getByText('Martha Johnson')).toBeVisible();
   });
 
-  test('selecting a call shows timeline', async ({ page }) => {
+  test('selecting a call shows context flow', async ({ page }) => {
     await page.goto('/');
 
     await page.locator('.call-list-item').first().click();
 
-    await expect(page.locator('.timeline-event').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.context-event').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Recent call summary context')).toBeVisible();
   });
 });

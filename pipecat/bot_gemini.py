@@ -37,6 +37,17 @@ from processors.conversation_tracker import ConversationTrackerProcessor
 from services.post_call import run_post_call
 
 
+def _get_env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning("Invalid integer for {name}: {value}; using {default}", name=name, value=value, default=default)
+        return default
+
+
 def _build_system_prompt(session_state: dict) -> str:
     """Build the single-phase system prompt for the Gemini Live pipeline."""
     from prompts import BASE_SYSTEM_PROMPT
@@ -139,6 +150,14 @@ async def run_gemini_pipeline(
 
     system_prompt = _build_system_prompt(session_state)
     logger.debug("[{cs}] Gemini system prompt: {n} chars", cs=call_sid, n=len(system_prompt))
+    audio_in_sample_rate = _get_env_int("TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE", 16000)
+    audio_out_sample_rate = _get_env_int("GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE", 24000)
+    logger.info(
+        "[{cs}] Gemini audio profile in={audio_in}Hz out={audio_out}Hz",
+        cs=call_sid,
+        audio_in=audio_in_sample_rate,
+        audio_out=audio_out_sample_rate,
+    )
 
     # task_ref: mutable container so end_call handler can queue EndFrame
     task_ref = [None]
@@ -172,8 +191,8 @@ async def run_gemini_pipeline(
             allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
-            audio_in_sample_rate=16000,  # Gemini expects 16kHz; Twilio serializer upsamples from 8kHz mulaw
-            audio_out_sample_rate=8000,  # Twilio output; serializer downsamples Gemini's 24kHz PCM
+            audio_in_sample_rate=audio_in_sample_rate,
+            audio_out_sample_rate=audio_out_sample_rate,
         ),
     )
 

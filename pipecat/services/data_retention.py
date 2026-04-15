@@ -25,12 +25,14 @@ from db.client import query_one
 # Only tables listed here (and in ALLOWED_TABLES) will be purged.
 
 TABLE_DATE_COLUMNS: dict[str, str] = {
-    "conversations": "created_at",
+    "conversations": "started_at",
     "memories": "created_at",
     "call_analyses": "created_at",
-    "daily_call_context": "created_at",
+    "daily_call_context": "call_date",
     "call_metrics": "created_at",
     "reminder_deliveries": "created_at",
+    "notifications": "sent_at",
+    "waitlist": "created_at",
     "audit_logs": "created_at",
 }
 
@@ -84,6 +86,49 @@ async def _purge_table(table: str, date_column: str, retention_days: int) -> int
     return total_deleted
 
 
+async def _redact_conversation_phi(retention_days: int) -> int:
+    """Null old conversation transcripts/summaries while retaining metadata."""
+    total_redacted = 0
+
+    while True:
+        result = await query_one(
+            f"WITH batch AS ("
+            f"  SELECT ctid"
+            f"  FROM conversations"
+            f"  WHERE started_at < NOW() - make_interval(days => $1)"
+            f"    AND ("
+            f"      summary IS NOT NULL"
+            f"      OR summary_encrypted IS NOT NULL"
+            f"      OR transcript IS NOT NULL"
+            f"      OR transcript_encrypted IS NOT NULL"
+            f"      OR transcript_text_encrypted IS NOT NULL"
+            f"      OR concerns IS NOT NULL"
+            f"    )"
+            f"  ORDER BY started_at"
+            f"  LIMIT {BATCH_SIZE}"
+            f"), redacted AS ("
+            f"  UPDATE conversations AS target"
+            f"  SET summary = NULL,"
+            f"      summary_encrypted = NULL,"
+            f"      transcript = NULL,"
+            f"      transcript_encrypted = NULL,"
+            f"      transcript_text_encrypted = NULL,"
+            f"      concerns = NULL"
+            f"  FROM batch"
+            f"  WHERE target.ctid = batch.ctid"
+            f"  RETURNING 1"
+            f") SELECT count(*) AS count FROM redacted",
+            retention_days,
+        )
+        batch_count = result["count"] if result else 0
+        total_redacted += batch_count
+        if batch_count < BATCH_SIZE:
+            break
+        await asyncio.sleep(0.1)
+
+    return total_redacted
+
+
 async def purge_expired_data() -> dict[str, int]:
     """Delete rows older than their retention period from all PHI tables.
 
@@ -91,12 +136,15 @@ async def purge_expired_data() -> dict[str, int]:
     Skips tables whose retention period is set to 0 (disabled).
     """
     retention_days = {
-        "conversations": settings.retention_conversations_days,
+        "conversation_phi": settings.retention_conversations_days,
+        "conversations": settings.retention_conversation_metadata_days,
         "memories": settings.retention_memories_days,
         "call_analyses": settings.retention_call_analyses_days,
         "daily_call_context": settings.retention_daily_context_days,
         "call_metrics": settings.retention_call_metrics_days,
         "reminder_deliveries": settings.retention_reminder_deliveries_days,
+        "notifications": settings.retention_notifications_days,
+        "waitlist": settings.retention_waitlist_days,
         "audit_logs": settings.retention_audit_logs_days,
     }
 
@@ -107,11 +155,15 @@ async def purge_expired_data() -> dict[str, int]:
             # 0 means retention is disabled for this table -- skip.
             continue
 
-        date_col = TABLE_DATE_COLUMNS.get(table)
-        if not date_col:
-            continue
-
         try:
+            if table == "conversation_phi":
+                results[table] = await _redact_conversation_phi(days)
+                continue
+
+            date_col = TABLE_DATE_COLUMNS.get(table)
+            if not date_col:
+                continue
+
             deleted = await _purge_table(table, date_col, days)
             results[table] = deleted
         except Exception as exc:

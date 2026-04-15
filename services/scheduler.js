@@ -6,6 +6,7 @@ import { memoryService } from './memory.js';
 import { contextCacheService } from './context-cache.js';
 import { runDailyPurgeIfNeeded } from './data-retention.js';
 import { createLogger } from '../lib/logger.js';
+import { decryptReminderPhi, decryptSeniorPhi, encryptReminderDeliveryPhi } from '../lib/phi.js';
 import { resolveFlags, getValue } from '../lib/growthbook.js';
 import {
   DEFAULT_TIMEZONE,
@@ -151,7 +152,7 @@ export const schedulerService = {
     const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
 
     // Find non-recurring reminders due now
-    const nonRecurring = await db.select({
+    const nonRecurring = (await db.select({
       reminder: reminders,
       senior: seniors
     })
@@ -162,10 +163,13 @@ export const schedulerService = {
         eq(reminders.isRecurring, false),
         lte(reminders.scheduledTime, oneMinuteFromNow),
         eq(seniors.isActive, true)
-      ));
+      ))).map(({ reminder, senior }) => ({
+        reminder: decryptReminderPhi(reminder),
+        senior: decryptSeniorPhi(senior),
+      }));
 
     // Find recurring reminders where scheduled time-of-day matches now
-    const recurring = await db.select({
+    const recurring = (await db.select({
       reminder: reminders,
       senior: seniors
     })
@@ -175,7 +179,10 @@ export const schedulerService = {
         eq(reminders.isActive, true),
         eq(reminders.isRecurring, true),
         eq(seniors.isActive, true)
-      ));
+      ))).map(({ reminder, senior }) => ({
+        reminder: decryptReminderPhi(reminder),
+        senior: decryptSeniorPhi(senior),
+      }));
 
     // Filter recurring to those whose time-of-day matches now (within 5 min window)
     const recurringDue = recurring.filter(r => isRecurringReminderDueNow(r.reminder, r.senior, now));
@@ -244,8 +251,8 @@ export const schedulerService = {
     // Add retries to due reminders with their delivery record
     for (const retry of retriesReady) {
       dueReminders.push({
-        reminder: retry.reminder,
-        senior: retry.senior,
+        reminder: decryptReminderPhi(retry.reminder),
+        senior: decryptSeniorPhi(retry.senior),
         scheduledFor: retry.delivery.scheduledFor,
         existingDelivery: retry.delivery // Include the delivery record for update
       });
@@ -343,7 +350,7 @@ export const schedulerService = {
     const call = await retryTwilioCall(client, {
       to: senior.phone,
       from: process.env.TWILIO_PHONE_NUMBER,
-      url: `${baseUrl}/voice/answer`,
+      url: `${baseUrl}/voice/answer?call_type=reminder`,
       statusCallback: `${baseUrl}/voice/status`,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
     });
@@ -508,11 +515,11 @@ export const schedulerService = {
 
     try {
       const [updated] = await db.update(reminderDeliveries)
-        .set({
+        .set(encryptReminderDeliveryPhi({
           status,
           acknowledgedAt: new Date(),
           userResponse
-        })
+        }))
         .where(eq(reminderDeliveries.id, deliveryId))
         .returning();
 
@@ -566,10 +573,11 @@ export const schedulerService = {
             .where(eq(reminders.id, delivery.reminderId))
             .limit(1);
           if (reminder) {
+            const decryptedReminder = decryptReminderPhi(reminder);
             const { notificationService } = await import('./notifications.js');
-            await notificationService.onReminderMissed(reminder.seniorId, {
-              reminderTitle: reminder.title,
-              reminderType: reminder.type,
+            await notificationService.onReminderMissed(decryptedReminder.seniorId, {
+              reminderTitle: decryptedReminder.title,
+              reminderType: decryptedReminder.type,
               attemptCount: delivery.attemptCount,
             });
           }
@@ -623,7 +631,20 @@ export const schedulerService = {
     const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
 
     const results = await db.execute(sql`
-      SELECT s.* FROM seniors s
+      SELECT s.id, s.name, s.phone, s.timezone, s.interests,
+             s.family_info AS "familyInfo",
+             s.family_info_encrypted AS "familyInfoEncrypted",
+             s.medical_notes AS "medicalNotes",
+             s.medical_notes_encrypted AS "medicalNotesEncrypted",
+             s.preferred_call_times AS "preferredCallTimes",
+             s.preferred_call_times_encrypted AS "preferredCallTimesEncrypted",
+             s.is_active AS "isActive",
+             s.city, s.state, s.zip_code AS "zipCode",
+             s.additional_info AS "additionalInfo",
+             s.additional_info_encrypted AS "additionalInfoEncrypted",
+             s.call_context_snapshot AS "callContextSnapshot",
+             s.call_context_snapshot_encrypted AS "callContextSnapshotEncrypted"
+      FROM seniors s
       WHERE s.is_active = true
       AND NOT EXISTS (
         SELECT 1 FROM conversations c
@@ -632,7 +653,7 @@ export const schedulerService = {
         AND c.started_at > ${twoDaysAgo}
       )
     `);
-    return results.rows;
+    return (results.rows || []).map(decryptSeniorPhi);
   }
 };
 

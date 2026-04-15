@@ -90,6 +90,20 @@ class TestFormatGroupedMemories:
         result = format_grouped_memories(groups)
         assert "custom_type" in result
 
+    def test_temporal_memory_gets_recorded_time_anchor(self):
+        from services.memory import format_memory_for_context
+
+        memory = {
+            "content": "Plans to work out tomorrow",
+            "created_at": datetime(2026, 4, 14, 20, 30, tzinfo=timezone.utc),
+        }
+
+        result = format_memory_for_context(memory, "America/Chicago")
+
+        assert "Plans to work out tomorrow" in result
+        assert "recorded" in result
+        assert any(label in result for label in ("Earlier today", "Yesterday", "April"))
+
 
 class TestGenerateEmbedding:
     @pytest.mark.asyncio
@@ -287,6 +301,31 @@ class TestExtractFromConversation:
             from services.memory import extract_from_conversation
             await extract_from_conversation("s1", "User: My cat is named Whiskers", "conv-1")
             mock_store.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_extraction_prompt_anchors_relative_dates(self):
+        memories_dict = {"memories": [{"type": "event", "content": "Plans to work out on April 15, 2026", "importance": 60}]}
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content=json.dumps(memories_dict)))]
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+        call_started_at = datetime(2026, 4, 14, 20, 30, tzinfo=timezone.utc)
+
+        with patch("services.memory._get_openai", return_value=mock_client), \
+             patch("services.memory.store", new_callable=AsyncMock):
+            from services.memory import extract_from_conversation
+            await extract_from_conversation(
+                "s1",
+                "User: I am too busy today, so I will work out tomorrow.",
+                "conv-1",
+                call_started_at=call_started_at,
+                timezone_name="America/Chicago",
+            )
+
+        prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+        assert "Call date/time: Tuesday, April 14, 2026 at 3:30 PM" in prompt
+        assert "Resolve relative dates" in prompt
+        assert "Avoid standalone memories like \"plans to work out tomorrow\"" in prompt
 
     @pytest.mark.asyncio
     async def test_handles_api_error(self):

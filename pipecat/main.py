@@ -13,16 +13,15 @@ Serves:
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 import time
 import warnings
 
 from loguru import logger
-from config import assert_production_config, is_production_environment
+from config import assert_production_config, is_production_environment, settings
 
 # Configure log level: INFO in production, DEBUG locally
-_log_level = os.getenv("LOG_LEVEL", "INFO" if is_production_environment() else "DEBUG")
+_log_level = settings.log_level
 
 
 def _safe_log_filter(record) -> bool:
@@ -73,7 +72,7 @@ try:
                 exc_info["value"] = val[:200] + "...[truncated]"
         return event
 
-    _sentry_dsn = os.getenv("SENTRY_DSN", "")
+    _sentry_dsn = settings.sentry_dsn
     if _sentry_dsn:
         sentry_sdk.init(
             dsn=_sentry_dsn,
@@ -130,7 +129,7 @@ def register_call_task(task: asyncio.Task) -> None:
 # ---------------------------------------------------------------------------
 # Scalability: Concurrency control & metrics
 # ---------------------------------------------------------------------------
-MAX_CALLS = int(os.getenv("MAX_CONCURRENT_CALLS", "50"))
+MAX_CALLS = settings.max_concurrent_calls
 _call_semaphore = asyncio.Semaphore(MAX_CALLS)
 _active_calls = 0
 _peak_calls = 0
@@ -146,7 +145,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 # CORS
 ALLOWED_ORIGINS = [
     "https://admin-v2-liart.vercel.app",
-    os.getenv("ADMIN_URL", ""),
+    settings.admin_url,
 ]
 if not is_production_environment():
     ALLOWED_ORIGINS.extend(["http://localhost:5173", "http://localhost:3000"])
@@ -209,6 +208,27 @@ async def health():
         "cache": caches,
     }
     return JSONResponse(content=body, status_code=status_code)
+
+
+@app.get("/live")
+async def live():
+    """Lightweight liveness check for Railway deploy health checks.
+
+    Keep this endpoint free of database and vendor calls. `/health` remains the
+    readiness endpoint for CI smoke tests and monitoring.
+    """
+    status_code = 503 if _shutting_down else 200
+    return JSONResponse(
+        content={
+            "status": "draining" if _shutting_down else "ok",
+            "service": "donna-pipecat",
+            "active_calls": _active_calls,
+            "max_calls": MAX_CALLS,
+            "uptime_seconds": round(time.monotonic() - _startup_time),
+            "shutting_down": _shutting_down,
+        },
+        status_code=status_code,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +353,7 @@ async def websocket_endpoint(websocket: WebSocket):
 async def startup():
     assert_production_config()
 
-    port = os.getenv("PORT", "7860")
+    port = settings.port
     logger.info(
         "Donna Pipecat starting on port {port} (max_concurrent_calls={max})",
         port=port,
@@ -359,17 +379,22 @@ async def startup():
     from lib.cache_cleanup import start_cleanup_loop
     asyncio.create_task(start_cleanup_loop())
 
-    # Start data retention background loop (HIPAA compliance)
-    try:
-        from services.data_retention import start_retention_loop
-        asyncio.create_task(start_retention_loop())
-        logger.info("Data retention loop started")
-    except Exception as e:
-        logger.warning("Data retention init failed: {err}", err=str(e))
+    # Node is the authoritative scheduler/retention worker. Keep Pipecat's
+    # worker opt-in only to avoid two services purging the same PHI tables.
+    retention_enabled = settings.pipecat_retention_enabled
+    if retention_enabled:
+        try:
+            from services.data_retention import start_retention_loop
+            asyncio.create_task(start_retention_loop())
+            logger.info("Data retention loop started")
+        except Exception as e:
+            logger.warning("Data retention init failed: {err}", err=str(e))
+    else:
+        logger.info("Pipecat data retention loop disabled; Node owns retention")
 
     # Start scheduler ONLY if explicitly enabled (prevents dual-scheduler conflict)
-    scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "false").lower() == "true"
-    base_url = os.getenv("BASE_URL", "")
+    scheduler_enabled = settings.scheduler_enabled
+    base_url = settings.base_url
     if scheduler_enabled and base_url:
         from services.scheduler import start_scheduler
         asyncio.create_task(start_scheduler(base_url))
@@ -377,7 +402,7 @@ async def startup():
     else:
         logger.info(
             "Scheduler disabled (SCHEDULER_ENABLED={se}, BASE_URL={bu})",
-            se=os.getenv("SCHEDULER_ENABLED", "false"),
+            se=str(scheduler_enabled).lower(),
             bu="set" if base_url else "unset",
         )
 

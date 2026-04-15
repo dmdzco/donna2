@@ -1,6 +1,7 @@
 """Tests for call context snapshot service."""
 
 import pytest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 
@@ -35,6 +36,28 @@ async def test_build_snapshot_includes_all_fields():
     assert snapshot["recent_turns"] == "RECENT CONVERSATIONS:\n  Senior: Hello"
     assert snapshot["todays_context"] == "EARLIER TODAY: discussed garden"
     assert "snapshot_updated_at" in snapshot
+
+
+@pytest.mark.asyncio
+async def test_build_snapshot_annotates_last_call_timing():
+    """Last-call analysis should carry a prompt-safe time anchor."""
+    from services.call_snapshot import build_snapshot
+
+    with patch("services.call_snapshot.get_recent_summaries", new_callable=AsyncMock, return_value=None), \
+         patch("services.call_snapshot.get_recent_turns", new_callable=AsyncMock, return_value=None), \
+         patch("services.call_snapshot.get_todays_context", new_callable=AsyncMock, return_value={"previousCallCount": 0}), \
+         patch("services.call_snapshot.format_todays_context", return_value=None):
+        snapshot = await build_snapshot(
+            "abc-123",
+            "America/Chicago",
+            analysis={"summary": "Talked about plans."},
+            last_call_started_at=datetime(2026, 4, 14, 20, 30, tzinfo=timezone.utc),
+        )
+
+    analysis = snapshot["last_call_analysis"]
+    assert analysis["summary"] == "Talked about plans."
+    assert analysis["call_datetime"] == "Tuesday, April 14, 2026 at 3:30 PM"
+    assert "call_time_label" in analysis
 
 
 @pytest.mark.asyncio

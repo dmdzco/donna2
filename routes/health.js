@@ -11,7 +11,7 @@ router.get('/health', async (req, res) => {
   try {
     await db.execute(sql`SELECT 1`);
   } catch (err) {
-    dbStatus = `error: ${err.message}`;
+    dbStatus = 'error';
   }
 
   const statusCode = dbStatus === 'connected' ? 200 : 503;

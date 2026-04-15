@@ -7,6 +7,7 @@
 import { db } from '../db/client.js';
 import { caregivers } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
+import { logRouteError, sendError } from '../lib/http-response.js';
 
 /**
  * Get senior IDs accessible by a user.
@@ -44,6 +45,9 @@ export async function canAccessSenior(auth, seniorId) {
  * @param {string} context - e.g. "POST /api/reminders"
  */
 export function routeError(res, error, context) {
-  console.error(`[${context}]`, error);
-  res.status(500).json({ error: error.message });
+  const status = error.status || error.statusCode || 500;
+  logRouteError(context, error, res, status);
+  return sendError(res, status, {
+    error: status < 500 ? error.message : 'An internal error occurred',
+  });
 }

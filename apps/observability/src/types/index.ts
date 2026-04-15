@@ -115,15 +115,22 @@ export interface CallMetrics {
   totalInputTokens: number;
   totalOutputTokens: number;
   totalTokens: number;
-  avgResponseTime: number;
+  avgResponseTime: number | null;
   avgTtfa: number | null;
   turnCount: number;
-  estimatedCost: number;
+  estimatedCost: number | null;
   modelsUsed: string[];
+  llmTtfbAvgMs?: number | null;
+  ttsTtfbAvgMs?: number | null;
+  endReason?: string | null;
+  errorCount?: number;
+  toolsUsed?: string[];
+  breakerStates?: Record<string, string> | null;
 }
 
 export interface MetricsData {
   turnMetrics: TurnMetric[];
   callMetrics: CallMetrics | null;
+  infraMetric?: Record<string, unknown> | null;
   durationSeconds: number | null;
 }

@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { db } from '../db/client.js';
 import { waitlist } from '../db/schema.js';
+import { routeError } from './helpers.js';
+import { encryptWaitlistPhi } from '../lib/phi.js';
 
 const router = Router();
 
@@ -16,8 +18,13 @@ async function ensureTable() {
       phone VARCHAR(50),
       who_for VARCHAR(100),
       thoughts TEXT,
+      payload_encrypted TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     )
+  `);
+  await db.execute(`
+    ALTER TABLE waitlist
+      ADD COLUMN IF NOT EXISTS payload_encrypted TEXT
   `);
   tableReady = true;
 }
@@ -32,18 +39,17 @@ router.post('/waitlist', async (req, res) => {
     }
 
     await ensureTable();
-    await db.insert(waitlist).values({
+    await db.insert(waitlist).values(encryptWaitlistPhi({
       name,
       email,
       phone: phone || null,
       whoFor: whoFor || null,
       thoughts: thoughts || null,
-    });
+    }));
 
     res.json({ success: true });
-  } catch (err) {
-    console.error('Waitlist signup error:', err);
-    res.status(500).json({ error: 'Something went wrong' });
+  } catch (error) {
+    routeError(res, error, 'POST /waitlist');
   }
 });
 

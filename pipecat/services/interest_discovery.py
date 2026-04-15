@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from loguru import logger
 
 from db import query_one, query_many
+from lib.encryption import decrypt_json
 
 # Topics that are NOT real hobbies/interests — filter these out
 _GENERIC_BLOCKLIST = {
@@ -128,7 +129,7 @@ async def compute_interest_scores(
         return {}
 
     rows = await query_many(
-        """SELECT topics, engagement_score, created_at
+        """SELECT topics, analysis_encrypted, engagement_score, created_at
            FROM call_analyses
            WHERE senior_id = $1
              AND created_at > NOW() - INTERVAL '1 day' * $2
@@ -143,7 +144,14 @@ async def compute_interest_scores(
 
     for row in rows:
         topics = row.get("topics") or []
+        encrypted = None
+        if row.get("analysis_encrypted"):
+            encrypted = decrypt_json(row["analysis_encrypted"])
+            if isinstance(encrypted, dict):
+                topics = topics or encrypted.get("topics_discussed") or encrypted.get("topics") or []
         eng = row.get("engagement_score") or 5
+        if isinstance(encrypted, dict):
+            eng = row.get("engagement_score") or encrypted.get("engagement_score") or 5
         created = row.get("created_at")
         if not created:
             continue

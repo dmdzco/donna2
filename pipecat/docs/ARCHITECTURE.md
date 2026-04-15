@@ -1,6 +1,6 @@
 # Donna Pipecat — Architecture Overview
 
-> Python Pipecat port of Donna's voice pipeline, running in parallel with the existing Node.js stack.
+> Active Python voice pipeline for Donna, running alongside the Node.js API/scheduler backend.
 
 ## High-Level Architecture
 
@@ -100,11 +100,12 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         │
                         ▼
               ┌─────────────────────┐
-              │   ElevenLabs TTS     │  Text-to-Speech (streaming)
+              │   TTS Service        │  ElevenLabs 44.1kHz PCM by default;
+              │                      │  Cartesia Sonic 3 48kHz PCM by flag
               └─────────┬───────────┘
                         │ AudioFrame
                         ▼
-              FastAPIWebsocketTransport ──► Twilio Audio
+              FastAPIWebsocketTransport ──► Twilio Audio (final 8kHz μ-law)
                         │
                         ▼
               ┌─────────────────────┐
@@ -130,6 +131,23 @@ The pipeline processors don't call each other directly. They communicate through
    - `_last_quick_analysis` — `AnalysisResult` from Quick Observer, read by prefetch engine for family/health/activity signals
 
 3. **Pipeline task reference** — Both QuickObserver and Director receive a `set_pipeline_task(task)` call after pipeline creation. This lets them queue `EndFrame` directly to force call termination, bypassing the normal frame flow.
+
+---
+
+## Runtime Audio Profile
+
+Runtime source of truth is `bot.py:get_audio_profile()` plus the active serializer. Twilio's wire format remains `8kHz` μ-law, but Donna's internal pipeline is higher quality:
+
+| Segment | Default | Config |
+|---|---:|---|
+| Incoming telephony wire | 8kHz μ-law | Twilio Media Streams |
+| STT/internal input | 16kHz PCM | `TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE` |
+| Cartesia output | 48kHz `pcm_s16le` | `CARTESIA_OUTPUT_SAMPLE_RATE` |
+| ElevenLabs output | 44.1kHz PCM | `ELEVENLABS_OUTPUT_SAMPLE_RATE` |
+| Gemini Live output | 24kHz PCM | `GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE` |
+| Twilio output wire | 8kHz μ-law | `TwilioFrameSerializer` final conversion |
+
+The rule is to keep TTS/model audio high quality internally and perform exactly one required telephony conversion at the serializer edge. Cartesia must remain PCM; using `pcm_mulaw` from Cartesia double-encodes and produces garbled Twilio audio.
 
 ---
 
@@ -394,6 +412,7 @@ When the Twilio client disconnects, `run_post_call()` in `services/post_call.py`
 pipecat/
 ├── main.py                          ← FastAPI entry point, /health, /ws, middleware
 ├── bot.py                           ← Pipeline assembly + run_bot()
+├── bot_gemini.py                    ← Gemini Live evaluation pipeline
 ├── config.py                        ← All env vars centralized
 ├── prompts.py                       ← System prompts + phase task instructions
 │
@@ -401,9 +420,13 @@ pipecat/
 │   ├── routes/
 │   │   ├── voice.py                 ← /voice/answer (TwiML), /voice/status
 │   │   ├── calls.py                 ← /api/call, /api/calls, /api/calls/:sid/end
-│   │   └── metrics.py               ← /api/metrics/* (call metrics for observability)
+│   │   ├── metrics.py               ← /api/metrics/* (call metrics for observability)
+│   │   ├── auth.py                  ← token revocation/logout endpoints
+│   │   ├── export.py                ← HIPAA right-to-access export bundle
+│   │   └── data.py                  ← retention management endpoints
 │   ├── middleware/
 │   │   ├── auth.py                  ← 3-tier auth (cofounder key, JWT, Clerk)
+│   │   ├── twilio.py                ← Twilio webhook signature validation
 │   │   ├── rate_limit.py            ← Rate limiting (slowapi)
 │   │   ├── security.py              ← Security headers (HSTS, X-Frame-Options)
 │   │   └── error_handler.py         ← Global error handlers
@@ -425,29 +448,33 @@ pipecat/
 │
 ├── services/
 │   ├── prefetch.py                  ← Predictive Context Engine: cache, extraction, runner
-│   ├── director_llm.py              ← Groq/Gemini Director analysis + prefetch hints (593 LOC)
+│   ├── director_llm.py              ← Groq/Gemini Director analysis + prefetch hints (598 LOC)
 │   ├── post_call.py                 ← Post-call orchestration (analysis, memory, cleanup, snapshot rebuild)
 │   ├── reminder_delivery.py         ← Reminder delivery CRUD + prompt formatting
-│   ├── call_analysis.py             ← Post-call analysis + call quality scoring (246 LOC)
-│   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (392 LOC)
-│   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation (326 LOC)
+│   ├── call_analysis.py             ← Post-call analysis + call quality scoring (354 LOC)
+│   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (526 LOC)
+│   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation (352 LOC)
 │   ├── conversations.py             ← Conversation CRUD + transcript history
 │   ├── interest_discovery.py        ← Interest extraction from conversations
-│   ├── seniors.py                   ← Senior profile + per-senior call_settings (131 LOC)
-│   ├── caregivers.py                ← Caregiver relationships + notes delivery (101 LOC)
-│   ├── scheduler.py                 ← Reminder scheduling + outbound calls
-│   ├── call_snapshot.py             ← Pre-computed call context snapshot (53 LOC)
+│   ├── seniors.py                   ← Senior profile + per-senior call_settings (188 LOC)
+│   ├── caregivers.py                ← Caregiver relationships + notes delivery (111 LOC)
+│   ├── scheduler.py                 ← Pipecat-side scheduler helpers + encrypted Redis context handoff; Node scheduler is active
+│   ├── call_snapshot.py             ← Pre-computed call context snapshot (71 LOC)
 │   ├── context_cache.py             ← Pre-cache senior context + news persistence (5 AM local)
 │   ├── daily_context.py             ← Cross-call same-day memory
-│   └── news.py                      ← News via OpenAI web search + circuit breaker (213 LOC)
+│   └── news.py                      ← News via OpenAI web search + circuit breaker (256 LOC)
 │
 ├── db/
-│   ├── client.py                    ← asyncpg pool + query helpers + health check (69 LOC)
+│   ├── client.py                    ← asyncpg pool + query helpers + health check (126 LOC)
 │   └── migrations/                  ← SQL migrations (HNSW index, call_context_snapshot, call_metrics)
 │
 ├── lib/
 │   ├── circuit_breaker.py           ← Async circuit breaker for external services + Sentry breadcrumbs
+│   ├── encryption.py                ← AES-256-GCM field-level PHI encryption
+│   ├── redis_client.py              ← shared Redis client helpers
 │   ├── growthbook.py                ← GrowthBook SDK wrapper (feature flags + kill switches)
+│   ├── phi.py                       ← PHI-safe serialization helpers
+│   ├── shared_state_phi.py          ← encrypted shared-state payload helpers
 │   ├── cache_cleanup.py             ← Background TTL-based cache eviction loop
 │   └── sanitize.py                  ← PII-safe logging (phone, name masking)
 │
@@ -480,7 +507,7 @@ pipecat/
 │  • Pipecat Flows (4 phases)      │    │  • Reminder scheduler            │
 │  • Quick Observer (patterns)     │    │  • Call initiation (Twilio)      │
 │  • Conversation Director (L2)    │    │  • Admin/consumer/observability  │
-│  • ElevenLabs TTS (Pipecat)      │    │    API endpoints                 │
+│  • TTS via Pipecat               │    │    API endpoints                 │
 │  • Deepgram STT (Pipecat)        │    │                                   │
 │  • FastAPI + WebSocket           │    │  SCHEDULER_ENABLED=true           │
 │  • SCHEDULER_ENABLED=false       │    │                                   │
@@ -495,9 +522,9 @@ pipecat/
                 │                        │
                 │  • Neon PostgreSQL DB   │
                 │  • Same DB schema       │
-                │  • Same API keys        │
+                │  • DONNA_API_KEYS       │
                 │  • Same JWT_SECRET      │
-                │  • Same DONNA_API_KEY   │
+                │  • FIELD_ENCRYPTION_KEY │
                 └────────────────────────┘
 ```
 
@@ -507,14 +534,14 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 
 | Aspect | Node.js | Pipecat |
 |--------|---------|---------|
-| **Pipeline** | Custom streaming (v1-advanced.js) | Pipecat FrameProcessor pipeline |
-| **Call phases** | Custom state machine in pipeline | Pipecat Flows (4 NodeConfigs) |
-| **Director** | Inline in v1-advanced.js | Separate non-blocking FrameProcessor |
+| **Pipeline** | Frontend/API only; legacy custom streaming code is inactive | Pipecat FrameProcessor pipeline |
+| **Call phases** | Legacy custom state machine is inactive | Pipecat Flows (4 NodeConfigs) |
+| **Director** | Legacy inline implementation is inactive | Separate non-blocking FrameProcessor |
 | **Transport** | Raw Twilio WebSocket | FastAPIWebsocketTransport + TwilioFrameSerializer |
 | **LLM** | Claude (streaming, sentence-by-sentence) | AnthropicLLMService (Pipecat managed) |
-| **TTS** | ElevenLabs WebSocket (custom) | ElevenLabs via Pipecat |
-| **STT** | Deepgram (custom integration) | DeepgramSTTService (Pipecat managed) |
-| **Goodbye** | Custom timer in v1-advanced.js | Quick Observer → EndFrame after configured delay |
+| **TTS** | Not active for live calls | ElevenLabs or Cartesia via Pipecat |
+| **STT** | Not active for live calls | DeepgramSTTService (Pipecat managed) |
+| **Goodbye** | Not active for live calls | Quick Observer → EndFrame after configured delay |
 | **Scheduler** | Active (SCHEDULER_ENABLED=true) | Disabled (prevents dual-scheduler) |
 
 ## Tech Stack
@@ -530,8 +557,8 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Director** | Groq (`gpt-oss-20b`) | Primary fast provider |
 | **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Full guidance fallback when Groq unavailable |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
-| **STT** | Deepgram Nova 3 | Real-time, interim results |
-| **TTS** | ElevenLabs | `eleven_turbo_v2_5` |
+| **STT** | Deepgram Nova 3 | Twilio 8kHz μ-law converted to internal 16kHz PCM before STT |
+| **TTS** | ElevenLabs by default; Cartesia behind provider flag | ElevenLabs `44100`; Cartesia Sonic 3 `pcm_s16le` at `48000`; serializer handles final phone conversion |
 | **VAD** | Silero | confidence=0.6, min_volume=0.5; stop_secs=1.2 (senior calls), 0.8 (onboarding) |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
@@ -572,6 +599,8 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 ```bash
 # Server
 PORT=7860                        # Different from Node.js (3001)
+ENVIRONMENT=production           # Enables fail-closed production checks
+PIPECAT_PUBLIC_URL=https://...   # Stable public URL for signed Twilio webhooks + wss:// stream
 
 # Twilio
 TWILIO_ACCOUNT_SID=...
@@ -587,20 +616,36 @@ GOOGLE_API_KEY=...               # Gemini Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...             # STT
 ELEVENLABS_API_KEY=...           # TTS
 ELEVENLABS_VOICE_ID=...          # Voice ID (optional, has default)
+CARTESIA_API_KEY=...             # Optional TTS provider
+CARTESIA_VOICE_ID=...            # Optional Cartesia voice override
 OPENAI_API_KEY=...               # Embeddings + news search
+TAVILY_API_KEY=...               # Optional in-call web_search fast path
 
 # Auth (shared with Node.js)
 JWT_SECRET=...
-DONNA_API_KEY=...
+DONNA_API_KEYS=pipecat:...,scheduler:...
 COFOUNDER_API_KEY_1=...          # Cofounder auth
 COFOUNDER_API_KEY_2=...          # Cofounder auth
+FIELD_ENCRYPTION_KEY=...         # 32-byte base64url key for PHI encryption
 
 # Scheduler (MUST be false to prevent conflicts)
 SCHEDULER_ENABLED=false
 
+# Audio profile
+TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE=16000
+ELEVENLABS_OUTPUT_SAMPLE_RATE=44100
+CARTESIA_OUTPUT_SAMPLE_RATE=48000
+GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE=24000
+
 # Director models
 FAST_OBSERVER_MODEL=gemini-3-flash-preview   # Gemini fallback model
 GROQ_API_KEY=...                             # Groq primary Director
+
+# Shared state / flags
+REDIS_URL=redis://...             # Required before horizontally scaling Pipecat
+PIPECAT_REQUIRE_REDIS=true        # Fail closed when Redis is required but missing
+TTS_PROVIDER=elevenlabs           # Optional: cartesia
+VOICE_BACKEND=claude              # Optional: gemini_live for evaluation path
 
 # Testing
 RUN_DB_TESTS=1                   # Set to run DB integration tests

@@ -26,7 +26,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3)
 - LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
-- Text-to-speech (ElevenLabs by default; Cartesia available behind provider flag)
+- Text-to-speech (ElevenLabs by default; Cartesia available behind provider flag; high-rate PCM internally before telephony conversion)
 - Semantic memory with decay + deduplication (pgvector + HNSW index)
 - Full in-call context retention (APPEND strategy, no summary truncation)
 - Cross-call turn history (recent turns from previous calls in system prompt)
@@ -65,6 +65,17 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Zod/Pydantic input validation
 
 ## Quick Start
+
+### Local Bootstrap
+
+```bash
+npm ci
+npm run install:apps
+cd pipecat && uv sync && cd ..
+cp apps/mobile/.env.example apps/mobile/.env
+```
+
+Set `EXPO_PUBLIC_API_URL` in `apps/mobile/.env` before running the mobile app. The mobile client no longer falls back to production when that variable is missing.
 
 ### Railway-First Development
 
@@ -108,6 +119,7 @@ See [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) for ful
 - Admin dashboard: `cd apps/admin-v2 && npm run dev` → http://localhost:5175
 - Consumer app: `cd apps/consumer && npm run dev` → http://localhost:5174
 - Observability: `cd apps/observability && npm run dev` → http://localhost:3002
+- Mobile app: `cd apps/mobile && npm run ios` after setting `EXPO_PUBLIC_API_URL` in `apps/mobile/.env`
 
 ## Architecture
 
@@ -149,9 +161,9 @@ Phone Call → Twilio → WebSocket → Pipecat Pipeline
                              Claude Sonnet 4.5 + Pipecat Flows (2 tools)
                                        │ TextFrame
                                        ▼
-                             Conversation Tracker → Guidance Stripper
+                             Guidance Stripper → Conversation Tracker
                                        ▼
-                             ElevenLabs TTS → Twilio Audio Out
+                             TTS high-rate PCM → Twilio Audio Out (final 8kHz μ-law)
                                        │
                                        ▼ (on disconnect)
                              Post-Call: Analysis + Memory + Daily Context
@@ -274,6 +286,8 @@ ANTHROPIC_API_KEY=...                   # Claude Sonnet 4.5 (voice LLM)
 GOOGLE_API_KEY=...                      # Gemini 3 Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...                    # STT (Nova 3)
 ELEVENLABS_API_KEY=...                  # TTS
+CARTESIA_API_KEY=...                    # Optional Cartesia TTS provider
+CARTESIA_VOICE_ID=...                   # Optional Cartesia voice override
 OPENAI_API_KEY=...                      # Embeddings + news search
 TAVILY_API_KEY=...                      # Optional fast in-call web search
 
@@ -295,6 +309,10 @@ FAST_OBSERVER_MODEL=gemini-3-flash-preview  # Director fallback model
 GROQ_API_KEY=...                        # Groq active fast Director provider
 ELEVENLABS_VOICE_ID=...                 # Voice ID (has default)
 TTS_PROVIDER=elevenlabs                 # Optional: cartesia when enabled/configured
+TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE=16000 # Internal STT input after telephony conversion
+ELEVENLABS_OUTPUT_SAMPLE_RATE=44100     # Internal ElevenLabs TTS output
+CARTESIA_OUTPUT_SAMPLE_RATE=48000       # Internal Cartesia PCM output
+GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE=24000 # Internal Gemini Live output
 GROWTHBOOK_API_HOST=...                 # Optional GrowthBook feature flag host
 GROWTHBOOK_CLIENT_KEY=...               # Optional GrowthBook client key
 REDIS_URL=redis://...                   # Required before running multiple Pipecat instances

@@ -5,6 +5,8 @@ import { eq, desc, and, sql } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
 import { decrypt, decryptJson } from '../lib/encryption.js';
 import { callAnalysisService } from '../services/call-analyses.js';
+import { routeError } from './helpers.js';
+import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
 
@@ -20,6 +22,19 @@ function readTranscript(call) {
 function readConcerns(call, analysis = null) {
   if (Array.isArray(call.concerns) && call.concerns.length > 0) return call.concerns;
   return Array.isArray(analysis?.concerns) ? analysis.concerns : [];
+}
+
+function auditObservabilityRead(req, resourceId = null, metadata = {}) {
+  logAudit({
+    userId: req.auth.userId,
+    userRole: authToRole(req.auth),
+    action: 'read',
+    resourceType: 'conversation',
+    resourceId,
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent'),
+    metadata: { surface: 'observability', ...metadata },
+  });
 }
 
 // One-time cleanup: mark stale in_progress calls (older than 1 hour) as completed
@@ -88,16 +103,59 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
       };
     });
 
+    auditObservabilityRead(req, null, { endpoint: 'calls', limit, count: formattedCalls.length });
     res.json({ calls: formattedCalls });
   } catch (error) {
-    console.error('Error fetching calls:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls');
   }
 });
 
 // Get active calls — voice sessions are tracked by Pipecat, not Node.js
 router.get('/api/observability/active', requireAdmin, async (req, res) => {
-  res.json({ activeCalls: [] });
+  try {
+    const active = await db.select({
+      id: conversations.id,
+      callSid: conversations.callSid,
+      seniorId: conversations.seniorId,
+      seniorName: seniors.name,
+      seniorPhone: seniors.phone,
+      startedAt: conversations.startedAt,
+      endedAt: conversations.endedAt,
+      durationSeconds: conversations.durationSeconds,
+      status: conversations.status,
+      transcript: conversations.transcript,
+      transcriptEncrypted: conversations.transcriptEncrypted,
+    })
+    .from(conversations)
+    .leftJoin(seniors, eq(conversations.seniorId, seniors.id))
+    .where(and(
+      eq(conversations.status, 'in_progress'),
+      sql`started_at >= NOW() - interval '2 hours'`
+    ))
+    .orderBy(desc(conversations.startedAt))
+    .limit(20);
+
+    const activeCalls = active.map(call => {
+      const transcript = readTranscript(call);
+      return {
+        id: call.id,
+        call_sid: call.callSid,
+        senior_id: call.seniorId,
+        senior_name: call.seniorName,
+        senior_phone: call.seniorPhone,
+        started_at: call.startedAt,
+        ended_at: call.endedAt,
+        duration_seconds: call.durationSeconds,
+        status: call.status,
+        turn_count: Array.isArray(transcript) ? transcript.length : 0,
+      };
+    });
+
+    auditObservabilityRead(req, null, { endpoint: 'active', count: activeCalls.length });
+    res.json({ activeCalls });
+  } catch (error) {
+    routeError(res, error, 'GET /api/observability/active');
+  }
 });
 
 // Get call details by ID
@@ -132,6 +190,11 @@ router.get('/api/observability/calls/:id', requireAdmin, async (req, res) => {
     const analysis = analyses.get(call.id) || null;
     const transcript = readTranscript(call);
 
+    auditObservabilityRead(req, call.id, {
+      endpoint: 'call_detail',
+      seniorId: call.seniorId,
+      includesTranscript: Boolean(transcript),
+    });
     res.json({
       id: call.id,
       call_sid: call.callSid,
@@ -149,8 +212,7 @@ router.get('/api/observability/calls/:id', requireAdmin, async (req, res) => {
       analysis,
     });
   } catch (error) {
-    console.error('Error fetching call:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id');
   }
 });
 
@@ -222,6 +284,11 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
       });
     }
 
+    auditObservabilityRead(req, call.id, {
+      endpoint: 'timeline',
+      seniorId: call.seniorId,
+      eventCount: timeline.length,
+    });
     res.json({
       callId: call.id,
       callSid: call.callSid,
@@ -232,8 +299,7 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
       timeline,
     });
   } catch (error) {
-    console.error('Error fetching timeline:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/timeline');
   }
 });
 
@@ -259,10 +325,13 @@ router.get('/api/observability/calls/:id/turns', requireAdmin, async (req, res) 
       timestamp: turn.timestamp,
     }));
 
+    auditObservabilityRead(req, req.params.id, {
+      endpoint: 'turns',
+      turnCount: turns.length,
+    });
     res.json({ turns });
   } catch (error) {
-    console.error('Error fetching turns:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/turns');
   }
 });
 
@@ -323,6 +392,10 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
 
     const uniqueConcerns = [...new Set([...allConcerns, ...(call.concerns || [])])];
 
+    auditObservabilityRead(req, req.params.id, {
+      endpoint: 'observer',
+      signalCount: signals.length,
+    });
     res.json({
       signals,
       count: signals.length,
@@ -335,8 +408,7 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
       },
     });
   } catch (error) {
-    console.error('Error fetching observer data:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/observer');
   }
 });
 
@@ -344,6 +416,7 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
 router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res) => {
   try {
     const [call] = await db.select({
+      callSid: conversations.callSid,
       transcript: conversations.transcript,
       transcriptEncrypted: conversations.transcriptEncrypted,
       callMetrics: conversations.callMetrics,
@@ -355,6 +428,18 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
     if (!call) {
       return res.status(404).json({ error: 'Call not found' });
     }
+
+    const infraRows = await db.execute(sql`
+      SELECT call_sid, senior_id, call_type, duration_seconds,
+             end_reason, turn_count, phase_durations, latency,
+             breaker_states, tools_used, token_usage, error_count,
+             created_at
+      FROM call_metrics
+      WHERE call_sid = ${call.callSid}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    const infraMetric = infraRows.rows[0] || null;
 
     // Extract per-turn metrics from transcript
     const turnMetrics = [];
@@ -371,14 +456,37 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
       });
     }
 
+    const tokenUsage = infraMetric?.token_usage || {};
+    const latency = infraMetric?.latency || {};
+    const infraCallMetrics = infraMetric ? {
+      totalInputTokens: Number(tokenUsage.prompt_tokens || 0),
+      totalOutputTokens: Number(tokenUsage.completion_tokens || 0),
+      totalTokens: Number(tokenUsage.prompt_tokens || 0) + Number(tokenUsage.completion_tokens || 0),
+      avgResponseTime: latency.turn_avg_ms != null ? Number(latency.turn_avg_ms) : null,
+      avgTtfa: latency.tts_ttfb_avg_ms != null ? Number(latency.tts_ttfb_avg_ms) : null,
+      turnCount: Number(infraMetric.turn_count || 0),
+      estimatedCost: null,
+      modelsUsed: [],
+      llmTtfbAvgMs: latency.llm_ttfb_avg_ms != null ? Number(latency.llm_ttfb_avg_ms) : null,
+      ttsTtfbAvgMs: latency.tts_ttfb_avg_ms != null ? Number(latency.tts_ttfb_avg_ms) : null,
+      endReason: infraMetric.end_reason || null,
+      errorCount: Number(infraMetric.error_count || 0),
+      toolsUsed: infraMetric.tools_used || [],
+      breakerStates: infraMetric.breaker_states || null,
+    } : null;
+
+    auditObservabilityRead(req, req.params.id, {
+      endpoint: 'call_metrics',
+      metricTurnCount: turnMetrics.length,
+    });
     res.json({
       turnMetrics,
-      callMetrics: call.callMetrics || null,
+      callMetrics: call.callMetrics || infraCallMetrics,
+      infraMetric,
       durationSeconds: call.durationSeconds,
     });
   } catch (error) {
-    console.error('Error fetching metrics:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/metrics');
   }
 });
 
@@ -405,8 +513,7 @@ router.get('/api/observability/metrics/calls', requireAdmin, async (req, res) =>
 
     res.json({ metrics: rows.rows, hours });
   } catch (error) {
-    console.error('Error fetching call metrics:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/metrics');
   }
 });
 
@@ -442,8 +549,7 @@ router.get('/api/observability/metrics/summary', requireAdmin, async (req, res) 
       hours,
     });
   } catch (error) {
-    console.error('Error fetching metrics summary:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/metrics/summary');
   }
 });
 
@@ -469,8 +575,7 @@ router.get('/api/observability/metrics/latency', requireAdmin, async (req, res) 
 
     res.json({ latency: rows.rows, hours });
   } catch (error) {
-    console.error('Error fetching latency trends:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/metrics/latency-trends');
   }
 });
 

@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
+import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { notificationPreferencesSchema, notificationTriggerSchema } from '../validators/schemas.js';
-import { notificationService } from '../services/notifications.js';
+import { decryptNotificationRow, notificationService } from '../services/notifications.js';
 import { db } from '../db/client.js';
 import { caregivers, notifications } from '../db/schema.js';
 import { eq, and, desc } from 'drizzle-orm';
 import { routeError } from './helpers.js';
 import { isProductionEnv, matchServiceApiKey, parseServiceApiKeys } from '../lib/security-config.js';
+import { sendError } from '../lib/http-response.js';
 
 const router = Router();
 
@@ -28,19 +30,19 @@ function requireServiceApiKey(req, res, next) {
   const configuredKeys = parseServiceApiKeys();
   if (configuredKeys.size === 0) {
     if (isProductionEnv()) {
-      return res.status(503).json({ error: 'Service API key auth is not configured' });
+      return sendError(res, 503, { error: 'Service API key auth is not configured' });
     }
     return next();
   }
 
   const provided = req.headers['x-api-key'];
   if (!provided) {
-    return res.status(401).json({ error: 'X-API-Key header required' });
+    return sendError(res, 401, { error: 'X-API-Key header required' });
   }
 
   const keyLabel = matchServiceApiKey(provided);
   if (!keyLabel) {
-    return res.status(403).json({ error: 'Invalid API key' });
+    return sendError(res, 403, { error: 'Invalid API key' });
   }
 
   req.serviceApiKeyLabel = keyLabel;
@@ -54,7 +56,7 @@ router.get('/api/notifications/preferences', requireAuth, async (req, res) => {
   try {
     const caregiverId = await getCaregiverIdForUser(req.auth.userId);
     if (!caregiverId) {
-      return res.status(404).json({ error: 'Caregiver not found' });
+      return sendError(res, 404, { error: 'Caregiver not found' });
     }
 
     const prefs = await notificationService.getPreferences(caregiverId);
@@ -67,11 +69,11 @@ router.get('/api/notifications/preferences', requireAuth, async (req, res) => {
 // ---------------------------------------------------------------------------
 // PATCH /api/notifications/preferences — update current user's notification prefs
 // ---------------------------------------------------------------------------
-router.patch('/api/notifications/preferences', requireAuth, async (req, res) => {
+router.patch('/api/notifications/preferences', requireAuth, idempotencyMiddleware, async (req, res) => {
   try {
     const parsed = notificationPreferencesSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({
+      return sendError(res, 400, {
         error: 'Validation error',
         details: parsed.error.flatten().fieldErrors,
       });
@@ -79,7 +81,7 @@ router.patch('/api/notifications/preferences', requireAuth, async (req, res) => 
 
     const caregiverId = await getCaregiverIdForUser(req.auth.userId);
     if (!caregiverId) {
-      return res.status(404).json({ error: 'Caregiver not found' });
+      return sendError(res, 404, { error: 'Caregiver not found' });
     }
 
     const updated = await notificationService.upsertPreferences(caregiverId, parsed.data);
@@ -96,7 +98,7 @@ router.get('/api/notifications', requireAuth, async (req, res) => {
   try {
     const caregiverId = await getCaregiverIdForUser(req.auth.userId);
     if (!caregiverId) {
-      return res.status(404).json({ error: 'Caregiver not found' });
+      return sendError(res, 404, { error: 'Caregiver not found' });
     }
 
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -110,7 +112,7 @@ router.get('/api/notifications', requireAuth, async (req, res) => {
       .limit(limit)
       .offset(offset);
 
-    res.json(results);
+    res.json(results.map(decryptNotificationRow));
   } catch (error) {
     routeError(res, error, 'GET /api/notifications');
   }
@@ -119,11 +121,11 @@ router.get('/api/notifications', requireAuth, async (req, res) => {
 // ---------------------------------------------------------------------------
 // PATCH /api/notifications/:id/read — mark notification as read
 // ---------------------------------------------------------------------------
-router.patch('/api/notifications/:id/read', requireAuth, async (req, res) => {
+router.patch('/api/notifications/:id/read', requireAuth, idempotencyMiddleware, async (req, res) => {
   try {
     const caregiverId = await getCaregiverIdForUser(req.auth.userId);
     if (!caregiverId) {
-      return res.status(404).json({ error: 'Caregiver not found' });
+      return sendError(res, 404, { error: 'Caregiver not found' });
     }
 
     const [updated] = await db.update(notifications)
@@ -135,10 +137,10 @@ router.patch('/api/notifications/:id/read', requireAuth, async (req, res) => {
       .returning();
 
     if (!updated) {
-      return res.status(404).json({ error: 'Notification not found' });
+      return sendError(res, 404, { error: 'Notification not found' });
     }
 
-    res.json(updated);
+    res.json(decryptNotificationRow(updated));
   } catch (error) {
     routeError(res, error, 'PATCH /api/notifications/:id/read');
   }
@@ -152,7 +154,7 @@ router.post('/api/notifications/trigger', requireServiceApiKey, async (req, res)
   try {
     const parsed = notificationTriggerSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({
+      return sendError(res, 400, {
         error: 'Validation error',
         details: parsed.error.flatten().fieldErrors,
       });

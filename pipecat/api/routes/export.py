@@ -7,12 +7,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 
 from api.middleware.auth import require_auth, AuthContext
 from db.client import query_one, query_many
 from lib.encryption import decrypt, decrypt_json
+from lib.phi import decrypt_daily_context_phi, decrypt_reminder_phi, decrypt_senior_phi
+from services.audit import write_audit, auth_to_role
 
 router = APIRouter()
 
@@ -81,9 +83,40 @@ def _decrypt_conversations(rows: list[dict]) -> list[dict]:
     return exported
 
 
+def _decrypt_memories(rows: list[dict]) -> list[dict]:
+    """Decrypt memory PHI for authorized export responses."""
+    exported = []
+    for row in rows:
+        clean = dict(row)
+        if clean.get("content_encrypted"):
+            clean["content"] = decrypt(clean["content_encrypted"])
+        clean.pop("content_encrypted", None)
+        exported.append(clean)
+    return exported
+
+
+def _decrypt_call_analyses(rows: list[dict]) -> list[dict]:
+    """Decrypt call analysis details for authorized export responses."""
+    exported = []
+    for row in rows:
+        clean = dict(row)
+        full = decrypt_json(clean["analysis_encrypted"]) if clean.get("analysis_encrypted") else {}
+        if isinstance(full, dict):
+            clean["summary"] = clean.get("summary") or full.get("summary")
+            clean["topics"] = clean.get("topics") or full.get("topics_discussed") or full.get("topics")
+            clean["concerns"] = clean.get("concerns") or full.get("concerns")
+            clean["positive_observations"] = clean.get("positive_observations") or full.get("positive_observations")
+            clean["follow_up_suggestions"] = clean.get("follow_up_suggestions") or full.get("follow_up_suggestions")
+            clean["call_quality"] = clean.get("call_quality") or full.get("call_quality")
+        clean.pop("analysis_encrypted", None)
+        exported.append(clean)
+    return exported
+
+
 @router.get("/api/seniors/{senior_id}/export")
 async def export_senior_data(
     senior_id: str,
+    request: Request,
     auth: AuthContext = Depends(require_auth),
 ):
     """Export all data for a senior (HIPAA right-to-access).
@@ -110,14 +143,15 @@ async def export_senior_data(
     )
 
     memories = await query_many(
-        """SELECT id, senior_id, type, content, source, importance, metadata,
+        """SELECT id, senior_id, type, content, content_encrypted, source, importance, metadata,
                   created_at, last_accessed_at
            FROM memories WHERE senior_id = $1 ORDER BY created_at DESC""",
         senior_id,
     )
 
     reminders = await query_many(
-        """SELECT id, senior_id, type, title, description, scheduled_time,
+        """SELECT id, senior_id, type, title, title_encrypted,
+                  description, description_encrypted, scheduled_time,
                   is_recurring, cron_expression, is_active, last_delivered_at, created_at
            FROM reminders WHERE senior_id = $1 ORDER BY created_at DESC""",
         senior_id,
@@ -126,14 +160,15 @@ async def export_senior_data(
     call_analyses = await query_many(
         """SELECT id, conversation_id, senior_id, summary, topics,
                   engagement_score, concerns, positive_observations,
-                  follow_up_suggestions, call_quality, created_at
+                  follow_up_suggestions, call_quality, analysis_encrypted, created_at
            FROM call_analyses WHERE senior_id = $1 ORDER BY created_at DESC""",
         senior_id,
     )
 
     daily_context = await query_many(
         """SELECT id, senior_id, call_date, call_sid, topics_discussed,
-                  reminders_delivered, advice_given, key_moments, summary, created_at
+                  reminders_delivered, advice_given, key_moments, summary,
+                  context_encrypted, created_at
            FROM daily_call_context WHERE senior_id = $1 ORDER BY call_date DESC""",
         senior_id,
     )
@@ -151,16 +186,33 @@ async def export_senior_data(
         r=len(reminders),
     )
 
+    await write_audit(
+        user_id=auth.user_id,
+        user_role=auth_to_role(auth),
+        action="export",
+        resource_type="senior",
+        resource_id=senior_id,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        metadata={
+            "conversations": len(conversations),
+            "memories": len(memories),
+            "reminders": len(reminders),
+            "surface": "pipecat_export",
+        },
+    )
+
     # Strip embedding vectors from senior (if call_context_snapshot has any)
-    clean_senior = {k: v for k, v in senior.items() if k != "embedding"}
+    decrypted_senior = decrypt_senior_phi(senior) or senior
+    clean_senior = {k: v for k, v in decrypted_senior.items() if k != "embedding"}
 
     return {
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "senior": _clean_rows([clean_senior])[0] if clean_senior else None,
         "conversations": _clean_rows(_decrypt_conversations(conversations)),
-        "memories": _clean_rows(memories),
-        "reminders": _clean_rows(reminders),
-        "call_analyses": _clean_rows(call_analyses),
-        "daily_context": _clean_rows(daily_context),
+        "memories": _clean_rows(_decrypt_memories(memories)),
+        "reminders": _clean_rows([decrypt_reminder_phi(row) for row in reminders]),
+        "call_analyses": _clean_rows(_decrypt_call_analyses(call_analyses)),
+        "daily_context": _clean_rows([decrypt_daily_context_phi(row) for row in daily_context]),
         "caregiver_links": _clean_rows(caregiver_links),
     }

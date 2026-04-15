@@ -81,6 +81,19 @@ class TestSeniorContext:
         ctx = _build_senior_context(state)
         assert "Yesterday" in ctx
 
+    def test_includes_temporal_grounding_guard(self):
+        state = _make_session_state(
+            last_call_analysis={
+                "call_time_label": "Earlier today at 3:00 PM (about 30 minutes ago)",
+                "follow_up_suggestions": ["Ask about the workout planned for tomorrow."],
+            }
+        )
+        ctx = _build_senior_context(state)
+        assert "Current time:" in ctx
+        assert "do not ask whether it already happened yet" in ctx
+        assert "Earlier today at 3:00 PM" in ctx
+        assert "Timing guard" in ctx
+
     def test_handles_no_senior(self):
         state = _make_session_state(senior=None)
         ctx = _build_senior_context(state)

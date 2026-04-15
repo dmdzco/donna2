@@ -1,5 +1,8 @@
 # Donna Voice AI: Framework Analysis, SOTA Takeaways & Migration Plan
 
+> Historical framework analysis. Donna has since migrated active live-call handling to the Pipecat service.
+> Use `DIRECTORY.md`, `docs/architecture/ARCHITECTURE.md`, and `pipecat/docs/ARCHITECTURE.md` for current architecture.
+
 > **Purpose:** Deep analysis of open-source voice AI frameworks (Pipecat, LiveKit) compared to Donna's current implementation, with SOTA best practices and a concrete migration plan.
 
 ## Sources

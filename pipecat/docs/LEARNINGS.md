@@ -90,7 +90,19 @@ The Guidance Director prompt went from ~200 tokens (everything) to ~130 tokens (
 `AnthropicLLMService.create_context_aggregator()` calls `set_llm_adapter()` which only exists on `OpenAILLMContext`. Using the generic `LLMContext` causes an instant crash with no error logs. This is a Pipecat v0.0.101 limitation — revisit when the Anthropic adapter is updated.
 
 ### Cartesia TTS Must Output PCM
-Cartesia with `pcm_mulaw` encoding causes garbled Twilio audio — Pipecat's `TwilioFrameSerializer` assumes all `TTSAudioRawFrame` data is PCM and re-encodes to mulaw. Double-encoding = garbled. Always output PCM from TTS; let the serializer handle mulaw conversion. Current code relies on Cartesia SDK defaults (which output PCM).
+Cartesia with `pcm_mulaw` encoding causes garbled Twilio audio — Pipecat's `TwilioFrameSerializer` assumes all `TTSAudioRawFrame` data is PCM and re-encodes to mulaw. Double-encoding = garbled. Always output PCM from TTS and let the serializer handle the final telephony conversion.
+
+Current runtime code explicitly requests `pcm_s16le` from Cartesia and sets the internal Cartesia sample rate to `CARTESIA_OUTPUT_SAMPLE_RATE` (default `48000`). `pcm_s16le` is the sample format, not the sample rate: it can be used at `8kHz`, `16kHz`, `44.1kHz`, or `48kHz`. We keep high-rate PCM inside Pipecat, then `TwilioFrameSerializer` performs the unavoidable final conversion to Twilio's `8kHz` μ-law wire format.
+
+### Internal Audio Should Stay Higher Quality Than The Phone Wire
+Do not set the whole pipeline to Twilio's `8kHz` unless debugging a serializer problem. The current default profile in `bot.py` is:
+
+- **Telephony/STT input**: `TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE=16000`. Twilio still sends `8kHz` μ-law, but the serializer converts it to `16kHz` PCM before Deepgram.
+- **Cartesia output**: `CARTESIA_OUTPUT_SAMPLE_RATE=48000`, `pcm_s16le`.
+- **ElevenLabs output**: `ELEVENLABS_OUTPUT_SAMPLE_RATE=44100`.
+- **Gemini Live output**: `GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE=24000`.
+
+This removes self-inflicted degradation while keeping one controlled downsample at the telephony edge. For Twilio, the final wire is still `8kHz` μ-law. For a future Telnyx path, the target should be `16kHz` at the Telnyx edge after the serializer supports the right codec.
 
 ### VAD Settings Are Caller-Type Dependent
 Senior calls use `stop_secs=1.2` — elderly speakers pause longer between thoughts, have softer voices, and speak more slowly. Default settings cut them off. **Tuned settings:** `confidence=0.6`, `stop_secs=1.2`, `min_volume=0.5`.
@@ -146,7 +158,7 @@ The Director's ephemeral context injection (via `LLMMessagesAppendFrame`) has no
 - **Model**: `models/gemini-3.1-flash-live-preview` (recommended; `gemini-2.5-flash-native-audio-preview-12-2025` is deprecated)
 - **Voices**: Full 30-voice TTS list applies (Aoede, Kore, Charon, Puck, etc.) — NOT the small subset in older Pipecat docs
 - **Audio in**: Set `audio_in_sample_rate=16000` — TwilioFrameSerializer upsamples 8kHz mulaw to 16kHz PCM, which is what Gemini expects. Sending 8kHz causes poor transcription.
-- **Audio out**: `audio_out_sample_rate=8000` — serializer downsamples Gemini's 24kHz output to 8kHz mulaw for Twilio automatically.
+- **Audio out**: `audio_out_sample_rate=24000` by default — keep Gemini audio at its native internal rate; TwilioFrameSerializer downsamples the output frame to 8kHz μ-law only at the edge.
 - **Tool format**: `[{"function_declarations": [...]}]` passed as-is to `GeminiLiveLLMService(tools=...)` — Pipecat falls through to raw dict when not a `ToolsSchema`.
 - **Greeting trigger**: Send `InputTextRawFrame(text="[Begin]")` ~1.5s after pipeline start to trigger Donna to speak first on outbound calls.
 

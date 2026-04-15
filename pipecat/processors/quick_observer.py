@@ -363,6 +363,8 @@ class QuickObserverProcessor(FrameProcessor):
             # Inject guidance into LLM context if there is any.
             # Use "user" role — Anthropic rejects "system" in the messages array.
             if analysis.guidance:
+                if self._session_state is not None:
+                    self._session_state["_pending_observer_guidance"] = analysis.guidance
                 guidance_msg = {
                     "role": "user",
                     "content": f"[EPHEMERAL: Observer guidance — do not read aloud]\n{analysis.guidance}",

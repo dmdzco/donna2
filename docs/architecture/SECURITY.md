@@ -157,7 +157,21 @@ Donna stores newly persisted conversation transcripts and call summaries in AES-
 - `conversations.transcript_text_encrypted` stores a plain-text transcript rendering for future retrieval and analysis.
 - `conversations.summary_encrypted` stores call summaries used by caregiver and admin views.
 
-The legacy plaintext `conversations.transcript` and `conversations.summary` columns remain read fallbacks for rows created before the encrypted migration and are included in retention purges. New transcript writes should not populate `conversations.transcript`.
+The legacy plaintext `conversations.transcript`, `conversations.summary`, and `conversations.concerns` columns remain read fallbacks for rows created before the encrypted migration and are included in retention purges. New transcript, summary, and concern writes should not populate those plaintext columns.
+
+New semantic memory writes store the memory body in `memories.content_encrypted` and use a non-PHI placeholder in the legacy non-null `memories.content` column. New call analysis writes store PHI-bearing analysis details in `call_analyses.analysis_encrypted`; legacy plaintext analysis columns remain read fallbacks for older rows.
+
+Redis/shared-state call payloads are also treated as PHI. Pipecat writes `call_metadata:{call_sid}` and `reminder_ctx:{call_sid}` through `pipecat/lib/shared_state_phi.py`, storing encrypted strings in Redis with short TTLs while preserving read compatibility for legacy raw dict entries during deployment.
+
+The remaining high-risk PHI fields now follow the same companion-column pattern:
+
+- Senior profile PHI: `family_info_encrypted`, `medical_notes_encrypted`, `preferred_call_times_encrypted`, `additional_info_encrypted`, and `call_context_snapshot_encrypted`.
+- Reminders: `title_encrypted`, `description_encrypted`, and `reminder_deliveries.user_response_encrypted`.
+- Daily call context: `daily_call_context.context_encrypted`.
+- Notifications: `content_encrypted` and `metadata_encrypted`.
+- Waitlist/prospect/caregiver-note data: `waitlist.payload_encrypted`, `prospects.details_encrypted`, and `caregiver_notes.content_encrypted`.
+
+New Node and Pipecat writes populate these encrypted columns and keep legacy PHI columns blank or set to the non-PHI placeholder `[encrypted]` where a `NOT NULL` constraint still exists. Reads and exports decrypt server-side only after authentication/authorization and fall back to legacy plaintext during the migration window.
 
 Caregiver clients do not receive encrypted blobs or decryption keys. The Node API authenticates the caregiver, verifies per-senior access, decrypts the summary server-side, and returns summary-only call records via `/api/seniors/:id/calls`. Admin conversation routes may return decrypted transcripts for the admin transcript viewer.
 
@@ -193,7 +207,7 @@ Global exception handlers prevent internal details from leaking:
 
 - All env vars centralized in a `frozen=True` dataclass (immutable after load)
 - `lru_cache(maxsize=1)` ensures single-load behavior
-- `ENVIRONMENT=production` or `RAILWAY_PUBLIC_DOMAIN` enables production fail-closed behavior
+- `ENVIRONMENT=production` or `RAILWAY_PUBLIC_DOMAIN` enables production fail-closed behavior. This applies to Railway staging too, because staging has a public Railway domain.
 - `JWT_SECRET`, `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `TWILIO_AUTH_TOKEN`, and `PIPECAT_PUBLIC_URL` are required in production
 - Node also requires `CLERK_SECRET_KEY` for Clerk-authenticated routes in production
 - `PIPECAT_REQUIRE_REDIS=true` requires `REDIS_URL` before horizontal scaling
@@ -202,7 +216,7 @@ Global exception handlers prevent internal details from leaking:
 
 ### Deployment Checklist
 
-Before promoting a production deployment:
+Before deploying any public Railway environment, including staging and production:
 
 - Set `ENVIRONMENT=production` on Railway services.
 - Set `PIPECAT_PUBLIC_URL=https://...` to the public Pipecat service URL.
@@ -215,17 +229,18 @@ Before promoting a production deployment:
 - Verify Railway logs do not contain prompt context, transcripts, medical notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
 - Smoke test real Twilio signatures, signed TwiML with `ws_token`, `/ws` token rejection/reuse, and a call longer than five minutes.
 
-### Remaining PHI Encryption Action Item
+### PHI Encryption Migration Runbook
 
-The staged PHI encryption/export migration is intentionally separate from ingress/auth hardening.
+The code and schema support encrypted-only new writes, but each deployed database still needs the migration/backfill sequence:
 
-Scope for that follow-up:
+1. Apply `db/migrations/002_encrypt_remaining_phi.sql` or `pipecat/db/migrations/009_encrypt_remaining_phi.sql` to the target Neon database.
+2. Deploy Node and Pipecat with the same 32-byte `FIELD_ENCRYPTION_KEY`.
+3. Run `node scripts/backfill-encrypted-phi.js --write` against the target database. The script logs counts only and does not print PHI.
+4. Verify admin reads, senior export, reminder calls, daily context, notifications, and onboarding still work.
+5. Run `node scripts/backfill-encrypted-phi.js --write --null-plaintext` to clear legacy PHI columns after verification.
+6. Re-run export and reminder-call smoke tests, then review Railway logs for PHI leakage.
 
-- Add encrypted companion columns for highest-risk plaintext PHI fields that are not yet covered, starting with senior medical notes, family info, additional info, call context snapshots, reminders, daily context, notifications, and caregiver notes.
-- Backfill encrypted values in batches and log counts only.
-- Change reads to prefer encrypted columns and fall back to plaintext only during the migration window.
-- Update exports to decrypt only at the authorized boundary and fail on decryption errors rather than silently falling back to stale plaintext.
-- Stop writing remaining plaintext PHI fields, then null/drop plaintext columns only after backfill verification and release validation.
+Operational lookup/display fields such as senior name, phone, timezone, city/state/ZIP, and interests remain plaintext for now. Treat them as minimized PII/operational data, not as a substitute for the encrypted PHI fields.
 
 ---
 
@@ -251,12 +266,12 @@ Scope for that follow-up:
 
 | File | Purpose |
 |------|---------|
-| `pipecat/api/middleware/auth.py` | 3-tier authentication (109 LOC) |
+| `pipecat/api/middleware/auth.py` | 3-tier authentication (238 LOC) |
 | `middleware/api-auth.js` | Node service API key auth with constant-time comparison |
-| `pipecat/api/middleware/twilio.py` | Twilio webhook signature validation (53 LOC) |
-| `pipecat/api/middleware/rate_limit.py` | 5-tier rate limiting config (17 LOC) |
-| `pipecat/api/middleware/security.py` | Security headers (31 LOC) |
-| `pipecat/api/middleware/error_handler.py` | Safe error responses (34 LOC) |
-| `pipecat/api/validators/schemas.py` | Pydantic input schemas (143 LOC) |
-| `pipecat/lib/sanitize.py` | PII masking utilities (39 LOC) |
-| `pipecat/config.py` | Centralized env vars (132 LOC) |
+| `pipecat/api/middleware/twilio.py` | Twilio webhook signature validation (113 LOC) |
+| `pipecat/api/middleware/rate_limit.py` | 5-tier rate limiting config (16 LOC) |
+| `pipecat/api/middleware/security.py` | Security headers (30 LOC) |
+| `pipecat/api/middleware/error_handler.py` | Safe error responses (33 LOC) |
+| `pipecat/api/validators/schemas.py` | Pydantic input schemas (139 LOC) |
+| `pipecat/lib/sanitize.py` | PII masking utilities (38 LOC) |
+| `pipecat/config.py` | Centralized env vars (310 LOC) |

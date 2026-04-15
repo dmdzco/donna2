@@ -9,6 +9,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import { tokenRevocationService } from '../services/token-revocation.js';
 import { logAudit } from '../services/audit.js';
 import { DEFAULT_JWT_SECRET, isProductionEnv } from '../lib/security-config.js';
+import { routeError } from './helpers.js';
 
 const router = Router();
 if (isProductionEnv() && (!process.env.JWT_SECRET || process.env.JWT_SECRET === DEFAULT_JWT_SECRET)) {
@@ -96,8 +97,7 @@ router.post('/api/admin/login', authLimiter, async (req, res) => {
       admin: { id: admin.id, email: admin.email, name: admin.name },
     });
   } catch (error) {
-    console.error('[Admin Auth] Login error:', error);
-    res.status(500).json({ error: 'Login failed' });
+    routeError(res, error, 'POST /api/admin/login');
   }
 });
 
@@ -147,7 +147,7 @@ router.get('/api/admin/me', async (req, res) => {
     if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
-    res.status(500).json({ error: 'Auth check failed' });
+    routeError(res, error, 'GET /api/admin/me');
   }
 });
 
@@ -162,8 +162,7 @@ router.post('/api/admin/revoke-token', requireAdmin, async (req, res) => {
     await tokenRevocationService.revokeToken(token, req.auth.userId, reason || '');
     res.json({ success: true, message: 'Token revoked' });
   } catch (error) {
-    console.error('[Admin Auth] Revoke token error:', error);
-    res.status(500).json({ error: 'Failed to revoke token' });
+    routeError(res, error, 'POST /api/admin/revoke-token');
   }
 });
 
@@ -178,8 +177,7 @@ router.post('/api/admin/revoke-all', requireAdmin, async (req, res) => {
     await tokenRevocationService.revokeAllForAdmin(adminId, req.auth.userId, reason || '');
     res.json({ success: true, message: `All tokens revoked for admin ${adminId}` });
   } catch (error) {
-    console.error('[Admin Auth] Revoke all error:', error);
-    res.status(500).json({ error: 'Failed to revoke tokens' });
+    routeError(res, error, 'POST /api/admin/revoke-all');
   }
 });
 
@@ -191,8 +189,7 @@ router.post('/api/admin/logout', requireAdmin, async (req, res) => {
     await tokenRevocationService.revokeToken(token, req.auth.userId, 'logout');
     res.json({ success: true, message: 'Logged out' });
   } catch (error) {
-    console.error('[Admin Auth] Logout error:', error);
-    res.status(500).json({ error: 'Logout failed' });
+    routeError(res, error, 'POST /api/admin/logout');
   }
 });
 

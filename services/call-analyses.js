@@ -49,17 +49,24 @@ export function normalizeCallAnalysis(row) {
   const encrypted = fromEncrypted(row);
   const summary = row.summary || encrypted.summary || null;
   const engagementScore = row.engagementScore ?? encrypted.engagement_score ?? null;
+  const sentiment = encrypted.sentiment || null;
+  const mood = encrypted.mood || null;
 
   return {
     id: row.id,
     conversationId: row.conversationId,
     seniorId: row.seniorId,
     summary,
+    sentiment,
+    mood,
     topics: coalesceArray(row.topics, encrypted.topics_discussed, encrypted.topics),
     engagementScore,
     concerns: coalesceArray(row.concerns, encrypted.concerns),
     positiveObservations: coalesceArray(row.positiveObservations, encrypted.positive_observations),
     followUpSuggestions: coalesceArray(row.followUpSuggestions, encrypted.follow_up_suggestions),
+    caregiverSms: encrypted.caregiver_sms || null,
+    caregiverTakeaways: coalesceArray(encrypted.caregiver_takeaways),
+    recommendedCaregiverAction: encrypted.recommended_caregiver_action || null,
     callQuality: coalesceObject(row.callQuality, encrypted.call_quality),
     createdAt: row.createdAt,
   };

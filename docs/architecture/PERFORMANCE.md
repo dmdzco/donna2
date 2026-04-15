@@ -15,20 +15,34 @@ User speaks → [STT] → [Observer] → [Director] → [LLM] → [TTS] → Audi
 
 | Component | Latency | Type | Notes |
 |-----------|---------|------|-------|
-| Deepgram STT | ~200-300ms | Streaming | Nova 3, 8kHz mulaw, interim results |
+| Deepgram STT | ~200-300ms | Streaming | Nova 3, Twilio 8kHz μ-law converted to internal 16kHz PCM, interim results |
 | Quick Observer | 0ms | Blocking | Regex pattern data, inline |
 | Conversation Director | Async | Non-blocking | Groq primary, Gemini fallback; speculative results can be injected same-turn |
 | Claude Sonnet 4.5 | ~500-1500ms | Streaming | Token-by-token via Pipecat |
-| ElevenLabs TTS | ~200-400ms | Streaming | turbo_v2_5, first chunk |
+| TTS | ~200-400ms | Streaming | ElevenLabs by default at internal 44.1kHz PCM; Cartesia flag path at 48kHz PCM |
 | **Total perceived** | **~1-2s** | | First audio chunk to user |
 
 **Key insight**: The Director runs asynchronously — it doesn't add to the pipeline's critical path. Its analysis from the previous turn is injected before the current LLM call.
+
+### Audio Quality Policy
+
+Runtime source of truth: `pipecat/bot.py:get_audio_profile()`, `pipecat/bot_gemini.py`, and the active telephony serializer.
+
+Donna keeps audio higher quality internally than Twilio's phone wire:
+
+- `TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE=16000` for STT input.
+- `ELEVENLABS_OUTPUT_SAMPLE_RATE=44100` for ElevenLabs TTS output.
+- `CARTESIA_OUTPUT_SAMPLE_RATE=48000` with `pcm_s16le` for Cartesia Sonic 3.
+- `GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE=24000` for the Gemini Live evaluation path.
+- `TwilioFrameSerializer` performs the final required downsample/re-encode to Twilio's `8kHz` μ-law output.
+
+This avoids degrading the whole pipeline to `8kHz` early while preserving Twilio compatibility.
 
 ---
 
 ## Predictive Context Engine
 
-**File**: `pipecat/services/prefetch.py` (250 LOC)
+**File**: `pipecat/services/prefetch.py` (329 LOC)
 
 Speculative memory prefetch that starts while the user is still speaking:
 
@@ -130,7 +144,7 @@ Alert thresholds:
 
 ## Circuit Breakers
 
-**File**: `pipecat/lib/circuit_breaker.py` (89 LOC)
+**File**: `pipecat/lib/circuit_breaker.py` (109 LOC)
 
 Prevents cascading failures when external services are slow or unavailable:
 
@@ -242,7 +256,19 @@ User: "Bye Donna!"
 
 ## Performance Monitoring
 
-### Health Endpoint (`/health`)
+### Liveness Endpoint (`/live`)
+
+Railway deploy health checks use Pipecat's lightweight `/live` endpoint. It
+only verifies that the FastAPI process is serving requests and does not touch
+Postgres, Redis, LLM providers, or other external dependencies. This keeps
+deploys from failing during a short staging cold-start window before the
+readiness smoke test can run.
+
+### Readiness Endpoint (`/health`)
+
+`/health` remains the readiness endpoint for CI smoke tests and monitoring. It
+verifies database reachability and reports pool, cache, circuit breaker, and
+call metrics.
 
 ```json
 {
@@ -278,9 +304,9 @@ User: "Bye Donna!"
 
 | File | Purpose |
 |------|---------|
-| `pipecat/services/prefetch.py` | Predictive context prefetch engine (250 LOC) |
-| `pipecat/lib/circuit_breaker.py` | Circuit breaker pattern (89 LOC) |
-| `pipecat/db/client.py` | Pool config, slow query logging (115 LOC) |
-| `pipecat/main.py` | Health endpoint, graceful shutdown (300 LOC) |
-| `pipecat/processors/quick_observer.py` | Programmatic call ending (386 LOC) |
+| `pipecat/services/prefetch.py` | Predictive context prefetch engine (329 LOC) |
+| `pipecat/lib/circuit_breaker.py` | Circuit breaker pattern (109 LOC) |
+| `pipecat/db/client.py` | Pool config, slow query logging (126 LOC) |
+| `pipecat/main.py` | Health endpoint, graceful shutdown (438 LOC) |
+| `pipecat/processors/quick_observer.py` | Programmatic call ending (404 LOC) |
 | `db/migrations/001_add_indexes.sql` | HNSW + B-tree indexes |

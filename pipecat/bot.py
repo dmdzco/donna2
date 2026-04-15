@@ -144,8 +144,14 @@ async def prepare_websocket_call(
     }
 
 
-SUPPORTED_CARTESIA_SAMPLE_RATES = {8000, 16000, 22050, 24000, 44100, 48000}
-SUPPORTED_ELEVENLABS_SAMPLE_RATES = {8000, 16000, 22050, 24000, 44100}
+SUPPORTED_CARTESIA_SAMPLE_RATES = {16000, 22050, 24000, 44100, 48000}
+SUPPORTED_ELEVENLABS_SAMPLE_RATES = {16000, 22050, 24000, 44100}
+TELNYX_REQUIRED_CODEC = "L16"
+TELNYX_REQUIRED_SAMPLE_RATE = 16000
+
+
+class TelnyxAudioConfigError(Exception):
+    """Raised when Telnyx starts a stream below Donna's required audio profile."""
 
 
 def resolve_tts_provider(session_state: dict) -> str:
@@ -228,17 +234,6 @@ def create_tts_service(session_state: dict):
     )
 
 
-def _telnyx_sample_rate_for_codec(codec: str, configured_rate: int) -> int:
-    codec = (codec or "").upper()
-    if codec in {"PCMU", "PCMA", "G722"}:
-        return 8000
-    if codec == "L16":
-        return 16000
-    if codec in {"OPUS", "AMR-WB"}:
-        return configured_rate or 16000
-    return 8000
-
-
 def _create_telephony_serializer(
     *,
     transport_type: str,
@@ -249,27 +244,30 @@ def _create_telephony_serializer(
 ):
     """Create the provider serializer at the only lossy audio boundary."""
     if transport_type == "telnyx":
-        outbound_encoding = (call_data.get("outbound_encoding") or cfg.telnyx_stream_codec or "L16").upper()
-        inbound_encoding = (cfg.telnyx_stream_codec or outbound_encoding).upper()
-        sample_rate = _telnyx_sample_rate_for_codec(outbound_encoding, cfg.telnyx_stream_sample_rate)
+        observed_encoding = (call_data.get("outbound_encoding") or "").upper()
+        if observed_encoding and observed_encoding != TELNYX_REQUIRED_CODEC:
+            raise TelnyxAudioConfigError(
+                f"Telnyx stream started as {observed_encoding}; "
+                f"Donna Telnyx requires {TELNYX_REQUIRED_CODEC}/{TELNYX_REQUIRED_SAMPLE_RATE}Hz"
+            )
 
         logger.info(
             "[{cs}] Telnyx serializer codec_in={codec_in} codec_out={codec_out} wire_rate={rate}Hz",
             cs=call_sid,
-            codec_in=outbound_encoding,
-            codec_out=inbound_encoding,
-            rate=sample_rate,
+            codec_in=TELNYX_REQUIRED_CODEC,
+            codec_out=TELNYX_REQUIRED_CODEC,
+            rate=TELNYX_REQUIRED_SAMPLE_RATE,
         )
         return DonnaTelnyxFrameSerializer(
             stream_id=stream_sid,
             call_control_id=call_sid,
-            outbound_encoding=outbound_encoding,
-            inbound_encoding=inbound_encoding,
+            outbound_encoding=TELNYX_REQUIRED_CODEC,
+            inbound_encoding=TELNYX_REQUIRED_CODEC,
             api_key=cfg.telnyx_api_key,
             params=DonnaTelnyxFrameSerializer.InputParams(
-                telnyx_sample_rate=sample_rate,
-                outbound_encoding=outbound_encoding,
-                inbound_encoding=inbound_encoding,
+                telnyx_sample_rate=TELNYX_REQUIRED_SAMPLE_RATE,
+                outbound_encoding=TELNYX_REQUIRED_CODEC,
+                inbound_encoding=TELNYX_REQUIRED_CODEC,
             ),
         )
 
@@ -494,17 +492,38 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     # Transport (Twilio ↔ FastAPI WebSocket)
     # -------------------------------------------------------------------------
     # Onboarding callers are adult caregivers (typical speech pace) — shorter pause.
-    # Senior calls use longer pause tolerance for elderly speech patterns.
+    # Senior Twilio calls keep longer pause tolerance for elderly speech patterns.
+    # Telnyx L16 has cleaner audio than Twilio μ-law, so use a more responsive VAD
+    # profile while we validate barge-in and turn latency on the new provider.
     is_onboarding = session_state.get("call_type") == "onboarding"
-    vad_stop_secs = 0.8 if is_onboarding else 1.2
-
-    serializer = _create_telephony_serializer(
-        transport_type=transport_type,
-        call_data=call_data,
-        stream_sid=stream_sid,
-        call_sid=call_sid,
-        cfg=cfg,
+    if transport_type == "telnyx":
+        vad_stop_secs = 0.8
+        vad_confidence = 0.5
+        vad_min_volume = 0.35
+    else:
+        vad_stop_secs = 0.8 if is_onboarding else 1.2
+        vad_confidence = 0.6
+        vad_min_volume = 0.5
+    logger.info(
+        "[{cs}] VAD profile provider={provider} confidence={confidence} stop_secs={stop_secs} min_volume={min_volume}",
+        cs=call_sid,
+        provider=transport_type,
+        confidence=vad_confidence,
+        stop_secs=vad_stop_secs,
+        min_volume=vad_min_volume,
     )
+
+    try:
+        serializer = _create_telephony_serializer(
+            transport_type=transport_type,
+            call_data=call_data,
+            stream_sid=stream_sid,
+            call_sid=call_sid,
+            cfg=cfg,
+        )
+    except TelnyxAudioConfigError as exc:
+        logger.error("[{cs}] {err}", cs=call_sid, err=str(exc))
+        return
 
     transport = FastAPIWebsocketTransport(
         websocket=websocket,
@@ -514,9 +533,9 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(
-                    confidence=0.6,
+                    confidence=vad_confidence,
                     stop_secs=vad_stop_secs,
-                    min_volume=0.5,
+                    min_volume=vad_min_volume,
                 ),
             ),
             serializer=serializer,

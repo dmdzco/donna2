@@ -7,6 +7,17 @@ from pipecat.frames.frames import OutputAudioRawFrame, StartFrame
 from serializers.telnyx import DonnaTelnyxFrameSerializer
 
 
+def test_telnyx_serializer_rejects_narrowband_codecs():
+    with pytest.raises(ValueError, match="only supports L16"):
+        DonnaTelnyxFrameSerializer(
+            stream_id="stream-1",
+            call_control_id="v2:test",
+            outbound_encoding="PCMU",
+            inbound_encoding="PCMU",
+            api_key="test-key",
+        )
+
+
 @pytest.mark.asyncio
 async def test_telnyx_l16_serializer_keeps_pcm_until_wire_boundary():
     serializer = DonnaTelnyxFrameSerializer(

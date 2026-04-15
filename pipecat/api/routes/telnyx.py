@@ -36,6 +36,9 @@ from lib.sanitize import mask_phone
 
 router = APIRouter()
 
+TELNYX_STREAM_CODEC = "L16"
+TELNYX_STREAM_SAMPLE_RATE = 16000
+
 _TERMINAL_EVENTS = {
     "call.hangup",
     "call.completed",
@@ -93,19 +96,13 @@ def _telnyx_stream_url(ws_token: str) -> str:
 
 
 def _telnyx_stream_options(ws_token: str) -> dict[str, Any]:
-    cfg = get_settings()
-    codec = (cfg.telnyx_stream_codec or "L16").upper()
-    if codec not in {"PCMU", "PCMA", "G722", "OPUS", "AMR-WB", "L16"}:
-        logger.warning("Unsupported TELNYX_STREAM_CODEC={codec}; using L16", codec=codec)
-        codec = "L16"
-
     return {
         "stream_url": _telnyx_stream_url(ws_token),
         "stream_track": "both_tracks",
-        "stream_codec": codec,
+        "stream_codec": TELNYX_STREAM_CODEC,
         "stream_bidirectional_mode": "rtp",
-        "stream_bidirectional_codec": codec,
-        "stream_bidirectional_sampling_rate": cfg.telnyx_stream_sample_rate,
+        "stream_bidirectional_codec": TELNYX_STREAM_CODEC,
+        "stream_bidirectional_sampling_rate": TELNYX_STREAM_SAMPLE_RATE,
     }
 
 
@@ -164,6 +161,7 @@ async def _store_senior_metadata(
     call_type: str,
     target_phone: str,
     ws_token: str,
+    start_stream_after_answer: bool,
 ) -> dict:
     hydrated = await _hydrate_senior_call_context(
         senior=senior,
@@ -204,6 +202,9 @@ async def _store_senior_metadata(
         "ws_token_expires_at": time.time() + 300,
         "ws_token_consumed": False,
         "telephony_provider": "telnyx",
+        "telnyx_start_stream_after_answer": start_stream_after_answer,
+        "telnyx_stream_codec": TELNYX_STREAM_CODEC,
+        "telnyx_stream_sample_rate": TELNYX_STREAM_SAMPLE_RATE,
     }
 
     async with _metadata_lock:
@@ -236,6 +237,7 @@ async def _store_prospect_metadata(
     call_control_id: str,
     target_phone: str,
     ws_token: str,
+    start_stream_after_answer: bool,
 ) -> None:
     prospect = None
     prospect_id = None
@@ -271,17 +273,30 @@ async def _store_prospect_metadata(
         "ws_token_expires_at": time.time() + 300,
         "ws_token_consumed": False,
         "telephony_provider": "telnyx",
+        "telnyx_start_stream_after_answer": start_stream_after_answer,
+        "telnyx_stream_codec": TELNYX_STREAM_CODEC,
+        "telnyx_stream_sample_rate": TELNYX_STREAM_SAMPLE_RATE,
     }
     async with _metadata_lock:
         call_metadata[call_control_id] = metadata
     await _persist_metadata(call_control_id, metadata)
 
 
-async def _answer_telnyx_call(call_control_id: str, ws_token: str) -> None:
-    payload = _telnyx_stream_options(ws_token)
+async def _answer_telnyx_call(call_control_id: str) -> None:
     endpoint = f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/answer"
-    await _telnyx_post(endpoint, payload)
-    logger.info("[{cid}] Telnyx inbound call answered with media stream", cid=call_control_id)
+    await _telnyx_post(endpoint, {})
+    logger.info("[{cid}] Telnyx inbound call answered; starting stream after call.answered", cid=call_control_id)
+
+
+async def _start_telnyx_stream(call_control_id: str, ws_token: str) -> None:
+    endpoint = f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/streaming_start"
+    await _telnyx_post(endpoint, _telnyx_stream_options(ws_token))
+    logger.info(
+        "[{cid}] Telnyx media stream started codec={codec} sample_rate={rate}Hz",
+        cid=call_control_id,
+        codec=TELNYX_STREAM_CODEC,
+        rate=TELNYX_STREAM_SAMPLE_RATE,
+    )
 
 
 async def _hangup_telnyx_call(call_control_id: str) -> None:
@@ -332,8 +347,9 @@ async def _handle_call_initiated(payload: dict[str, Any]) -> None:
             call_type="check-in",
             target_phone=target_phone,
             ws_token=ws_token,
+            start_stream_after_answer=True,
         )
-        await _answer_telnyx_call(call_control_id, ws_token)
+        await _answer_telnyx_call(call_control_id)
         return
 
     inactive_match = await find_any_by_phone(target_phone)
@@ -346,8 +362,38 @@ async def _handle_call_initiated(payload: dict[str, Any]) -> None:
         call_control_id=call_control_id,
         target_phone=target_phone,
         ws_token=ws_token,
+        start_stream_after_answer=True,
     )
-    await _answer_telnyx_call(call_control_id, ws_token)
+    await _answer_telnyx_call(call_control_id)
+
+
+async def _handle_call_answered(call_control_id: str) -> None:
+    async with _metadata_lock:
+        metadata = call_metadata.get(call_control_id)
+        if not metadata or not metadata.get("telnyx_start_stream_after_answer"):
+            return
+        if metadata.get("telnyx_stream_started"):
+            return
+        ws_token = metadata.get("ws_token")
+        if not ws_token:
+            logger.error("[{cid}] Cannot start Telnyx media stream: missing ws_token", cid=call_control_id)
+            return
+        metadata["telnyx_stream_started"] = True
+
+    try:
+        await _start_telnyx_stream(call_control_id, ws_token)
+    except Exception:
+        async with _metadata_lock:
+            current = call_metadata.get(call_control_id)
+            if current:
+                current["telnyx_stream_started"] = False
+        raise
+
+    async with _metadata_lock:
+        current = call_metadata.get(call_control_id)
+        if current:
+            current["telnyx_stream_started_at"] = time.time()
+            await _persist_metadata(call_control_id, current)
 
 
 @router.post("/telnyx/events")
@@ -367,6 +413,8 @@ async def telnyx_events(request: Request, background_tasks: BackgroundTasks):
 
     if event_type == "call.initiated":
         background_tasks.add_task(_handle_call_initiated, payload)
+    elif event_type == "call.answered" and call_control_id:
+        background_tasks.add_task(_handle_call_answered, call_control_id)
     elif event_type in _TERMINAL_EVENTS and call_control_id:
         await _cleanup_metadata(call_control_id)
         logger.info("[{cid}] Cleaned up Telnyx metadata event={event}", cid=call_control_id, event=event_type)
@@ -418,6 +466,7 @@ async def telnyx_outbound_call(
         call_type=body.call_type,
         target_phone=target_phone,
         ws_token=ws_token,
+        start_stream_after_answer=False,
     )
 
     logger.info("[{cid}] Initiated Telnyx outbound call for senior {sid}", cid=call_control_id, sid=str(senior["id"])[:8])

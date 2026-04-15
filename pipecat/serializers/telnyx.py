@@ -1,7 +1,7 @@
-"""Telnyx WebSocket serializer with L16 support.
+"""Telnyx WebSocket serializer for Donna's L16/16 kHz path.
 
-Pipecat 0.0.101's built-in Telnyx serializer only handles PCMU/PCMA. Donna's
-Telnyx path requests L16/16 kHz so the core pipeline can stay linear PCM until
+Pipecat 0.0.101's built-in Telnyx serializer is narrowband-oriented. Donna's
+Telnyx path requires L16/16 kHz so the core pipeline can stay linear PCM until
 the provider edge.
 """
 
@@ -18,11 +18,7 @@ from pydantic import BaseModel
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import (
-    alaw_to_pcm,
     create_stream_resampler,
-    pcm_to_alaw,
-    pcm_to_ulaw,
-    ulaw_to_pcm,
 )
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -62,6 +58,10 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
         self._params = params or DonnaTelnyxFrameSerializer.InputParams()
         self._params.outbound_encoding = outbound_encoding.upper()
         self._params.inbound_encoding = inbound_encoding.upper()
+        if self._params.outbound_encoding != "L16" or self._params.inbound_encoding != "L16":
+            raise ValueError("Donna Telnyx serializer only supports L16/16000Hz")
+        if self._params.telnyx_sample_rate != 16000:
+            raise ValueError("Donna Telnyx serializer requires 16000Hz")
 
         self._telnyx_sample_rate = self._params.telnyx_sample_rate
         self._sample_rate = 0
@@ -128,20 +128,6 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
 
     async def _encode_audio(self, pcm_bytes: bytes, in_rate: int) -> bytes | None:
         encoding = self._params.inbound_encoding
-        if encoding == "PCMU":
-            return await pcm_to_ulaw(
-                pcm_bytes,
-                in_rate,
-                self._telnyx_sample_rate,
-                self._output_resampler,
-            )
-        if encoding == "PCMA":
-            return await pcm_to_alaw(
-                pcm_bytes,
-                in_rate,
-                self._telnyx_sample_rate,
-                self._output_resampler,
-            )
         if encoding == "L16":
             resampled = await self._output_resampler.resample(
                 pcm_bytes,
@@ -156,20 +142,6 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
 
     async def _decode_audio(self, payload: bytes) -> bytes | None:
         encoding = self._params.outbound_encoding
-        if encoding == "PCMU":
-            return await ulaw_to_pcm(
-                payload,
-                self._telnyx_sample_rate,
-                self._sample_rate,
-                self._input_resampler,
-            )
-        if encoding == "PCMA":
-            return await alaw_to_pcm(
-                payload,
-                self._telnyx_sample_rate,
-                self._sample_rate,
-                self._input_resampler,
-            )
         if encoding == "L16":
             if len(payload) % 2 != 0:
                 logger.warning("Dropping malformed L16 Telnyx payload with odd byte length")

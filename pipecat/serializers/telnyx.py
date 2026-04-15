@@ -7,7 +7,6 @@ the provider edge.
 
 from __future__ import annotations
 
-import audioop
 import base64
 import json
 from typing import Optional
@@ -129,14 +128,11 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
     async def _encode_audio(self, pcm_bytes: bytes, in_rate: int) -> bytes | None:
         encoding = self._params.inbound_encoding
         if encoding == "L16":
-            resampled = await self._output_resampler.resample(
+            return await self._output_resampler.resample(
                 pcm_bytes,
                 in_rate,
                 self._telnyx_sample_rate,
             )
-            # Telnyx treats L16 media as an RTP payload. RTP L16 uses network
-            # byte order, while Pipecat frames are signed 16-bit little-endian.
-            return audioop.byteswap(resampled, 2)
 
         raise ValueError(f"Unsupported Telnyx inbound encoding: {encoding}")
 
@@ -146,9 +142,8 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
             if len(payload) % 2 != 0:
                 logger.warning("Dropping malformed L16 Telnyx payload with odd byte length")
                 return None
-            pcm = audioop.byteswap(payload, 2)
             return await self._input_resampler.resample(
-                pcm,
+                payload,
                 self._telnyx_sample_rate,
                 self._sample_rate,
             )

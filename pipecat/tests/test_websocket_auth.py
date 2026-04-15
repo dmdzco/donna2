@@ -1,10 +1,10 @@
-"""Tests for Twilio Media Stream WebSocket admission."""
+"""Tests for telephony media WebSocket admission."""
 
 import time
 
 import pytest
 
-from api.routes.voice import call_metadata
+from api.routes.call_context import call_metadata
 from bot import WebSocketAuthError, authenticate_websocket_call
 
 
@@ -104,3 +104,22 @@ async def test_websocket_auth_can_validate_without_consuming_token():
         {},
     )
     assert consumed["ws_token_consumed"] is True
+
+
+@pytest.mark.asyncio
+async def test_websocket_auth_accepts_telnyx_call_control_id_with_query_token():
+    call_metadata["v2:call-control"] = {
+        "ws_token": "expected-token",
+        "ws_token_expires_at": time.time() + 300,
+        "ws_token_consumed": False,
+    }
+
+    metadata = await authenticate_websocket_call(
+        {
+            "call_control_id": "v2:call-control",
+            "query_params": {"ws_token": "expected-token"},
+        },
+        {},
+    )
+
+    assert metadata["ws_token_consumed"] is True

@@ -131,9 +131,9 @@ echo ""
 info "Configuration needed:"
 echo ""
 
-read -rp "Dev Twilio phone number (e.g. +1234567890): " DEV_TWILIO_NUMBER
-if [ -z "$DEV_TWILIO_NUMBER" ]; then
-  fail "Twilio number is required"
+read -rp "Dev Telnyx voice phone number (e.g. +1234567890): " DEV_TELNYX_NUMBER
+if [ -z "$DEV_TELNYX_NUMBER" ]; then
+  fail "Telnyx voice number is required"
 fi
 
 # ─────────────────────────────────────────────
@@ -173,8 +173,21 @@ ELEVENLABS_API_KEY=$(get_prod_var donna-pipecat ELEVENLABS_API_KEY)
 ELEVENLABS_VOICE_ID=$(get_prod_var donna-pipecat ELEVENLABS_VOICE_ID)
 GOOGLE_API_KEY=$(get_prod_var donna-pipecat GOOGLE_API_KEY)
 OPENAI_API_KEY=$(get_prod_var donna-pipecat OPENAI_API_KEY)
-TWILIO_ACCOUNT_SID=$(get_prod_var donna-pipecat TWILIO_ACCOUNT_SID)
-TWILIO_AUTH_TOKEN=$(get_prod_var donna-pipecat TWILIO_AUTH_TOKEN)
+TWILIO_ACCOUNT_SID=$(get_prod_var donna-api TWILIO_ACCOUNT_SID)
+if [ -z "$TWILIO_ACCOUNT_SID" ]; then
+  TWILIO_ACCOUNT_SID=$(get_prod_var donna-pipecat TWILIO_ACCOUNT_SID)
+fi
+TWILIO_AUTH_TOKEN=$(get_prod_var donna-api TWILIO_AUTH_TOKEN)
+if [ -z "$TWILIO_AUTH_TOKEN" ]; then
+  TWILIO_AUTH_TOKEN=$(get_prod_var donna-pipecat TWILIO_AUTH_TOKEN)
+fi
+TWILIO_PHONE_NUMBER=$(get_prod_var donna-api TWILIO_PHONE_NUMBER)
+if [ -z "$TWILIO_PHONE_NUMBER" ]; then
+  TWILIO_PHONE_NUMBER=$(get_prod_var donna-pipecat TWILIO_PHONE_NUMBER)
+fi
+TELNYX_API_KEY=$(get_prod_var donna-pipecat TELNYX_API_KEY)
+TELNYX_PUBLIC_KEY=$(get_prod_var donna-pipecat TELNYX_PUBLIC_KEY)
+TELNYX_CONNECTION_ID=$(get_prod_var donna-pipecat TELNYX_CONNECTION_ID)
 JWT_SECRET=$(get_prod_var donna-pipecat JWT_SECRET)
 DONNA_API_KEYS=$(get_prod_var donna-pipecat DONNA_API_KEYS)
 if [ -z "$DONNA_API_KEYS" ]; then
@@ -203,9 +216,12 @@ if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$DONNA_API_KEYS" ] || [ -z "$FIELD_ENCRY
   echo "  DONNA_API_KEYS        = pipecat:<key>,scheduler:<key>,notifications:<key>"
   echo "  FIELD_ENCRYPTION_KEY  = <32-byte base64url key>"
   echo "  JWT_SECRET            = <non-default secret>"
-  echo "  TWILIO_ACCOUNT_SID    = <Twilio account SID>"
-  echo "  TWILIO_AUTH_TOKEN     = <Twilio auth token>"
-  echo "  TWILIO_PHONE_NUMBER   = $DEV_TWILIO_NUMBER"
+  echo "  TELNYX_API_KEY        = <Telnyx API key>"
+  echo "  TELNYX_PUBLIC_KEY     = <Telnyx public key>"
+  echo "  TELNYX_PHONE_NUMBER   = $DEV_TELNYX_NUMBER"
+  echo "  TELNYX_CONNECTION_ID  = <Telnyx Voice API application id>"
+  echo "  TELEPHONY_PROVIDER    = telnyx"
+  echo "  TWILIO_*              = optional SMS notification credentials on donna-api"
   echo "  NODE_API_URL          = https://<dev-node-domain>   (on donna-pipecat)"
   echo "  CLERK_SECRET_KEY      = <Clerk secret>              (on donna-api)"
   echo "  SCHEDULER_ENABLED     = false   (on donna-pipecat)"
@@ -217,7 +233,7 @@ if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$DONNA_API_KEYS" ] || [ -z "$FIELD_ENCRY
   echo "  ENVIRONMENT           = production"
   echo "  DATABASE_URL          = $STAGING_DB_URL"
   echo "  PIPECAT_PUBLIC_URL    = https://<staging-pipecat-domain>"
-  echo "  + same API keys and Twilio dev number"
+  echo "  + same API keys and Telnyx dev number"
   echo ""
   ok "Neon branches created. Set Railway vars manually, then run: make deploy-dev"
   exit 0
@@ -273,9 +289,11 @@ set_dev_var donna-pipecat ENVIRONMENT "production"
 set_dev_var donna-pipecat DATABASE_URL "$DEV_DB_URL"
 set_dev_var donna-pipecat PIPECAT_PUBLIC_URL "$DEV_PIPECAT_PUBLIC_URL"
 set_dev_var donna-pipecat NODE_API_URL "$DEV_NODE_API_URL"
-set_dev_var donna-pipecat TWILIO_ACCOUNT_SID "$TWILIO_ACCOUNT_SID"
-set_dev_var donna-pipecat TWILIO_AUTH_TOKEN "$TWILIO_AUTH_TOKEN"
-set_dev_var donna-pipecat TWILIO_PHONE_NUMBER "$DEV_TWILIO_NUMBER"
+set_dev_var donna-pipecat TELEPHONY_PROVIDER "telnyx"
+set_dev_var donna-pipecat TELNYX_API_KEY "$TELNYX_API_KEY"
+set_dev_var donna-pipecat TELNYX_PUBLIC_KEY "$TELNYX_PUBLIC_KEY"
+set_dev_var donna-pipecat TELNYX_PHONE_NUMBER "$DEV_TELNYX_NUMBER"
+set_dev_var donna-pipecat TELNYX_CONNECTION_ID "$TELNYX_CONNECTION_ID"
 set_dev_var donna-pipecat ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
 set_dev_var donna-pipecat DEEPGRAM_API_KEY "$DEEPGRAM_API_KEY"
 set_dev_var donna-pipecat ELEVENLABS_API_KEY "$ELEVENLABS_API_KEY"
@@ -293,9 +311,10 @@ info "Setting donna-api dev vars..."
 set_dev_var donna-api ENVIRONMENT "production"
 set_dev_var donna-api DATABASE_URL "$DEV_DB_URL"
 set_dev_var donna-api PIPECAT_PUBLIC_URL "$DEV_PIPECAT_PUBLIC_URL"
+set_dev_var donna-api TELEPHONY_PROVIDER "telnyx"
 set_dev_var donna-api TWILIO_ACCOUNT_SID "$TWILIO_ACCOUNT_SID"
 set_dev_var donna-api TWILIO_AUTH_TOKEN "$TWILIO_AUTH_TOKEN"
-set_dev_var donna-api TWILIO_PHONE_NUMBER "$DEV_TWILIO_NUMBER"
+set_dev_var donna-api TWILIO_PHONE_NUMBER "$TWILIO_PHONE_NUMBER"
 set_dev_var donna-api GOOGLE_API_KEY "$GOOGLE_API_KEY"
 set_dev_var donna-api OPENAI_API_KEY "$OPENAI_API_KEY"
 set_dev_var donna-api JWT_SECRET "$JWT_SECRET"
@@ -326,9 +345,11 @@ set_staging_var donna-pipecat ENVIRONMENT "production"
 set_staging_var donna-pipecat DATABASE_URL "$STAGING_DB_URL"
 set_staging_var donna-pipecat PIPECAT_PUBLIC_URL "$STAGING_PIPECAT_PUBLIC_URL"
 set_staging_var donna-pipecat NODE_API_URL "$STAGING_NODE_API_URL"
-set_staging_var donna-pipecat TWILIO_ACCOUNT_SID "$TWILIO_ACCOUNT_SID"
-set_staging_var donna-pipecat TWILIO_AUTH_TOKEN "$TWILIO_AUTH_TOKEN"
-set_staging_var donna-pipecat TWILIO_PHONE_NUMBER "$DEV_TWILIO_NUMBER"
+set_staging_var donna-pipecat TELEPHONY_PROVIDER "telnyx"
+set_staging_var donna-pipecat TELNYX_API_KEY "$TELNYX_API_KEY"
+set_staging_var donna-pipecat TELNYX_PUBLIC_KEY "$TELNYX_PUBLIC_KEY"
+set_staging_var donna-pipecat TELNYX_PHONE_NUMBER "$DEV_TELNYX_NUMBER"
+set_staging_var donna-pipecat TELNYX_CONNECTION_ID "$TELNYX_CONNECTION_ID"
 set_staging_var donna-pipecat ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
 set_staging_var donna-pipecat DEEPGRAM_API_KEY "$DEEPGRAM_API_KEY"
 set_staging_var donna-pipecat ELEVENLABS_API_KEY "$ELEVENLABS_API_KEY"
@@ -343,9 +364,10 @@ set_staging_var donna-pipecat LOG_LEVEL "INFO"
 set_staging_var donna-api ENVIRONMENT "production"
 set_staging_var donna-api DATABASE_URL "$STAGING_DB_URL"
 set_staging_var donna-api PIPECAT_PUBLIC_URL "$STAGING_PIPECAT_PUBLIC_URL"
+set_staging_var donna-api TELEPHONY_PROVIDER "telnyx"
 set_staging_var donna-api TWILIO_ACCOUNT_SID "$TWILIO_ACCOUNT_SID"
 set_staging_var donna-api TWILIO_AUTH_TOKEN "$TWILIO_AUTH_TOKEN"
-set_staging_var donna-api TWILIO_PHONE_NUMBER "$DEV_TWILIO_NUMBER"
+set_staging_var donna-api TWILIO_PHONE_NUMBER "$TWILIO_PHONE_NUMBER"
 set_staging_var donna-api GOOGLE_API_KEY "$GOOGLE_API_KEY"
 set_staging_var donna-api OPENAI_API_KEY "$OPENAI_API_KEY"
 set_staging_var donna-api JWT_SECRET "$JWT_SECRET"
@@ -370,11 +392,11 @@ echo "  dev         → Neon 'dev' branch"
 echo ""
 echo "Next steps:"
 echo ""
-echo "  1. Configure Twilio webhook for dev number ($DEV_TWILIO_NUMBER):"
+echo "  1. Configure Telnyx Voice API application for dev number ($DEV_TELNYX_NUMBER):"
 if [ -n "$DEV_PIPECAT_PUBLIC_URL" ]; then
-  echo "     Voice URL → $DEV_PIPECAT_PUBLIC_URL/voice/answer"
+  echo "     Webhook URL → $DEV_PIPECAT_PUBLIC_URL/telnyx/events"
 else
-  echo "     Voice URL → https://<dev-pipecat-domain>/voice/answer"
+  echo "     Webhook URL → https://<dev-pipecat-domain>/telnyx/events"
   echo "     Set PIPECAT_PUBLIC_URL and NODE_API_URL after Railway creates domains."
 fi
 echo ""

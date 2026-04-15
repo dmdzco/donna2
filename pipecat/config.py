@@ -6,7 +6,7 @@ Lazy-loaded on first access; reads from environment at that time.
 Usage:
     from config import settings
     print(settings.anthropic_api_key)
-    print(settings.twilio_phone_number)
+    print(settings.telnyx_phone_number)
 """
 
 import os
@@ -36,10 +36,26 @@ class Settings:
     db_pool_min: int = 5
     db_pool_max: int = 50
 
-    # ---- Twilio ----
+    # ---- Archived Twilio voice settings ----
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""
+
+    # ---- Telephony Provider ----
+    telephony_provider: str = "telnyx"
+
+    # ---- Telnyx ----
+    telnyx_api_key: str = ""
+    telnyx_public_key: str = ""
+    telnyx_phone_number: str = ""
+    telnyx_connection_id: str = ""
+    telnyx_stream_codec: str = "L16"
+    telnyx_stream_sample_rate: int = 16000
+    telnyx_stream_track: str = "inbound_track"
+    telnyx_bidirectional_target_legs: str = "both"
+    telnyx_l16_input_byte_order: str = "little"
+    telnyx_l16_output_byte_order: str = "little"
+    telnyx_webhook_tolerance_seconds: int = 300
 
     # ---- AI Services ----
     anthropic_api_key: str = ""
@@ -99,7 +115,7 @@ class Settings:
     pipecat_retention_enabled: bool = False
     voice_backend: str = ""
     tts_provider: str = ""
-    twilio_ws_handshake_timeout_seconds: float = 5.0
+    telephony_ws_handshake_timeout_seconds: float = 5.0
 
     # ---- Data Retention (HIPAA) ----
     retention_conversations_days: int = 365
@@ -187,8 +203,25 @@ def validate_production_config() -> list[str]:
         errors.append("DONNA_API_KEYS must contain at least one labeled key")
     if not is_valid_field_encryption_key(field_key):
         errors.append("FIELD_ENCRYPTION_KEY must decode to 32 bytes")
-    if not os.getenv("TWILIO_AUTH_TOKEN", ""):
-        errors.append("TWILIO_AUTH_TOKEN is required")
+    telephony_provider = os.getenv("TELEPHONY_PROVIDER", "telnyx").lower()
+    if telephony_provider != "telnyx":
+        errors.append("TELEPHONY_PROVIDER must be telnyx for voice calls")
+    if os.getenv("TELNYX_STREAM_CODEC", "L16").upper() != "L16":
+        errors.append("TELNYX_STREAM_CODEC must be L16")
+    try:
+        telnyx_sample_rate = int(os.getenv("TELNYX_STREAM_SAMPLE_RATE", "16000"))
+    except ValueError:
+        telnyx_sample_rate = 0
+    if telnyx_sample_rate != 16000:
+        errors.append("TELNYX_STREAM_SAMPLE_RATE must be 16000")
+    if not os.getenv("TELNYX_API_KEY", ""):
+        errors.append("TELNYX_API_KEY is required")
+    if not os.getenv("TELNYX_PUBLIC_KEY", ""):
+        errors.append("TELNYX_PUBLIC_KEY is required")
+    if not os.getenv("TELNYX_PHONE_NUMBER", ""):
+        errors.append("TELNYX_PHONE_NUMBER is required")
+    if not os.getenv("TELNYX_CONNECTION_ID", ""):
+        errors.append("TELNYX_CONNECTION_ID is required")
     if not public_url or not public_url.startswith("https://"):
         errors.append("PIPECAT_PUBLIC_URL must be an https:// URL")
     if _truthy(os.getenv("PIPECAT_REQUIRE_REDIS")) and not os.getenv("REDIS_URL", ""):
@@ -231,10 +264,24 @@ def _load_settings() -> Settings:
         database_url=_env("DATABASE_URL"),
         db_pool_min=int(_env("DB_POOL_MIN", "5")),
         db_pool_max=int(_env("DB_POOL_MAX", "50")),
-        # Twilio
+        # Archived Twilio voice settings
         twilio_account_sid=_env("TWILIO_ACCOUNT_SID"),
         twilio_auth_token=_env("TWILIO_AUTH_TOKEN"),
         twilio_phone_number=_env("TWILIO_PHONE_NUMBER"),
+        # Telephony Provider
+        telephony_provider=_env("TELEPHONY_PROVIDER", "telnyx").lower(),
+        # Telnyx
+        telnyx_api_key=_env("TELNYX_API_KEY"),
+        telnyx_public_key=_env("TELNYX_PUBLIC_KEY"),
+        telnyx_phone_number=_env("TELNYX_PHONE_NUMBER"),
+        telnyx_connection_id=_env("TELNYX_CONNECTION_ID"),
+        telnyx_stream_codec=_env("TELNYX_STREAM_CODEC", "L16").upper(),
+        telnyx_stream_sample_rate=_env_int("TELNYX_STREAM_SAMPLE_RATE", 16000),
+        telnyx_stream_track=_env("TELNYX_STREAM_TRACK", "inbound_track"),
+        telnyx_bidirectional_target_legs=_env("TELNYX_BIDIRECTIONAL_TARGET_LEGS", "both"),
+        telnyx_l16_input_byte_order=_env("TELNYX_L16_INPUT_BYTE_ORDER", "little").lower(),
+        telnyx_l16_output_byte_order=_env("TELNYX_L16_OUTPUT_BYTE_ORDER", "little").lower(),
+        telnyx_webhook_tolerance_seconds=_env_int("TELNYX_WEBHOOK_TOLERANCE_SECONDS", 300),
         # AI Services
         anthropic_api_key=_env("ANTHROPIC_API_KEY"),
         deepgram_api_key=_env("DEEPGRAM_API_KEY"),
@@ -285,7 +332,9 @@ def _load_settings() -> Settings:
         pipecat_retention_enabled=_truthy(_env("PIPECAT_RETENTION_ENABLED")),
         voice_backend=_env("VOICE_BACKEND"),
         tts_provider=_env("TTS_PROVIDER"),
-        twilio_ws_handshake_timeout_seconds=float(_env("TWILIO_WS_HANDSHAKE_TIMEOUT_SECONDS", "5")),
+        telephony_ws_handshake_timeout_seconds=float(
+            _env("TELEPHONY_WS_HANDSHAKE_TIMEOUT_SECONDS", _env("TWILIO_WS_HANDSHAKE_TIMEOUT_SECONDS", "5"))
+        ),
         # Data Retention (HIPAA)
         retention_conversations_days=int(_env("RETENTION_CONVERSATIONS_DAYS", "365")),
         retention_conversation_metadata_days=int(_env("RETENTION_CONVERSATION_METADATA_DAYS", "1095")),

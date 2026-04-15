@@ -45,7 +45,6 @@ describe('security config', () => {
     expect(errors.some(err => err.includes('JWT_SECRET'))).toBe(true);
     expect(errors.some(err => err.includes('DONNA_API_KEYS'))).toBe(true);
     expect(errors.some(err => err.includes('FIELD_ENCRYPTION_KEY'))).toBe(true);
-    expect(errors.some(err => err.includes('TWILIO_AUTH_TOKEN'))).toBe(true);
     expect(errors.some(err => err.includes('CLERK_SECRET_KEY'))).toBe(true);
     expect(errors.some(err => err.includes('PIPECAT_PUBLIC_URL'))).toBe(true);
   });
@@ -56,7 +55,6 @@ describe('security config', () => {
       JWT_SECRET: 'not-the-default-secret',
       DONNA_API_KEYS: 'pipecat:key-one',
       FIELD_ENCRYPTION_KEY: fieldKey(),
-      TWILIO_AUTH_TOKEN: 'twilio-token',
       CLERK_SECRET_KEY: 'clerk-secret',
       PIPECAT_PUBLIC_URL: 'https://pipecat.example.com',
     });

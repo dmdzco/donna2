@@ -28,7 +28,6 @@ if (process.env.SENTRY_DSN) {
 
 import express from 'express';
 import cors from 'cors';
-import twilio from 'twilio';
 import { createServer } from 'http';
 import { apiLimiter } from './middleware/rate-limit.js';
 import { clerkMiddleware } from './middleware/auth.js';
@@ -96,14 +95,7 @@ const PIPECAT_BASE_URL = getPipecatPublicUrl() || (
     : `http://localhost:7860`
 );
 
-// Initialize Twilio client for outbound calls
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
-
 // Make shared state available to route handlers via app.get()
-app.set('twilioClient', twilioClient);
 app.set('baseUrl', PIPECAT_BASE_URL);
 
 // Mount all routes
@@ -122,7 +114,7 @@ const server = createServer(app);
 
 server.listen(PORT, async () => {
   console.log(`Donna v4.0 listening on port ${PORT}`);
-  console.log(`Pipecat webhook: ${PIPECAT_BASE_URL}/voice/answer`);
+  console.log(`Pipecat Telnyx webhook: ${PIPECAT_BASE_URL}/telnyx/events`);
   console.log(`Features: Admin APIs, Reminder scheduler, Call initiation`);
 
   // Initialize GrowthBook feature flags

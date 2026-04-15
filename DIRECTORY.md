@@ -31,8 +31,8 @@
 | Change Pipecat auth/middleware | `pipecat/api/middleware/` |
 | Change database queries (Python) | `pipecat/db/client.py` |
 | Change Pipecat server startup | `pipecat/main.py` |
-| Change Twilio answer/status path | `pipecat/api/routes/voice.py` |
-| Change frontend/manual call initiation | `routes/calls.js` (Node creates the Twilio call with Pipecat webhook URLs) |
+| Change Telnyx call-control/webhook path | `pipecat/api/routes/telnyx.py` + `pipecat/api/routes/call_context.py` |
+| Change frontend/manual call initiation | `routes/calls.js` (Node asks Pipecat to create a Telnyx call) |
 | Change admin dashboard UI | `apps/admin-v2/src/pages/` |
 | Change admin API client | `apps/admin-v2/src/lib/api.ts` |
 | Change consumer app | `apps/consumer/src/` |
@@ -55,7 +55,7 @@ Donna runs two backend services. Change the wrong one and nothing happens.
 ```
                   ┌─────────────────────────────────┐
   Phone Call ───► │  Pipecat (Python, Railway:7860)  │  Voice pipeline: STT → Observer →
-  (Twilio)        │  pipecat/ directory               │  Director → Claude → TTS
+  (Telnyx)        │  pipecat/ directory               │  Director → Claude → TTS
                   └──────────────┬──────────────────┘
                                  │
                      Shared DB (Neon PostgreSQL)
@@ -70,13 +70,13 @@ Donna runs two backend services. Change the wrong one and nothing happens.
 
 **Call lifecycle (Pipecat path — primary):**
 1. Call arrives (inbound, scheduled, or manual; frontends initiate manual calls through Node `/api/call`)
-2. Pipecat `/voice/answer` verifies Twilio signature, fetches senior/prospect context, creates conversation record, stores encrypted call metadata, and returns TwiML `<Stream url="/ws">` with a single-use `ws_token`
-3. Twilio connects WebSocket → `/ws` validates `call_sid` + `ws_token` before consuming active-call capacity → **Pipecat runs full pipeline** (STT → Observer → Director → Claude → TTS)
+2. Pipecat `/telnyx/events` verifies Telnyx signatures for inbound events, hydrates senior/prospect context, creates conversation records, stores encrypted call metadata, answers inbound calls, and starts a Telnyx media stream with a single-use `ws_token`
+3. Telnyx connects WebSocket → `/ws` validates `call_control_id` + `ws_token` before consuming active-call capacity → **Pipecat runs full pipeline** (STT → Observer → Director → Claude → TTS)
 4. Call ends → Pipecat `services/post_call.py` runs analysis, memory extraction, daily context save
 
-**Note:** Frontends hit Node.js APIs for call initiation. The active Node `routes/calls.js` sets Twilio callbacks to Pipecat `/voice/answer` and `/voice/status`; there is no active root Node `routes/voice.js` route.
+**Note:** Frontends hit Node.js APIs for call initiation. The active Node `routes/calls.js` calls Pipecat `/telnyx/outbound`; Node does not call Twilio for voice. Twilio voice code is archived under `archive/twilio-voice/`. Twilio SMS notifications remain in `services/notifications.js`.
 
-**Current audio profile:** Twilio wire audio is still `8kHz` μ-law, but Donna no longer runs the whole internal pipeline at `8kHz`. `bot.py` upsamples inbound telephony audio to `TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE` (default `16000`) for STT. TTS stays high quality internally: Cartesia defaults to `pcm_s16le` at `48000`, ElevenLabs defaults to `44100`, and Gemini Live defaults to `24000`. The telephony serializer performs the final required conversion to Twilio's `8kHz` μ-law at the provider edge.
+**Current audio profile:** Telnyx voice uses `L16` at `16kHz` on the wire. Donna keeps the active Telnyx path linear PCM through the pipeline and uses little-endian L16 at the Telnyx WebSocket edge (`TELNYX_STREAM_CODEC=L16`, `TELNYX_STREAM_SAMPLE_RATE=16000`, `TELNYX_L16_INPUT_BYTE_ORDER=little`, `TELNYX_L16_OUTPUT_BYTE_ORDER=little`). Browser/internal TTS can still use higher-rate PCM when not constrained by a Telnyx call.
 
 ---
 
@@ -140,12 +140,14 @@ pipecat/
 │   └── sanitize.py          PII masking for logs (38 LOC)
 │
 ├── api/                 HTTP layer
-│   ├── routes/voice.py      /voice/answer (signed TwiML + encrypted metadata + snapshot), /voice/status (730 LOC)
+│   ├── routes/telnyx.py     /telnyx/events, /telnyx/outbound, /telnyx/calls/{id}/end
+│   ├── routes/call_context.py Shared encrypted call metadata + senior context hydration
+│   ├── routes/voice.py      Archived Twilio placeholder; implementation lives in archive/twilio-voice
 │   ├── routes/calls.py      /api/call, /api/calls
 │   ├── routes/auth.py       Token revocation: /api/admin/revoke-token, revoke-all, logout
 │   ├── routes/export.py     HIPAA right-to-access: /api/seniors/{id}/export (full data bundle)
 │   ├── routes/data.py       Data retention management endpoints
-│   ├── middleware/           auth, api_auth, rate_limit, security, twilio, error_handler
+│   ├── middleware/           auth, api_auth, rate_limit, security, error_handler
 │   └── validators/schemas.py  Pydantic request validation (139 LOC)
 │
 ├── db/
@@ -239,7 +241,7 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 ├── index.js             Express server entry — CORS, middleware, GrowthBook, scheduler start
 │
 ├── routes/              17 files — frontend-facing /api/* endpoints plus public health/waitlist
-│   ├── calls.js         /api/call — initiate manual outbound call; Twilio webhooks point to Pipecat (95 LOC)
+│   ├── calls.js         /api/call — initiate manual outbound call through Pipecat /telnyx/outbound
 │   ├── seniors.js       CRUD /api/seniors (335 LOC)
 │   ├── reminders.js     CRUD /api/reminders + delivery tracking (221 LOC)
 │   ├── observability.js Call monitoring endpoints (582 LOC)
@@ -399,7 +401,7 @@ Frontend E2E tests are in `tests/e2e/` — see [`docs/guides/FRONTEND_TESTING.md
 
 ## Deployment
 
-Three environments: **dev** (experiments), **staging** (CI), **production** (customers). Each has its own Neon DB branch and Twilio number.
+Three environments: **dev** (experiments), **staging** (CI), **production** (customers). Each has its own Neon DB branch and Telnyx number for voice.
 
 ```bash
 # Deploy to dev (your iteration environment)

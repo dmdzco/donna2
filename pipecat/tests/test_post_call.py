@@ -5,6 +5,7 @@ post-call sequence: conversation completion, analysis, memory extraction,
 daily context save, reminder cleanup, cache clearing.
 """
 
+import json
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch
@@ -269,6 +270,46 @@ class TestPostCallProcessing:
 
         args = mock_execute.await_args.args
         assert args[-2] == 3
+
+    @pytest.mark.asyncio
+    async def test_persist_call_metrics_includes_stage_breakdown(self, session_state):
+        from services.post_call import _persist_call_metrics
+
+        session_state["_call_metrics"] = {
+            "token_usage": {},
+            "turn_count": 2,
+            "stage_latency_values": {
+                "director.query": [120, 180],
+                "tool.web_search": [640],
+            },
+        }
+
+        with patch("db.client.execute", new_callable=AsyncMock) as mock_execute:
+            await _persist_call_metrics(session_state, 60, None, error_count=0)
+
+        args = mock_execute.await_args.args
+        latency_json = json.loads(args[8])
+        assert latency_json["stage_breakdown"]["director.query"]["avg_ms"] == 150
+        assert latency_json["stage_breakdown"]["tool.web_search"]["max_ms"] == 640
+
+    @pytest.mark.asyncio
+    async def test_persist_call_metrics_prefers_conversation_turn_count_and_tracks_llm_invocations(self, session_state):
+        from services.post_call import _persist_call_metrics
+
+        session_state["_current_turn_sequence"] = 4
+        session_state["_call_metrics"] = {
+            "token_usage": {"prompt_tokens": 10, "completion_tokens": 12},
+            "turn_count": 2,
+            "llm_invocation_count": 5,
+        }
+
+        with patch("db.client.execute", new_callable=AsyncMock) as mock_execute:
+            await _persist_call_metrics(session_state, 60, None, error_count=0)
+
+        args = mock_execute.await_args.args
+        assert args[6] == 4
+        token_usage_json = json.loads(args[11])
+        assert token_usage_json["llm_invocation_count"] == 5
 
     @pytest.mark.asyncio
     async def test_post_call_discovers_new_interests(self, session_state):

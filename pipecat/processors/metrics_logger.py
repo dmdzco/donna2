@@ -17,6 +17,7 @@ import time
 from loguru import logger
 from pipecat.frames.frames import EndFrame, Frame, MetricsFrame
 from pipecat.processors.frame_processor import FrameProcessor
+from services.context_trace import record_latency_event
 
 try:
     from pipecat.metrics.metrics import (
@@ -40,26 +41,30 @@ class MetricsLoggerProcessor(FrameProcessor):
     - turn_latency_values: list of end-to-end turn latency ms values
     - token_usage: {prompt_tokens, completion_tokens, cache_read_tokens}
     - tts_characters: total TTS characters
-    - turn_count: number of LLM turns
+    - turn_count: number of conversational user turns
+    - llm_invocation_count: number of LLM requests during the call
     """
 
     def __init__(self, session_state: dict, **kwargs):
         super().__init__(**kwargs)
         self._session_state = session_state
-        self._turn_count = 0
         # Initialize metrics accumulator
-        self._session_state["_call_metrics"] = {
-            "llm_ttfb_values": [],
-            "tts_ttfb_values": [],
-            "turn_latency_values": [],
-            "token_usage": {
+        metrics = self._session_state.setdefault("_call_metrics", {})
+        metrics.setdefault("llm_ttfb_values", [])
+        metrics.setdefault("tts_ttfb_values", [])
+        metrics.setdefault("turn_latency_values", [])
+        metrics.setdefault(
+            "token_usage",
+            {
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
                 "cache_read_tokens": 0,
             },
-            "tts_characters": 0,
-            "turn_count": 0,
-        }
+        )
+        metrics.setdefault("tts_characters", 0)
+        metrics.setdefault("turn_count", 0)
+        metrics.setdefault("llm_invocation_count", 0)
+        metrics.setdefault("stage_latency_values", {})
 
     async def process_frame(self, frame: Frame, direction):
         await super().process_frame(frame, direction)
@@ -93,27 +98,68 @@ class MetricsLoggerProcessor(FrameProcessor):
     def _log_ttfb(self, item: TTFBMetricsData):
         ms = round(item.value * 1000)
         proc = item.processor or "unknown"
+        proc_lower = proc.lower()
         metrics = self._session_state["_call_metrics"]
+        turn_sequence = self._session_state.get("_current_turn_sequence")
+        self._update_turn_count(turn_sequence)
 
         # Identify service type from processor name
-        is_llm = "llm" in proc.lower() or "anthropic" in proc.lower()
-        is_tts = "tts" in proc.lower() or "eleven" in proc.lower()
+        is_llm = any(token in proc_lower for token in ("llm", "anthropic", "claude", "groq", "openai"))
+        is_tts = any(token in proc_lower for token in ("tts", "eleven", "cartesia"))
 
         if is_llm:
             logger.info("[Metrics] LLM TTFB: {ms}ms", ms=ms)
             metrics["llm_ttfb_values"].append(ms)
-            metrics["turn_count"] += 1
+            metrics["llm_invocation_count"] += 1
+            record_latency_event(
+                self._session_state,
+                stage="llm_ttfb",
+                source="llm_latency",
+                action="measured",
+                label="LLM first token",
+                provider=proc,
+                latency_ms=ms,
+                turn_sequence=turn_sequence,
+                metadata={"processor": proc},
+            )
         elif is_tts:
             logger.info("[Metrics] TTS TTFB: {ms}ms", ms=ms)
             metrics["tts_ttfb_values"].append(ms)
+            record_latency_event(
+                self._session_state,
+                stage="tts_ttfb",
+                source="tts_latency",
+                action="measured",
+                label="TTS first audio",
+                provider=proc,
+                latency_ms=ms,
+                turn_sequence=turn_sequence,
+                metadata={"processor": proc},
+            )
             # Calculate total turn latency (user speech end → first audio)
             speech_time = self._session_state.get("_last_user_speech_time")
             if speech_time:
                 turn_ms = round((time.time() - speech_time) * 1000)
                 logger.info("[Metrics] Turn latency (speech→audio): {ms}ms", ms=turn_ms)
                 metrics["turn_latency_values"].append(turn_ms)
+                record_latency_event(
+                    self._session_state,
+                    stage="turn.total",
+                    source="turn_latency",
+                    action="measured",
+                    label="Turn speech to audio",
+                    provider=proc,
+                    latency_ms=turn_ms,
+                    turn_sequence=turn_sequence,
+                )
         else:
             logger.info("[Metrics] {proc} TTFB: {ms}ms", proc=proc, ms=ms)
+
+    def _update_turn_count(self, turn_sequence) -> None:
+        if not isinstance(turn_sequence, int) or turn_sequence < 0:
+            return
+        metrics = self._session_state["_call_metrics"]
+        metrics["turn_count"] = max(metrics.get("turn_count", 0), turn_sequence)
 
     def _log_llm_usage(self, item: LLMUsageMetricsData):
         tokens = item.value

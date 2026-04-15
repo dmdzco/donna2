@@ -22,5 +22,8 @@ test.describe('Observability History', () => {
 
     await expect(page.locator('.context-event').first()).toBeVisible({ timeout: 5000 });
     await expect(page.getByText('Recent call summary context')).toBeVisible();
+
+    await page.locator('.view-toggle').getByText('Timeline').click();
+    await expect(page.getByText('Voice answer to media stream')).toBeVisible();
   });
 });

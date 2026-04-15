@@ -3,6 +3,7 @@ import { seniorService } from '../services/seniors.js';
 import { schedulerService } from '../services/scheduler.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { callLimiter } from '../middleware/rate-limit.js';
+import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody } from '../middleware/validate.js';
 import { initiateCallSchema } from '../validators/schemas.js';
 import { canAccessSenior, routeError } from './helpers.js';
@@ -19,7 +20,7 @@ function formatPhoneForCall(phone) {
 }
 
 // API: Initiate outbound call (strict rate limit: 5/min)
-router.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSchema), async (req, res) => {
+router.post('/api/call', requireAuth, validateBody(initiateCallSchema), idempotencyMiddleware, callLimiter, async (req, res) => {
   const { seniorId } = req.body;
   const twilioClient = req.app.get('twilioClient');
   // Twilio webhooks must hit Pipecat (voice pipeline), not this Node.js server
@@ -67,8 +68,7 @@ router.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSche
     res.json({ success: true, callSid: call.sid, seniorId: senior.id });
 
   } catch (error) {
-    console.error('Failed to initiate call:', error.message);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'POST /api/call');
   }
 });
 

@@ -25,11 +25,14 @@ Goal: make Donna's mobile app fail clearly and safely under poor network, backen
 - [x] Hide raw crash/error details from the production error boundary.
 - [x] Run TypeScript and auth guard checks.
 - [x] Review for PHI leakage in logs and user-facing errors.
+- [x] Add request IDs to backend error responses and mobile support references.
+- [x] Add idempotency keys for mobile write requests.
+- [x] Cache idempotent replay responses encrypted at rest.
+- [x] Remove raw backend error messages from mobile-owned 500 responses.
+- [x] Run backend middleware/route tests, full Node tests, mobile TypeScript, auth guard, asset verification, Expo dependency check, and whitespace checks.
 
 ## Later Work
 
 - [ ] Add encrypted local drafts for long forms.
-- [ ] Add idempotency keys for write requests.
-- [ ] Add request IDs from backend responses to support flows.
 - [ ] Add real-device tests for airplane mode, slow network, app background/resume, and expired auth.
 - [ ] Add Sentry or equivalent with strict PHI scrubbing.

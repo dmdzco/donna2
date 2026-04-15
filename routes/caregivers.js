@@ -3,6 +3,7 @@ import { clerkClient } from '@clerk/express';
 import { caregiverService } from '../services/caregivers.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
+import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { db } from '../db/client.js';
 import { caregivers, seniors, notificationPreferences, notifications } from '../db/schema.js';
 import { eq, desc, inArray, sql } from 'drizzle-orm';
@@ -56,7 +57,7 @@ router.get('/api/caregivers/me', requireAuth, async (req, res) => {
 });
 
 // Delete current caregiver account and associated Donna data.
-router.delete('/api/caregivers/me/account', requireAuth, writeLimiter, async (req, res) => {
+router.delete('/api/caregivers/me/account', requireAuth, idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     if (req.auth.provider !== 'clerk') {
       return res.status(400).json({ error: 'Clerk authentication required for account deletion' });
@@ -147,7 +148,7 @@ router.delete('/api/caregivers/me/account', requireAuth, writeLimiter, async (re
         resourceId: clerkUserId,
         ipAddress: req.ip,
         userAgent: req.get('user-agent'),
-        metadata: { error: error.message },
+        metadata: { error_name: error.name, error_code: error.code },
       });
 
       return res.status(202).json({

@@ -4,6 +4,7 @@ import { reminders, seniors } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
 import { requireAuth } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
+import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import {
   createReminderSchema,
@@ -85,7 +86,7 @@ router.get('/api/reminders', requireAuth, async (req, res) => {
 });
 
 // Create a reminder
-router.post('/api/reminders', requireAuth, writeLimiter, validateBody(createReminderSchema), async (req, res) => {
+router.post('/api/reminders', requireAuth, validateBody(createReminderSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     const { seniorId, type, title, description, scheduledTime, isRecurring, cronExpression } = req.body;
     // Check access to the senior
@@ -122,7 +123,7 @@ router.post('/api/reminders', requireAuth, writeLimiter, validateBody(createRemi
 });
 
 // Update a reminder
-router.patch('/api/reminders/:id', requireAuth, writeLimiter, validateParams(reminderIdParamSchema), validateBody(updateReminderSchema), async (req, res) => {
+router.patch('/api/reminders/:id', requireAuth, validateParams(reminderIdParamSchema), validateBody(updateReminderSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     // Get the reminder to check senior access
     const [existing] = await db.select({
@@ -179,7 +180,7 @@ router.patch('/api/reminders/:id', requireAuth, writeLimiter, validateParams(rem
 });
 
 // Delete a reminder
-router.delete('/api/reminders/:id', requireAuth, writeLimiter, validateParams(reminderIdParamSchema), async (req, res) => {
+router.delete('/api/reminders/:id', requireAuth, validateParams(reminderIdParamSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     // Get the reminder to check senior access
     const [existing] = await db.select({ seniorId: reminders.seniorId })

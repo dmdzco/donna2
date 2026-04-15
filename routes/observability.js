@@ -5,6 +5,7 @@ import { eq, desc, and, sql } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
 import { decrypt, decryptJson } from '../lib/encryption.js';
 import { callAnalysisService } from '../services/call-analyses.js';
+import { routeError } from './helpers.js';
 
 const router = Router();
 
@@ -90,8 +91,7 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
 
     res.json({ calls: formattedCalls });
   } catch (error) {
-    console.error('Error fetching calls:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls');
   }
 });
 
@@ -149,8 +149,7 @@ router.get('/api/observability/calls/:id', requireAdmin, async (req, res) => {
       analysis,
     });
   } catch (error) {
-    console.error('Error fetching call:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id');
   }
 });
 
@@ -232,8 +231,7 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
       timeline,
     });
   } catch (error) {
-    console.error('Error fetching timeline:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/timeline');
   }
 });
 
@@ -261,8 +259,7 @@ router.get('/api/observability/calls/:id/turns', requireAdmin, async (req, res) 
 
     res.json({ turns });
   } catch (error) {
-    console.error('Error fetching turns:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/turns');
   }
 });
 
@@ -335,8 +332,7 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
       },
     });
   } catch (error) {
-    console.error('Error fetching observer data:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/observer');
   }
 });
 
@@ -377,8 +373,7 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
       durationSeconds: call.durationSeconds,
     });
   } catch (error) {
-    console.error('Error fetching metrics:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/metrics');
   }
 });
 
@@ -405,8 +400,7 @@ router.get('/api/observability/metrics/calls', requireAdmin, async (req, res) =>
 
     res.json({ metrics: rows.rows, hours });
   } catch (error) {
-    console.error('Error fetching call metrics:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/metrics/calls');
   }
 });
 
@@ -442,8 +436,7 @@ router.get('/api/observability/metrics/summary', requireAdmin, async (req, res) 
       hours,
     });
   } catch (error) {
-    console.error('Error fetching metrics summary:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/metrics/summary');
   }
 });
 
@@ -469,8 +462,7 @@ router.get('/api/observability/metrics/latency', requireAdmin, async (req, res) 
 
     res.json({ latency: rows.rows, hours });
   } catch (error) {
-    console.error('Error fetching latency trends:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/metrics/latency');
   }
 });
 

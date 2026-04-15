@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
+import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { notificationPreferencesSchema, notificationTriggerSchema } from '../validators/schemas.js';
 import { notificationService } from '../services/notifications.js';
 import { db } from '../db/client.js';
@@ -67,7 +68,7 @@ router.get('/api/notifications/preferences', requireAuth, async (req, res) => {
 // ---------------------------------------------------------------------------
 // PATCH /api/notifications/preferences — update current user's notification prefs
 // ---------------------------------------------------------------------------
-router.patch('/api/notifications/preferences', requireAuth, async (req, res) => {
+router.patch('/api/notifications/preferences', requireAuth, idempotencyMiddleware, async (req, res) => {
   try {
     const parsed = notificationPreferencesSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -119,7 +120,7 @@ router.get('/api/notifications', requireAuth, async (req, res) => {
 // ---------------------------------------------------------------------------
 // PATCH /api/notifications/:id/read — mark notification as read
 // ---------------------------------------------------------------------------
-router.patch('/api/notifications/:id/read', requireAuth, async (req, res) => {
+router.patch('/api/notifications/:id/read', requireAuth, idempotencyMiddleware, async (req, res) => {
   try {
     const caregiverId = await getCaregiverIdForUser(req.auth.userId);
     if (!caregiverId) {

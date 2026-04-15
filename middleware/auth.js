@@ -16,6 +16,7 @@ import jwt from 'jsonwebtoken';
 import { logAudit } from '../services/audit.js';
 import { tokenRevocationService } from '../services/token-revocation.js';
 import { DEFAULT_JWT_SECRET, isProductionEnv, timingSafeEqual } from '../lib/security-config.js';
+import { sendError } from '../lib/http-response.js';
 
 if (isProductionEnv() && (!process.env.JWT_SECRET || process.env.JWT_SECRET === DEFAULT_JWT_SECRET)) {
   throw new Error('JWT_SECRET environment variable is required in production (do not use the default)');
@@ -108,7 +109,7 @@ export async function requireAuth(req, res, next) {
       // Check token revocation before granting access
       const revocation = await checkTokenRevocation(token, decoded.adminId);
       if (revocation.revoked) {
-        return res.status(401).json({ error: revocation.message });
+        return sendError(res, 401, { error: revocation.message });
       }
       req.auth = {
         isCofounder: false,
@@ -134,7 +135,7 @@ export async function requireAuth(req, res, next) {
         userAgent: req.get('user-agent'),
         metadata: { reason: 'no_clerk_session', path: req.path },
       });
-      return res.status(401).json({
+      return sendError(res, 401, {
         error: 'Unauthorized',
         message: 'Authentication required',
       });
@@ -158,7 +159,7 @@ export async function requireAuth(req, res, next) {
 
     next();
   } catch (error) {
-    console.error('[Auth] Clerk error:', error.message);
+    console.error('[Auth] Clerk error:', { requestId: req.id, errorName: error.name, errorCode: error.code });
     logAudit({
       userId: 'anonymous',
       userRole: 'unknown',
@@ -166,9 +167,9 @@ export async function requireAuth(req, res, next) {
       resourceType: 'auth',
       ipAddress: req.ip,
       userAgent: req.get('user-agent'),
-      metadata: { reason: 'clerk_error', error: error.message, path: req.path },
+      metadata: { reason: 'clerk_error', error_name: error.name, error_code: error.code, path: req.path },
     });
-    return res.status(401).json({
+    return sendError(res, 401, {
       error: 'Unauthorized',
       message: 'Invalid or expired session',
     });
@@ -239,7 +240,7 @@ export async function optionalAuth(req, res, next) {
 export async function requireAdmin(req, res, next) {
   await requireAuth(req, res, () => {
     if (!req.auth?.isAdmin) {
-      return res.status(403).json({
+      return sendError(res, 403, {
         error: 'Forbidden',
         message: 'Admin access required',
       });

@@ -206,3 +206,19 @@ export const auditLogs = pgTable('audit_logs', {
   metadata: json('metadata').default({}),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+// Idempotency keys for mobile write requests.
+// Response bodies are encrypted because reminders/profile payloads can contain PHI.
+export const idempotencyKeys = pgTable('idempotency_keys', {
+  key: varchar('key', { length: 255 }).primaryKey(),
+  userId: varchar('user_id', { length: 255 }).notNull(),
+  method: varchar('method', { length: 10 }).notNull(),
+  path: text('path').notNull(),
+  bodyHash: varchar('body_hash', { length: 64 }).notNull(),
+  state: varchar('state', { length: 20 }).default('processing').notNull(),
+  statusCode: integer('status_code'),
+  responseEncrypted: text('response_encrypted'),
+  requestId: text('request_id'),
+  createdAt: timestamp('created_at').defaultNow(),
+  expiresAt: timestamp('expires_at').notNull(),
+});

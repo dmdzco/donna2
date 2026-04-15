@@ -10,7 +10,8 @@ import type {
 const API_URL =
   process.env.EXPO_PUBLIC_API_URL ?? "https://donna-api-production-2450.up.railway.app";
 
-type FetchOptions = RequestInit & { token?: string };
+type WriteOptions = { idempotencyKey?: string };
+type FetchOptions = RequestInit & { token?: string } & WriteOptions;
 
 const DEFAULT_TIMEOUT_MS = 15000;
 
@@ -37,10 +38,14 @@ function classifyStatus(status: number): ApiErrorKind {
   return "unknown";
 }
 
-function requestIdFrom(body: Record<string, unknown>, res?: Response) {
+function requestIdFrom(
+  body: Record<string, unknown>,
+  res?: Response,
+  fallback?: string,
+) {
   const bodyRequestId =
     typeof body.requestId === "string" ? body.requestId : undefined;
-  return bodyRequestId ?? res?.headers.get("x-request-id") ?? undefined;
+  return bodyRequestId ?? res?.headers.get("x-request-id") ?? fallback;
 }
 
 function isAbortError(error: unknown) {
@@ -54,10 +59,13 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 async function fetchJson<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
-  const { token, ...fetchOpts } = options;
+  const { token, idempotencyKey, ...fetchOpts } = options;
+  const requestId = createRequestId();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "X-Request-Id": requestId,
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     ...((fetchOpts.headers as Record<string, string>) ?? {}),
   };
 
@@ -81,9 +89,9 @@ async function fetchJson<T>(endpoint: string, options: FetchOptions = {}): Promi
     });
   } catch (error) {
     if (didTimeout || isAbortError(error)) {
-      throw ApiError.timeout();
+      throw ApiError.timeout(requestId);
     }
-    throw ApiError.network();
+    throw ApiError.network(requestId);
   } finally {
     clearTimeout(timeout);
     sourceSignal?.removeEventListener("abort", abortFromSource);
@@ -98,7 +106,7 @@ async function fetchJson<T>(endpoint: string, options: FetchOptions = {}): Promi
       res.status,
       body,
       classifyStatus(res.status),
-      requestIdFrom(body, res),
+      requestIdFrom(body, res, requestId),
     );
   }
 
@@ -119,12 +127,12 @@ export class ApiError extends Error {
     this.name = "ApiError";
   }
 
-  static network() {
-    return new ApiError("Network request failed", 0, {}, "network");
+  static network(requestId?: string) {
+    return new ApiError("Network request failed", 0, {}, "network", requestId);
   }
 
-  static timeout() {
-    return new ApiError("Request timed out", 0, {}, "timeout");
+  static timeout(requestId?: string) {
+    return new ApiError("Request timed out", 0, {}, "timeout", requestId);
   }
 
   get isUnauthorized() {
@@ -167,6 +175,23 @@ export interface AccountDeletionResult {
 
 export type ErrorMessageContext = "load" | "save" | "delete" | "call" | "auth";
 
+export function createIdempotencyKey(scope: string): string {
+  return `${sanitizeKeyPart(scope)}:${createRequestId()}`.slice(0, 128);
+}
+
+function createRequestId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+
+  const random = Math.random().toString(36).slice(2, 12);
+  return `${Date.now().toString(36)}-${random}`;
+}
+
+function sanitizeKeyPart(value: string): string {
+  return value.replace(/[^A-Za-z0-9._:-]/g, "-").slice(0, 40) || "mobile";
+}
+
 export function isRetryableApiError(error: unknown): boolean {
   if (!(error instanceof ApiError)) return false;
   return (
@@ -187,12 +212,25 @@ export function getErrorMessage(
   context: ErrorMessageContext = "load",
 ): string {
   if (error instanceof ApiError) {
+    const code = typeof error.body.code === "string" ? error.body.code : undefined;
+
+    if (code === "request_processing") {
+      if (context === "call") {
+        return "Donna is still starting the call. Wait a moment before trying again. If this is urgent, call your loved one directly.";
+      }
+      return "Donna is still finishing that request. Wait a moment, then check again before retrying.";
+    }
+
+    if (code === "idempotency_key_reused") {
+      return "That request changed before Donna finished the first try. Check the latest information, then try again.";
+    }
+
     if (context === "call") {
       if (error.kind === "network" || error.kind === "timeout") {
         return "Donna needs a steady internet connection to start the call. Check your connection and try again. If this is urgent, call your loved one directly.";
       }
       if (error.kind === "server" || error.kind === "rate_limit") {
-        return "Donna couldn't start the call right now. Please try again in a moment. If this is urgent, call your loved one directly.";
+        return withSupportReference("Donna couldn't start the call right now. Please try again in a moment. If this is urgent, call your loved one directly.", error);
       }
     }
 
@@ -201,7 +239,7 @@ export function getErrorMessage(
         return "We couldn't save this because the connection dropped. Your changes are still here. Check your connection and try again.";
       }
       if (error.kind === "server" || error.kind === "rate_limit") {
-        return "We couldn't save this right now. Your changes are still here. Please try again in a moment.";
+        return withSupportReference("We couldn't save this right now. Your changes are still here. Please try again in a moment.", error);
       }
     }
 
@@ -210,7 +248,7 @@ export function getErrorMessage(
         return "We couldn't delete this because the connection dropped. Check your connection and try again.";
       }
       if (error.kind === "server" || error.kind === "rate_limit") {
-        return "We couldn't delete this right now. Please try again in a moment.";
+        return withSupportReference("We couldn't delete this right now. Please try again in a moment.", error);
       }
     }
 
@@ -234,12 +272,17 @@ export function getErrorMessage(
       case "rate_limit":
         return "Too many attempts. Wait a moment and try again.";
       case "server":
-        return "Donna couldn't reach the server. Please try again in a moment.";
+        return withSupportReference("Donna couldn't reach the server. Please try again in a moment.", error);
       default:
         return fallback;
     }
   }
   return fallback;
+}
+
+function withSupportReference(message: string, error: ApiError): string {
+  if (!error.requestId || error.status < 500) return message;
+  return `${message}\n\nSupport reference: ${error.requestId}`;
 }
 
 export const api = {
@@ -250,20 +293,22 @@ export const api = {
 
   account: {
     /** DELETE /api/caregivers/me/account -- deletes the current caregiver account */
-    delete: (token: string) =>
+    delete: (token: string, options?: WriteOptions) =>
       fetchJson<AccountDeletionResult>("/api/caregivers/me/account", {
         method: "DELETE",
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
   },
 
   onboarding: {
     /** POST /api/onboarding -- creates senior + links to Clerk user + creates reminders */
-    complete: (data: OnboardingInput, token: string) =>
+    complete: (data: OnboardingInput, token: string, options?: WriteOptions) =>
       fetchJson<{ senior: Senior; reminders: Reminder[] }>("/api/onboarding", {
         method: "POST",
         body: JSON.stringify(data),
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
   },
 
@@ -272,11 +317,12 @@ export const api = {
     get: (id: string, token: string) => fetchJson<Senior>(`/api/seniors/${id}`, { token }),
 
     /** PATCH /api/seniors/:id */
-    update: (id: string, data: Partial<Senior>, token: string) =>
+    update: (id: string, data: Partial<Senior>, token: string, options?: WriteOptions) =>
       fetchJson<Senior>(`/api/seniors/${id}`, {
         method: "PATCH",
         body: JSON.stringify(data),
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
 
     /** GET /api/seniors/:id/schedule */
@@ -291,10 +337,16 @@ export const api = {
       id: string,
       data: { schedule?: unknown; topicsToAvoid?: string[] },
       token: string,
+      options?: WriteOptions,
     ) =>
       fetchJson<{ schedule: unknown; topicsToAvoid: string[] }>(
         `/api/seniors/${id}/schedule`,
-        { method: "PATCH", body: JSON.stringify(data), token },
+        {
+          method: "PATCH",
+          body: JSON.stringify(data),
+          token,
+          idempotencyKey: options?.idempotencyKey,
+        },
       ),
   },
 
@@ -312,24 +364,31 @@ export const api = {
     create: (
       data: { seniorId: string } & Omit<Partial<Reminder>, "id" | "createdAt" | "lastDeliveredAt">,
       token: string,
+      options?: WriteOptions,
     ) =>
       fetchJson<Reminder>("/api/reminders", {
         method: "POST",
         body: JSON.stringify(data),
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
 
     /** PATCH /api/reminders/:id */
-    update: (id: string, data: Partial<Reminder>, token: string) =>
+    update: (id: string, data: Partial<Reminder>, token: string, options?: WriteOptions) =>
       fetchJson<Reminder>(`/api/reminders/${id}`, {
         method: "PATCH",
         body: JSON.stringify(data),
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
 
     /** DELETE /api/reminders/:id */
-    delete: (id: string, token: string) =>
-      fetchJson<{ success: boolean }>(`/api/reminders/${id}`, { method: "DELETE", token }),
+    delete: (id: string, token: string, options?: WriteOptions) =>
+      fetchJson<{ success: boolean }>(`/api/reminders/${id}`, {
+        method: "DELETE",
+        token,
+        idempotencyKey: options?.idempotencyKey,
+      }),
   },
 
   conversations: {
@@ -343,11 +402,12 @@ export const api = {
 
   calls: {
     /** POST /api/call -- initiate an outbound call for an authorized senior */
-    initiate: (seniorId: string, token: string) =>
+    initiate: (seniorId: string, token: string, options?: WriteOptions) =>
       fetchJson<{ success: boolean; callSid: string }>("/api/call", {
         method: "POST",
         body: JSON.stringify({ seniorId }),
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
   },
 
@@ -357,11 +417,16 @@ export const api = {
       fetchJson<NotificationPreferences>("/api/notifications/preferences", { token }),
 
     /** PATCH /api/notifications/preferences */
-    updatePreferences: (prefs: Partial<NotificationPreferences>, token: string) =>
+    updatePreferences: (
+      prefs: Partial<NotificationPreferences>,
+      token: string,
+      options?: WriteOptions,
+    ) =>
       fetchJson<NotificationPreferences>("/api/notifications/preferences", {
         method: "PATCH",
         body: JSON.stringify(prefs),
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
 
     /** GET /api/notifications?page=N -- paginated notification history (20 per page) */
@@ -369,7 +434,11 @@ export const api = {
       fetchJson<DonnaNotification[]>(`/api/notifications?page=${page}`, { token }),
 
     /** PATCH /api/notifications/:id/read -- mark a notification as read */
-    markRead: (id: string, token: string) =>
-      fetchJson<DonnaNotification>(`/api/notifications/${id}/read`, { method: "PATCH", token }),
+    markRead: (id: string, token: string, options?: WriteOptions) =>
+      fetchJson<DonnaNotification>(`/api/notifications/${id}/read`, {
+        method: "PATCH",
+        token,
+        idempotencyKey: options?.idempotencyKey,
+      }),
   },
 };

@@ -34,8 +34,7 @@ router.post('/api/seniors/:id/memories', requireAuth, writeLimiter, validatePara
     );
     res.json(memory);
   } catch (error) {
-    console.error('Failed to store memory:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'POST /api/seniors/:id/memories');
   }
 });
 

@@ -3,10 +3,12 @@ import { db } from '../db/client.js';
 import { caregivers, reminders, seniors } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
+import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody } from '../middleware/validate.js';
 import { onboardingSchema } from '../validators/schemas.js';
 import { maskName } from '../lib/sanitize.js';
 import { cronExpressionFromTime, resolveTimezoneFromProfile, wallTimeTodayToUtcDate } from '../lib/timezone.js';
+import { logRouteError, sendError } from '../lib/http-response.js';
 
 const router = Router();
 
@@ -15,7 +17,7 @@ function normalizePhone(phone) {
 }
 
 // Complete onboarding - creates senior + links to Clerk user + creates reminders
-router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardingSchema), async (req, res) => {
+router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     const { senior: seniorData, relation, interests, additionalInfo, reminders: reminderStrings, topicsToAvoid, callSchedule } = req.body;
 
@@ -96,16 +98,16 @@ router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardin
       reminders: createdReminders,
     });
   } catch (error) {
-    console.error('Onboarding failed:', error);
+    logRouteError('POST /api/onboarding', error, req, error?.status || 500);
 
     if (error.code === '23505' && error.constraint?.includes('phone')) {
-      return res.status(409).json({ error: 'This phone number is already registered for another senior' });
+      return sendError(res, 409, { error: 'This phone number is already registered for another senior' });
     }
 
     // Pass through service-level errors with status codes (e.g. duplicate phone 409)
     const status = error.status || 500;
     const message = status < 500 ? error.message : 'Failed to complete onboarding. Please try again.';
-    res.status(status).json({ error: message });
+    sendError(res, status, { error: message });
   }
 });
 

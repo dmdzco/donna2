@@ -5,6 +5,7 @@ import { eq, desc } from 'drizzle-orm';
 import { seniorService } from '../services/seniors.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
+import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import {
   createSeniorSchema,
@@ -15,6 +16,7 @@ import {
 import { getAccessibleSeniorIds, canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
 import { decrypt, decryptJson } from '../lib/encryption.js';
+import { logRouteError, sendError } from '../lib/http-response.js';
 
 const router = Router();
 
@@ -51,10 +53,10 @@ router.post('/api/seniors', requireAdmin, writeLimiter, validateBody(createSenio
     });
     res.json(senior);
   } catch (error) {
-    console.error('Failed to create senior:', error);
     const status = error.status || 500;
     const message = status < 500 ? error.message : 'Failed to create senior';
-    res.status(status).json({ error: message });
+    logRouteError('POST /api/seniors', error, req, status);
+    sendError(res, status, { error: message });
   }
 });
 
@@ -113,7 +115,7 @@ router.get('/api/seniors/:id', requireAuth, validateParams(seniorIdParamSchema),
 });
 
 // Update senior
-router.patch('/api/seniors/:id', requireAuth, writeLimiter, validateParams(seniorIdParamSchema), validateBody(updateSeniorSchema), async (req, res) => {
+router.patch('/api/seniors/:id', requireAuth, validateParams(seniorIdParamSchema), validateBody(updateSeniorSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
       return res.status(403).json({ error: 'Access denied to this senior' });
@@ -158,7 +160,7 @@ router.get('/api/seniors/:id/schedule', requireAuth, validateParams(seniorIdPara
 });
 
 // Update senior's call schedule
-router.patch('/api/seniors/:id/schedule', requireAuth, writeLimiter, validateParams(seniorIdParamSchema), validateBody(updateScheduleSchema), async (req, res) => {
+router.patch('/api/seniors/:id/schedule', requireAuth, validateParams(seniorIdParamSchema), validateBody(updateScheduleSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
       return res.status(403).json({ error: 'Access denied to this senior' });
@@ -190,7 +192,7 @@ router.patch('/api/seniors/:id/schedule', requireAuth, writeLimiter, validatePar
 });
 
 // Hard-delete a senior and all associated data
-router.delete('/api/seniors/:id/data', requireAuth, writeLimiter, validateParams(seniorIdParamSchema), async (req, res) => {
+router.delete('/api/seniors/:id/data', requireAuth, validateParams(seniorIdParamSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
       return res.status(403).json({ error: 'Access denied to this senior' });
@@ -216,8 +218,8 @@ router.delete('/api/seniors/:id/data', requireAuth, writeLimiter, validateParams
     });
     res.json({ success: true, deleted_counts: counts });
   } catch (error) {
-    console.error('Failed to hard-delete senior:', error);
-    res.status(500).json({ error: 'Failed to delete senior data' });
+    logRouteError('DELETE /api/seniors/:id/data', error, req, 500);
+    sendError(res, 500, { error: 'Failed to delete senior data' });
   }
 });
 
@@ -316,8 +318,8 @@ router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamS
       caregiverLinks: seniorCaregiverLinks,
     });
   } catch (error) {
-    console.error('[Export] Data export failed:', error);
-    res.status(500).json({ error: 'Export failed' });
+    logRouteError('GET /api/seniors/:id/export', error, req, 500);
+    sendError(res, 500, { error: 'Export failed' });
   }
 });
 

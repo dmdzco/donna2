@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime
 
 from loguru import logger
 from db import query_one, execute
@@ -101,11 +102,9 @@ async def mark_call_ended_without_acknowledgment(delivery_id: str) -> None:
 
 
 async def get_reminder_by_call_sid(call_sid: str) -> dict | None:
-    """Look up an active reminder delivery by Twilio call_sid.
+    """Look up an active reminder delivery by provider call id.
 
-    Used when Pipecat receives an outbound call from the Node.js scheduler.
-    The scheduler writes call_sid to reminder_deliveries, so Pipecat can
-    detect reminder calls without cross-process shared state.
+    Kept for archived Twilio compatibility and direct database recovery.
 
     Returns dict with reminder + delivery info, or None if not a reminder call.
     """
@@ -129,6 +128,63 @@ async def get_reminder_by_call_sid(call_sid: str) -> dict | None:
     return row
 
 
+async def get_reminder_by_id(reminder_id: str) -> dict | None:
+    """Fetch reminder details for a scheduled call."""
+    if not reminder_id:
+        return None
+
+    row = await query_one(
+        """SELECT r.id AS reminder_id, r.senior_id,
+                  r.title, r.title_encrypted, r.description,
+                  r.description_encrypted, r.type AS reminder_type
+           FROM reminders r
+           WHERE r.id = $1
+           LIMIT 1""",
+        reminder_id,
+    )
+    return decrypt_reminder_phi(row) if row else None
+
+
+async def create_or_update_delivery_for_call(
+    *,
+    reminder_id: str,
+    scheduled_for: datetime,
+    call_sid: str,
+    existing_delivery_id: str | None = None,
+) -> dict:
+    """Create or update a reminder delivery row for a call."""
+    if existing_delivery_id:
+        delivery = await query_one(
+            """UPDATE reminder_deliveries SET
+                 delivered_at = NOW(),
+                 call_sid = $1,
+                 attempt_count = COALESCE(attempt_count, 0) + 1,
+                 status = 'delivered'
+               WHERE id = $2
+               RETURNING *""",
+            call_sid,
+            existing_delivery_id,
+        )
+        if not delivery:
+            raise ValueError("Existing reminder delivery not found")
+        logger.info("Updated delivery {did} for call", did=delivery["id"])
+        return delivery
+
+    delivery = await query_one(
+        """INSERT INTO reminder_deliveries
+           (reminder_id, scheduled_for, delivered_at, call_sid, status, attempt_count)
+           VALUES ($1, $2, NOW(), $3, 'delivered', 1)
+           RETURNING *""",
+        reminder_id,
+        scheduled_for,
+        call_sid,
+    )
+    if not delivery:
+        raise ValueError("Reminder delivery was not created")
+    logger.info("Created delivery {did} for call", did=delivery["id"])
+    return delivery
+
+
 async def wait_for_reminder_by_call_sid(
     call_sid: str,
     *,
@@ -138,9 +194,9 @@ async def wait_for_reminder_by_call_sid(
 ) -> dict | None:
     """Look up a reminder delivery, waiting briefly for scheduler DB writes.
 
-    Twilio can request /voice/answer before the Node scheduler has committed the
-    reminder_deliveries row containing call_sid. Waiting here keeps the call on
-    the reminder path instead of incorrectly falling through to a generic call.
+    Older webhook paths could reach Pipecat before the scheduler committed the
+    reminder_deliveries row containing call_sid. Waiting here keeps those calls
+    on the reminder path instead of falling through to a generic call.
     """
     if not call_sid:
         return None

@@ -12,7 +12,7 @@ Port of initiateCallEnding() / cancelCallEnding() from v1-advanced.js.
 In the Pipecat Flows architecture, the closing transition happens via
 the Flow's `transition_to_closing` tool call, not via Twilio REST API.
 The closing node's `post_actions: [{type: "end_conversation"}]` triggers
-pipeline shutdown, and TwilioFrameSerializer auto-terminates the call.
+pipeline shutdown, and the active telephony serializer terminates the call.
 """
 
 from __future__ import annotations

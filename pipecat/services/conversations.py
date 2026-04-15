@@ -206,7 +206,7 @@ async def get_transcript_by_call_sid(call_sid: str):
 
 
 async def get_by_call_sid(call_sid: str) -> dict | None:
-    """Get a conversation by its Twilio call SID."""
+    """Get a conversation by provider call id."""
     return await query_one(
         """SELECT id, senior_id, call_sid, started_at, ended_at,
                   duration_seconds, status, summary, sentiment, concerns

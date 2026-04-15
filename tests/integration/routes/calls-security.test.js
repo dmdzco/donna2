@@ -14,17 +14,18 @@ describe('call route security structure', () => {
     expect(source).not.toContain('seniorService.findByPhone(phoneNumber)');
   });
 
-  it('authorizes senior access before using Twilio', () => {
+  it('authorizes senior access before initiating a Telnyx call', () => {
     const accessCheck = source.indexOf('canAccessSenior(req.auth, senior.id)');
-    const twilioCall = source.indexOf('twilioClient.calls.create');
+    const telnyxCall = source.indexOf('initiateTelnyxOutboundCall({');
 
     expect(accessCheck).toBeGreaterThan(-1);
-    expect(twilioCall).toBeGreaterThan(-1);
-    expect(accessCheck).toBeLessThan(twilioCall);
+    expect(telnyxCall).toBeGreaterThan(-1);
+    expect(accessCheck).toBeLessThan(telnyxCall);
+    expect(source).not.toContain('twilioClient.calls.create');
   });
 
-  it('uses the server-resolved senior phone for Twilio calls', () => {
+  it('validates the server-resolved senior phone before calling', () => {
     expect(source).toContain('const callPhone = formatPhoneForCall(senior.phone)');
-    expect(source).toContain('to: callPhone');
+    expect(source).toContain("return sendError(res, 400, { error: 'Senior phone is not callable' })");
   });
 });

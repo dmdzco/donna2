@@ -1,20 +1,20 @@
-"""Tests for API routes — health check and voice routes using FastAPI TestClient."""
+"""Tests for API routes using FastAPI TestClient."""
 
 import base64
 import os
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from twilio.request_validator import RequestValidator
 
 # Set required env vars before importing app
 os.environ.setdefault("JWT_SECRET", "test-secret")
-os.environ.setdefault("TWILIO_ACCOUNT_SID", "ACtest")
-os.environ.setdefault("TWILIO_AUTH_TOKEN", "test-token")
-os.environ.setdefault("TWILIO_PHONE_NUMBER", "+15551234567")
-os.environ.setdefault("ALLOW_UNSIGNED_TWILIO_WEBHOOKS", "true")
+os.environ.setdefault("TELNYX_API_KEY", "test-telnyx-key")
+os.environ.setdefault("TELNYX_PUBLIC_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+os.environ.setdefault("TELNYX_PHONE_NUMBER", "+15551234567")
+os.environ.setdefault("TELNYX_CONNECTION_ID", "test-connection")
+os.environ.setdefault("ALLOW_UNSIGNED_TELNYX_WEBHOOKS", "true")
 
 from main import app
 
@@ -88,9 +88,9 @@ class TestHealthEndpoint:
         assert data["database"] == "error"
 
 
-class TestVoiceAnswerEndpoint:
+class TestTelnyxAndCallContext:
     def test_cached_news_requires_fresh_timestamp(self):
-        from api.routes.voice import _cached_news_context_from_senior
+        from api.routes.call_context import _cached_news_context_from_senior
 
         senior = {
             "id": "senior-1",
@@ -101,7 +101,7 @@ class TestVoiceAnswerEndpoint:
         assert _cached_news_context_from_senior(senior) is None
 
     def test_cached_news_selects_fresh_stories(self):
-        from api.routes.voice import _cached_news_context_from_senior
+        from api.routes.call_context import _cached_news_context_from_senior
 
         senior = {
             "id": "senior-1",
@@ -117,7 +117,7 @@ class TestVoiceAnswerEndpoint:
         mock_select.assert_called_once()
 
     def test_cached_news_must_be_from_senior_local_today(self):
-        from api.routes.voice import _cached_news_context_from_senior
+        from api.routes.call_context import _cached_news_context_from_senior
 
         senior = {
             "id": "senior-1",
@@ -128,130 +128,22 @@ class TestVoiceAnswerEndpoint:
 
         assert _cached_news_context_from_senior(senior) is None
 
-    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
-    @patch("services.scheduler.get_prefetched_context", return_value=None)
-    @patch("services.seniors.find_any_by_phone", new_callable=AsyncMock, return_value=None)
-    @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
-    def test_voice_answer_returns_twiml(self, mock_find, mock_find_any, mock_prefetch, mock_reminder, client):
-        """Test that /voice/answer returns valid TwiML XML."""
+    def test_archived_twilio_voice_answer_is_not_mounted(self, client):
+        response = client.post("/voice/answer", data={})
+        assert response.status_code == 404
+
+    def test_telnyx_events_accepts_unsigned_webhook_in_test_mode(self, client):
         response = client.post(
-            "/voice/answer",
-            data={
-                "CallSid": "CA123test",
-                "From": "+15559876543",
-                "To": "+15551234567",
-                "Direction": "inbound",
+            "/telnyx/events",
+            json={
+                "data": {
+                    "event_type": "call.initiated",
+                    "payload": {},
+                }
             },
         )
         assert response.status_code == 200
-        assert "text/xml" in response.headers["content-type"]
-        assert "<Response>" in response.text
-        assert "<Stream" in response.text
-        assert "/ws" in response.text
-        assert "ws_token" in response.text
-
-    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
-    @patch("services.scheduler.get_prefetched_context", return_value=None)
-    @patch("services.reminder_delivery.get_reminder_by_call_sid", new_callable=AsyncMock, return_value=None)
-    @patch("services.conversations.create", new_callable=AsyncMock, return_value={"id": "conv-456"})
-    @patch("api.routes.voice._hydrate_senior_call_context", new_callable=AsyncMock)
-    @patch("services.seniors.find_by_phone", new_callable=AsyncMock)
-    def test_voice_answer_includes_params(self, mock_find, mock_hydrate, mock_create, mock_reminder_db, mock_prefetch, mock_reminder, client):
-        """Test that TwiML includes stream parameters."""
-        mock_find.return_value = {
-            "id": "senior-456",
-            "name": "Margaret",
-            "phone": "5559876543",
-            "timezone": "America/New_York",
-            "is_active": True,
-        }
-        mock_hydrate.return_value = {
-            "memory_context": "memory",
-            "pre_generated_greeting": "Hello Margaret",
-            "news_context": None,
-            "recent_turns": None,
-            "previous_calls_summary": None,
-            "todays_context": None,
-            "last_call_analysis": None,
-            "call_settings": {},
-            "has_caregiver_notes": False,
-            "caregiver_notes_content": [],
-        }
-
-        response = client.post(
-            "/voice/answer",
-            data={
-                "CallSid": "CA456test",
-                "From": "+15551234567",
-                "To": "+15559876543",
-                "Direction": "outbound-api",
-            },
-        )
-        assert response.status_code == 200
-        assert "call_sid" in response.text
-        assert "CA456test" in response.text
-        assert "ws_token" in response.text
-
-    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
-    @patch("services.scheduler.get_prefetched_context", return_value=None)
-    @patch("services.reminder_delivery.wait_for_reminder_by_call_sid", new_callable=AsyncMock)
-    @patch("services.conversations.create", new_callable=AsyncMock, return_value={"id": "conv-reminder"})
-    @patch("api.routes.voice._hydrate_senior_call_context", new_callable=AsyncMock)
-    @patch("services.seniors.find_by_phone", new_callable=AsyncMock)
-    def test_voice_answer_waits_for_reminder_delivery_when_tagged(
-        self,
-        mock_find,
-        mock_hydrate,
-        mock_create,
-        mock_wait_reminder_db,
-        mock_prefetch,
-        mock_reminder,
-        client,
-    ):
-        """Tagged reminder calls wait for Node's reminder_deliveries row."""
-        mock_wait_reminder_db.return_value = {
-            "delivery_id": "delivery-123",
-            "reminder_id": "reminder-123",
-            "delivery_status": "delivered",
-            "attempt_count": 1,
-            "title": "Take metformin",
-            "description": "With dinner",
-            "reminder_type": "medication",
-        }
-        mock_find.return_value = {
-            "id": "senior-789",
-            "name": "Margaret",
-            "phone": "5559876543",
-            "timezone": "America/New_York",
-            "is_active": True,
-        }
-        mock_hydrate.return_value = {
-            "memory_context": "memory",
-            "pre_generated_greeting": "Hello Margaret",
-            "news_context": None,
-            "recent_turns": None,
-            "previous_calls_summary": None,
-            "todays_context": None,
-            "last_call_analysis": None,
-            "call_settings": {},
-            "has_caregiver_notes": False,
-            "caregiver_notes_content": [],
-        }
-
-        response = client.post(
-            "/voice/answer?call_type=reminder",
-            data={
-                "CallSid": "CAremindertest",
-                "From": "+15551234567",
-                "To": "+15559876543",
-                "Direction": "outbound-api",
-            },
-        )
-
-        assert response.status_code == 200
-        assert 'name="call_type" value="reminder"' in response.text
-        mock_wait_reminder_db.assert_awaited_once_with("CAremindertest")
-        mock_create.assert_awaited_once()
+        assert response.json() == {"received": True}
 
     @pytest.mark.asyncio
     async def test_bot_loads_metadata_from_local_state_first(self):
@@ -293,7 +185,7 @@ class TestVoiceAnswerEndpoint:
     @pytest.mark.asyncio
     async def test_voice_metadata_persisted_encrypted_and_recovered_from_shared_state(self, monkeypatch):
         """Call metadata written for multi-instance routing should be encrypted."""
-        from api.routes import voice
+        from api.routes import call_context
         from lib.encryption import decrypt_json
 
         enable_test_encryption(monkeypatch)
@@ -305,23 +197,23 @@ class TestVoiceAnswerEndpoint:
             "ws_token": "token-abc",
         }
 
-        voice.call_metadata.clear()
+        call_context.call_metadata.clear()
         try:
             with patch("lib.redis_client.get_shared_state", return_value=state):
-                await voice._persist_metadata("CAencrypted", metadata)
+                await call_context._persist_metadata("CAencrypted", metadata)
 
                 encrypted = state.data["call_metadata:CAencrypted"]
                 assert isinstance(encrypted, str)
                 assert encrypted.startswith("enc:")
                 assert decrypt_json(encrypted)["memory_context"] == "Known routine context."
 
-                loaded = await voice.get_call_metadata("CAencrypted")
+                loaded = await call_context.get_call_metadata("CAencrypted")
 
             assert loaded["senior"]["id"] == "senior-1"
             assert loaded["memory_context"] == "Known routine context."
-            assert voice.call_metadata["CAencrypted"] == loaded
+            assert call_context.call_metadata["CAencrypted"] == loaded
         finally:
-            voice.call_metadata.clear()
+            call_context.call_metadata.clear()
 
     @pytest.mark.asyncio
     async def test_bot_metadata_missing_without_shared_state(self):
@@ -337,110 +229,6 @@ class TestVoiceAnswerEndpoint:
 
         assert metadata == {}
 
-    def test_voice_answer_rejects_unsigned_webhook_in_production(self, client, monkeypatch):
-        monkeypatch.setenv("ENVIRONMENT", "production")
-        monkeypatch.setenv("PIPECAT_PUBLIC_URL", "https://pipecat.test")
-        monkeypatch.setenv("TWILIO_AUTH_TOKEN", "test-token")
-        monkeypatch.delenv("ALLOW_UNSIGNED_TWILIO_WEBHOOKS", raising=False)
-        monkeypatch.delenv("SKIP_TWILIO_VALIDATION", raising=False)
-
-        response = client.post(
-            "/voice/answer",
-            data={
-                "CallSid": "CAunsigned",
-                "From": "+15559876543",
-                "To": "+15551234567",
-                "Direction": "inbound",
-            },
-        )
-
-        assert response.status_code == 403
-
-    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
-    @patch("services.scheduler.get_prefetched_context", return_value=None)
-    @patch("services.seniors.find_any_by_phone", new_callable=AsyncMock, return_value=None)
-    @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
-    def test_voice_answer_accepts_valid_twilio_signature(
-        self, mock_find, mock_find_any, mock_prefetch, mock_reminder, client, monkeypatch
-    ):
-        monkeypatch.setenv("ENVIRONMENT", "production")
-        monkeypatch.setenv("PIPECAT_PUBLIC_URL", "https://pipecat.test")
-        monkeypatch.setenv("TWILIO_AUTH_TOKEN", "test-token")
-        monkeypatch.delenv("ALLOW_UNSIGNED_TWILIO_WEBHOOKS", raising=False)
-        monkeypatch.delenv("SKIP_TWILIO_VALIDATION", raising=False)
-
-        data = {
-            "CallSid": "CAsigned",
-            "From": "+15559876543",
-            "To": "+15551234567",
-            "Direction": "inbound",
-        }
-        signature = RequestValidator("test-token").compute_signature(
-            "https://pipecat.test/voice/answer",
-            data,
-        )
-
-        response = client.post(
-            "/voice/answer",
-            data=data,
-            headers={"X-Twilio-Signature": signature},
-        )
-
-        assert response.status_code == 200
-        assert "wss://pipecat.test/ws" in response.text
-        assert "ws_token" in response.text
-
-    @patch("services.scheduler.get_reminder_context_async", new_callable=AsyncMock, return_value=None)
-    @patch("services.scheduler.get_prefetched_context", return_value=None)
-    @patch("services.seniors.find_any_by_phone", new_callable=AsyncMock)
-    @patch("services.seniors.find_by_phone", new_callable=AsyncMock, return_value=None)
-    def test_voice_answer_inactive_senior_uses_no_phi_hangup(
-        self, mock_find, mock_find_any, mock_prefetch, mock_reminder, client
-    ):
-        """Inactive seniors should not create conversations or load PHI context."""
-        mock_find_any.return_value = {
-            "id": "senior-inactive",
-            "phone": "5559876543",
-            "is_active": False,
-        }
-
-        response = client.post(
-            "/voice/answer",
-            data={
-                "CallSid": "CAinactive",
-                "From": "+15559876543",
-                "To": "+15551234567",
-                "Direction": "inbound",
-            },
-        )
-
-        assert response.status_code == 200
-        assert "<Hangup/>" in response.text
-        assert "<Stream" not in response.text
-
-
-class TestVoiceStatusEndpoint:
-    def test_voice_status_completed(self, client):
-        response = client.post(
-            "/voice/status",
-            data={
-                "CallSid": "CA789test",
-                "CallStatus": "completed",
-                "CallDuration": "120",
-            },
-        )
-        assert response.status_code == 200
-
-    def test_voice_status_failed(self, client):
-        response = client.post(
-            "/voice/status",
-            data={
-                "CallSid": "CA999test",
-                "CallStatus": "failed",
-                "CallDuration": "0",
-            },
-        )
-        assert response.status_code == 200
 
 
 class TestCallsEndpointAuth:

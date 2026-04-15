@@ -556,7 +556,7 @@ Once GrowthBook is deployed, seed flags in these categories:
 |------|------|---------|---------|
 | `tts_speed` | value | 0.9 | Per-senior TTS speed (0.7–1.0) |
 | `tts_voice_id` | value | null | Per-senior ElevenLabs voice |
-| `tts_model` | value | "eleven_turbo_v2_5" | TTS model selection |
+| `tts_model` | value | "eleven_flash_v2_5" | TTS model selection |
 | `vad_confidence` | value | 0.6 | VAD confidence threshold |
 | `vad_stop_secs` | value | 1.2 | Silence duration before speech end |
 | `vad_min_volume` | value | 0.5 | Minimum volume threshold |
@@ -679,7 +679,7 @@ Once GrowthBook is deployed, seed flags in these categories:
 |------|------|---------|---------|
 | `prompt_style_ab` | variant | "warm" | Prompt tone experiment |
 | `greeting_ab` | variant | "interest_first" | Greeting approach experiment |
-| `tts_model_ab` | variant | "eleven_turbo_v2_5" | TTS provider experiment |
+| `tts_model_ab` | variant | "eleven_flash_v2_5" | TTS provider experiment |
 | `director_model_ab` | variant | "gemini-3-flash-preview" | Director model experiment |
 | `vad_sensitivity_ab` | variant | "standard" | VAD tuning experiment |
 | `closing_approach_ab` | variant | "natural" | Closing style experiment |

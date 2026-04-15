@@ -156,7 +156,7 @@ Telnyx Audio ──► FastAPIWebsocketTransport
                         ▼
               Guidance Stripper (strips <guidance> tags + [BRACKETED] directives)
                         ▼
-              ElevenLabs TTS (eleven_turbo_v2_5)
+              ElevenLabs TTS (eleven_flash_v2_5)
                         ▼
               FastAPIWebsocketTransport ──► Telnyx Audio (L16 16kHz)
                         ▼
@@ -573,6 +573,7 @@ GOOGLE_API_KEY=...               # Gemini Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...             # STT
 ELEVENLABS_API_KEY=...           # TTS (ElevenLabs)
 ELEVENLABS_VOICE_ID=...          # Voice ID (optional)
+ELEVENLABS_MODEL=eleven_flash_v2_5 # TTS model (optional, has default)
 CARTESIA_API_KEY=...             # TTS (Cartesia — alternative to ElevenLabs)
 CARTESIA_VOICE_ID=...            # Cartesia voice ID (optional, has default)
 TTS_PROVIDER=cartesia            # Override GrowthBook flag: "cartesia" or "elevenlabs"

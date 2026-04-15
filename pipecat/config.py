@@ -62,6 +62,7 @@ class Settings:
     deepgram_api_key: str = ""
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = "jixzNFANovqRhzplvmwR"
+    elevenlabs_model: str = "eleven_flash_v2_5"
     cartesia_api_key: str = ""
     cartesia_voice_id: str = "f786b574-daa5-4673-aa0c-cbe3e8534c02"
     google_api_key: str = ""
@@ -287,6 +288,7 @@ def _load_settings() -> Settings:
         deepgram_api_key=_env("DEEPGRAM_API_KEY"),
         elevenlabs_api_key=_env("ELEVENLABS_API_KEY"),
         elevenlabs_voice_id=_env("ELEVENLABS_VOICE_ID", "jixzNFANovqRhzplvmwR"),
+        elevenlabs_model=_env("ELEVENLABS_MODEL") or "eleven_flash_v2_5",
         cartesia_api_key=_env("CARTESIA_API_KEY"),
         cartesia_voice_id=_env("CARTESIA_VOICE_ID", "f786b574-daa5-4673-aa0c-cbe3e8534c02"),
         google_api_key=_env("GOOGLE_API_KEY"),

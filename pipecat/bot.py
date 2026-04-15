@@ -233,11 +233,11 @@ def create_tts_service(session_state: dict):
             ),
         )
 
-    logger.info("TTS provider: ElevenLabs")
+    logger.info("TTS provider: ElevenLabs {model}", model=cfg.elevenlabs_model)
     return ElevenLabsTTSService(
         api_key=cfg.elevenlabs_api_key,
         voice_id=cfg.elevenlabs_voice_id,
-        model="eleven_turbo_v2_5",
+        model=cfg.elevenlabs_model,
         sample_rate=output_sample_rate,
         params=ElevenLabsTTSService.InputParams(speed=0.9),
     )

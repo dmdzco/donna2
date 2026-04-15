@@ -82,7 +82,7 @@ This document is now a forward-looking Telnyx model. It is not a historical carr
 | Director LLM | Groq `openai/gpt-oss-20b`, Gemini fallback | Runs off critical path for guidance/query extraction. |
 | Post-call analysis | Gemini 3 Flash Preview | Summaries, concerns, engagement, caregiver SMS copy. |
 | Memory extraction | OpenAI small model + embeddings | Runs post-call; embeddings are de minimis in cost. |
-| TTS | ElevenLabs Flash/Turbo | Keep this assumption for now. Active Telnyx calls request 16kHz PCM from TTS; higher-rate TTS output is only for non-phone paths. Other speech vendors are sensitivity only. |
+| TTS | ElevenLabs Flash | Keep this assumption for now. Active Telnyx calls request 16kHz PCM from TTS; higher-rate TTS output is only for non-phone paths. Other speech vendors are sensitivity only. |
 | Web/news | Tavily basic search, OpenAI web search fallback/news | Current feature remains enabled in the model. |
 | Notifications | Telnyx SMS + Resend email | SMS uses one outbound message part plus estimated carrier fee. |
 | Hosting/data | Railway, Neon Postgres/pgvector, Redis | Mostly fixed platform cost, not the main COGS driver. |
@@ -105,7 +105,7 @@ Important correction: the carrier baseline is Telnyx from this document forward,
 | Deepgram Nova-3 streaming STT | $0.0077/min pay-as-you-go | [Deepgram pricing](https://deepgram.com/pricing) |
 | Deepgram Aura-2 TTS | $0.030/1K chars | [Deepgram pricing](https://deepgram.com/pricing) |
 | Deepgram Aura-1 TTS | $0.015/1K chars | [Deepgram pricing](https://deepgram.com/pricing) |
-| ElevenLabs Flash/Turbo TTS | $0.05/1K chars | [ElevenLabs API pricing](https://elevenlabs.io/pricing/api) |
+| ElevenLabs Flash TTS | $0.05/1K chars | [ElevenLabs API pricing](https://elevenlabs.io/pricing/api) |
 | Cartesia Sonic TTS | 1 credit/char; Scale annual plan implies about $0.030/1K chars | [Cartesia pricing](https://cartesia.ai/pricing) |
 | Claude Sonnet 4.x | $3/MTok input, $15/MTok output, $0.30/MTok cache read | [Anthropic pricing](https://claude.com/pricing) |
 | Groq GPT OSS 20B | $0.075/MTok input, $0.30/MTok output | [Groq pricing](https://groq.com/pricing) |
@@ -294,7 +294,7 @@ Future sensitivity:
 
 | Provider | Modeled TTS cost at 6,000 chars | Savings vs ElevenLabs |
 |---|---:|---:|
-| ElevenLabs Flash/Turbo | $0.300 | Baseline |
+| ElevenLabs Flash | $0.300 | Baseline |
 | Cartesia Sonic | ~$0.179 | ~$0.121/call |
 | Deepgram Aura-2 | $0.180 | ~$0.120/call |
 | Deepgram Aura-1 | $0.090 | ~$0.210/call |

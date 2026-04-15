@@ -370,7 +370,7 @@ LiveKit Server → dispatches jobs to → Worker Pool → each worker runs → A
 |----------|----------|-------------|----------|-----------|
 | **Cartesia** | $0.02 | **190ms** | 260ms | State-space architecture, streaming, word timestamps |
 | **Deepgram** | $0.008 | **150ms** | 320ms | Lowest cost, reliable |
-| **ElevenLabs Turbo** | $0.08 | 300ms | 510ms | Best emotional realism |
+| **ElevenLabs Flash** | $0.08 | 300ms | 510ms | Best emotional realism |
 | **Rime** | $0.024 | 340ms | 980ms | Conversational fine-tuning |
 
 **Donna uses ElevenLabs** — the most expensive and 2nd slowest option. Cartesia offers word-level timestamps (critical for interruption context), lower latency, and lower cost. Trade-off: ElevenLabs has the most emotionally realistic voices, which matters for elderly companionship.

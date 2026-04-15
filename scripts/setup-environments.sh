@@ -171,6 +171,7 @@ ANTHROPIC_API_KEY=$(get_prod_var donna-pipecat ANTHROPIC_API_KEY)
 DEEPGRAM_API_KEY=$(get_prod_var donna-pipecat DEEPGRAM_API_KEY)
 ELEVENLABS_API_KEY=$(get_prod_var donna-pipecat ELEVENLABS_API_KEY)
 ELEVENLABS_VOICE_ID=$(get_prod_var donna-pipecat ELEVENLABS_VOICE_ID)
+ELEVENLABS_MODEL=$(get_prod_var donna-pipecat ELEVENLABS_MODEL)
 GOOGLE_API_KEY=$(get_prod_var donna-pipecat GOOGLE_API_KEY)
 OPENAI_API_KEY=$(get_prod_var donna-pipecat OPENAI_API_KEY)
 TWILIO_ACCOUNT_SID=$(get_prod_var donna-api TWILIO_ACCOUNT_SID)
@@ -298,6 +299,7 @@ set_dev_var donna-pipecat ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
 set_dev_var donna-pipecat DEEPGRAM_API_KEY "$DEEPGRAM_API_KEY"
 set_dev_var donna-pipecat ELEVENLABS_API_KEY "$ELEVENLABS_API_KEY"
 set_dev_var donna-pipecat ELEVENLABS_VOICE_ID "$ELEVENLABS_VOICE_ID"
+set_dev_var donna-pipecat ELEVENLABS_MODEL "$ELEVENLABS_MODEL"
 set_dev_var donna-pipecat GOOGLE_API_KEY "$GOOGLE_API_KEY"
 set_dev_var donna-pipecat OPENAI_API_KEY "$OPENAI_API_KEY"
 set_dev_var donna-pipecat JWT_SECRET "$JWT_SECRET"
@@ -354,6 +356,7 @@ set_staging_var donna-pipecat ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
 set_staging_var donna-pipecat DEEPGRAM_API_KEY "$DEEPGRAM_API_KEY"
 set_staging_var donna-pipecat ELEVENLABS_API_KEY "$ELEVENLABS_API_KEY"
 set_staging_var donna-pipecat ELEVENLABS_VOICE_ID "$ELEVENLABS_VOICE_ID"
+set_staging_var donna-pipecat ELEVENLABS_MODEL "$ELEVENLABS_MODEL"
 set_staging_var donna-pipecat GOOGLE_API_KEY "$GOOGLE_API_KEY"
 set_staging_var donna-pipecat OPENAI_API_KEY "$OPENAI_API_KEY"
 set_staging_var donna-pipecat JWT_SECRET "$JWT_SECRET"

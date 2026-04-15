@@ -316,6 +316,7 @@ FAST_OBSERVER_MODEL=gemini-3-flash-preview  # Director fallback model
 GROQ_API_KEY=...                        # Groq active fast Director provider
 ELEVENLABS_VOICE_ID=...                 # Voice ID (has default)
 TTS_PROVIDER=elevenlabs                 # Optional: cartesia when enabled/configured
+ELEVENLABS_MODEL=eleven_flash_v2_5      # ElevenLabs TTS model
 TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE=16000 # Internal STT input after telephony conversion
 ELEVENLABS_OUTPUT_SAMPLE_RATE=44100     # Internal ElevenLabs TTS output
 CARTESIA_OUTPUT_SAMPLE_RATE=48000       # Internal Cartesia PCM output

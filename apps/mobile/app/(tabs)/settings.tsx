@@ -20,6 +20,7 @@ import { Modal } from "@/src/components/ui/Modal";
 import { Button } from "@/src/components/ui/Button";
 import { api, getErrorMessage } from "@/src/lib/api";
 import { useStableIdempotencyKey } from "@/src/hooks/useStableIdempotencyKey";
+import { clearOnboardingDraft } from "@/src/stores/onboarding";
 
 type SettingsRow = {
   icon: React.ReactNode;
@@ -124,6 +125,7 @@ export default function SettingsScreen() {
     }
 
     try {
+      await clearOnboardingDraft();
       await SecureStore.deleteItemAsync("__clerk_client_jwt");
     } catch {}
 

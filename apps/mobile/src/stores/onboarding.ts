@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { secureDraftStorage } from "@/src/lib/secureDraftStorage";
 
 export interface OnboardingCall {
   title: string;
@@ -64,6 +66,8 @@ const DEFAULT_CALL: OnboardingCall = {
   selectedReminderIds: [],
 };
 
+const ONBOARDING_DRAFT_KEY = "donna-onboarding-draft-v1";
+
 const INITIAL_STATE = {
   firstName: "",
   lastName: "",
@@ -82,67 +86,99 @@ const INITIAL_STATE = {
   calls: [{ ...DEFAULT_CALL }],
 };
 
-export const useOnboardingStore = create<OnboardingState>((set) => ({
-  ...INITIAL_STATE,
+const draftFields = (state: OnboardingState) => ({
+  firstName: state.firstName,
+  lastName: state.lastName,
+  email: state.email,
+  phone: state.phone,
+  lovedOneName: state.lovedOneName,
+  lovedOnePhone: state.lovedOnePhone,
+  relationship: state.relationship,
+  city: state.city,
+  state: state.state,
+  zipcode: state.zipcode,
+  selectedInterests: state.selectedInterests,
+  additionalTopics: state.additionalTopics,
+  topicsToAvoid: state.topicsToAvoid,
+  reminders: state.reminders,
+  calls: state.calls,
+});
 
-  setField: (field, value) => set({ [field]: value }),
+export const useOnboardingStore = create<OnboardingState>()(
+  persist(
+    (set) => ({
+      ...INITIAL_STATE,
 
-  addReminder: () =>
-    set((s) => ({
-      reminders: [...s.reminders, { title: "", description: "" }],
-    })),
+      setField: (field, value) => set({ [field]: value }),
 
-  removeReminder: (index) =>
-    set((s) => ({
-      reminders: s.reminders.filter((_, i) => i !== index),
-    })),
+      addReminder: () =>
+        set((s) => ({
+          reminders: [...s.reminders, { title: "", description: "" }],
+        })),
 
-  updateReminder: (index, field, value) =>
-    set((s) => ({
-      reminders: s.reminders.map((r, i) =>
-        i === index ? { ...r, [field]: value } : r,
-      ),
-    })),
+      removeReminder: (index) =>
+        set((s) => ({
+          reminders: s.reminders.filter((_, i) => i !== index),
+        })),
 
-  addCall: () =>
-    set((s) => ({
-      calls: [...s.calls, { ...DEFAULT_CALL }],
-    })),
+      updateReminder: (index, field, value) =>
+        set((s) => ({
+          reminders: s.reminders.map((r, i) =>
+            i === index ? { ...r, [field]: value } : r,
+          ),
+        })),
 
-  removeCall: (index) =>
-    set((s) => ({
-      calls: s.calls.filter((_, i) => i !== index),
-    })),
+      addCall: () =>
+        set((s) => ({
+          calls: [...s.calls, { ...DEFAULT_CALL }],
+        })),
 
-  updateCall: (index, field, value) =>
-    set((s) => ({
-      calls: s.calls.map((c, i) =>
-        i === index ? { ...c, [field]: value } : c,
-      ),
-    })),
+      removeCall: (index) =>
+        set((s) => ({
+          calls: s.calls.filter((_, i) => i !== index),
+        })),
 
-  toggleInterest: (id) =>
-    set((s) => {
-      const next = { ...s.selectedInterests };
-      if (id in next) {
-        delete next[id];
-      } else {
-        next[id] = "";
-      }
-      return { selectedInterests: next };
+      updateCall: (index, field, value) =>
+        set((s) => ({
+          calls: s.calls.map((c, i) =>
+            i === index ? { ...c, [field]: value } : c,
+          ),
+        })),
+
+      toggleInterest: (id) =>
+        set((s) => {
+          const next = { ...s.selectedInterests };
+          if (id in next) {
+            delete next[id];
+          } else {
+            next[id] = "";
+          }
+          return { selectedInterests: next };
+        }),
+
+      updateInterestDetail: (id, value) =>
+        set((s) => ({
+          selectedInterests: { ...s.selectedInterests, [id]: value },
+        })),
+
+      removeInterest: (id) =>
+        set((s) => {
+          const next = { ...s.selectedInterests };
+          delete next[id];
+          return { selectedInterests: next };
+        }),
+
+      reset: () => set({ ...INITIAL_STATE }),
     }),
+    {
+      name: ONBOARDING_DRAFT_KEY,
+      storage: createJSONStorage(() => secureDraftStorage),
+      partialize: draftFields,
+    },
+  ),
+);
 
-  updateInterestDetail: (id, value) =>
-    set((s) => ({
-      selectedInterests: { ...s.selectedInterests, [id]: value },
-    })),
-
-  removeInterest: (id) =>
-    set((s) => {
-      const next = { ...s.selectedInterests };
-      delete next[id];
-      return { selectedInterests: next };
-    }),
-
-  reset: () => set(INITIAL_STATE),
-}));
+export async function clearOnboardingDraft() {
+  useOnboardingStore.setState({ ...INITIAL_STATE });
+  await secureDraftStorage.removeItem(ONBOARDING_DRAFT_KEY);
+}

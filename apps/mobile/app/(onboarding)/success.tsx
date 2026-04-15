@@ -18,6 +18,7 @@ import { COLORS } from "@/src/constants/theme";
 import { api, getErrorMessage } from "@/src/lib/api";
 import { useStableIdempotencyKey } from "@/src/hooks/useStableIdempotencyKey";
 import {
+  clearOnboardingDraft,
   useOnboardingStore,
   type OnboardingCall,
 } from "@/src/stores/onboarding";
@@ -211,7 +212,7 @@ export default function SuccessScreen() {
       });
 
       idempotency.reset();
-      store.reset();
+      await clearOnboardingDraft();
       router.replace("/(tabs)");
     } catch (err: unknown) {
       Alert.alert(

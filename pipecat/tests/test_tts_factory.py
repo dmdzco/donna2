@@ -59,6 +59,7 @@ def test_defaults_to_elevenlabs_when_no_flags(cartesia_env):
     session_state = {}  # No _flags key
     tts = create_tts_service(session_state)
     assert isinstance(tts, ElevenLabsTTSService)
+    assert tts._init_sample_rate == 44100
 
 
 def test_cartesia_uses_default_encoding(cartesia_env):
@@ -70,6 +71,7 @@ def test_cartesia_uses_default_encoding(cartesia_env):
     tts = create_tts_service(session_state)
     assert isinstance(tts, CartesiaTTSService)
     assert tts._settings["output_format"]["encoding"] == "pcm_s16le"
+    assert tts._init_sample_rate == 48000
 
 
 def test_cartesia_uses_sonic3_model(cartesia_env):
@@ -90,3 +92,28 @@ def test_cartesia_speed_configured(cartesia_env):
     gen_config = tts._settings.get("generation_config")
     assert gen_config is not None
     assert gen_config.speed == 1.05
+
+
+def test_audio_profile_prefers_cartesia_48k_and_16k_input(cartesia_env):
+    """Cartesia keeps 48kHz audio internally and uses 16kHz for telephony/STT input."""
+    from bot import get_audio_profile
+
+    session_state = {"_flags": {"tts_provider": "cartesia"}}
+    profile = get_audio_profile(session_state)
+
+    assert profile["tts_provider"] == "cartesia"
+    assert profile["audio_in_sample_rate"] == 16000
+    assert profile["audio_out_sample_rate"] == 48000
+
+
+def test_audio_profile_falls_back_to_elevenlabs_when_cartesia_unavailable(cartesia_env):
+    """Missing Cartesia credentials fall back to the ElevenLabs audio profile."""
+    from bot import get_audio_profile
+
+    with patch.dict(os.environ, {"CARTESIA_API_KEY": ""}):
+        session_state = {"_flags": {"tts_provider": "cartesia"}}
+        profile = get_audio_profile(session_state)
+
+    assert profile["tts_provider"] == "elevenlabs"
+    assert profile["audio_in_sample_rate"] == 16000
+    assert profile["audio_out_sample_rate"] == 44100

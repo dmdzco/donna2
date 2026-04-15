@@ -48,21 +48,84 @@ from processors.quick_observer import QuickObserverProcessor
 from services.post_call import run_post_call
 
 
+SUPPORTED_CARTESIA_SAMPLE_RATES = {8000, 16000, 22050, 24000, 44100, 48000}
+SUPPORTED_ELEVENLABS_SAMPLE_RATES = {8000, 16000, 22050, 24000, 44100}
+
+
+def _get_env_int(name: str, default: int) -> int:
+    """Read an integer env var with a safe fallback."""
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning("Invalid integer for {name}: {value}; using {default}", name=name, value=value, default=default)
+        return default
+
+
+def resolve_tts_provider(session_state: dict) -> str:
+    """Resolve the active TTS provider after applying availability fallbacks."""
+    flags = session_state.get("_flags", {})
+    requested_provider = os.getenv("TTS_PROVIDER") or flags.get("tts_provider", "elevenlabs")
+
+    if requested_provider == "cartesia":
+        if os.getenv("CARTESIA_API_KEY"):
+            return "cartesia"
+        logger.warning("Cartesia requested but CARTESIA_API_KEY is missing; falling back to ElevenLabs")
+
+    return "elevenlabs"
+
+
+def get_audio_profile(session_state: dict) -> dict[str, int | str]:
+    """Pick the highest safe internal sample rates for the active telephony pipeline."""
+    provider = resolve_tts_provider(session_state)
+    audio_in_sample_rate = _get_env_int("TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE", 16000)
+
+    if provider == "cartesia":
+        audio_out_sample_rate = _get_env_int("CARTESIA_OUTPUT_SAMPLE_RATE", 48000)
+        if audio_out_sample_rate not in SUPPORTED_CARTESIA_SAMPLE_RATES:
+            logger.warning(
+                "Unsupported Cartesia sample rate {rate}; using 48000",
+                rate=audio_out_sample_rate,
+            )
+            audio_out_sample_rate = 48000
+    else:
+        audio_out_sample_rate = _get_env_int("ELEVENLABS_OUTPUT_SAMPLE_RATE", 44100)
+        if audio_out_sample_rate not in SUPPORTED_ELEVENLABS_SAMPLE_RATES:
+            logger.warning(
+                "Unsupported ElevenLabs sample rate {rate}; using 44100",
+                rate=audio_out_sample_rate,
+            )
+            audio_out_sample_rate = 44100
+
+    return {
+        "tts_provider": provider,
+        "audio_in_sample_rate": audio_in_sample_rate,
+        "audio_out_sample_rate": audio_out_sample_rate,
+    }
+
+
 def create_tts_service(session_state: dict):
     """Select TTS provider based on feature flag.
 
     Uses session_state["_flags"]["tts_provider"] to pick Cartesia or ElevenLabs.
     Falls back to ElevenLabs if Cartesia key is missing or flag is unset.
     """
-    flags = session_state.get("_flags", {})
-    provider = os.getenv("TTS_PROVIDER") or flags.get("tts_provider", "elevenlabs")
+    audio_profile = get_audio_profile(session_state)
+    provider = str(audio_profile["tts_provider"])
+    output_sample_rate = int(audio_profile["audio_out_sample_rate"])
 
-    if provider == "cartesia" and os.getenv("CARTESIA_API_KEY"):
+    if provider == "cartesia":
         logger.info("TTS provider: Cartesia Sonic 3")
         return CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY", ""),
             voice_id=os.getenv("CARTESIA_VOICE_ID", "1242fb95-7ddd-44ac-8a05-9e8a22a6137d"),
             model="sonic-3",
+            sample_rate=output_sample_rate,
+            # Keep linear PCM in-process; the telephony serializer owns the final
+            # μ-law / A-law conversion at the provider edge.
+            encoding="pcm_s16le",
             params=CartesiaTTSService.InputParams(
                 generation_config=GenerationConfig(speed=1.05, volume=1.2, emotion="enthusiastic"),
             ),
@@ -73,6 +136,7 @@ def create_tts_service(session_state: dict):
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
         model="eleven_turbo_v2_5",
+        sample_rate=output_sample_rate,
         params=ElevenLabsTTSService.InputParams(speed=0.9),
     )
 
@@ -148,7 +212,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     start_time = time.time()
 
     # -------------------------------------------------------------------------
-    # Parse Twilio WebSocket handshake
+    # Parse telephony WebSocket handshake
     # -------------------------------------------------------------------------
     transport_type, call_data = await parse_telephony_websocket(websocket)
     stream_sid = call_data.get("stream_id", "")
@@ -265,7 +329,18 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
     except Exception as e:
         logger.warning("[{cs}] Flag resolution failed — using defaults: {err}", cs=call_sid, err=str(e))
 
+    audio_profile = get_audio_profile(session_state)
+    audio_in_sample_rate = int(audio_profile["audio_in_sample_rate"])
+    audio_out_sample_rate = int(audio_profile["audio_out_sample_rate"])
+
     logger.info("[{cs}] Starting pipeline senior_id={sid}", cs=call_sid, sid=str(session_state.get("senior_id") or "")[:8])
+    logger.info(
+        "[{cs}] Audio profile provider={provider} in={audio_in}Hz out={audio_out}Hz",
+        cs=call_sid,
+        provider=audio_profile["tts_provider"],
+        audio_in=audio_in_sample_rate,
+        audio_out=audio_out_sample_rate,
+    )
 
     # -------------------------------------------------------------------------
     # Transport (Twilio ↔ FastAPI WebSocket)
@@ -337,7 +412,7 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             live_options=LiveOptions(
                 model="nova-3-general",
                 language="en",
-                sample_rate=8000,
+                sample_rate=audio_in_sample_rate,
                 encoding="linear16",
                 channels=1,
                 interim_results=True,
@@ -409,8 +484,8 @@ async def run_bot(websocket: WebSocket, session_state: dict) -> None:
             allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
-            audio_in_sample_rate=8000,
-            audio_out_sample_rate=8000,
+            audio_in_sample_rate=audio_in_sample_rate,
+            audio_out_sample_rate=audio_out_sample_rate,
         ),
     )
 

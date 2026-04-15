@@ -82,7 +82,7 @@ This document is now a forward-looking Telnyx model. It is not a historical carr
 | Director LLM | Groq `openai/gpt-oss-20b`, Gemini fallback | Runs off critical path for guidance/query extraction. |
 | Post-call analysis | Gemini 3 Flash Preview | Summaries, concerns, engagement, caregiver SMS copy. |
 | Memory extraction | OpenAI small model + embeddings | Runs post-call; embeddings are de minimis in cost. |
-| TTS | ElevenLabs Flash/Turbo | Keep this assumption for now. Active Telnyx calls request 16kHz PCM from TTS; higher-rate TTS output is only for non-phone paths. |
+| TTS | ElevenLabs Flash/Turbo | Keep this assumption for now. Active Telnyx calls request 16kHz PCM from TTS; higher-rate TTS output is only for non-phone paths. Other speech vendors are sensitivity only. |
 | Web/news | Tavily basic search, OpenAI web search fallback/news | Current feature remains enabled in the model. |
 | Notifications | Telnyx SMS + Resend email | SMS uses one outbound message part plus estimated carrier fee. |
 | Hosting/data | Railway, Neon Postgres/pgvector, Redis | Mostly fixed platform cost, not the main COGS driver. |

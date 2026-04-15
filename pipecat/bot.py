@@ -1,11 +1,11 @@
 """Donna voice pipeline — core bot entry point.
 
 Assembles the full Pipecat pipeline for a single call session:
-  Twilio WebSocket → Deepgram STT → Quick Observer → LLM Context →
+  Telnyx WebSocket → Deepgram STT → Quick Observer → LLM Context →
   Anthropic Claude → Guidance Stripper → Conversation Tracker →
-  TTS provider → Twilio output
+  TTS provider → Telnyx output
 
-Called once per incoming WebSocket connection from Twilio.
+Called once per incoming WebSocket connection from Telnyx.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.utils import parse_telephony_websocket
-from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
@@ -40,19 +39,39 @@ from pipecat_flows import FlowManager
 from config import get_settings, settings
 from flows.nodes import build_initial_node
 from flows.tools import make_flows_tools
+from lib.telnyx_audio import TelnyxAudioProfileError, resolve_telnyx_audio_profile
 from processors.conversation_director import ConversationDirectorProcessor
 from processors.conversation_tracker import ConversationState, ConversationTrackerProcessor
+from processors.audio_preroll import InitialAudioPrerollProcessor
 from processors.guidance_stripper import GuidanceStripperProcessor
 from processors.metrics_logger import MetricsLoggerProcessor
 from processors.quick_observer import QuickObserverProcessor
-from services.context_trace import record_context_event, record_latency_event
 from services.post_call import run_post_call
+from serializers.telnyx import DonnaTelnyxFrameSerializer
 
 class WebSocketAuthError(Exception):
-    """Raised when a Twilio media WebSocket cannot be admitted."""
+    """Raised when a telephony media WebSocket cannot be admitted."""
 
 
-HANDSHAKE_TIMEOUT_SECONDS = settings.twilio_ws_handshake_timeout_seconds
+HANDSHAKE_TIMEOUT_SECONDS = settings.telephony_ws_handshake_timeout_seconds
+
+
+def _provider_call_id(call_data: dict, session_state: dict | None = None) -> str:
+    """Return the canonical call identifier for the active telephony provider."""
+    session_state = session_state or {}
+    return (
+        call_data.get("call_id")
+        or call_data.get("call_control_id")
+        or session_state.get("call_sid")
+        or ""
+    )
+
+
+def _provider_ws_token(call_data: dict) -> str:
+    """Extract the one-time WebSocket token from provider-specific metadata."""
+    body_token = (call_data.get("body") or {}).get("ws_token", "")
+    query_token = (call_data.get("query_params") or {}).get("ws_token", "")
+    return body_token or query_token
 
 
 async def authenticate_websocket_call(
@@ -61,19 +80,19 @@ async def authenticate_websocket_call(
     *,
     consume_token: bool = True,
 ) -> dict:
-    """Authenticate the Twilio media WebSocket before any AI services start."""
-    call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "")
+    """Authenticate the media WebSocket before any AI services start."""
+    call_sid = _provider_call_id(call_data, session_state)
     if not call_sid:
         raise WebSocketAuthError("missing call_sid")
 
-    from api.routes.voice import get_call_metadata, mark_ws_token_consumed
+    from api.routes.call_context import get_call_metadata, mark_ws_token_consumed
 
     metadata = await get_call_metadata(call_sid)
     if not metadata:
         raise WebSocketAuthError("unknown call_sid")
 
     expected_token = metadata.get("ws_token")
-    provided_token = (call_data.get("body") or {}).get("ws_token", "")
+    provided_token = _provider_ws_token(call_data)
     if not expected_token:
         raise WebSocketAuthError("missing expected token")
     if metadata.get("ws_token_consumed"):
@@ -94,7 +113,7 @@ async def prepare_websocket_call(
     *,
     consume_token: bool = True,
 ) -> dict:
-    """Parse and authenticate the Twilio start frame with a short timeout.
+    """Parse and authenticate the telephony start frame with a short timeout.
 
     This can run before active-call capacity is acquired so stalled or invalid
     WebSockets do not occupy an AI call slot.
@@ -108,7 +127,8 @@ async def prepare_websocket_call(
         raise WebSocketAuthError("handshake timeout") from exc
 
     stream_sid = call_data.get("stream_id", "")
-    call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "unknown")
+    call_data["query_params"] = dict(websocket.query_params)
+    call_sid = _provider_call_id(call_data, session_state) or "unknown"
     session_state["call_sid"] = call_sid
 
     logger.info("[{cs}] Stream connected: {ss} (type={tt})", cs=call_sid, ss=stream_sid, tt=transport_type)
@@ -125,8 +145,11 @@ async def prepare_websocket_call(
     }
 
 
-SUPPORTED_CARTESIA_SAMPLE_RATES = {8000, 16000, 22050, 24000, 44100, 48000}
-SUPPORTED_ELEVENLABS_SAMPLE_RATES = {8000, 16000, 22050, 24000, 44100}
+SUPPORTED_CARTESIA_SAMPLE_RATES = {16000, 22050, 24000, 44100, 48000}
+SUPPORTED_ELEVENLABS_SAMPLE_RATES = {16000, 22050, 24000, 44100}
+TELNYX_WIDEBAND_CODEC = "L16"
+class TelnyxAudioConfigError(Exception):
+    """Raised when Telnyx starts a stream below Donna's required audio profile."""
 
 
 def resolve_tts_provider(session_state: dict) -> str:
@@ -144,12 +167,18 @@ def resolve_tts_provider(session_state: dict) -> str:
 
 
 def get_audio_profile(session_state: dict) -> dict[str, int | str]:
-    """Pick the highest safe internal sample rates for the active telephony pipeline."""
+    """Pick stable sample rates for the active telephony pipeline."""
     cfg = get_settings()
     provider = resolve_tts_provider(session_state)
+    is_telnyx = session_state.get("_transport_type") == "telnyx"
+    telnyx_profile = resolve_telnyx_audio_profile(cfg) if is_telnyx else None
     audio_in_sample_rate = cfg.telephony_internal_input_sample_rate
+    if telnyx_profile and telnyx_profile.uses_l16_serializer:
+        audio_in_sample_rate = telnyx_profile.sample_rate
 
-    if provider == "cartesia":
+    if is_telnyx and telnyx_profile and telnyx_profile.uses_l16_serializer:
+        audio_out_sample_rate = telnyx_profile.sample_rate
+    elif provider == "cartesia":
         audio_out_sample_rate = cfg.cartesia_output_sample_rate
         if audio_out_sample_rate not in SUPPORTED_CARTESIA_SAMPLE_RATES:
             logger.warning(
@@ -185,6 +214,7 @@ def create_tts_service(session_state: dict):
     output_sample_rate = int(audio_profile["audio_out_sample_rate"])
 
     if provider == "cartesia":
+        is_telnyx = session_state.get("_transport_type") == "telnyx"
         logger.info("TTS provider: Cartesia Sonic 3")
         return CartesiaTTSService(
             api_key=cfg.cartesia_api_key,
@@ -192,10 +222,14 @@ def create_tts_service(session_state: dict):
             model="sonic-3",
             sample_rate=output_sample_rate,
             # Keep linear PCM in-process; the telephony serializer owns the final
-            # μ-law / A-law conversion at the provider edge.
+            # L16/16 kHz conversion at the provider edge.
             encoding="pcm_s16le",
             params=CartesiaTTSService.InputParams(
-                generation_config=GenerationConfig(speed=1.05, volume=1.2, emotion="enthusiastic"),
+                generation_config=GenerationConfig(
+                    speed=1.0 if is_telnyx else 1.05,
+                    volume=0.9 if is_telnyx else 1.2,
+                    emotion="enthusiastic",
+                ),
             ),
         )
 
@@ -206,6 +240,55 @@ def create_tts_service(session_state: dict):
         model="eleven_turbo_v2_5",
         sample_rate=output_sample_rate,
         params=ElevenLabsTTSService.InputParams(speed=0.9),
+    )
+
+
+def _create_telephony_serializer(
+    *,
+    transport_type: str,
+    call_data: dict,
+    stream_sid: str,
+    call_sid: str,
+    cfg,
+):
+    """Create the provider serializer at the only lossy audio boundary."""
+    if transport_type == "telnyx":
+        try:
+            profile = resolve_telnyx_audio_profile(cfg)
+        except TelnyxAudioProfileError as exc:
+            raise TelnyxAudioConfigError(str(exc)) from exc
+
+        observed_encoding = (call_data.get("outbound_encoding") or "").upper()
+        if observed_encoding and observed_encoding != profile.codec:
+            raise TelnyxAudioConfigError(
+                f"Telnyx stream started as {observed_encoding}; "
+                f"Donna Telnyx is configured for {profile.label}"
+            )
+
+        logger.info(
+            "[{cs}] Telnyx serializer codec_in={codec_in} codec_out={codec_out} wire_rate={rate}Hz",
+            cs=call_sid,
+            codec_in=profile.codec,
+            codec_out=profile.codec,
+            rate=profile.sample_rate,
+        )
+        return DonnaTelnyxFrameSerializer(
+            stream_id=stream_sid,
+            call_control_id=call_sid,
+            outbound_encoding=profile.codec,
+            inbound_encoding=profile.codec,
+            api_key=cfg.telnyx_api_key,
+            params=DonnaTelnyxFrameSerializer.InputParams(
+                telnyx_sample_rate=profile.sample_rate,
+                outbound_encoding=profile.codec,
+                inbound_encoding=profile.codec,
+                l16_input_byte_order=profile.l16_input_byte_order,
+                l16_output_byte_order=profile.l16_output_byte_order,
+            ),
+        )
+
+    raise TelnyxAudioConfigError(
+        f"Unsupported telephony transport {transport_type}; Donna voice is configured for Telnyx"
     )
 
 
@@ -273,7 +356,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     """Run the Donna voice pipeline for a single call.
 
     Args:
-        websocket: Starlette WebSocket from Twilio.
+        websocket: Starlette WebSocket from Telnyx.
         session_state: Pre-populated dict with call context:
             - senior_id: str
             - senior: dict (profile)
@@ -305,13 +388,12 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     call_data = prepared_call["call_data"]
     metadata = prepared_call["metadata"]
     stream_sid = call_data.get("stream_id", "")
-    call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "unknown")
+    call_sid = _provider_call_id(call_data, session_state) or "unknown"
     session_state["call_sid"] = call_sid
-    trace_start = None
+    session_state["_transport_type"] = transport_type
 
-    # Populate session_state from call_metadata (pre-fetched by /voice/answer)
+    # Populate session_state from call_metadata seeded by the Telnyx route.
     if metadata:
-        trace_start = metadata.get("_trace_start_time")
         # Use `or` assignment — setdefault won't overwrite pre-initialized None values
         session_state["senior"] = session_state.get("senior") or metadata.get("senior")
         session_state["senior_id"] = session_state.get("senior_id") or (metadata.get("senior") or {}).get("id")
@@ -386,62 +468,6 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             rem=bool(session_state.get("reminder_prompt")),
         )
 
-    if trace_start is None:
-        trace_start = session_state.get("_trace_start_time") or start_time
-    try:
-        session_state["_trace_start_time"] = float(trace_start)
-    except (TypeError, ValueError):
-        session_state["_trace_start_time"] = start_time
-
-    if metadata:
-        if metadata.get("_voice_answer_context_ms") is not None:
-            record_latency_event(
-                session_state,
-                stage="call.voice_answer_context",
-                source="call_lifecycle",
-                action="completed",
-                label="Voice answer context ready",
-                provider="voice_answer",
-                latency_ms=metadata.get("_voice_answer_context_ms"),
-                metadata={"phase": "voice_answer"},
-            )
-        if metadata.get("_voice_answer_total_ms") is not None:
-            record_latency_event(
-                session_state,
-                stage="call.voice_answer_total",
-                source="call_lifecycle",
-                action="completed",
-                label="Voice answer TwiML returned",
-                provider="voice_answer",
-                latency_ms=metadata.get("_voice_answer_total_ms"),
-                metadata={"phase": "voice_answer"},
-            )
-        completed_at = metadata.get("_voice_answer_completed_at")
-        if completed_at:
-            try:
-                answer_to_ws_ms = round((time.time() - float(completed_at)) * 1000)
-            except (TypeError, ValueError):
-                answer_to_ws_ms = None
-            if answer_to_ws_ms is not None:
-                record_latency_event(
-                    session_state,
-                    stage="call.answer_to_ws",
-                    source="call_lifecycle",
-                    action="connected",
-                    label="Voice answer to media stream",
-                    provider="twilio_media_stream",
-                    latency_ms=answer_to_ws_ms,
-                    metadata={"stream_sid": stream_sid},
-                )
-        record_context_event(
-            session_state,
-            source="call_lifecycle",
-            action="connected",
-            label="Twilio media stream connected",
-            provider="twilio_media_stream",
-            metadata={"stream_sid": stream_sid, "call_sid": call_sid},
-        )
-
     # Also merge custom parameters from TwiML <Stream> params
     body = call_data.get("body", {})
     if body.get("senior_id") and not session_state.get("senior_id"):
@@ -477,32 +503,57 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     )
 
     # -------------------------------------------------------------------------
-    # Transport (Twilio ↔ FastAPI WebSocket)
+    # Transport (Telnyx ↔ FastAPI WebSocket)
     # -------------------------------------------------------------------------
     # Onboarding callers are adult caregivers (typical speech pace) — shorter pause.
-    # Senior calls use longer pause tolerance for elderly speech patterns.
+    # Senior fallback telephony calls keep longer pause tolerance for elderly speech patterns.
+    # Telnyx validation uses a more responsive VAD profile while we tune
+    # barge-in and turn latency on the new provider.
     is_onboarding = session_state.get("call_type") == "onboarding"
-    vad_stop_secs = 0.8 if is_onboarding else 1.2
+    if transport_type == "telnyx":
+        vad_stop_secs = 0.8
+        vad_confidence = 0.5
+        vad_min_volume = 0.35
+    else:
+        vad_stop_secs = 0.8 if is_onboarding else 1.2
+        vad_confidence = 0.6
+        vad_min_volume = 0.5
+    logger.info(
+        "[{cs}] VAD profile provider={provider} confidence={confidence} stop_secs={stop_secs} min_volume={min_volume}",
+        cs=call_sid,
+        provider=transport_type,
+        confidence=vad_confidence,
+        stop_secs=vad_stop_secs,
+        min_volume=vad_min_volume,
+    )
+
+    try:
+        serializer = _create_telephony_serializer(
+            transport_type=transport_type,
+            call_data=call_data,
+            stream_sid=stream_sid,
+            call_sid=call_sid,
+            cfg=cfg,
+        )
+    except TelnyxAudioConfigError as exc:
+        logger.error("[{cs}] {err}", cs=call_sid, err=str(exc))
+        return
 
     transport = FastAPIWebsocketTransport(
         websocket=websocket,
         params=FastAPIWebsocketParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            audio_out_10ms_chunks=2 if transport_type == "telnyx" else 4,
             add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(
-                    confidence=0.6,
+                    confidence=vad_confidence,
                     stop_secs=vad_stop_secs,
-                    min_volume=0.5,
+                    min_volume=vad_min_volume,
                 ),
             ),
-            serializer=TwilioFrameSerializer(
-                stream_sid=stream_sid,
-                call_sid=call_sid,
-                account_sid=cfg.twilio_account_sid,
-                auth_token=cfg.twilio_auth_token,
-            ),
+            serializer=serializer,
         ),
     )
 
@@ -582,6 +633,9 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
         track_user=False,
     )
     guidance_stripper = GuidanceStripperProcessor()
+    audio_preroll = InitialAudioPrerollProcessor(
+        preroll_ms=120 if transport_type == "telnyx" else 0
+    )
     metrics_logger = MetricsLoggerProcessor(session_state=session_state)
 
     # Record call start time for Director's phase timing
@@ -617,6 +671,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             guidance_stripper,
             conversation_tracker,
             tts,
+            audio_preroll,
             transport.output(),
             context_aggregator.assistant(),
             metrics_logger,
@@ -669,18 +724,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
         # Warm up Groq TCP+TLS immediately before greeting plays.
         from services.director_llm import warmup_fast_providers
         asyncio.create_task(warmup_fast_providers())
-        init_start = time.time()
         await flow_manager.initialize(initial_node)
-        record_latency_event(
-            session_state,
-            stage="call.flow_initialize",
-            source="call_lifecycle",
-            action="initialized",
-            label="Flow initialized",
-            provider="pipecat_flows",
-            latency_ms=(time.time() - init_start) * 1000,
-            metadata={"node": getattr(initial_node, "name", None)},
-        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_disconnected(transport_ref, websocket_ref):

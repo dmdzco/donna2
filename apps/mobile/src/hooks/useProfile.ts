@@ -9,7 +9,17 @@ export function useProfile() {
     queryKey: ["profile"],
     queryFn: async () => {
       const token = await getToken();
-      return api.caregivers.me(token!);
+      if (!token) { console.log("[profile] no token"); return null; }
+      try {
+        const result = await api.caregivers.me(token);
+        console.log("[profile] response:", JSON.stringify(result));
+        return result;
+      } catch (e: any) {
+        console.log("[profile] error:", e?.status, e?.message);
+        throw e;
+      }
     },
+    staleTime: 0,
+    gcTime: 0,
   });
 }

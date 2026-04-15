@@ -1,6 +1,9 @@
 import { Router } from 'express';
+import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { caregivers, reminders, seniors } from '../db/schema.js';
+import { seniorService } from '../services/seniors.js';
+import { caregiverService } from '../services/caregivers.js';
 import { requireAuth } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
 import { validateBody } from '../middleware/validate.js';
@@ -98,7 +101,20 @@ router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardin
   } catch (error) {
     console.error('Onboarding failed:', error);
 
-    if (error.code === '23505' && error.constraint?.includes('phone')) {
+    // If phone already exists, find and reuse the existing senior + link caregiver
+    const pgCode = error.code || error.cause?.code;
+    const pgConstraint = error.constraint || error.cause?.constraint;
+    if (pgCode === '23505' && pgConstraint?.includes('phone')) {
+      try {
+        const existing = await seniorService.findByPhone(seniorCreateData.phone);
+        if (existing) {
+          await caregiverService.linkUserToSenior(clerkUserId, existing.id, 'caregiver');
+          console.log(`[Onboarding] Reused existing senior: user=${clerkUserId}, senior=${maskName(existing.name)}`);
+          return res.json({ senior: existing, reminders: [] });
+        }
+      } catch (linkErr) {
+        console.error('Onboarding duplicate phone fallback failed:', linkErr);
+      }
       return res.status(409).json({ error: 'This phone number is already registered for another senior' });
     }
 

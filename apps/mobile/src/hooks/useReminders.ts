@@ -30,8 +30,9 @@ export function useCreateReminder(seniorId: string | undefined) {
 
   return useMutation({
     mutationFn: async (data: Omit<Reminder, "id" | "seniorId" | "createdAt" | "lastDeliveredAt">) => {
+      if (!seniorId) throw new Error("No senior selected");
       const token = await getToken();
-      return api.reminders.create({ seniorId: seniorId!, ...data }, token!);
+      return api.reminders.create({ seniorId, ...data }, token!);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["reminders", seniorId] });

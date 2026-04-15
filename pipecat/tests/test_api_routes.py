@@ -1,5 +1,6 @@
 """Tests for API routes — health check and voice routes using FastAPI TestClient."""
 
+import base64
 import os
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -15,6 +16,35 @@ os.environ.setdefault("TWILIO_PHONE_NUMBER", "+15551234567")
 os.environ.setdefault("ALLOW_UNSIGNED_TWILIO_WEBHOOKS", "true")
 
 from main import app
+
+
+class FakeSharedState:
+    is_shared = True
+
+    def __init__(self):
+        self.data = {}
+        self.ttls = {}
+        self.deleted = []
+
+    async def set(self, key, value, ttl=None):
+        self.data[key] = value
+        self.ttls[key] = ttl
+
+    async def get(self, key):
+        return self.data.get(key)
+
+    async def delete(self, key):
+        self.deleted.append(key)
+        self.data.pop(key, None)
+
+
+def enable_test_encryption(monkeypatch):
+    from lib import encryption
+
+    key = base64.urlsafe_b64encode(b"m" * 32).decode().rstrip("=")
+    monkeypatch.setenv("FIELD_ENCRYPTION_KEY", key)
+    monkeypatch.setattr(encryption, "_KEY", None)
+    monkeypatch.setattr(encryption, "_aes", None)
 
 
 @pytest.fixture
@@ -198,16 +228,20 @@ class TestVoiceAnswerEndpoint:
         mock_shared.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_bot_loads_metadata_from_shared_state(self):
+    async def test_bot_loads_metadata_from_encrypted_shared_state(self, monkeypatch):
         """WebSocket setup should recover metadata when local call map misses."""
         from bot import _load_call_metadata
+        from lib.shared_state_phi import encode_phi_payload
+
+        enable_test_encryption(monkeypatch)
+        payload = encode_phi_payload({"ws_token": "token-123", "call_type": "check-in"})
 
         class FakeRedisState:
-            is_shared = True
-
             async def get(self, key):
                 assert key == "call_metadata:CAredis"
-                return {"ws_token": "token-123", "call_type": "check-in"}
+                return payload
+
+            is_shared = True
 
         session_state = {"_call_metadata": {}}
         with patch("lib.redis_client.get_shared_state", return_value=FakeRedisState()):
@@ -215,6 +249,39 @@ class TestVoiceAnswerEndpoint:
 
         assert metadata["ws_token"] == "token-123"
         assert session_state["_call_metadata"]["CAredis"] == metadata
+
+    @pytest.mark.asyncio
+    async def test_voice_metadata_persisted_encrypted_and_recovered_from_shared_state(self, monkeypatch):
+        """Call metadata written for multi-instance routing should be encrypted."""
+        from api.routes import voice
+        from lib.encryption import decrypt_json
+
+        enable_test_encryption(monkeypatch)
+        state = FakeSharedState()
+        metadata = {
+            "senior": {"id": "senior-1"},
+            "memory_context": "Known routine context.",
+            "call_type": "check-in",
+            "ws_token": "token-abc",
+        }
+
+        voice.call_metadata.clear()
+        try:
+            with patch("lib.redis_client.get_shared_state", return_value=state):
+                await voice._persist_metadata("CAencrypted", metadata)
+
+                encrypted = state.data["call_metadata:CAencrypted"]
+                assert isinstance(encrypted, str)
+                assert encrypted.startswith("enc:")
+                assert decrypt_json(encrypted)["memory_context"] == "Known routine context."
+
+                loaded = await voice.get_call_metadata("CAencrypted")
+
+            assert loaded["senior"]["id"] == "senior-1"
+            assert loaded["memory_context"] == "Known routine context."
+            assert voice.call_metadata["CAencrypted"] == loaded
+        finally:
+            voice.call_metadata.clear()
 
     @pytest.mark.asyncio
     async def test_bot_metadata_missing_without_shared_state(self):

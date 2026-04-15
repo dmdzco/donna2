@@ -47,9 +47,16 @@ def _format_analysis_insights(analysis: dict) -> str | None:
     # Follow-up suggestions — highest signal for personalization
     follow_ups = analysis.get("follow_up_suggestions") or []
     if follow_ups:
-        lines.append("From last call, follow up on:")
+        time_label = analysis.get("call_time_label")
+        if time_label:
+            lines.append(f"From last call ({time_label}), follow up on:")
+        else:
+            lines.append("From last call, follow up on:")
         for fu in follow_ups[:4]:
             lines.append(f"- {fu}")
+        lines.append(
+            "Timing guard: if the follow-up is about a future plan, only ask if it happened after that date/time has arrived."
+        )
 
     # Positive observations — what lit them up
     positives = analysis.get("positive_observations") or []
@@ -95,6 +102,10 @@ def _build_senior_context(session_state: dict) -> str:
         tz = ZoneInfo("America/New_York")
     local_now = datetime.now(tz)
     parts.append(f"Current time: {local_now.strftime('%A, %B %d, %Y at %I:%M %p')}.")
+    parts.append(
+        "Use prior-call time labels literally. If an earlier-today call said something would happen tomorrow, "
+        "do not ask whether it already happened yet."
+    )
 
     first_name = (senior.get("name") or "").split(" ")[0] or "there"
     city = senior.get("city") or ""

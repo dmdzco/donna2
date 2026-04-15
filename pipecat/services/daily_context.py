@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from loguru import logger
 from db import query_one, query_many
 from lib.phi import decrypt_daily_context_phi, encrypt_daily_context_payload
+from services.time_context import format_call_time_label
 
 
 def _get_start_of_day(tz_name: str = "America/New_York") -> datetime:
@@ -98,7 +99,11 @@ async def get_todays_context(
                 else:
                     key_moments.append(km)
             if row.get("summary"):
-                summaries.append(row["summary"])
+                label = format_call_time_label(
+                    row.get("created_at") or row.get("call_date"),
+                    tz_name,
+                )
+                summaries.append(f"{label}: {row['summary']}")
 
         return {
             "topicsDiscussed": list(topics),
@@ -153,6 +158,8 @@ def format_todays_context(todays_context: dict | None) -> str | None:
 
     lines.append(
         "\nDo NOT repeat reminders or advice from earlier today. "
-        'Reference them naturally: "This morning I mentioned...", "Earlier I reminded you about..."'
+        'Use the time labels. If a prior call was earlier today and they planned something for tomorrow, '
+        "do not ask as if it already happened. "
+        'Reference completed same-day items naturally: "This morning I mentioned...", "Earlier I reminded you about..."'
     )
     return "\n".join(lines)

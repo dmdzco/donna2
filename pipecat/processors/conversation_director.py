@@ -176,6 +176,7 @@ class ConversationDirectorProcessor(FrameProcessor):
     CONTINUOUS_SPECULATIVE_REFIRE_MIN = 60   # subsequent fires need 60+ total chars
     CONTINUOUS_SPECULATIVE_REFIRE_WINDOW = 25 # 25 new chars needed to re-fire
     CONTINUOUS_SPECULATIVE_INTERVAL = 0.5    # min seconds between fires
+    MEMORY_REINJECTION_COOLDOWN_TURNS = 4
 
     def __init__(self, session_state: dict, **kwargs):
         super().__init__(**kwargs)
@@ -247,6 +248,7 @@ class ConversationDirectorProcessor(FrameProcessor):
 
             # Strip previous turn's ephemeral context (guidance, memories, web results)
             self._strip_ephemeral_messages()
+            await self._inject_observer_guidance()
 
             # Feature flag: skip Director analysis when disabled
             from lib.growthbook import is_on
@@ -667,6 +669,33 @@ class ConversationDirectorProcessor(FrameProcessor):
             )
         )
 
+    async def _inject_observer_guidance(self):
+        """Re-inject current-turn Quick Observer guidance after stripping.
+
+        Quick Observer runs before the Director and its guidance reaches the
+        context aggregator before the final transcription. The Director strips
+        stale ephemeral messages at the start of each turn, so the observer also
+        leaves the current guidance in session_state for a same-turn reinjection.
+        """
+        guidance_text = self._session_state.pop("_pending_observer_guidance", None)
+        if not guidance_text:
+            return
+
+        await self.push_frame(
+            LLMMessagesAppendFrame(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            "[EPHEMERAL: Observer guidance — do not read aloud]\n"
+                            + guidance_text
+                        ),
+                    }
+                ],
+                run_llm=False,
+            )
+        )
+
     # ------------------------------------------------------------------
     # Proactive memory injection
     # ------------------------------------------------------------------
@@ -703,8 +732,40 @@ class ConversationDirectorProcessor(FrameProcessor):
         if not cached:
             return
 
-        # Format memories for injection
-        memory_lines = [r["content"] for r in cached if r.get("content")]
+        # Format memories for injection, suppressing recent repeats.
+        memory_lines: list[str] = []
+        injected_turns = self._session_state.setdefault("_injected_memory_turns", {})
+        current_turn = self._turn_count
+        explicit_memory_request = bool(
+            re.search(r"\b(remember|last time|what did I tell you|do you know)\b", user_text, re.I)
+        )
+
+        senior = self._session_state.get("senior") or {}
+        timezone_name = senior.get("timezone") or "America/New_York"
+        try:
+            from services.memory import format_memory_for_context
+        except Exception:
+            format_memory_for_context = None
+
+        for result in cached:
+            content = (
+                format_memory_for_context(result, timezone_name)
+                if format_memory_for_context
+                else result.get("content")
+            )
+            if not content:
+                continue
+            memory_key = str(result.get("id") or content)
+            last_turn = injected_turns.get(memory_key)
+            if (
+                last_turn is not None
+                and not explicit_memory_request
+                and current_turn - int(last_turn) < self.MEMORY_REINJECTION_COOLDOWN_TURNS
+            ):
+                continue
+            memory_lines.append(content)
+            injected_turns[memory_key] = current_turn
+
         if not memory_lines:
             return
 

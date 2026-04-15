@@ -235,8 +235,12 @@ Starts Director analysis before the user finishes speaking:
 - Reduces per-turn token count while keeping news contextually relevant
 
 ### Location & Date Context for Director
-- Senior's city/state and today's date passed in every Director turn template
-- Improves guidance and memory query specificity
+- Senior's city/state and local current date passed in every Director turn template
+- Senior-facing system prompt includes the senior's local current date and time at call start
+- Recent call summaries and transcript snippets include local prior-call labels such as "Earlier today at 3:30 PM (about 30 minutes ago)"
+- Post-call memory extraction receives the call date/time and resolves relative phrases like "tomorrow" into anchored future plans
+- Greeting and analysis followups avoid completion-style questions for future plans until the referenced date/time has arrived
+- Improves guidance, memory query specificity, and same-day temporal grounding
 
 ### Director Provider Chain
 - **Groq** (`gpt-oss-20b`) is the primary fast provider

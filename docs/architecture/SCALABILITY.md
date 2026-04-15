@@ -192,8 +192,10 @@ Both implement the same async interface:
 - `keys(pattern)` / `cleanup()`
 
 ### What's Stored in Redis
-- `call_metadata:{call_sid}` — Call context for WebSocket handler (TTL: 30 min)
-- `reminder_ctx:{call_sid}` — Pipecat-scheduler reminder context for outbound reminder calls (TTL: 30 min)
+- `call_metadata:{call_sid}` — encrypted call context for WebSocket handler (TTL: 30 min)
+- `reminder_ctx:{call_sid}` — encrypted Pipecat-scheduler reminder context for outbound reminder calls (TTL: 30 min)
+
+These payloads can contain PHI-bearing memory context, reminders, transcript fragments, senior profile fields, and caregiver note content. Shared-state writes use `pipecat/lib/shared_state_phi.py`, which encrypts the dict before it enters Redis and still accepts legacy raw dict payloads during rollout.
 
 ### Cross-Instance Flow
 1. `/voice/answer` stores call metadata in local dict + Redis

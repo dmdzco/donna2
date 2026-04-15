@@ -10,13 +10,17 @@ import type {
 const API_URL =
   process.env.EXPO_PUBLIC_API_URL ?? "https://donna-api-production-2450.up.railway.app";
 
-type FetchOptions = RequestInit & { token?: string };
+type WriteOptions = { idempotencyKey?: string };
+type FetchOptions = RequestInit & { token?: string } & WriteOptions;
 
 async function fetchJson<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
-  const { token, ...fetchOpts } = options;
+  const { token, idempotencyKey, ...fetchOpts } = options;
+  const requestId = createRequestId();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "X-Request-Id": requestId,
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     ...((fetchOpts.headers as Record<string, string>) ?? {}),
   };
 
@@ -84,6 +88,23 @@ export interface AccountDeletionResult {
   message?: string;
 }
 
+export function createIdempotencyKey(scope: string): string {
+  return `${sanitizeKeyPart(scope)}:${createRequestId()}`.slice(0, 128);
+}
+
+function createRequestId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+
+  const random = Math.random().toString(36).slice(2, 12);
+  return `${Date.now().toString(36)}-${random}`;
+}
+
+function sanitizeKeyPart(value: string): string {
+  return value.replace(/[^A-Za-z0-9._:-]/g, "-").slice(0, 40) || "mobile";
+}
+
 /**
  * Extract a user-facing error message from a React Query error.
  * Shows the API error message + status code for debugging.
@@ -103,20 +124,22 @@ export const api = {
 
   account: {
     /** DELETE /api/caregivers/me/account -- deletes the current caregiver account */
-    delete: (token: string) =>
+    delete: (token: string, options?: WriteOptions) =>
       fetchJson<AccountDeletionResult>("/api/caregivers/me/account", {
         method: "DELETE",
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
   },
 
   onboarding: {
     /** POST /api/onboarding -- creates senior + links to Clerk user + creates reminders */
-    complete: (data: OnboardingInput, token: string) =>
+    complete: (data: OnboardingInput, token: string, options?: WriteOptions) =>
       fetchJson<{ senior: Senior; reminders: Reminder[] }>("/api/onboarding", {
         method: "POST",
         body: JSON.stringify(data),
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
   },
 
@@ -125,11 +148,12 @@ export const api = {
     get: (id: string, token: string) => fetchJson<Senior>(`/api/seniors/${id}`, { token }),
 
     /** PATCH /api/seniors/:id */
-    update: (id: string, data: Partial<Senior>, token: string) =>
+    update: (id: string, data: Partial<Senior>, token: string, options?: WriteOptions) =>
       fetchJson<Senior>(`/api/seniors/${id}`, {
         method: "PATCH",
         body: JSON.stringify(data),
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
 
     /** GET /api/seniors/:id/schedule */
@@ -144,10 +168,16 @@ export const api = {
       id: string,
       data: { schedule?: unknown; topicsToAvoid?: string[] },
       token: string,
+      options?: WriteOptions,
     ) =>
       fetchJson<{ schedule: unknown; topicsToAvoid: string[] }>(
         `/api/seniors/${id}/schedule`,
-        { method: "PATCH", body: JSON.stringify(data), token },
+        {
+          method: "PATCH",
+          body: JSON.stringify(data),
+          token,
+          idempotencyKey: options?.idempotencyKey,
+        },
       ),
   },
 
@@ -165,24 +195,31 @@ export const api = {
     create: (
       data: { seniorId: string } & Omit<Partial<Reminder>, "id" | "createdAt" | "lastDeliveredAt">,
       token: string,
+      options?: WriteOptions,
     ) =>
       fetchJson<Reminder>("/api/reminders", {
         method: "POST",
         body: JSON.stringify(data),
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
 
     /** PATCH /api/reminders/:id */
-    update: (id: string, data: Partial<Reminder>, token: string) =>
+    update: (id: string, data: Partial<Reminder>, token: string, options?: WriteOptions) =>
       fetchJson<Reminder>(`/api/reminders/${id}`, {
         method: "PATCH",
         body: JSON.stringify(data),
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
 
     /** DELETE /api/reminders/:id */
-    delete: (id: string, token: string) =>
-      fetchJson<{ success: boolean }>(`/api/reminders/${id}`, { method: "DELETE", token }),
+    delete: (id: string, token: string, options?: WriteOptions) =>
+      fetchJson<{ success: boolean }>(`/api/reminders/${id}`, {
+        method: "DELETE",
+        token,
+        idempotencyKey: options?.idempotencyKey,
+      }),
   },
 
   conversations: {
@@ -196,11 +233,12 @@ export const api = {
 
   calls: {
     /** POST /api/call -- initiate an outbound call for an authorized senior */
-    initiate: (seniorId: string, token: string) =>
+    initiate: (seniorId: string, token: string, options?: WriteOptions) =>
       fetchJson<{ success: boolean; callSid: string }>("/api/call", {
         method: "POST",
         body: JSON.stringify({ seniorId }),
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
   },
 
@@ -210,11 +248,16 @@ export const api = {
       fetchJson<NotificationPreferences>("/api/notifications/preferences", { token }),
 
     /** PATCH /api/notifications/preferences */
-    updatePreferences: (prefs: Partial<NotificationPreferences>, token: string) =>
+    updatePreferences: (
+      prefs: Partial<NotificationPreferences>,
+      token: string,
+      options?: WriteOptions,
+    ) =>
       fetchJson<NotificationPreferences>("/api/notifications/preferences", {
         method: "PATCH",
         body: JSON.stringify(prefs),
         token,
+        idempotencyKey: options?.idempotencyKey,
       }),
 
     /** GET /api/notifications?page=N -- paginated notification history (20 per page) */
@@ -222,7 +265,11 @@ export const api = {
       fetchJson<DonnaNotification[]>(`/api/notifications?page=${page}`, { token }),
 
     /** PATCH /api/notifications/:id/read -- mark a notification as read */
-    markRead: (id: string, token: string) =>
-      fetchJson<DonnaNotification>(`/api/notifications/${id}/read`, { method: "PATCH", token }),
+    markRead: (id: string, token: string, options?: WriteOptions) =>
+      fetchJson<DonnaNotification>(`/api/notifications/${id}/read`, {
+        method: "PATCH",
+        token,
+        idempotencyKey: options?.idempotencyKey,
+      }),
   },
 };

@@ -5,6 +5,7 @@ import { eq, desc } from 'drizzle-orm';
 import { seniorService } from '../services/seniors.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
+import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import {
   createSeniorSchema,
@@ -15,6 +16,7 @@ import {
 import { getAccessibleSeniorIds, canAccessSenior, routeError } from './helpers.js';
 import { logAudit, writeAudit, authToRole } from '../services/audit.js';
 import { decrypt, decryptJson } from '../lib/encryption.js';
+import { sendError } from '../lib/http-response.js';
 
 const router = Router();
 
@@ -48,7 +50,7 @@ function decryptExportMemory(row) {
 }
 
 // Create a senior profile (admin only)
-router.post('/api/seniors', requireAdmin, writeLimiter, validateBody(createSeniorSchema), async (req, res) => {
+router.post('/api/seniors', requireAdmin, validateBody(createSeniorSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     const senior = await seniorService.create(req.body);
     logAudit({
@@ -99,7 +101,7 @@ router.get('/api/seniors', requireAuth, async (req, res) => {
 router.get('/api/seniors/:id', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
-      return res.status(403).json({ error: 'Access denied to this senior' });
+      return sendError(res, 403, { error: 'Access denied to this senior' });
     }
     logAudit({
       userId: req.auth.userId,
@@ -112,7 +114,7 @@ router.get('/api/seniors/:id', requireAuth, validateParams(seniorIdParamSchema),
     });
     const senior = await seniorService.getById(req.params.id);
     if (!senior) {
-      return res.status(404).json({ error: 'Senior not found' });
+      return sendError(res, 404, { error: 'Senior not found' });
     }
     res.json(senior);
   } catch (error) {
@@ -121,10 +123,10 @@ router.get('/api/seniors/:id', requireAuth, validateParams(seniorIdParamSchema),
 });
 
 // Update senior
-router.patch('/api/seniors/:id', requireAuth, writeLimiter, validateParams(seniorIdParamSchema), validateBody(updateSeniorSchema), async (req, res) => {
+router.patch('/api/seniors/:id', requireAuth, validateParams(seniorIdParamSchema), validateBody(updateSeniorSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
-      return res.status(403).json({ error: 'Access denied to this senior' });
+      return sendError(res, 403, { error: 'Access denied to this senior' });
     }
     logAudit({
       userId: req.auth.userId,
@@ -147,11 +149,11 @@ router.patch('/api/seniors/:id', requireAuth, writeLimiter, validateParams(senio
 router.get('/api/seniors/:id/schedule', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
-      return res.status(403).json({ error: 'Access denied to this senior' });
+      return sendError(res, 403, { error: 'Access denied to this senior' });
     }
     const senior = await seniorService.getById(req.params.id);
     if (!senior) {
-      return res.status(404).json({ error: 'Senior not found' });
+      return sendError(res, 404, { error: 'Senior not found' });
     }
 
     const schedule = senior.preferredCallTimes?.schedule || null;
@@ -166,16 +168,16 @@ router.get('/api/seniors/:id/schedule', requireAuth, validateParams(seniorIdPara
 });
 
 // Update senior's call schedule
-router.patch('/api/seniors/:id/schedule', requireAuth, writeLimiter, validateParams(seniorIdParamSchema), validateBody(updateScheduleSchema), async (req, res) => {
+router.patch('/api/seniors/:id/schedule', requireAuth, validateParams(seniorIdParamSchema), validateBody(updateScheduleSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
-      return res.status(403).json({ error: 'Access denied to this senior' });
+      return sendError(res, 403, { error: 'Access denied to this senior' });
     }
     const { schedule, topicsToAvoid } = req.body;
     const senior = await seniorService.getById(req.params.id);
 
     if (!senior) {
-      return res.status(404).json({ error: 'Senior not found' });
+      return sendError(res, 404, { error: 'Senior not found' });
     }
 
     const updatedPreferredCallTimes = {
@@ -198,14 +200,14 @@ router.patch('/api/seniors/:id/schedule', requireAuth, writeLimiter, validatePar
 });
 
 // Hard-delete a senior and all associated data
-router.delete('/api/seniors/:id/data', requireAuth, writeLimiter, validateParams(seniorIdParamSchema), async (req, res) => {
+router.delete('/api/seniors/:id/data', requireAuth, validateParams(seniorIdParamSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
-      return res.status(403).json({ error: 'Access denied to this senior' });
+      return sendError(res, 403, { error: 'Access denied to this senior' });
     }
     const senior = await seniorService.getById(req.params.id);
     if (!senior) {
-      return res.status(404).json({ error: 'Senior not found' });
+      return sendError(res, 404, { error: 'Senior not found' });
     }
 
     const deletedBy = req.auth.userId || 'unknown';
@@ -232,7 +234,7 @@ router.delete('/api/seniors/:id/data', requireAuth, writeLimiter, validateParams
 router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
-      return res.status(403).json({ error: 'Access denied to this senior' });
+      return sendError(res, 403, { error: 'Access denied to this senior' });
     }
 
     const seniorId = req.params.id;
@@ -300,7 +302,7 @@ router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamS
     ]);
 
     if (!senior) {
-      return res.status(404).json({ error: 'Senior not found' });
+      return sendError(res, 404, { error: 'Senior not found' });
     }
 
     await writeAudit({

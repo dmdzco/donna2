@@ -6,6 +6,7 @@
  */
 
 import { ZodError } from 'zod';
+import { withRequestId } from '../lib/http-response.js';
 
 /**
  * Format Zod errors into a user-friendly structure
@@ -38,6 +39,7 @@ export function validateBody(schema) {
         return res.status(400).json({
           error: 'Validation failed',
           details: formatZodErrors(error),
+          ...withRequestId(req),
         });
       }
       next(error);
@@ -62,6 +64,7 @@ export function validateParams(schema) {
         return res.status(400).json({
           error: 'Invalid URL parameters',
           details: formatZodErrors(error),
+          ...withRequestId(req),
         });
       }
       next(error);
@@ -86,6 +89,7 @@ export function validateQuery(schema) {
         return res.status(400).json({
           error: 'Invalid query parameters',
           details: formatZodErrors(error),
+          ...withRequestId(req),
         });
       }
       next(error);
@@ -149,6 +153,7 @@ export function validate({ body: bodySchema, params: paramsSchema, query: queryS
       return res.status(400).json({
         error: 'Validation failed',
         details: errors,
+        ...withRequestId(req),
       });
     }
 

@@ -33,8 +33,17 @@ export function securityHeaders() {
  */
 export function requestId() {
   return (req, res, next) => {
-    req.id = req.headers['x-request-id'] || crypto.randomUUID();
+    const header = req.headers['x-request-id'];
+    const candidate = Array.isArray(header) ? header[0] : header;
+    req.id = isSafeRequestId(candidate) ? candidate : crypto.randomUUID();
     res.setHeader('X-Request-Id', req.id);
     next();
   };
+}
+
+function isSafeRequestId(value) {
+  return typeof value === 'string' &&
+    value.length >= 8 &&
+    value.length <= 128 &&
+    /^[A-Za-z0-9._:-]+$/.test(value);
 }

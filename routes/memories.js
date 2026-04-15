@@ -2,19 +2,21 @@ import { Router } from 'express';
 import { memoryService } from '../services/memory.js';
 import { requireAuth } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
+import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { createMemorySchema, seniorIdParamSchema } from '../validators/schemas.js';
 import { canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
+import { sendError } from '../lib/http-response.js';
 
 const router = Router();
 
 // Store a memory for a senior
-router.post('/api/seniors/:id/memories', requireAuth, writeLimiter, validateParams(seniorIdParamSchema), validateBody(createMemorySchema), async (req, res) => {
+router.post('/api/seniors/:id/memories', requireAuth, validateParams(seniorIdParamSchema), validateBody(createMemorySchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   const { type, content, importance } = req.body;
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
-      return res.status(403).json({ error: 'Access denied to this senior' });
+      return sendError(res, 403, { error: 'Access denied to this senior' });
     }
     logAudit({
       userId: req.auth.userId,
@@ -43,7 +45,7 @@ router.get('/api/seniors/:id/memories/search', requireAuth, validateParams(senio
   const { q, limit } = req.query;
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
-      return res.status(403).json({ error: 'Access denied to this senior' });
+      return sendError(res, 403, { error: 'Access denied to this senior' });
     }
     logAudit({
       userId: req.auth.userId,
@@ -69,7 +71,7 @@ router.get('/api/seniors/:id/memories/search', requireAuth, validateParams(senio
 router.get('/api/seniors/:id/memories', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
-      return res.status(403).json({ error: 'Access denied to this senior' });
+      return sendError(res, 403, { error: 'Access denied to this senior' });
     }
     logAudit({
       userId: req.auth.userId,

@@ -34,6 +34,7 @@ const RETENTION_DAYS = {
   call_metrics:          parseInt(process.env.RETENTION_CALL_METRICS_DAYS               || '180', 10),
   reminder_deliveries:   parseInt(process.env.RETENTION_REMINDER_DELIVERIES_DAYS        || '90',  10),
   notifications:         parseInt(process.env.RETENTION_NOTIFICATIONS_DAYS              || '180', 10),
+  idempotency_keys:      parseInt(process.env.RETENTION_IDEMPOTENCY_KEYS_DAYS           || '1',   10),
   waitlist:              parseInt(process.env.RETENTION_WAITLIST_DAYS                   || '365', 10),
   audit_logs:            parseInt(process.env.RETENTION_AUDIT_LOGS_DAYS                 || '2190', 10),
 };
@@ -156,6 +157,41 @@ async function redactConversationPhi(days) {
 }
 
 /**
+ * Delete idempotency replay cache entries after their explicit expiration.
+ * Cached responses are encrypted, but they can still contain PHI after
+ * authorized decrypt-at-boundary replay, so they must not outlive their TTL.
+ */
+async function purgeExpiredIdempotencyKeys() {
+  let totalDeleted = 0;
+
+  while (true) {
+    const result = await db.execute(sql`
+      WITH batch AS (
+        SELECT ctid
+        FROM idempotency_keys
+        WHERE expires_at < NOW()
+        ORDER BY expires_at
+        LIMIT ${BATCH_SIZE}
+      ),
+      deleted AS (
+        DELETE FROM idempotency_keys AS target
+        USING batch
+        WHERE target.ctid = batch.ctid
+        RETURNING 1
+      )
+      SELECT count(*)::int AS count FROM deleted
+    `);
+
+    const batchCount = result.rows?.[0]?.count ?? 0;
+    totalDeleted += batchCount;
+    if (batchCount < BATCH_SIZE) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  return totalDeleted;
+}
+
+/**
  * Delete rows older than their retention period from all PHI tables.
  * @returns {Promise<Object>} Map of table name -> number of rows deleted
  */
@@ -168,6 +204,11 @@ export async function purgeExpiredData() {
     try {
       if (table === 'conversation_phi') {
         results[table] = await redactConversationPhi(days);
+        continue;
+      }
+
+      if (table === 'idempotency_keys') {
+        results[table] = await purgeExpiredIdempotencyKeys();
         continue;
       }
 

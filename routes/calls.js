@@ -3,10 +3,12 @@ import { seniorService } from '../services/seniors.js';
 import { schedulerService } from '../services/scheduler.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { callLimiter } from '../middleware/rate-limit.js';
+import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody } from '../middleware/validate.js';
 import { initiateCallSchema } from '../validators/schemas.js';
 import { canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
+import { sendError } from '../lib/http-response.js';
 
 const router = Router();
 
@@ -19,7 +21,7 @@ function formatPhoneForCall(phone) {
 }
 
 // API: Initiate outbound call (strict rate limit: 5/min)
-router.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSchema), async (req, res) => {
+router.post('/api/call', requireAuth, validateBody(initiateCallSchema), idempotencyMiddleware, callLimiter, async (req, res) => {
   const { seniorId } = req.body;
   const twilioClient = req.app.get('twilioClient');
   // Twilio webhooks must hit Pipecat (voice pipeline), not this Node.js server
@@ -38,20 +40,20 @@ router.post('/api/call', requireAuth, callLimiter, validateBody(initiateCallSche
   try {
     const senior = await seniorService.getById(seniorId);
     if (!senior) {
-      return res.status(404).json({ error: 'Senior not found' });
+      return sendError(res, 404, { error: 'Senior not found' });
     }
     if (!senior.isActive) {
-      return res.status(400).json({ error: 'Senior is not active' });
+      return sendError(res, 400, { error: 'Senior is not active' });
     }
 
     // Check if user can access this senior before resolving/calling the phone number.
     if (!await canAccessSenior(req.auth, senior.id)) {
-      return res.status(403).json({ error: 'Access denied to this senior' });
+      return sendError(res, 403, { error: 'Access denied to this senior' });
     }
 
     const callPhone = formatPhoneForCall(senior.phone);
     if (!callPhone) {
-      return res.status(400).json({ error: 'Senior phone is not callable' });
+      return sendError(res, 400, { error: 'Senior phone is not callable' });
     }
     await schedulerService.prefetchForPhone(callPhone, senior);
 

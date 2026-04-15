@@ -25,4 +25,10 @@ describe('data retention purge SQL', () => {
     expect(source).toContain('summary = NULL');
     expect(source).toContain('transcript_encrypted = NULL');
   });
+
+  it('purges expired idempotency replay cache rows by expires_at', () => {
+    expect(source).toContain('idempotency_keys');
+    expect(source).toContain('purgeExpiredIdempotencyKeys');
+    expect(source).toContain('WHERE expires_at < NOW()');
+  });
 });

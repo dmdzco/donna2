@@ -4,6 +4,7 @@ import { reminders, seniors } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
 import { requireAuth } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
+import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import {
   createReminderSchema,
@@ -12,6 +13,7 @@ import {
 } from '../validators/schemas.js';
 import { getAccessibleSeniorIds, canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
+import { sendError } from '../lib/http-response.js';
 import { getDatePartsInTimezone, resolveTimezoneFromProfile } from '../lib/timezone.js';
 
 const router = Router();
@@ -85,12 +87,12 @@ router.get('/api/reminders', requireAuth, async (req, res) => {
 });
 
 // Create a reminder
-router.post('/api/reminders', requireAuth, writeLimiter, validateBody(createReminderSchema), async (req, res) => {
+router.post('/api/reminders', requireAuth, validateBody(createReminderSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     const { seniorId, type, title, description, scheduledTime, isRecurring, cronExpression } = req.body;
     // Check access to the senior
     if (!await canAccessSenior(req.auth, seniorId)) {
-      return res.status(403).json({ error: 'Access denied to this senior' });
+      return sendError(res, 403, { error: 'Access denied to this senior' });
     }
     const seniorProfile = await getSeniorTimezoneProfile(seniorId);
     const reminderCronExpression = cronExpression ||
@@ -122,7 +124,7 @@ router.post('/api/reminders', requireAuth, writeLimiter, validateBody(createRemi
 });
 
 // Update a reminder
-router.patch('/api/reminders/:id', requireAuth, writeLimiter, validateParams(reminderIdParamSchema), validateBody(updateReminderSchema), async (req, res) => {
+router.patch('/api/reminders/:id', requireAuth, validateParams(reminderIdParamSchema), validateBody(updateReminderSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     // Get the reminder to check senior access
     const [existing] = await db.select({
@@ -132,10 +134,10 @@ router.patch('/api/reminders/:id', requireAuth, writeLimiter, validateParams(rem
     })
       .from(reminders).where(eq(reminders.id, req.params.id));
     if (!existing) {
-      return res.status(404).json({ error: 'Reminder not found' });
+      return sendError(res, 404, { error: 'Reminder not found' });
     }
     if (!await canAccessSenior(req.auth, existing.seniorId)) {
-      return res.status(403).json({ error: 'Access denied to this reminder' });
+      return sendError(res, 403, { error: 'Access denied to this reminder' });
     }
 
     const { title, description, scheduledTime, isRecurring, cronExpression, isActive } = req.body;
@@ -179,16 +181,16 @@ router.patch('/api/reminders/:id', requireAuth, writeLimiter, validateParams(rem
 });
 
 // Delete a reminder
-router.delete('/api/reminders/:id', requireAuth, writeLimiter, validateParams(reminderIdParamSchema), async (req, res) => {
+router.delete('/api/reminders/:id', requireAuth, validateParams(reminderIdParamSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
     // Get the reminder to check senior access
     const [existing] = await db.select({ seniorId: reminders.seniorId })
       .from(reminders).where(eq(reminders.id, req.params.id));
     if (!existing) {
-      return res.status(404).json({ error: 'Reminder not found' });
+      return sendError(res, 404, { error: 'Reminder not found' });
     }
     if (!await canAccessSenior(req.auth, existing.seniorId)) {
-      return res.status(403).json({ error: 'Access denied to this reminder' });
+      return sendError(res, 403, { error: 'Access denied to this reminder' });
     }
 
     logAudit({

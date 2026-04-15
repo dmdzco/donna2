@@ -60,6 +60,18 @@ def test_defaults_to_elevenlabs_when_no_flags(cartesia_env):
     tts = create_tts_service(session_state)
     assert isinstance(tts, ElevenLabsTTSService)
     assert tts._init_sample_rate == 44100
+    assert tts.model_name == "eleven_flash_v2_5"
+
+
+def test_blank_elevenlabs_model_uses_flash_default(cartesia_env):
+    """Blank ELEVENLABS_MODEL keeps the Flash v2.5 default."""
+    from bot import create_tts_service
+
+    with patch.dict(os.environ, {"ELEVENLABS_MODEL": ""}):
+        session_state = {"_flags": {"tts_provider": "elevenlabs"}}
+        tts = create_tts_service(session_state)
+
+    assert tts.model_name == "eleven_flash_v2_5"
 
 
 def test_cartesia_uses_default_encoding(cartesia_env):

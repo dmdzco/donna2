@@ -17,7 +17,7 @@
 ## Context for the Implementer
 
 ### Current State
-- **TTS**: `ElevenLabsTTSService` in `pipecat/bot.py:256-261`, model `eleven_turbo_v2_5`, speed 0.9
+- **TTS**: `ElevenLabsTTSService` in `pipecat/bot.py:256-261`, model `eleven_flash_v2_5`, speed 0.9
 - **Config**: `elevenlabs_api_key` and `elevenlabs_voice_id` in `pipecat/config.py:43-44`
 - **Feature flags**: GrowthBook integration in `pipecat/lib/growthbook.py`, resolved per-call in `bot.py:173-182`
 - **Pipeline**: TTS sits at position 10 in the pipeline array (`bot.py:300`), receives TextFrames from GuidanceStripper
@@ -330,7 +330,7 @@ def create_tts_service(session_state: dict):
     return ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
-        model="eleven_turbo_v2_5",
+        model="eleven_flash_v2_5",
         params=ElevenLabsTTSService.InputParams(speed=0.9),
     )
 ```
@@ -344,7 +344,7 @@ In `run_bot()`, replace the ElevenLabs block (lines 256-261):
         tts = ElevenLabsTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY", ""),
             voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
-            model="eleven_turbo_v2_5",
+            model="eleven_flash_v2_5",
             params=ElevenLabsTTSService.InputParams(speed=0.9),
         )
 

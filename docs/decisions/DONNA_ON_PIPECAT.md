@@ -281,7 +281,7 @@ async def bot(runner_args: RunnerArguments):
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY"),
         voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel
-        model="eleven_turbo_v2_5",
+        model="eleven_flash_v2_5",
         params=ElevenLabsTTSService.InputParams(
             stability=0.4,
             similarity_boost=0.75,

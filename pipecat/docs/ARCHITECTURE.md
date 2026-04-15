@@ -647,6 +647,7 @@ GROQ_API_KEY=...                             # Groq primary Director
 REDIS_URL=redis://...             # Required before horizontally scaling Pipecat
 PIPECAT_REQUIRE_REDIS=true        # Fail closed when Redis is required but missing
 TTS_PROVIDER=elevenlabs           # Optional: cartesia
+ELEVENLABS_MODEL=eleven_flash_v2_5
 VOICE_BACKEND=claude              # Optional: gemini_live for evaluation path
 
 # Testing

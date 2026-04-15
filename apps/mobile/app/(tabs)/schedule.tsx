@@ -903,7 +903,11 @@ export default function ScheduleScreen() {
 
           {updateSchedule.isError && (
             <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
-              {getErrorMessage(updateSchedule.error, "Failed to save")}
+              {getErrorMessage(
+                updateSchedule.error,
+                "We couldn't save this call schedule. Your changes are still here. Please try again.",
+                "save",
+              )}
             </Text>
           )}
         </View>

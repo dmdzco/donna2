@@ -11,6 +11,6 @@ export function errorHandler(err, req, res, _next) {
     ? err.message
     : 'An internal error occurred';
 
-  logRouteError('Unhandled error', err, req, status);
+  logRouteError('Unhandled middleware error', err, req, status);
   sendError(res, status, { error: message });
 }

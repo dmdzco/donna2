@@ -45,9 +45,11 @@ export async function canAccessSenior(auth, seniorId) {
  * @param {string} context - e.g. "POST /api/reminders"
  */
 export function routeError(res, error, context) {
-  const status = error.status || error.statusCode || 500;
+  const status = error?.status || error?.statusCode || 500;
+  const message = status < 500
+    ? error.message
+    : 'An internal error occurred';
+
   logRouteError(context, error, res, status);
-  return sendError(res, status, {
-    error: status < 500 ? error.message : 'An internal error occurred',
-  });
+  return sendError(res, status, { error: message });
 }

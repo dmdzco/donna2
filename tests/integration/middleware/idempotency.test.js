@@ -42,8 +42,15 @@ describe('idempotency replay cache', () => {
     expect(middlewareSource).toContain('createHmac');
     expect(middlewareSource).toContain('IDEMPOTENCY_HASH_KEY');
     expect(middlewareSource).toContain('hashRequestPath');
+    expect(middlewareSource).toContain('canonicalStringify');
     expect(middlewareSource).toContain("code: 'idempotency_key_reused'");
     expect(middlewareSource).toContain("code: 'request_processing'");
+  });
+
+  it('replays completed matching requests and clears failed writes', () => {
+    expect(middlewareSource).toContain("existing.state === 'completed'");
+    expect(middlewareSource).toContain("res.setHeader('Idempotency-Status', 'replayed')");
+    expect(middlewareSource).toContain('clearRecord(key, getRequestId(req))');
   });
 
   it('cleans up expired replay entries through data retention', () => {

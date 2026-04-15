@@ -486,7 +486,7 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
       durationSeconds: call.durationSeconds,
     });
   } catch (error) {
-    routeError(res, error, 'GET /api/observability/metrics');
+    routeError(res, error, 'GET /api/observability/calls/:id/metrics');
   }
 });
 
@@ -513,7 +513,7 @@ router.get('/api/observability/metrics/calls', requireAdmin, async (req, res) =>
 
     res.json({ metrics: rows.rows, hours });
   } catch (error) {
-    routeError(res, error, 'GET /api/observability/calls/:id/metrics');
+    routeError(res, error, 'GET /api/observability/metrics/calls');
   }
 });
 
@@ -575,7 +575,7 @@ router.get('/api/observability/metrics/latency', requireAdmin, async (req, res) 
 
     res.json({ latency: rows.rows, hours });
   } catch (error) {
-    routeError(res, error, 'GET /api/observability/metrics/latency-trends');
+    routeError(res, error, 'GET /api/observability/metrics/latency');
   }
 });
 

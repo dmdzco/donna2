@@ -12,10 +12,30 @@ const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 const IDEMPOTENT_METHODS = new Set(['POST', 'PATCH', 'DELETE']);
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{16,255}$/;
 
+function getIdempotencyKey(req) {
+  const header = req.headers['idempotency-key'];
+  return Array.isArray(header) ? header[0] : header;
+}
+
 function isMissingTableError(error) {
+  const message = String(error?.message || '');
   return error?.code === '42P01' ||
-    String(error?.message || '').includes('idempotency_keys') ||
-    String(error?.message || '').includes('relation "idempotency_keys" does not exist');
+    (/idempotency_keys/i.test(message) && /does not exist|relation/i.test(message));
+}
+
+function canonicalStringify(value) {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalStringify).join(',')}]`;
+  }
+
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalStringify(value[key])}`)
+    .join(',')}}`;
 }
 
 function hashValue(value) {
@@ -27,11 +47,11 @@ function hashValue(value) {
 }
 
 function hashRequestBody(body) {
-  return hashValue(JSON.stringify(body ?? {}));
+  return hashValue(canonicalStringify(body ?? {}));
 }
 
 function hashRequestPath(req) {
-  return hashValue(req.originalUrl?.split('?')[0] || req.path || '');
+  return hashValue(req.originalUrl?.split('?')[0] || `${req.baseUrl || ''}${req.path || ''}`);
 }
 
 function replayConflict(res) {
@@ -42,11 +62,12 @@ function replayConflict(res) {
   });
 }
 
-function requestInProgress(res) {
+function requestInProgress(res, existing) {
   return sendError(res, 409, {
     error: 'Request already in progress',
     code: 'request_processing',
     message: 'A matching request is still being processed. Please retry shortly.',
+    ...(existing?.requestId ? { originalRequestId: existing.requestId } : {}),
   });
 }
 
@@ -126,7 +147,7 @@ function isEncryptedPayload(value) {
 async function completeRecord(key, statusCode, body, requestId) {
   const responseEncrypted = encryptJson({ body: body ?? null });
   if (!isEncryptedPayload(responseEncrypted)) {
-    await db.delete(idempotencyKeys).where(eq(idempotencyKeys.key, key));
+    await clearRecord(key, requestId);
     log.warn('Skipped idempotency response cache because encrypted storage is unavailable', {
       requestId,
     });
@@ -138,8 +159,20 @@ async function completeRecord(key, statusCode, body, requestId) {
       state: 'completed',
       statusCode,
       responseEncrypted,
+      requestId,
     })
     .where(eq(idempotencyKeys.key, key));
+}
+
+async function clearRecord(key, requestId) {
+  try {
+    await db.delete(idempotencyKeys).where(eq(idempotencyKeys.key, key));
+  } catch (error) {
+    log.warn('Failed to clear idempotency key', {
+      requestId,
+      errorCode: error?.code,
+    });
+  }
 }
 
 function sameRequest(existing, { userId, method, pathHash, bodyHash }) {
@@ -158,7 +191,7 @@ export async function idempotencyMiddleware(req, res, next) {
     return next();
   }
 
-  const key = req.get('Idempotency-Key');
+  const key = getIdempotencyKey(req);
   if (!key) {
     return next();
   }
@@ -193,7 +226,7 @@ export async function idempotencyMiddleware(req, res, next) {
     if (!claimed) {
       const existing = await findExisting(key);
       if (!existing || expired(existing)) {
-        return requestInProgress(res);
+        return requestInProgress(res, existing);
       }
 
       if (!sameRequest(existing, request)) {
@@ -205,10 +238,14 @@ export async function idempotencyMiddleware(req, res, next) {
         const body = cached && typeof cached === 'object' && Object.hasOwn(cached, 'body')
           ? cached.body
           : cached;
+        res.setHeader('Idempotency-Status', 'replayed');
+        if (existing.requestId) {
+          res.setHeader('X-Original-Request-Id', existing.requestId);
+        }
         return res.status(existing.statusCode || 200).json(body ?? {});
       }
 
-      return requestInProgress(res);
+      return requestInProgress(res, existing);
     }
   } catch (error) {
     if (isMissingTableError(error)) {
@@ -246,7 +283,10 @@ export async function idempotencyMiddleware(req, res, next) {
         .finally(() => originalJson(body));
       return res;
     }
-    return originalJson(body);
+
+    clearRecord(key, getRequestId(req))
+      .finally(() => originalJson(body));
+    return res;
   };
 
   next();

@@ -38,7 +38,7 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
     const { familyInfo: clientFamilyInfo } = req.body;
 
     // Prepare senior data with structured info in JSON fields
-    const seniorCreateData = {
+    seniorCreateData = {
       name: seniorData.name,
       phone: seniorData.phone,
       timezone: seniorData.timezone || 'America/New_York',

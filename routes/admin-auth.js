@@ -10,6 +10,7 @@ import { tokenRevocationService } from '../services/token-revocation.js';
 import { logAudit } from '../services/audit.js';
 import { DEFAULT_JWT_SECRET, isProductionEnv } from '../lib/security-config.js';
 import { routeError } from './helpers.js';
+import { sendError } from '../lib/http-response.js';
 
 const router = Router();
 if (isProductionEnv() && (!process.env.JWT_SECRET || process.env.JWT_SECRET === DEFAULT_JWT_SECRET)) {
@@ -145,7 +146,7 @@ router.get('/api/admin/me', async (req, res) => {
     res.json(admin);
   } catch (error) {
     if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
-      return res.status(401).json({ error: 'Invalid or expired token' });
+      return sendError(res, 401, { error: 'Invalid or expired token' });
     }
     routeError(res, error, 'GET /api/admin/me');
   }

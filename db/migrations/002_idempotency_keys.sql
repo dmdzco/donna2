@@ -1,3 +1,7 @@
+-- Mobile write idempotency support.
+-- Response bodies are encrypted by the Node service before storage because
+-- mobile writes can return reminders, profile fields, and other PHI-adjacent data.
+
 CREATE TABLE IF NOT EXISTS idempotency_keys (
   key varchar(255) PRIMARY KEY,
   user_id varchar(255) NOT NULL,

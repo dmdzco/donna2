@@ -463,7 +463,7 @@ async def _persist_call_metrics(
     from db.client import execute
     from lib.circuit_breaker import get_breaker_states
     from lib.encryption import encrypt_json
-    from services.context_trace import get_context_trace
+    from services.context_trace import get_context_trace, summarize_stage_latencies
 
     call_sid = session_state.get("call_sid")
     senior_id = session_state.get("senior_id")
@@ -489,12 +489,20 @@ async def _persist_call_metrics(
         latency["tts_ttfb_avg_ms"] = round(sum(tts_vals) / len(tts_vals))
     if turn_vals:
         latency["turn_avg_ms"] = round(sum(turn_vals) / len(turn_vals))
+    stage_breakdown = summarize_stage_latencies(session_state)
+    if stage_breakdown:
+        latency["stage_breakdown"] = stage_breakdown
 
-    token_usage = cm.get("token_usage", {})
+    token_usage = dict(cm.get("token_usage", {}))
     if cm.get("tts_characters"):
         token_usage["tts_characters"] = cm["tts_characters"]
+    if cm.get("llm_invocation_count"):
+        token_usage["llm_invocation_count"] = cm["llm_invocation_count"]
 
     turn_count = cm.get("turn_count", 0)
+    current_turn_sequence = session_state.get("_current_turn_sequence")
+    if isinstance(current_turn_sequence, int) and current_turn_sequence >= 0:
+        turn_count = max(turn_count, current_turn_sequence)
     tools_used = session_state.get("_tools_used", [])
     breaker_states = get_breaker_states()
     context_trace = get_context_trace(session_state)

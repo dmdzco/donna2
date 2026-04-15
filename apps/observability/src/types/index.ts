@@ -169,10 +169,27 @@ export interface ContextTraceEvent {
   metadata?: Record<string, unknown>;
 }
 
+export interface LatencyBreakdownStat {
+  count: number;
+  avg_ms: number;
+  p95_ms: number;
+  max_ms: number;
+  last_ms?: number;
+}
+
+export interface ContextLatency {
+  llm_ttfb_avg_ms?: number | null;
+  tts_ttfb_avg_ms?: number | null;
+  turn_avg_ms?: number | null;
+  stage_breakdown?: Record<string, LatencyBreakdownStat>;
+  [key: string]: number | Record<string, LatencyBreakdownStat> | null | undefined;
+}
+
 export interface ContextTrace {
   version: number;
   captured_at?: string | null;
   event_count?: number;
+  latency_breakdown?: Record<string, LatencyBreakdownStat>;
   events: ContextTraceEvent[];
 }
 
@@ -182,7 +199,7 @@ export interface ContextTraceData {
   status: string;
   durationSeconds: number | null;
   contextTrace: ContextTrace;
-  latency: Record<string, number>;
+  latency: ContextLatency;
   toolsUsed: string[];
   captured: boolean;
   schemaReady: boolean;

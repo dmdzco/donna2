@@ -61,7 +61,7 @@ class Settings:
     anthropic_api_key: str = ""
     deepgram_api_key: str = ""
     elevenlabs_api_key: str = ""
-    elevenlabs_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
+    elevenlabs_voice_id: str = "jixzNFANovqRhzplvmwR"
     cartesia_api_key: str = ""
     cartesia_voice_id: str = "f786b574-daa5-4673-aa0c-cbe3e8534c02"
     google_api_key: str = ""
@@ -286,7 +286,7 @@ def _load_settings() -> Settings:
         anthropic_api_key=_env("ANTHROPIC_API_KEY"),
         deepgram_api_key=_env("DEEPGRAM_API_KEY"),
         elevenlabs_api_key=_env("ELEVENLABS_API_KEY"),
-        elevenlabs_voice_id=_env("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
+        elevenlabs_voice_id=_env("ELEVENLABS_VOICE_ID", "jixzNFANovqRhzplvmwR"),
         cartesia_api_key=_env("CARTESIA_API_KEY"),
         cartesia_voice_id=_env("CARTESIA_VOICE_ID", "f786b574-daa5-4673-aa0c-cbe3e8534c02"),
         google_api_key=_env("GOOGLE_API_KEY"),

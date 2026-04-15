@@ -28,7 +28,7 @@ async def test_telnyx_l16_serializer_keeps_pcm_until_wire_boundary():
     serialized = await serializer.serialize(frame)
     payload = base64.b64decode(json.loads(serialized)["media"]["payload"])
 
-    assert payload == b"\x02\x01\x04\x03"
+    assert payload == b"\x01\x02\x03\x04"
 
 
 @pytest.mark.asyncio
@@ -47,7 +47,7 @@ async def test_telnyx_l16_deserializer_restores_pipeline_pcm_endianness():
         json.dumps(
             {
                 "event": "media",
-                "media": {"payload": base64.b64encode(b"\x02\x01\x04\x03").decode()},
+                "media": {"payload": base64.b64encode(b"\x01\x02\x03\x04").decode()},
             }
         )
     )

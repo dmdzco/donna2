@@ -109,8 +109,13 @@ gh repo clone <org>/donna2
 cd donna2
 
 # Install dependencies
-npm install
+npm ci
+npm run install:apps
 cd pipecat && uv sync && cd ..
+
+# Mobile app env (required before running Expo)
+cp apps/mobile/.env.example apps/mobile/.env
+# Edit apps/mobile/.env and set EXPO_PUBLIC_API_URL + EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY
 
 # Run tests to verify setup
 make test
@@ -118,6 +123,8 @@ make test
 # Install Playwright browsers (for E2E tests)
 npx playwright install chromium
 ```
+
+The frontend apps use their own `package-lock.json` files, so root `npm ci` is not enough by itself. `npm run install:apps` installs the app-local dependencies that Playwright and Expo expect.
 
 ---
 

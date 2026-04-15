@@ -38,6 +38,7 @@ from pipecat.transports.websocket.fastapi import (
 )
 from pipecat_flows import FlowManager
 
+from config import get_settings, settings
 from flows.nodes import build_initial_node
 from flows.tools import make_flows_tools
 from processors.conversation_director import ConversationDirectorProcessor
@@ -51,7 +52,7 @@ class WebSocketAuthError(Exception):
     """Raised when a Twilio media WebSocket cannot be admitted."""
 
 
-HANDSHAKE_TIMEOUT_SECONDS = float(os.getenv("TWILIO_WS_HANDSHAKE_TIMEOUT_SECONDS", "5"))
+HANDSHAKE_TIMEOUT_SECONDS = settings.twilio_ws_handshake_timeout_seconds
 
 
 async def authenticate_websocket_call(
@@ -142,11 +143,12 @@ def _get_env_int(name: str, default: int) -> int:
 
 def resolve_tts_provider(session_state: dict) -> str:
     """Resolve the active TTS provider after applying availability fallbacks."""
+    cfg = get_settings()
     flags = session_state.get("_flags", {})
-    requested_provider = os.getenv("TTS_PROVIDER") or flags.get("tts_provider", "elevenlabs")
+    requested_provider = cfg.tts_provider or flags.get("tts_provider", "elevenlabs")
 
     if requested_provider == "cartesia":
-        if os.getenv("CARTESIA_API_KEY"):
+        if cfg.cartesia_api_key:
             return "cartesia"
         logger.warning("Cartesia requested but CARTESIA_API_KEY is missing; falling back to ElevenLabs")
 
@@ -188,6 +190,7 @@ def create_tts_service(session_state: dict):
     Uses session_state["_flags"]["tts_provider"] to pick Cartesia or ElevenLabs.
     Falls back to ElevenLabs if Cartesia key is missing or flag is unset.
     """
+    cfg = get_settings()
     audio_profile = get_audio_profile(session_state)
     provider = str(audio_profile["tts_provider"])
     output_sample_rate = int(audio_profile["audio_out_sample_rate"])
@@ -195,8 +198,8 @@ def create_tts_service(session_state: dict):
     if provider == "cartesia":
         logger.info("TTS provider: Cartesia Sonic 3")
         return CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY", ""),
-            voice_id=os.getenv("CARTESIA_VOICE_ID", "1242fb95-7ddd-44ac-8a05-9e8a22a6137d"),
+            api_key=cfg.cartesia_api_key,
+            voice_id=cfg.cartesia_voice_id or "1242fb95-7ddd-44ac-8a05-9e8a22a6137d",
             model="sonic-3",
             sample_rate=output_sample_rate,
             # Keep linear PCM in-process; the telephony serializer owns the final
@@ -209,8 +212,8 @@ def create_tts_service(session_state: dict):
 
     logger.info("TTS provider: ElevenLabs")
     return ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
+        api_key=cfg.elevenlabs_api_key,
+        voice_id=cfg.elevenlabs_voice_id,
         model="eleven_turbo_v2_5",
         sample_rate=output_sample_rate,
         params=ElevenLabsTTSService.InputParams(speed=0.9),
@@ -292,6 +295,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             - todays_context: str | None
     """
     start_time = time.time()
+    cfg = get_settings()
 
     # -------------------------------------------------------------------------
     # Parse telephony WebSocket handshake
@@ -444,8 +448,8 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             serializer=TwilioFrameSerializer(
                 stream_sid=stream_sid,
                 call_sid=call_sid,
-                account_sid=os.getenv("TWILIO_ACCOUNT_SID"),
-                auth_token=os.getenv("TWILIO_AUTH_TOKEN"),
+                account_sid=cfg.twilio_account_sid,
+                auth_token=cfg.twilio_auth_token,
             ),
         ),
     )
@@ -455,7 +459,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     # Env var VOICE_BACKEND=gemini_live overrides GrowthBook flag
     # -------------------------------------------------------------------------
     voice_backend = (
-        os.getenv("VOICE_BACKEND")
+        cfg.voice_backend
         or (session_state.get("_flags") or {}).get("voice_backend", "claude")
     )
     if voice_backend == "gemini_live":
@@ -466,7 +470,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     # -------------------------------------------------------------------------
     # STT / LLM / TTS — swap for mocks in load test mode
     # -------------------------------------------------------------------------
-    load_test = os.getenv("LOAD_TEST_MODE", "false").lower() == "true"
+    load_test = cfg.load_test_mode
 
     if load_test:
         logger.warning("LOAD_TEST_MODE enabled — using mock STT/LLM/TTS")
@@ -481,12 +485,12 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
         tts = MockTTSProcessor()
         # Real LLM needed for create_context_aggregator(); mock replaces it in pipeline
         llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY", "fake-key-load-test"),
-            model="claude-sonnet-4-5-20250929",
+            api_key=cfg.anthropic_api_key or "fake-key-load-test",
+            model=cfg.anthropic_model,
         )
     else:
         stt = DeepgramSTTService(
-            api_key=os.getenv("DEEPGRAM_API_KEY", ""),
+            api_key=cfg.deepgram_api_key,
             live_options=LiveOptions(
                 model="nova-3-general",
                 language="en",
@@ -500,8 +504,8 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
         )
 
         llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-            model="claude-sonnet-4-5-20250929",
+            api_key=cfg.anthropic_api_key,
+            model=cfg.anthropic_model,
             params=AnthropicLLMService.InputParams(
                 enable_prompt_caching=True,
             ),

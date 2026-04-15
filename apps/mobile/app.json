@@ -51,7 +51,6 @@
       "typedRoutes": true
     },
     "extra": {
-      "apiUrl": "https://donna-api-production-2450.up.railway.app",
       "router": {},
       "eas": {
         "projectId": "aa482a04-3f14-4373-a654-42e51f1bd7b0"

@@ -7,8 +7,17 @@ import type {
   OnboardingInput,
 } from "@/src/types";
 
-const API_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? "https://donna-api-production-2450.up.railway.app";
+function getRequiredApiUrl(): string {
+  const apiUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+  if (!apiUrl) {
+    throw new Error(
+      "EXPO_PUBLIC_API_URL is required for the mobile app. Set it in apps/mobile/.env or the EAS environment.",
+    );
+  }
+  return apiUrl.replace(/\/+$/, "");
+}
+
+const API_URL = getRequiredApiUrl();
 
 type WriteOptions = { idempotencyKey?: string };
 type FetchOptions = RequestInit & { token?: string } & WriteOptions;

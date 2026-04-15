@@ -25,6 +25,7 @@ class Settings:
     # ---- Server ----
     port: int = 7860
     environment: str = ""
+    log_level: str = ""
     base_url: str = ""
     pipecat_public_url: str = ""
     admin_url: str = ""
@@ -89,6 +90,10 @@ class Settings:
 
     # ---- Feature Flags ----
     scheduler_enabled: bool = False
+    pipecat_retention_enabled: bool = False
+    voice_backend: str = ""
+    tts_provider: str = ""
+    twilio_ws_handshake_timeout_seconds: float = 5.0
 
     # ---- Data Retention (HIPAA) ----
     retention_conversations_days: int = 365
@@ -205,6 +210,7 @@ def _load_settings() -> Settings:
         # Server
         port=int(_env("PORT", "7860")),
         environment=_env("ENVIRONMENT"),
+        log_level=_env("LOG_LEVEL", "INFO" if is_production_environment() else "DEBUG"),
         base_url=_env("BASE_URL"),
         pipecat_public_url=_env("PIPECAT_PUBLIC_URL"),
         admin_url=_env("ADMIN_URL"),
@@ -259,6 +265,10 @@ def _load_settings() -> Settings:
         field_encryption_key=_env("FIELD_ENCRYPTION_KEY"),
         # Feature Flags
         scheduler_enabled=_env("SCHEDULER_ENABLED", "false").lower() == "true",
+        pipecat_retention_enabled=_truthy(_env("PIPECAT_RETENTION_ENABLED")),
+        voice_backend=_env("VOICE_BACKEND"),
+        tts_provider=_env("TTS_PROVIDER"),
+        twilio_ws_handshake_timeout_seconds=float(_env("TWILIO_WS_HANDSHAKE_TIMEOUT_SECONDS", "5")),
         # Data Retention (HIPAA)
         retention_conversations_days=int(_env("RETENTION_CONVERSATIONS_DAYS", "365")),
         retention_conversation_metadata_days=int(_env("RETENTION_CONVERSATION_METADATA_DAYS", "1095")),
@@ -275,3 +285,9 @@ def _load_settings() -> Settings:
 
 # Module-level accessor — import this
 settings = _load_settings()
+
+
+def get_settings() -> Settings:
+    """Return a fresh settings snapshot for code paths that rely on env overrides."""
+    _load_settings.cache_clear()
+    return _load_settings()

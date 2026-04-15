@@ -66,6 +66,17 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ## Quick Start
 
+### Local Bootstrap
+
+```bash
+npm ci
+npm run install:apps
+cd pipecat && uv sync && cd ..
+cp apps/mobile/.env.example apps/mobile/.env
+```
+
+Set `EXPO_PUBLIC_API_URL` in `apps/mobile/.env` before running the mobile app. The mobile client no longer falls back to production when that variable is missing.
+
 ### Railway-First Development
 
 Voice and API features are developed directly against Railway — not localhost. Three isolated environments: dev, staging, production.
@@ -108,6 +119,7 @@ See [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) for ful
 - Admin dashboard: `cd apps/admin-v2 && npm run dev` → http://localhost:5175
 - Consumer app: `cd apps/consumer && npm run dev` → http://localhost:5174
 - Observability: `cd apps/observability && npm run dev` → http://localhost:3002
+- Mobile app: `cd apps/mobile && npm run ios` after setting `EXPO_PUBLIC_API_URL` in `apps/mobile/.env`
 
 ## Architecture
 

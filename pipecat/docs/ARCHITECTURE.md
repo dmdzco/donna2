@@ -100,8 +100,8 @@ Telnyx Audio ──► FastAPIWebsocketTransport
                         │
                         ▼
               ┌─────────────────────┐
-              │   TTS Service        │  ElevenLabs 44.1kHz PCM by default;
-              │                      │  Cartesia Sonic 3 48kHz PCM by flag
+              │   TTS Service        │  Telnyx calls use 16kHz PCM;
+              │                      │  non-phone paths can use higher rates
               └─────────┬───────────┘
                         │ AudioFrame
                         ▼
@@ -136,18 +136,19 @@ The pipeline processors don't call each other directly. They communicate through
 
 ## Runtime Audio Profile
 
-Runtime source of truth is `bot.py:get_audio_profile()` plus the active serializer. Telnyx's default wire format is `16kHz` L16, while Donna keeps TTS/model audio at higher rates internally:
+Runtime source of truth is `bot.py:get_audio_profile()` plus the active serializer. Telnyx's default wire format is `16kHz` L16, and active Telnyx calls request TTS at that native phone rate for stable packet cadence. Non-phone/browser paths can still keep TTS/model audio at higher internal rates:
 
 | Segment | Default | Config |
 |---|---:|---|
 | Incoming telephony wire | 16kHz L16 | Telnyx media streaming |
 | STT/internal input | 16kHz PCM | `TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE` |
-| Cartesia output | 48kHz `pcm_s16le` | `CARTESIA_OUTPUT_SAMPLE_RATE` |
-| ElevenLabs output | 44.1kHz PCM | `ELEVENLABS_OUTPUT_SAMPLE_RATE` |
+| Telnyx phone TTS output | 16kHz PCM | Selected TTS provider, matched to Telnyx |
+| Cartesia non-phone output | 48kHz `pcm_s16le` | `CARTESIA_OUTPUT_SAMPLE_RATE` |
+| ElevenLabs non-phone output | 44.1kHz PCM | `ELEVENLABS_OUTPUT_SAMPLE_RATE` |
 | Gemini Live output | 24kHz PCM | `GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE` |
 | Telnyx output wire | 16kHz L16 | `DonnaTelnyxFrameSerializer` final conversion |
 
-The rule is to keep TTS/model audio high quality internally and perform exactly one required telephony conversion at the serializer edge. Cartesia must remain PCM; using telephony-compressed output from the TTS provider double-encodes and produces garbled phone audio.
+The rule is to keep TTS/model audio as PCM and avoid live telephony resampling whenever the carrier path already defines a stable native rate. Cartesia must remain PCM; using telephony-compressed output from the TTS provider double-encodes and produces garbled phone audio.
 
 ---
 
@@ -558,7 +559,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Full guidance fallback when Groq unavailable |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
 | **STT** | Deepgram Nova 3 | Telnyx 16kHz L16 is passed through as internal 16kHz PCM before STT |
-| **TTS** | ElevenLabs by default; Cartesia behind provider flag | ElevenLabs `44100`; Cartesia Sonic 3 `pcm_s16le` at `48000`; serializer handles final phone conversion |
+| **TTS** | ElevenLabs by default; Cartesia behind provider flag | Telnyx calls request 16kHz PCM; non-phone paths can use ElevenLabs `44100` or Cartesia Sonic 3 `48000` |
 | **VAD** | Silero | confidence=0.6, min_volume=0.5; stop_secs=1.2 (senior calls), 0.8 (onboarding) |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |

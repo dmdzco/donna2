@@ -51,7 +51,7 @@ Telnyx L16/16k audio ──► FastAPIWebsocketTransport
                         ▼
               Conversation Tracker (topics, questions, advice + stripped transcript)
                         ▼
-              ElevenLabs TTS (44.1kHz PCM) or Cartesia Sonic 3 (48kHz PCM)
+              ElevenLabs TTS or Cartesia Sonic 3 (16kHz PCM for Telnyx calls)
                         ▼
               FastAPIWebsocketTransport ──► Telnyx L16/16k audio
                         ▼
@@ -68,12 +68,13 @@ Source of truth: `pipecat/bot.py`, `pipecat/bot_gemini.py`, and the active telep
 |---|---:|---|
 | Telnyx wire input | 16kHz L16 PCM | Telnyx media stream profile |
 | Internal STT input | 16kHz PCM | Matches the Telnyx wire profile for STT |
-| Cartesia TTS output | 48kHz `pcm_s16le` | `CARTESIA_OUTPUT_SAMPLE_RATE`; keeps high-quality PCM until serializer edge |
-| ElevenLabs TTS output | 44.1kHz PCM | `ELEVENLABS_OUTPUT_SAMPLE_RATE`; highest supported ElevenLabs PCM rate in current Pipecat service |
+| Telnyx phone TTS output | 16kHz PCM | Selected TTS provider, matched to the Telnyx wire profile |
+| Cartesia non-phone output | 48kHz `pcm_s16le` | `CARTESIA_OUTPUT_SAMPLE_RATE`; used outside active Telnyx calls |
+| ElevenLabs non-phone output | 44.1kHz PCM | `ELEVENLABS_OUTPUT_SAMPLE_RATE`; used outside active Telnyx calls |
 | Gemini Live internal output | 24kHz PCM | `GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE`; preserved internally before serializer output |
 | Telnyx wire output | 16kHz L16 PCM | Final provider edge handled by `DonnaTelnyxFrameSerializer` |
 
-The guiding rule is: keep high-quality PCM internally, then convert once at the telephony edge. Do not request `pcm_mulaw` from Cartesia; the Telnyx path expects linear PCM through the serializer boundary.
+The guiding rule is: keep PCM throughout the pipeline and match active Telnyx calls to 16kHz before the serializer so output frames stay at a normal 20ms cadence. Do not request `pcm_mulaw` from Cartesia; the Telnyx path expects linear PCM through the serializer boundary.
 
 ---
 
@@ -167,7 +168,7 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 | Director LLM (regular fallback helper) | Google Gemini Flash | gemini-3-flash-preview |
 | Post-Call Analysis | Google Gemini Flash | gemini-3-flash-preview |
 | STT | Deepgram Nova 3 | Telnyx L16/16k reaches STT as 16kHz PCM |
-| TTS | ElevenLabs by default; Cartesia behind provider flag | ElevenLabs internal `44100`; Cartesia `pcm_s16le`; Telnyx L16 calls output 16kHz at the serializer edge |
+| TTS | ElevenLabs by default; Cartesia behind provider flag | Telnyx L16 calls use 16kHz PCM from TTS; non-phone paths can use higher internal rates |
 | VAD | Silero | confidence=0.6, stop_secs=1.2 |
 | Embeddings | OpenAI | text-embedding-3-small |
 | News / Web Search | OpenAI GPT-4o-mini + Tavily | OpenAI cached news; Tavily first/OpenAI fallback for in-call web_search |

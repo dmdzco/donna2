@@ -254,8 +254,8 @@ Each cohort transition:
 | `UPSTASH_REDIS_REST_TOKEN` | *(empty)* | Optional fallback for non-Railway deployments — Upstash REST bearer token |
 | `SCHEDULER_ENABLED` | false | Only one instance should run the scheduler |
 | `TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE` | 16000 | Internal STT input rate after telephony serializer conversion |
-| `ELEVENLABS_OUTPUT_SAMPLE_RATE` | 44100 | Internal ElevenLabs TTS output rate before telephony serializer conversion |
-| `CARTESIA_OUTPUT_SAMPLE_RATE` | 48000 | Internal Cartesia PCM output rate before telephony serializer conversion |
+| `ELEVENLABS_OUTPUT_SAMPLE_RATE` | 44100 | Non-phone ElevenLabs TTS output rate; active Telnyx calls override to 16kHz |
+| `CARTESIA_OUTPUT_SAMPLE_RATE` | 48000 | Non-phone Cartesia PCM output rate; active Telnyx calls override to 16kHz |
 | `GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE` | 24000 | Internal Gemini Live output rate before telephony serializer conversion |
 
 ---

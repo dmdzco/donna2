@@ -19,7 +19,7 @@ User speaks → [STT] → [Observer] → [Director] → [LLM] → [TTS] → Audi
 | Quick Observer | 0ms | Blocking | Regex pattern data, inline |
 | Conversation Director | Async | Non-blocking | Groq primary, Gemini fallback; speculative results can be injected same-turn |
 | Claude Sonnet 4.5 | ~500-1500ms | Streaming | Token-by-token via Pipecat |
-| TTS | ~200-400ms | Streaming | ElevenLabs by default at internal 44.1kHz PCM; Cartesia flag path at 48kHz PCM |
+| TTS | ~200-400ms | Streaming | ElevenLabs by default; active Telnyx calls request 16kHz PCM for stable output frames |
 | **Total perceived** | **~1-2s** | | First audio chunk to user |
 
 **Key insight**: The Director runs asynchronously — it doesn't add to the pipeline's critical path. Its analysis from the previous turn is injected before the current LLM call.
@@ -32,8 +32,9 @@ Donna keeps audio linear and wideband across the active Telnyx phone path:
 
 - Telnyx media streams use `L16` at `16000Hz`.
 - `TELNYX_L16_INPUT_BYTE_ORDER=little` and `TELNYX_L16_OUTPUT_BYTE_ORDER=little` match the verified Telnyx media payload behavior.
-- `ELEVENLABS_OUTPUT_SAMPLE_RATE=44100` for ElevenLabs TTS output.
-- `CARTESIA_OUTPUT_SAMPLE_RATE=48000` with `pcm_s16le` for Cartesia Sonic 3.
+- Active Telnyx phone calls request `16000Hz` TTS output to avoid live resampling artifacts.
+- `ELEVENLABS_OUTPUT_SAMPLE_RATE=44100` for non-phone ElevenLabs TTS output.
+- `CARTESIA_OUTPUT_SAMPLE_RATE=48000` with `pcm_s16le` for non-phone Cartesia Sonic 3 output.
 - `GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE=24000` for the Gemini Live evaluation path.
 - `DonnaTelnyxFrameSerializer` owns the final Telnyx L16/16k wire boundary.
 

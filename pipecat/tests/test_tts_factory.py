@@ -106,8 +106,8 @@ def test_audio_profile_prefers_cartesia_48k_and_16k_input(cartesia_env):
     assert profile["audio_out_sample_rate"] == 48000
 
 
-def test_audio_profile_keeps_telnyx_l16_cartesia_high_rate_until_serializer(cartesia_env):
-    """Telnyx L16 keeps STT at 16k but leaves Cartesia high-rate until the serializer edge."""
+def test_audio_profile_uses_telnyx_native_rate_for_cartesia_phone_calls(cartesia_env):
+    """Telnyx phone calls request native 16k TTS to keep output frames stable."""
     from bot import get_audio_profile
 
     with patch.dict(os.environ, {"TELNYX_STREAM_CODEC": "L16", "TELNYX_STREAM_SAMPLE_RATE": "16000"}):
@@ -119,7 +119,7 @@ def test_audio_profile_keeps_telnyx_l16_cartesia_high_rate_until_serializer(cart
 
     assert profile["tts_provider"] == "cartesia"
     assert profile["audio_in_sample_rate"] == 16000
-    assert profile["audio_out_sample_rate"] == 48000
+    assert profile["audio_out_sample_rate"] == 16000
 
 
 def test_cartesia_uses_lower_volume_for_telnyx(cartesia_env):
@@ -134,13 +134,13 @@ def test_cartesia_uses_lower_volume_for_telnyx(cartesia_env):
         tts = create_tts_service(session_state)
     gen_config = tts._settings.get("generation_config")
 
-    assert tts._init_sample_rate == 48000
+    assert tts._init_sample_rate == 16000
     assert gen_config.speed == 1.0
     assert gen_config.volume == 0.9
 
 
-def test_cartesia_keeps_48k_for_telnyx_l16(cartesia_env):
-    """Cartesia stays high-rate internally; the Telnyx serializer performs final 16k conversion."""
+def test_cartesia_uses_16k_for_telnyx_l16(cartesia_env):
+    """Cartesia uses the Telnyx native rate for phone calls."""
     from bot import create_tts_service
 
     with patch.dict(os.environ, {"TELNYX_STREAM_CODEC": "L16", "TELNYX_STREAM_SAMPLE_RATE": "16000"}):
@@ -150,7 +150,7 @@ def test_cartesia_keeps_48k_for_telnyx_l16(cartesia_env):
         }
         tts = create_tts_service(session_state)
 
-    assert tts._init_sample_rate == 48000
+    assert tts._init_sample_rate == 16000
 
 
 def test_audio_profile_falls_back_to_elevenlabs_when_cartesia_unavailable(cartesia_env):

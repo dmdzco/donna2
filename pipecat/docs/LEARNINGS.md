@@ -99,11 +99,12 @@ Do not reintroduce the old 8kHz μ-law bottleneck. The current default profile i
 
 - **Telnyx wire input/output**: `L16` at `16000Hz`, little-endian payloads.
 - **Telephony/STT input**: `16000Hz` PCM.
-- **Cartesia output**: `CARTESIA_OUTPUT_SAMPLE_RATE=48000`, `pcm_s16le`.
-- **ElevenLabs output**: `ELEVENLABS_OUTPUT_SAMPLE_RATE=44100`.
+- **Telnyx phone TTS output**: `16000Hz` PCM from the selected TTS provider.
+- **Cartesia non-phone output**: `CARTESIA_OUTPUT_SAMPLE_RATE=48000`, `pcm_s16le`.
+- **ElevenLabs non-phone output**: `ELEVENLABS_OUTPUT_SAMPLE_RATE=44100`.
 - **Gemini Live output**: `GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE=24000`.
 
-For active Telnyx calls, TTS output is matched to 16kHz at the serializer boundary to avoid extra live resampling and preserve a stable packet cadence.
+For active Telnyx calls, TTS output is requested at 16kHz before the serializer. Live testing showed that resampling 48kHz TTS at the Telnyx serializer could produce an oversized first output frame and audible buzz. Browser/internal playback can still use higher-rate PCM when not constrained by the phone wire format.
 
 ### VAD Settings Are Caller-Type Dependent
 Senior calls use `stop_secs=1.2` — elderly speakers pause longer between thoughts, have softer voices, and speak more slowly. Default settings cut them off. **Tuned settings:** `confidence=0.6`, `stop_secs=1.2`, `min_volume=0.5`.

@@ -42,6 +42,7 @@ from flows.tools import make_flows_tools
 from lib.telnyx_audio import TelnyxAudioProfileError, resolve_telnyx_audio_profile
 from processors.conversation_director import ConversationDirectorProcessor
 from processors.conversation_tracker import ConversationState, ConversationTrackerProcessor
+from processors.audio_preroll import InitialAudioPrerollProcessor
 from processors.guidance_stripper import GuidanceStripperProcessor
 from processors.metrics_logger import MetricsLoggerProcessor
 from processors.quick_observer import QuickObserverProcessor
@@ -166,7 +167,7 @@ def resolve_tts_provider(session_state: dict) -> str:
 
 
 def get_audio_profile(session_state: dict) -> dict[str, int | str]:
-    """Pick the highest safe internal sample rates for the active telephony pipeline."""
+    """Pick stable sample rates for the active telephony pipeline."""
     cfg = get_settings()
     provider = resolve_tts_provider(session_state)
     is_telnyx = session_state.get("_transport_type") == "telnyx"
@@ -175,7 +176,9 @@ def get_audio_profile(session_state: dict) -> dict[str, int | str]:
     if telnyx_profile and telnyx_profile.uses_l16_serializer:
         audio_in_sample_rate = telnyx_profile.sample_rate
 
-    if provider == "cartesia":
+    if is_telnyx and telnyx_profile and telnyx_profile.uses_l16_serializer:
+        audio_out_sample_rate = telnyx_profile.sample_rate
+    elif provider == "cartesia":
         audio_out_sample_rate = cfg.cartesia_output_sample_rate
         if audio_out_sample_rate not in SUPPORTED_CARTESIA_SAMPLE_RATES:
             logger.warning(
@@ -630,6 +633,9 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
         track_user=False,
     )
     guidance_stripper = GuidanceStripperProcessor()
+    audio_preroll = InitialAudioPrerollProcessor(
+        preroll_ms=120 if transport_type == "telnyx" else 0
+    )
     metrics_logger = MetricsLoggerProcessor(session_state=session_state)
 
     # Record call start time for Director's phase timing
@@ -665,6 +671,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             guidance_stripper,
             conversation_tracker,
             tts,
+            audio_preroll,
             transport.output(),
             context_aggregator.assistant(),
             metrics_logger,

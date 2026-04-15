@@ -78,7 +78,7 @@ The active voice pipeline is in `pipecat/bot.py`:
 | Director LLM | Groq `openai/gpt-oss-20b`, Gemini fallback | Runs off critical path for guidance/query extraction. |
 | Post-call analysis | Gemini 3 Flash Preview | Summaries, concerns, engagement, caregiver SMS copy. |
 | Memory extraction | OpenAI `gpt-4o-mini` + embeddings | Runs post-call; embeddings are de minimis in cost. |
-| TTS | Environment-controlled; Cartesia and ElevenLabs supported | Runtime keeps TTS as high-rate PCM internally: ElevenLabs `44100`, Cartesia `pcm_s16le` at `48000`; Telnyx conversion happens at the serializer edge. |
+| TTS | Environment-controlled; Cartesia and ElevenLabs supported | Active Telnyx calls request 16kHz PCM from TTS; non-phone paths can use ElevenLabs `44100` or Cartesia `48000`. |
 | Web/news | Tavily basic search, OpenAI web search fallback/news | Current feature remains enabled. |
 | Notifications | Twilio SMS + Resend email | Defaults allow both SMS and email if caregiver preferences permit. |
 | Hosting/data | Railway, Neon Postgres/pgvector, Redis | Mostly fixed platform cost, not the main COGS driver. |

@@ -1,5 +1,6 @@
 import base64
 import json
+import struct
 
 import pytest
 
@@ -39,7 +40,14 @@ async def test_telnyx_l16_serializer_keeps_pcm_until_wire_boundary():
     serialized = await serializer.serialize(frame)
     payload = base64.b64decode(json.loads(serialized)["media"]["payload"])
 
-    assert payload == b"\x02\x01\x04\x03"
+    assert len(payload) == 16
+    version_payload_type, payload_type, sequence, timestamp, ssrc = struct.unpack("!BBHII", payload[:12])
+    assert version_payload_type == 0x80
+    assert payload_type == 96
+    assert sequence >= 0
+    assert timestamp >= 0
+    assert ssrc > 0
+    assert payload[12:] == b"\x02\x01\x04\x03"
 
 
 @pytest.mark.asyncio

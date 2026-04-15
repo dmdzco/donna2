@@ -549,6 +549,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
         params=FastAPIWebsocketParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            audio_out_10ms_chunks=2 if transport_type == "telnyx" else 4,
             add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(

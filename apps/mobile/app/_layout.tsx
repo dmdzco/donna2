@@ -2,6 +2,8 @@ import "../global.css";
 import { useEffect } from "react";
 import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";
+import { useProfile } from "@/src/hooks/useProfile";
+import { ApiError } from "@/src/lib/api";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { tokenCache } from "@/src/lib/auth";
 import {
@@ -30,6 +32,7 @@ const CLERK_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
 
 function AuthGuard() {
   const { isLoaded, isSignedIn } = useAuth();
+  const { data: profile, isLoading: profileLoading, isError: profileError, error: profileErrorObj } = useProfile();
   const segments = useSegments();
   const pathname = usePathname();
   const router = useRouter();
@@ -37,17 +40,31 @@ function AuthGuard() {
   useEffect(() => {
     if (!isLoaded) return;
 
-    const firstSegment = segments[0];
+    const firstSegment = segments?.[0];
     const inTabsGroup = firstSegment === "(tabs)";
     const inAuthGroup = firstSegment === "(auth)";
     const isLanding = pathname === "/";
+    const hasCompletedOnboarding = (profile?.seniors?.length ?? 0) > 0;
 
     if (!isSignedIn && inTabsGroup) {
       router.replace("/");
     } else if (isSignedIn && (isLanding || inAuthGroup)) {
-      router.replace("/(tabs)");
+      if (!profileLoading && profileError) {
+        const needsOnboarding = profileErrorObj instanceof ApiError && profileErrorObj.needsOnboarding;
+        if (needsOnboarding) {
+          router.replace("/(onboarding)/step1" as any);
+        } else {
+          router.replace("/(tabs)");
+        }
+      } else if (!profileLoading && !hasCompletedOnboarding) {
+        router.replace("/(onboarding)/step1" as any);
+      } else if (hasCompletedOnboarding) {
+        router.replace("/(tabs)");
+      }
+    } else if (isSignedIn && inTabsGroup && !profileLoading && !profileError && !hasCompletedOnboarding) {
+      router.replace("/(onboarding)/step1" as any);
     }
-  }, [isLoaded, isSignedIn, pathname, router, segments]);
+  }, [isLoaded, isSignedIn, pathname, segments, profile, profileLoading, profileError, profileErrorObj]);
 
   // Register for push notifications once the user is signed in
   useEffect(() => {

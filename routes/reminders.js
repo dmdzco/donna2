@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/client.js';
-import { reminders, seniors } from '../db/schema.js';
+import { reminders, reminderDeliveries, seniors } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
 import { requireAuth } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
@@ -211,6 +211,7 @@ router.delete('/api/reminders/:id', requireAuth, validateParams(reminderIdParamS
       ipAddress: req.ip,
       userAgent: req.get('user-agent'),
     });
+    await db.delete(reminderDeliveries).where(eq(reminderDeliveries.reminderId, req.params.id));
     await db.delete(reminders).where(eq(reminders.id, req.params.id));
     res.json({ success: true });
   } catch (error) {

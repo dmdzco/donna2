@@ -32,8 +32,9 @@ export function useCreateReminder(seniorId: string | undefined) {
 
   return useMutation({
     mutationFn: async (data: Omit<Reminder, "id" | "seniorId" | "createdAt" | "lastDeliveredAt">) => {
+      if (!seniorId) throw new Error("No senior selected");
       const token = await getToken();
-      const payload = { seniorId: seniorId!, ...data };
+      const payload = { seniorId, ...data };
       return api.reminders.create(payload, token!, {
         idempotencyKey: idempotency.getKey(payload),
       });

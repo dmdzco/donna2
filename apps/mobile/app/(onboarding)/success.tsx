@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useAuth } from "@clerk/clerk-expo";
@@ -147,6 +147,7 @@ export default function SuccessScreen() {
   const { getToken } = useAuth();
   const store = useOnboardingStore();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const idempotency = useStableIdempotencyKey("onboarding-complete");
 
   // Entrance animation for icon
@@ -190,6 +191,7 @@ export default function SuccessScreen() {
 
   async function handleContinue() {
     setLoading(true);
+    setError(null);
     try {
       const token = await getToken();
 
@@ -236,7 +238,7 @@ export default function SuccessScreen() {
       store.reset();
       router.replace("/(tabs)");
     } catch (err: unknown) {
-      Alert.alert("Error", getAlertMessage(err));
+      setError(getAlertMessage(err));
     } finally {
       setLoading(false);
     }
@@ -286,6 +288,11 @@ export default function SuccessScreen() {
 
       {/* Fixed bottom button */}
       <View className="bg-cream border-t border-charcoal/10 px-6 pt-4 pb-8">
+        {error && (
+          <Text className="text-[13px] text-center mb-3" style={{ color: "#E53E3E" }}>
+            {error}
+          </Text>
+        )}
         <Button
           title="Continue to Homepage"
           onPress={handleContinue}

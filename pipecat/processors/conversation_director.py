@@ -45,6 +45,7 @@ from services.director_llm import (
     get_default_direction,
     warmup_fast_providers,
 )
+from services.context_trace import record_context_event
 
 
 # ---------------------------------------------------------------------------
@@ -687,8 +688,31 @@ class ConversationDirectorProcessor(FrameProcessor):
             if news_ctx:
                 guidance_text += f"\n\n{news_ctx}"
                 self._session_state["_news_injected"] = True
+                record_context_event(
+                    self._session_state,
+                    source="news_context",
+                    action="injected",
+                    label="Director news context",
+                    content=news_ctx,
+                    provider="context_cache",
+                    item_count=sum(1 for line in str(news_ctx).splitlines() if line.strip().startswith("-")) or None,
+                    metadata={"trigger": "director_should_mention_news"},
+                )
                 logger.info("[Director] News content injected into context")
 
+        record_context_event(
+            self._session_state,
+            source="director_guidance",
+            action="injected",
+            label="Director guidance",
+            content=guidance_text,
+            provider="conversation_director",
+            metadata={
+                "call_phase": (result.get("analysis") or {}).get("call_phase"),
+                "pacing_note": (result.get("direction") or {}).get("pacing_note"),
+                "has_token_recommendation": bool(token_rec),
+            },
+        )
         await self.push_frame(
             LLMMessagesAppendFrame(
                 messages=[
@@ -809,6 +833,16 @@ class ConversationDirectorProcessor(FrameProcessor):
             return
 
         memory_text = "\n".join(f"- {line}" for line in memory_lines)
+        record_context_event(
+            self._session_state,
+            source="memory_context",
+            action="injected",
+            label="Prefetched memories injected",
+            content=memory_text,
+            provider="prefetch_cache",
+            item_count=len(memory_lines),
+            metadata={"cache_hit": True, "query_chars": len(user_text or "")},
+        )
         logger.info(
             "[Director] Proactive memory injection: {n} memories",
             n=len(memory_lines),
@@ -853,6 +887,14 @@ class ConversationDirectorProcessor(FrameProcessor):
 
         self._last_tracking_summary = summary
         self._session_state["conversation_tracking"] = summary
+        record_context_event(
+            self._session_state,
+            source="conversation_tracking",
+            action="injected",
+            label="Conversation tracking summary",
+            content=summary,
+            provider="conversation_tracker",
+        )
         await self.push_frame(
             LLMMessagesAppendFrame(
                 messages=[
@@ -895,6 +937,17 @@ class ConversationDirectorProcessor(FrameProcessor):
 
             count = await run_prefetch(senior_id, queries, cache)
             if count > 0:
+                record_context_event(
+                    self._session_state,
+                    source="memory_prefetch",
+                    action="prefetched",
+                    label=f"Memory prefetch from {source} transcript",
+                    content="\n".join(queries),
+                    provider="prefetch",
+                    item_count=count,
+                    metadata={"source": source, "query_count": len(queries)},
+                )
+            if count > 0:
                 logger.info(
                     "[Prefetch] {n} queries cached from {src} transcription",
                     n=count, src=source,
@@ -925,6 +978,16 @@ class ConversationDirectorProcessor(FrameProcessor):
 
             count = await run_prefetch(senior_id, queries, cache)
             if count:
+                record_context_event(
+                    self._session_state,
+                    source="memory_prefetch",
+                    action="prefetched",
+                    label="Director memory prefetch",
+                    content="\n".join(queries),
+                    provider="director_llm",
+                    item_count=count,
+                    metadata={"query_count": len(queries)},
+                )
                 logger.info(
                     "[Prefetch] Director 2nd wave: {m} memory cached",
                     m=count,

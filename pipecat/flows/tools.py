@@ -18,10 +18,12 @@ from __future__ import annotations
 import asyncio
 from datetime import date
 import re
+import time
 from zoneinfo import ZoneInfo
 
 from loguru import logger
 from pipecat_flows import FlowsFunctionSchema
+from services.context_trace import record_context_event
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +445,32 @@ def make_tool_handlers(session_state: dict) -> dict:
             if name not in tools_used:
                 tools_used.append(name)
             logger.info("Tool CALL: {name}", name=name)
+            record_context_event(
+                session_state,
+                source="tool",
+                action="called",
+                label=f"{name} called",
+                provider="llm_tool",
+                metadata={"tool": name, "arguments": args or {}},
+            )
+            start = time.time()
             result = await fn(args)
+            elapsed_ms = round((time.time() - start) * 1000)
+            result_text = result.get("result", "") if isinstance(result, dict) else str(result)
+            record_context_event(
+                session_state,
+                source=name,
+                action="result",
+                label=f"{name} result",
+                content=result_text,
+                provider="llm_tool",
+                latency_ms=elapsed_ms,
+                metadata={
+                    "tool": name,
+                    "status": result.get("status", "?") if isinstance(result, dict) else "unknown",
+                    "result_chars": len(str(result_text)),
+                },
+            )
             logger.info(
                 "Tool RESULT: {name} -> {status} result_chars={n}",
                 name=name,

@@ -462,6 +462,8 @@ async def _persist_call_metrics(
     import time
     from db.client import execute
     from lib.circuit_breaker import get_breaker_states
+    from lib.encryption import encrypt_json
+    from services.context_trace import get_context_trace
 
     call_sid = session_state.get("call_sid")
     senior_id = session_state.get("senior_id")
@@ -495,17 +497,14 @@ async def _persist_call_metrics(
     turn_count = cm.get("turn_count", 0)
     tools_used = session_state.get("_tools_used", [])
     breaker_states = get_breaker_states()
+    context_trace = get_context_trace(session_state)
+    context_trace_encrypted = encrypt_json(context_trace) if context_trace else None
 
     # Determine end_reason from session state
     end_reason = session_state.get("_end_reason", "unknown")
 
     import json
-    await execute(
-        """INSERT INTO call_metrics
-           (call_sid, senior_id, call_type, duration_seconds, end_reason,
-            turn_count, phase_durations, latency, breaker_states,
-            tools_used, token_usage, error_count)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
+    args = [
         call_sid,
         senior_id,
         call_type,
@@ -518,10 +517,39 @@ async def _persist_call_metrics(
         tools_used or None,
         json.dumps(token_usage) if any(token_usage.values()) else None,
         error_count,
-    )
+        context_trace_encrypted,
+    ]
+    try:
+        await execute(
+            """INSERT INTO call_metrics
+               (call_sid, senior_id, call_type, duration_seconds, end_reason,
+                turn_count, phase_durations, latency, breaker_states,
+                tools_used, token_usage, error_count, context_trace_encrypted)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)""",
+            *args,
+        )
+    except Exception as e:
+        if getattr(e, "sqlstate", None) != "42703" and e.__class__.__name__ != "UndefinedColumnError":
+            raise
+        await execute(
+            """INSERT INTO call_metrics
+               (call_sid, senior_id, call_type, duration_seconds, end_reason,
+                turn_count, phase_durations, latency, breaker_states,
+                tools_used, token_usage, error_count)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
+            *args[:-1],
+        )
+        logger.warning(
+            "[{cs}] context_trace_encrypted column missing; call metrics persisted without context trace",
+            cs=call_sid,
+        )
     logger.info(
-        "[{cs}] Call metrics persisted (turns={t}, duration={d}s, errors={e})",
-        cs=call_sid, t=turn_count, d=duration_seconds, e=error_count,
+        "[{cs}] Call metrics persisted (turns={t}, duration={d}s, errors={e}, context_events={c})",
+        cs=call_sid,
+        t=turn_count,
+        d=duration_seconds,
+        e=error_count,
+        c=(context_trace or {}).get("event_count", 0),
     )
 
 

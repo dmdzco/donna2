@@ -384,13 +384,13 @@ export default function RemindersScreen() {
                   borderWidth: 1,
                   borderColor: "rgba(0,0,0,0.08)",
                   marginTop: 4,
-                  maxHeight: 200,
+                  maxHeight: 300,
                   overflow: "hidden",
                 }}
               >
                 <ScrollView
                   nestedScrollEnabled
-                  showsVerticalScrollIndicator={false}
+                  showsVerticalScrollIndicator
                   keyboardShouldPersistTaps="handled"
                 >
                   {TIME_OPTIONS.map((time) => (

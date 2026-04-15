@@ -148,9 +148,9 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
                 in_rate,
                 self._telnyx_sample_rate,
             )
-            # Telnyx WebSocket media frames play raw 16-bit PCM bytes. Keep the
-            # same little-endian layout used by Pipecat's internal PCM frames.
-            return resampled
+            # Telnyx treats L16 media as an RTP payload. RTP L16 uses network
+            # byte order, while Pipecat frames are signed 16-bit little-endian.
+            return audioop.byteswap(resampled, 2)
 
         raise ValueError(f"Unsupported Telnyx inbound encoding: {encoding}")
 
@@ -174,8 +174,9 @@ class DonnaTelnyxFrameSerializer(FrameSerializer):
             if len(payload) % 2 != 0:
                 logger.warning("Dropping malformed L16 Telnyx payload with odd byte length")
                 return None
+            pcm = audioop.byteswap(payload, 2)
             return await self._input_resampler.resample(
-                payload,
+                pcm,
                 self._telnyx_sample_rate,
                 self._sample_rate,
             )

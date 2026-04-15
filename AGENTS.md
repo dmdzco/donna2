@@ -72,7 +72,8 @@ Read `DIRECTORY.md` before writing code. It is the navigation map for active vs.
 - Change Director behavior: `pipecat/processors/conversation_director.py`, `pipecat/services/director_llm.py`
 - Change post-call behavior: `pipecat/services/post_call.py`
 - Change semantic memory or prefetch: `pipecat/services/memory.py`, `pipecat/services/prefetch.py`
-- Change call setup or Twilio answer path: `pipecat/api/routes/voice.py`, `routes/voice.js`
+- Change Twilio answer/status path: `pipecat/api/routes/voice.py`
+- Change frontend/manual call initiation: `routes/calls.js` (Node creates the Twilio call with Pipecat webhook URLs)
 - Change frontend APIs: `routes/*.js`, `middleware/*.js`, `validators/schemas.js`
 - Change admin UI: `apps/admin-v2/src/`
 - Change caregiver web UI: `apps/consumer/src/`

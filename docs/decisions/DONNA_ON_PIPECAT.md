@@ -1,5 +1,8 @@
 # Donna on Pipecat: Full Migration Architecture
 
+> Historical migration design. Use `DIRECTORY.md`, `pipecat/docs/ARCHITECTURE.md`, and the runtime code in `pipecat/bot.py` as the current source of truth.
+> Some embedded examples predate the current audio profile, websocket token admission flow, and active Node scheduler ownership.
+
 > Complete mapping of Donna's current codebase to a Pipecat + Pipecat Flows implementation in Python.
 
 ---

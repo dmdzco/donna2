@@ -92,13 +92,15 @@ async def test_purge_expired_data_calls_all_tables():
     """purge_expired_data should attempt to purge each configured table."""
     from services.data_retention import purge_expired_data
 
-    with patch("services.data_retention._purge_table", new_callable=AsyncMock) as mock_purge:
+    with patch("services.data_retention._redact_conversation_phi", new_callable=AsyncMock, return_value=0) as mock_redact, \
+         patch("services.data_retention._purge_table", new_callable=AsyncMock) as mock_purge:
         mock_purge.return_value = 0
 
         results = await purge_expired_data()
 
-    # Should have attempted all 7 tables
-    assert mock_purge.call_count == 7
+    assert mock_redact.await_count == 1
+    # Should have attempted all delete tables after conversation PHI redaction.
+    assert mock_purge.call_count == 9
     tables_purged = {call.args[0] for call in mock_purge.call_args_list}
     assert "conversations" in tables_purged
     assert "memories" in tables_purged
@@ -106,6 +108,8 @@ async def test_purge_expired_data_calls_all_tables():
     assert "daily_call_context" in tables_purged
     assert "call_metrics" in tables_purged
     assert "reminder_deliveries" in tables_purged
+    assert "notifications" in tables_purged
+    assert "waitlist" in tables_purged
     assert "audit_logs" in tables_purged
 
 
@@ -115,22 +119,27 @@ async def test_purge_expired_data_skips_zero_retention():
     from services.data_retention import purge_expired_data
 
     with patch("services.data_retention.settings") as mock_settings, \
+         patch("services.data_retention._redact_conversation_phi", new_callable=AsyncMock, return_value=5) as mock_redact, \
          patch("services.data_retention._purge_table", new_callable=AsyncMock) as mock_purge:
-        # Set all retention to 0 except conversations
+        # Set all retention to 0 except conversation PHI redaction.
         mock_settings.retention_conversations_days = 365
+        mock_settings.retention_conversation_metadata_days = 0
         mock_settings.retention_memories_days = 0
         mock_settings.retention_call_analyses_days = 0
         mock_settings.retention_daily_context_days = 0
         mock_settings.retention_call_metrics_days = 0
         mock_settings.retention_reminder_deliveries_days = 0
+        mock_settings.retention_notifications_days = 0
+        mock_settings.retention_waitlist_days = 0
         mock_settings.retention_audit_logs_days = 0
 
         mock_purge.return_value = 5
 
         results = await purge_expired_data()
 
-    assert mock_purge.call_count == 1
-    assert mock_purge.call_args[0][0] == "conversations"
+    assert mock_redact.await_count == 1
+    assert mock_purge.call_count == 0
+    assert results["conversation_phi"] == 5
 
 
 @pytest.mark.asyncio
@@ -147,13 +156,14 @@ async def test_purge_expired_data_handles_table_error():
             raise Exception("relation does not exist")
         return 10
 
-    with patch("services.data_retention._purge_table", new_callable=AsyncMock) as mock_purge:
+    with patch("services.data_retention._redact_conversation_phi", new_callable=AsyncMock, return_value=0), \
+         patch("services.data_retention._purge_table", new_callable=AsyncMock) as mock_purge:
         mock_purge.side_effect = _side_effect
 
         results = await purge_expired_data()
 
-    # All 7 tables should be attempted even though memories failed
-    assert call_count == 7
+    # All delete tables should be attempted even though memories failed.
+    assert call_count == 9
     assert results["memories"] == -1
     assert results["conversations"] == 10
 
@@ -166,7 +176,8 @@ async def test_purge_expired_data_returns_deleted_counts():
     async def _side_effect(table, col, days):
         return {"conversations": 5, "memories": 0, "call_analyses": 3}.get(table, 0)
 
-    with patch("services.data_retention._purge_table", new_callable=AsyncMock) as mock_purge:
+    with patch("services.data_retention._redact_conversation_phi", new_callable=AsyncMock, return_value=0), \
+         patch("services.data_retention._purge_table", new_callable=AsyncMock) as mock_purge:
         mock_purge.side_effect = _side_effect
 
         results = await purge_expired_data()
@@ -186,11 +197,14 @@ def test_default_retention_periods():
 
     s = Settings()
     assert s.retention_conversations_days == 365
+    assert s.retention_conversation_metadata_days == 1095
     assert s.retention_memories_days == 730
     assert s.retention_call_analyses_days == 365
     assert s.retention_daily_context_days == 90
     assert s.retention_call_metrics_days == 180
     assert s.retention_reminder_deliveries_days == 90
+    assert s.retention_notifications_days == 180
+    assert s.retention_waitlist_days == 365
     assert s.retention_audit_logs_days == 2190
 
 
@@ -205,9 +219,11 @@ def test_allowed_tables_matches_config():
     assert ALLOWED_TABLES == frozenset(TABLE_DATE_COLUMNS.keys())
 
 
-def test_all_tables_have_created_at_column():
-    """All tables in TABLE_DATE_COLUMNS should use 'created_at'."""
+def test_tables_use_policy_date_columns():
+    """Retention should age data from the policy-specific date column."""
     from services.data_retention import TABLE_DATE_COLUMNS
 
-    for table, col in TABLE_DATE_COLUMNS.items():
-        assert col == "created_at", f"{table} uses {col!r}, expected 'created_at'"
+    assert TABLE_DATE_COLUMNS["conversations"] == "started_at"
+    assert TABLE_DATE_COLUMNS["daily_call_context"] == "call_date"
+    assert TABLE_DATE_COLUMNS["notifications"] == "sent_at"
+    assert TABLE_DATE_COLUMNS["waitlist"] == "created_at"

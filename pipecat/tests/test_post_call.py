@@ -125,6 +125,44 @@ class TestPostCallProcessing:
             mock_no_ack.assert_awaited_once_with("delivery-001")
 
     @pytest.mark.asyncio
+    async def test_post_call_recovers_reminder_ack_from_transcript(self, reminder_session_state):
+        """If Claude misses the tool, transcript evidence can still persist the ack."""
+        reminder_session_state["_transcript"] = [
+            {"role": "assistant", "content": "Remember to take your metformin with dinner tonight."},
+            {"role": "user", "content": "Okay, I will do that."},
+        ]
+
+        tracker = ConversationTrackerProcessor(session_state=reminder_session_state)
+
+        with patch("services.conversations.complete", new_callable=AsyncMock), \
+             patch("services.call_analysis.analyze_completed_call", new_callable=AsyncMock, return_value=None), \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock), \
+             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={}), \
+             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
+             patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
+             patch("services.context_cache.clear_cache"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
+             patch("services.reminder_delivery.get_delivery_status", new_callable=AsyncMock, return_value={"id": "delivery-001", "status": "delivered"}), \
+             patch("services.reminder_delivery.mark_reminder_acknowledged", new_callable=AsyncMock, return_value={"id": "delivery-001", "status": "acknowledged"}) as mock_ack, \
+             patch("services.reminder_delivery.mark_call_ended_without_acknowledgment", new_callable=AsyncMock) as mock_no_ack:
+
+            from services.post_call import run_post_call
+            await run_post_call(reminder_session_state, tracker, duration_seconds=30)
+
+            mock_ack.assert_awaited_once_with("delivery-001", "acknowledged", "Okay, I will do that.")
+            mock_no_ack.assert_not_awaited()
+
+    def test_reminder_ack_inference_requires_delivery_evidence(self, reminder_session_state):
+        from services.post_call import _infer_reminder_ack_from_transcript
+
+        transcript = [
+            {"role": "assistant", "content": "Hello, how are you?"},
+            {"role": "user", "content": "Okay."},
+        ]
+
+        assert _infer_reminder_ack_from_transcript(reminder_session_state, transcript) is None
+
+    @pytest.mark.asyncio
     async def test_post_call_waits_for_reminder_ack_task_before_status_check(self, reminder_session_state):
         """A no-latency tool ack still gets a brief post-call settlement window."""
         reminder_session_state["_transcript"] = [
@@ -205,6 +243,32 @@ class TestPostCallProcessing:
         assert "check in" in text
         assert "Full transcript" not in text
         assert len(text) <= 300
+
+    @pytest.mark.asyncio
+    async def test_caregiver_notification_requires_node_api_url(self, monkeypatch):
+        """Missing NODE_API_URL should not fall through to a production default."""
+        monkeypatch.delenv("NODE_API_URL", raising=False)
+
+        from services.post_call import _trigger_caregiver_notification
+
+        await _trigger_caregiver_notification(
+            "senior-001",
+            "CA-test-001",
+            {"summary": "Good call", "sentiment": "positive"},
+            120,
+        )
+
+    @pytest.mark.asyncio
+    async def test_persist_call_metrics_uses_error_count(self, session_state):
+        from services.post_call import _persist_call_metrics
+
+        session_state["_call_metrics"] = {"token_usage": {}, "turn_count": 2}
+
+        with patch("db.client.execute", new_callable=AsyncMock) as mock_execute:
+            await _persist_call_metrics(session_state, 60, None, error_count=3)
+
+        args = mock_execute.await_args.args
+        assert args[-2] == 3
 
     @pytest.mark.asyncio
     async def test_post_call_discovers_new_interests(self, session_state):

@@ -1,6 +1,16 @@
 import { useAuth } from '@clerk/clerk-expo';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://donna-production.up.railway.app';
+function getRequiredApiUrl() {
+  const apiUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+  if (!apiUrl) {
+    throw new Error(
+      'EXPO_PUBLIC_API_URL is required for the mobile app. Set it in apps/mobile/.env or the EAS environment.',
+    );
+  }
+  return apiUrl.replace(/\/+$/, '');
+}
+
+const API_URL = getRequiredApiUrl();
 
 async function fetchWithAuth(path: string, options: RequestInit = {}, token?: string | null) {
   const headers: Record<string, string> = {

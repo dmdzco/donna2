@@ -11,7 +11,9 @@ import asyncio
 import os
 import secrets
 import time
+from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape as xml_escape
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request, Response
 from loguru import logger
@@ -29,14 +31,15 @@ _metadata_lock = asyncio.Lock()
 
 
 async def _persist_metadata(call_sid: str, data: dict) -> None:
-    """Write metadata to Redis if configured (for multi-instance routing)."""
+    """Write encrypted metadata to Redis if configured (for multi-instance routing)."""
     try:
         from lib.redis_client import get_shared_state
+        from lib.shared_state_phi import encode_phi_payload
         state = get_shared_state()
         if getattr(state, "is_shared", False):
-            await state.set(f"call_metadata:{call_sid}", data, ttl=1800)
-    except Exception:
-        pass  # Redis is optional — failure is non-fatal
+            await state.set(f"call_metadata:{call_sid}", encode_phi_payload(data), ttl=1800)
+    except Exception as exc:
+        logger.warning("[{cs}] Redis metadata write failed: {err}", cs=call_sid, err=str(exc))
 
 
 async def get_call_metadata(call_sid: str) -> dict | None:
@@ -46,9 +49,11 @@ async def get_call_metadata(call_sid: str) -> dict | None:
         return metadata
     try:
         from lib.redis_client import get_shared_state
+        from lib.shared_state_phi import decode_phi_payload
         state = get_shared_state()
-        if hasattr(state, '_url'):
-            metadata = await state.get(f"call_metadata:{call_sid}")
+        if getattr(state, "is_shared", False):
+            raw_metadata = await state.get(f"call_metadata:{call_sid}")
+            metadata = decode_phi_payload(raw_metadata, label="call metadata")
             if metadata is not None:
                 call_metadata[call_sid] = metadata
             return metadata
@@ -74,7 +79,11 @@ async def _cleanup_metadata(call_sid: str) -> dict | None:
         if getattr(state, "is_shared", False):
             if metadata is None:
                 # May be on a different instance — try Redis
-                metadata = await state.get(f"call_metadata:{call_sid}")
+                from lib.shared_state_phi import decode_phi_payload
+                metadata = decode_phi_payload(
+                    await state.get(f"call_metadata:{call_sid}"),
+                    label="call metadata",
+                )
             await state.delete(f"call_metadata:{call_sid}")
     except Exception:
         pass
@@ -108,6 +117,68 @@ def _senior_is_inactive(senior: dict | None) -> bool:
     if not senior:
         return False
     return senior.get("is_active") is False or senior.get("isActive") is False
+
+
+def _parse_db_timestamp(value) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    else:
+        return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _cached_news_context_from_senior(senior: dict, *, max_age_hours: int = 36) -> str | None:
+    """Return selected cached news only when the daily cache is fresh."""
+    raw_cached_news = senior.get("cached_news") or senior.get("cachedNews")
+    if not raw_cached_news:
+        return None
+
+    updated_at = _parse_db_timestamp(
+        senior.get("cached_news_updated_at") or senior.get("cachedNewsUpdatedAt")
+    )
+    sid = str(senior.get("id", ""))[:8]
+    if not updated_at:
+        logger.warning("[News] Cached news has no freshness timestamp; skipping senior={sid}", sid=sid)
+        return None
+
+    timezone_name = senior.get("timezone") or "America/New_York"
+    try:
+        senior_tz = ZoneInfo(timezone_name)
+    except Exception:
+        senior_tz = ZoneInfo("America/New_York")
+    if updated_at.astimezone(senior_tz).date() != datetime.now(senior_tz).date():
+        logger.warning("[News] Cached news not from today; skipping senior={sid}", sid=sid)
+        return None
+
+    age = datetime.now(timezone.utc) - updated_at
+    if age > timedelta(hours=max_age_hours):
+        logger.warning(
+            "[News] Cached news stale; skipping senior={sid} age_hours={age}",
+            sid=sid,
+            age=round(age.total_seconds() / 3600, 1),
+        )
+        return None
+
+    try:
+        from services.news import select_stories_for_call
+        return select_stories_for_call(
+            raw_cached_news,
+            interests=senior.get("interests"),
+            interest_scores=senior.get("interest_scores"),
+            count=3,
+        )
+    except Exception:
+        return raw_cached_news
 
 
 async def _hydrate_senior_call_context(
@@ -153,18 +224,8 @@ async def _hydrate_senior_call_context(
             elif name == "caregiver_notes_content":
                 caregiver_notes_content = result or []
 
-    raw_cached_news = senior.get("cached_news")
-    if news_context is None and raw_cached_news:
-        try:
-            from services.news import select_stories_for_call
-            news_context = select_stories_for_call(
-                raw_cached_news,
-                interests=senior.get("interests"),
-                interest_scores=senior.get("interest_scores"),
-                count=3,
-            )
-        except Exception:
-            news_context = raw_cached_news
+    if news_context is None:
+        news_context = _cached_news_context_from_senior(senior)
 
     snapshot = senior.get("call_context_snapshot")
     if isinstance(snapshot, str):
@@ -195,11 +256,12 @@ async def _hydrate_senior_call_context(
         from services.conversations import get_recent_summaries, get_recent_turns
         from services.daily_context import get_todays_context, format_todays_context
 
+        senior_tz = senior.get("timezone", "America/New_York")
         analysis_result, summaries_result, turns_result, today_result = await asyncio.gather(
-            get_latest_analysis(senior_id),
-            get_recent_summaries(senior_id, 3),
-            get_recent_turns(senior_id),
-            get_todays_context(senior_id, senior.get("timezone", "America/New_York")),
+            get_latest_analysis(senior_id, senior_tz),
+            get_recent_summaries(senior_id, 3, senior_tz),
+            get_recent_turns(senior_id, timezone_name=senior_tz),
+            get_todays_context(senior_id, senior_tz),
             return_exceptions=True,
         )
         if not isinstance(analysis_result, Exception):
@@ -228,11 +290,15 @@ async def _hydrate_senior_call_context(
                     senior_name=senior.get("name", ""),
                     timezone=senior.get("timezone"),
                     interests=senior.get("interests"),
-                    last_call_summary=analysis_data.get("summary"),
+                    last_call_summary=previous_calls_summary or analysis_data.get("summary"),
                     senior_id=senior_id,
                     news_context=news_context,
                     interest_scores=senior.get("interest_scores"),
-                    last_call_sentiment=call_quality.get("rapport"),
+                    last_call_sentiment=(
+                        analysis_data.get("sentiment")
+                        or analysis_data.get("mood")
+                        or call_quality.get("rapport")
+                    ),
                     last_call_engagement=analysis_data.get("engagement_score"),
                     followup_chance=(call_settings or {}).get("greeting_followup_chance", 0.6),
                 )
@@ -282,6 +348,7 @@ async def voice_answer(request: Request):
     from_number = form.get("From", "")
     to_number = form.get("To", "")
     direction = form.get("Direction", "")
+    call_type_hint = (request.query_params.get("call_type") or "").lower()
 
     twilio_number = os.getenv("TWILIO_PHONE_NUMBER", "")
     is_outbound = from_number == twilio_number or direction == "outbound-api"
@@ -332,9 +399,16 @@ async def voice_answer(request: Request):
         logger.info("[{cs}] Reminder call (prefetched context)", cs=call_sid)
     elif is_outbound:
         # Outbound call — check DB for reminder delivery (Node.js scheduler)
-        from services.reminder_delivery import get_reminder_by_call_sid, format_reminder_prompt as fmt_prompt
+        from services.reminder_delivery import (
+            get_reminder_by_call_sid,
+            wait_for_reminder_by_call_sid,
+            format_reminder_prompt as fmt_prompt,
+        )
         from services.seniors import find_by_phone
-        reminder_row = await get_reminder_by_call_sid(call_sid)
+        if call_type_hint == "reminder":
+            reminder_row = await wait_for_reminder_by_call_sid(call_sid)
+        else:
+            reminder_row = await get_reminder_by_call_sid(call_sid)
         if reminder_row:
             reminder_prompt = fmt_prompt({
                 "title": reminder_row.get("title"),
@@ -411,20 +485,9 @@ async def voice_answer(request: Request):
             has_caregiver_notes = bool(caregiver_notes)
             caregiver_notes_content = caregiver_notes if caregiver_notes else []
 
-            # --- News: read from DB (pre-cached daily at 5 AM, never fetched live) ---
+            # --- News: read fresh DB cache only (pre-cached daily; no live fetch here) ---
             import json as _json
-            raw_cached_news = senior.get("cached_news")
-            if raw_cached_news:
-                try:
-                    from services.news import select_stories_for_call
-                    news_context = select_stories_for_call(
-                        raw_cached_news,
-                        interests=senior.get("interests"),
-                        interest_scores=senior.get("interest_scores"),
-                        count=3,
-                    )
-                except Exception:
-                    news_context = raw_cached_news  # fallback: use full cached text
+            news_context = _cached_news_context_from_senior(senior)
 
             # --- Read pre-computed snapshot (came with find_by_phone) ---
             snapshot = senior.get("call_context_snapshot")
@@ -447,10 +510,11 @@ async def voice_answer(request: Request):
                 from services.call_analysis import get_latest_analysis
                 from services.conversations import get_recent_summaries, get_recent_turns
                 from services.daily_context import get_todays_context, format_todays_context
-                last_call_analysis = await get_latest_analysis(senior["id"])
-                previous_calls_summary = await get_recent_summaries(senior["id"], 3)
-                recent_turns = await get_recent_turns(senior["id"])
-                raw_ctx = await get_todays_context(senior["id"], senior.get("timezone", "America/New_York"))
+                senior_tz = senior.get("timezone", "America/New_York")
+                last_call_analysis = await get_latest_analysis(senior["id"], senior_tz)
+                previous_calls_summary = await get_recent_summaries(senior["id"], 3, senior_tz)
+                recent_turns = await get_recent_turns(senior["id"], timezone_name=senior_tz)
+                raw_ctx = await get_todays_context(senior["id"], senior_tz)
                 todays_context = format_todays_context(raw_ctx)
 
             # --- call_settings from senior row (no extra query needed) ---

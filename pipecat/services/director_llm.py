@@ -17,11 +17,12 @@ import json
 import os
 import re
 import time
-from datetime import date
+from datetime import datetime
 
 from loguru import logger
 
 from lib.circuit_breaker import CircuitBreaker
+from services.time_context import get_timezone
 
 # ---------------------------------------------------------------------------
 # Circuit breakers
@@ -132,7 +133,8 @@ Direct Donna, an AI companion calling elderly people. Return JSON guidance.
 
 Phases: opening(0-30s) → main(30s-8min) → winding_down(8-9min) → closing(9-10min). Past 30s still opening → "main".
 Reminders: natural pauses + high engagement only. Never during emotions/low engagement. Never repeat delivered.
-Low engagement: suggest personal questions or memories. News: medium+ engagement, topic winding down.
+Low engagement: suggest personal questions, memories, or one uplifting news item if Has news=true.
+News: if Has news=true and tone is neutral/positive, suggest it during lulls, low/medium engagement, or topic wind-down. Avoid news during sadness, health/safety concerns, or active reminders.
 Onboarding calls (call_type="onboarding"): no reminders, no re-engage signals, focus on discovery.
 
 JSON:{"analysis":{"call_phase":"str","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"str","priority_action":"str","specific_instruction":"str"}}"""
@@ -188,6 +190,10 @@ def _format_location(senior: dict) -> str:
     return city or state or "unknown location"
 
 
+def _today_for_senior(senior: dict) -> str:
+    return datetime.now(get_timezone(senior.get("timezone"))).strftime("%B %d, %Y")
+
+
 def _format_reminders(reminders: list, delivered: set) -> str:
     remaining = [
         r
@@ -218,7 +224,7 @@ def _build_turn_content(
     return DIRECTOR_TURN_TEMPLATE.format(
         senior_name=(senior.get("name") or "").split(" ")[0] or "Friend",
         location=_format_location(senior),
-        today_date=date.today().strftime("%B %d, %Y"),
+        today_date=_today_for_senior(senior),
         minutes_elapsed=f"{minutes_elapsed:.1f}",
         max_duration=max_duration,
         call_type=session_state.get("call_type", "check-in"),
@@ -248,7 +254,7 @@ def _build_query_content(
     ]
     return QUERY_TURN_TEMPLATE.format(
         location=_format_location(senior),
-        today_date=date.today().strftime("%B %d, %Y"),
+        today_date=_today_for_senior(senior),
         conversation_history="\n".join(hist_lines) if hist_lines else "",
         user_message=user_message,
     )

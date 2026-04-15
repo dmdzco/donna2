@@ -32,6 +32,7 @@ Start by classifying the bug before reading large files. Use `references/hotspot
 - Ephemeral context must be stripped each turn.
 - Frontends call the Node API, not Pipecat directly.
 - Security-sensitive behavior may require matching changes in both Python and Node implementations.
+- For post-call, memory, export, and retention paths, preserve encrypted-only PHI writes where encrypted companion columns exist; plaintext columns are legacy fallbacks or minimized placeholders only. Authorized exports must decrypt at the response boundary.
 - Scheduler ownership is architectural, not accidental. Confirm whether the task is changing the active scheduler before moving logic.
 
 ## Validation

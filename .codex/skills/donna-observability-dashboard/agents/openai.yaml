@@ -1,0 +1,4 @@
+interface:
+  display_name: "Donna Observability Dashboard"
+  short_description: "Iterate safely on Donna internal observability."
+  default_prompt: "Use this skill when changing, debugging, or validating the Donna observability dashboard."

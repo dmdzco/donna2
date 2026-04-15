@@ -18,25 +18,27 @@
 
 ## Admission Control
 
-**File**: `pipecat/main.py` (lines 82-97, 163-176)
+**File**: `pipecat/main.py`
 
 ### Semaphore-Based Concurrency Limiting
 
 ```python
-MAX_CALLS = int(os.getenv("MAX_CONCURRENT_CALLS", "50"))
+MAX_CALLS = settings.max_concurrent_calls
 _call_semaphore = asyncio.Semaphore(MAX_CALLS)
 ```
 
 WebSocket handler flow:
 1. Accept WebSocket connection (Twilio protocol requires accept before close)
-2. Check `_call_semaphore.locked()` — returns True when all slots taken
-3. If at capacity: close with code 1013 (Try Again Later)
-4. If available: acquire semaphore, increment `_active_calls` counter
-5. On disconnect: release semaphore in `finally` block
+2. Parse the Twilio start frame and validate `call_sid` + `ws_token` before consuming active-call capacity
+3. Try to acquire `_call_semaphore` immediately
+4. If at capacity: close with code 1013 (Try Again Later)
+5. After capacity is reserved, consume the single-use `ws_token`
+6. Start STT/LLM/TTS services and increment `_active_calls`
+7. On disconnect: release semaphore in `finally` block
 
 ### TwiML Fallback
 
-**File**: `pipecat/api/routes/voice.py` (lines 56-66)
+**File**: `pipecat/api/routes/voice.py`
 
 Before returning the WebSocket `<Stream>` TwiML, `/voice/answer` checks capacity:
 
@@ -102,16 +104,15 @@ The HNSW vector index is the highest-impact single change: turns O(n) full-table
 
 ---
 
-## Scheduler Parallelization
+## Scheduler And Outbound Call Initiation
 
-**File**: `pipecat/services/scheduler.py`
+**Active file**: `services/scheduler.js`
 
-### Before
-Sequential loop with 5-second stagger between Twilio API calls:
-- 100 reminders × 5s = 500 seconds (8+ minutes)
+The Node.js scheduler is authoritative for production reminder and welfare calls. Pipecat's scheduler module remains for helper parity, reminder context handoff, and explicit Python-side experiments; it must stay disabled unless the architecture changes.
 
-### After
-Parallel initiation with concurrency limiter:
+Node builds a unified call plan, prioritizes reminders over welfare checks, gates all calls through the senior's local calling window, retries Twilio `calls.create()`, and points webhooks at Pipecat `/voice/answer` and `/voice/status`.
+
+Pipecat's helper scheduler still supports parallel initiation with a limiter:
 
 ```python
 sem = asyncio.Semaphore(10)  # 10 concurrent Twilio API calls
@@ -192,8 +193,10 @@ Both implement the same async interface:
 - `keys(pattern)` / `cleanup()`
 
 ### What's Stored in Redis
-- `call_metadata:{call_sid}` — Call context for WebSocket handler (TTL: 30 min)
-- `reminder_ctx:{call_sid}` — Pipecat-scheduler reminder context for outbound reminder calls (TTL: 30 min)
+- `call_metadata:{call_sid}` — encrypted call context for WebSocket handler (TTL: 30 min)
+- `reminder_ctx:{call_sid}` — encrypted Pipecat-scheduler reminder context for outbound reminder calls (TTL: 30 min)
+
+These payloads can contain PHI-bearing memory context, reminders, transcript fragments, senior profile fields, and caregiver note content. Shared-state writes use `pipecat/lib/shared_state_phi.py`, which encrypts the dict before it enters Redis and still accepts legacy raw dict payloads during rollout.
 
 ### Cross-Instance Flow
 1. `/voice/answer` stores call metadata in local dict + Redis
@@ -262,6 +265,10 @@ Each cohort transition:
 | `UPSTASH_REDIS_REST_URL` | *(empty)* | Optional fallback for non-Railway deployments — enables Upstash REST shared state when paired with token |
 | `UPSTASH_REDIS_REST_TOKEN` | *(empty)* | Optional fallback for non-Railway deployments — Upstash REST bearer token |
 | `SCHEDULER_ENABLED` | false | Only one instance should run the scheduler |
+| `TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE` | 16000 | Internal STT input rate after telephony serializer conversion |
+| `ELEVENLABS_OUTPUT_SAMPLE_RATE` | 44100 | Internal ElevenLabs TTS output rate before telephony serializer conversion |
+| `CARTESIA_OUTPUT_SAMPLE_RATE` | 48000 | Internal Cartesia PCM output rate before telephony serializer conversion |
+| `GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE` | 24000 | Internal Gemini Live output rate before telephony serializer conversion |
 
 ---
 

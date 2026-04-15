@@ -19,6 +19,10 @@ import { Button } from "@/src/components/ui/Button";
 import { useCurrentSenior, useSenior, useUpdateSenior } from "@/src/hooks";
 import { getErrorMessage } from "@/src/lib/api";
 
+function sanitizePhoneInput(value: string): string {
+  return value.replace(/[^\d+\-\s()]/g, "").slice(0, 20);
+}
+
 export default function LovedOneProfileScreen() {
   const router = useRouter();
   const { seniorId } = useCurrentSenior();
@@ -86,8 +90,12 @@ export default function LovedOneProfileScreen() {
       router.replace("/(tabs)/settings");
     } catch (error) {
       Alert.alert(
-        "Error",
-        getErrorMessage(error, "Failed to update profile. Please try again."),
+        "Couldn't Save",
+        getErrorMessage(
+          error,
+          "We couldn't save this profile. Your changes are still here. Please try again.",
+          "save",
+        ),
       );
     }
   };
@@ -142,9 +150,10 @@ export default function LovedOneProfileScreen() {
             <Input
               label="Phone Number"
               value={phone}
-              onChangeText={setPhone}
+              onChangeText={(value) => setPhone(sanitizePhoneInput(value))}
               placeholder="+1 (555) 000-0000"
               keyboardType="phone-pad"
+              maxLength={20}
               testID="loved-one-phone-input"
             />
             <View className="flex-row gap-3">

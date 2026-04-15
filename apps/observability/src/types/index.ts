@@ -22,11 +22,15 @@ export interface CallAnalysis {
   conversationId: string;
   seniorId: string;
   summary?: string | null;
+  sentiment?: string | null;
+  mood?: string | null;
   topics?: string[];
   engagementScore?: number | null;
   concerns?: Array<string | Record<string, unknown>>;
   positiveObservations?: string[];
   followUpSuggestions?: string[];
+  caregiverTakeaways?: string[];
+  recommendedCaregiverAction?: string | null;
   callQuality?: Record<string, unknown> | null;
   createdAt?: string;
 }
@@ -88,6 +92,18 @@ export interface ObserverSummary {
     totalConcerns: number;
     uniqueConcerns: string[];
   };
+  postCall?: {
+    sentiment?: string | null;
+    mood?: string | null;
+    engagementScore?: number | null;
+    topics?: string[];
+    concerns?: Array<string | Record<string, unknown>>;
+    positiveObservations?: string[];
+    followUpSuggestions?: string[];
+    caregiverTakeaways?: string[];
+    recommendedCaregiverAction?: string | null;
+    callQuality?: Record<string, unknown> | null;
+  };
 }
 
 export interface Continuity {
@@ -112,18 +128,62 @@ export interface TurnMetric {
 }
 
 export interface CallMetrics {
+  durationSeconds?: number | null;
   totalInputTokens: number;
   totalOutputTokens: number;
   totalTokens: number;
-  avgResponseTime: number;
+  avgResponseTime: number | null;
   avgTtfa: number | null;
   turnCount: number;
-  estimatedCost: number;
+  estimatedCost: number | null;
   modelsUsed: string[];
+  llmTtfbAvgMs?: number | null;
+  ttsTtfbAvgMs?: number | null;
+  endReason?: string | null;
+  errorCount?: number;
+  toolsUsed?: string[];
+  breakerStates?: Record<string, string> | null;
 }
 
 export interface MetricsData {
   turnMetrics: TurnMetric[];
   callMetrics: CallMetrics | null;
+  infraMetric?: Record<string, unknown> | null;
   durationSeconds: number | null;
+}
+
+export interface ContextTraceEvent {
+  sequence: number;
+  timestamp?: string | null;
+  timestamp_offset_ms?: number | null;
+  source: string;
+  action: string;
+  label: string;
+  provider?: string | null;
+  item_count?: number | null;
+  latency_ms?: number | null;
+  turn_sequence?: number | null;
+  content?: string | null;
+  content_chars?: number | null;
+  content_truncated?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ContextTrace {
+  version: number;
+  captured_at?: string | null;
+  event_count?: number;
+  events: ContextTraceEvent[];
+}
+
+export interface ContextTraceData {
+  callId: string;
+  callSid: string;
+  status: string;
+  durationSeconds: number | null;
+  contextTrace: ContextTrace;
+  latency: Record<string, number>;
+  toolsUsed: string[];
+  captured: boolean;
+  schemaReady: boolean;
 }

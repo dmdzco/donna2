@@ -7,6 +7,7 @@ for seniors with per-senior rotation tracking.
 from __future__ import annotations
 
 import random
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -68,6 +69,12 @@ CONTEXT_FOLLOWUPS = [
     "I've been curious about {context} since our last chat.",
     "How did things turn out with {context}?",
     "Any news about {context} since we last spoke?",
+]
+
+FUTURE_CONTEXT_FOLLOWUPS = [
+    "You mentioned {context}. Is that still the plan?",
+    "I remember you were thinking about {context}. How are you feeling about that?",
+    "You had mentioned {context}. Is that still coming up?",
 ]
 
 # ── News-based followups ──────────────────────────────────────────
@@ -186,7 +193,6 @@ def _extract_context_phrase(summary: str | None) -> str | None:
     if not summary or len(summary) < 10:
         return None
 
-    import re
     first_clause = re.split(r"[.;!?]", summary)[0].strip()
     cleaned = re.sub(
         r"^(discussed|talked about|chatted about|mentioned|shared about|spoke about)\s+",
@@ -200,6 +206,21 @@ def _extract_context_phrase(summary: str | None) -> str | None:
     if len(cleaned) > 60:
         return cleaned[:57] + "..."
     return cleaned
+
+
+def _summary_needs_future_caution(summary: str | None) -> bool:
+    """Detect summaries where completion-style followups would be premature."""
+    if not summary:
+        return False
+    return bool(
+        re.search(
+            r"\b(tomorrow|later today|tonight|this evening|next (day|week|month|time)|upcoming|"
+            r"plan(?:s|ned|ning)? to|going to|hop(?:e|es|ing) to|intend(?:s|ed|ing)? to|"
+            r"push(?:ed|ing)? (?:it )?(?:to|into|until))\b",
+            summary,
+            re.IGNORECASE,
+        )
+    )
 
 
 def get_greeting(
@@ -259,7 +280,12 @@ def get_greeting(
     if add_followup and last_call_summary:
         ctx_phrase = _extract_context_phrase(last_call_summary)
         if ctx_phrase:
-            followup = random.choice(CONTEXT_FOLLOWUPS).replace("{context}", ctx_phrase)
+            templates = (
+                FUTURE_CONTEXT_FOLLOWUPS
+                if _summary_needs_future_caution(last_call_summary)
+                else CONTEXT_FOLLOWUPS
+            )
+            followup = random.choice(templates).replace("{context}", ctx_phrase)
             greeting += " " + followup
             return {
                 "greeting": greeting,

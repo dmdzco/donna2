@@ -1,5 +1,9 @@
 # Gemini 3.1 Flash Live Pipeline Implementation Plan
 
+> Historical implementation plan. Do not use this as runtime source of truth.
+> Current runtime source of truth is `pipecat/bot_gemini.py`, `pipecat/config.py`, and `pipecat/docs/ARCHITECTURE.md`.
+> Superseded detail: Gemini Live currently uses 16kHz internal input and 24kHz internal output; Twilio conversion stays at the serializer edge.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add Gemini 3.1 Flash Live as a parallel voice pipeline selectable via GrowthBook `voice_backend` flag, with full tool support (memory search, web search, reminders, save detail).

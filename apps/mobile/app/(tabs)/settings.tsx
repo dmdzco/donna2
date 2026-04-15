@@ -19,6 +19,8 @@ import { COLORS } from "@/src/constants/theme";
 import { Modal } from "@/src/components/ui/Modal";
 import { Button } from "@/src/components/ui/Button";
 import { api, getErrorMessage } from "@/src/lib/api";
+import { useStableIdempotencyKey } from "@/src/hooks/useStableIdempotencyKey";
+import { clearOnboardingDraft } from "@/src/stores/onboarding";
 
 type SettingsRow = {
   icon: React.ReactNode;
@@ -106,6 +108,7 @@ export default function SettingsScreen() {
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const deleteAccountIdempotency = useStableIdempotencyKey("account-delete");
 
   const clearLocalSession = async () => {
     queryClient.clear();
@@ -122,6 +125,7 @@ export default function SettingsScreen() {
     }
 
     try {
+      await clearOnboardingDraft();
       await SecureStore.deleteItemAsync("__clerk_client_jwt");
     } catch {}
 
@@ -155,7 +159,10 @@ export default function SettingsScreen() {
         throw new Error("Please sign in again before deleting your account.");
       }
 
-      const result = await api.account.delete(token);
+      const result = await api.account.delete(token, {
+        idempotencyKey: deleteAccountIdempotency.getKey({ action: "delete-account" }),
+      });
+      deleteAccountIdempotency.reset();
       const message =
         result.message ??
         "Your Donna account and eligible Donna data have been deleted.";
@@ -168,7 +175,11 @@ export default function SettingsScreen() {
       setShowDeleteAccountModal(false);
       Alert.alert(
         "Delete Account Failed",
-        getErrorMessage(error, "Please contact support to delete your account.")
+        getErrorMessage(
+          error,
+          "We couldn't delete your account right now. Please try again or contact support.",
+          "delete",
+        )
       );
     }
   };

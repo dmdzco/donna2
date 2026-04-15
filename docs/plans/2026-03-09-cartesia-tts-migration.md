@@ -1,5 +1,9 @@
 # Cartesia TTS Migration Plan
 
+> Historical implementation plan. Do not use this as runtime source of truth.
+> Current runtime source of truth is `pipecat/bot.py`, `pipecat/config.py`, and `pipecat/docs/LEARNINGS.md`.
+> Superseded detail: Cartesia must output PCM (`pcm_s16le`) and currently defaults to 48kHz internally; do not request `pcm_mulaw` from Cartesia for Twilio calls.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add Cartesia Sonic 3 as primary TTS with ElevenLabs as automatic fallback, controlled by a feature flag for safe rollout.

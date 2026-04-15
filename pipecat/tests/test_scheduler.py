@@ -1,5 +1,6 @@
 """Tests for services/scheduler.py — reminder scheduling + outbound calls."""
 
+import base64
 import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, AsyncMock, MagicMock
@@ -41,6 +42,15 @@ class FakeSharedState:
     async def delete(self, key):
         self.deleted.append(key)
         self.data.pop(key, None)
+
+
+def enable_test_encryption(monkeypatch):
+    from lib import encryption
+
+    key = base64.urlsafe_b64encode(b"r" * 32).decode().rstrip("=")
+    monkeypatch.setenv("FIELD_ENCRYPTION_KEY", key)
+    monkeypatch.setattr(encryption, "_KEY", None)
+    monkeypatch.setattr(encryption, "_aes", None)
 
 
 class TestGetScheduledForTime:
@@ -95,6 +105,7 @@ class TestInMemoryOps:
 
     @pytest.mark.asyncio
     async def test_get_reminder_context_async_loads_shared_state(self):
+        """Legacy raw dict reminder contexts remain readable during rollout."""
         state = FakeSharedState()
         state.data["reminder_ctx:CA-redis"] = {"reminder": {"id": "shared"}}
         with patch("lib.redis_client.get_shared_state", return_value=state):
@@ -103,13 +114,39 @@ class TestInMemoryOps:
         assert pending_reminder_calls["CA-redis"] == result
 
     @pytest.mark.asyncio
-    async def test_store_reminder_context_writes_local_and_shared_state(self):
+    async def test_get_reminder_context_async_decrypts_shared_state(self, monkeypatch):
+        from lib.encryption import decrypt_json
+        from lib.shared_state_phi import encode_phi_payload
+
+        enable_test_encryption(monkeypatch)
+        state = FakeSharedState()
+        encrypted = encode_phi_payload({"reminder": {"id": "shared-encrypted"}})
+        assert isinstance(encrypted, str) and encrypted.startswith("enc:")
+        assert decrypt_json(encrypted)["reminder"]["id"] == "shared-encrypted"
+        state.data["reminder_ctx:CA-redis"] = encrypted
+
+        with patch("lib.redis_client.get_shared_state", return_value=state):
+            result = await get_reminder_context_async("CA-redis")
+
+        assert result["reminder"]["id"] == "shared-encrypted"
+        assert pending_reminder_calls["CA-redis"] == result
+
+    @pytest.mark.asyncio
+    async def test_store_reminder_context_writes_local_and_encrypted_shared_state(self, monkeypatch):
+        from lib.encryption import decrypt_json
+
+        enable_test_encryption(monkeypatch)
         state = FakeSharedState()
         context = {"reminder": {"id": "r1"}, "triggered_at": datetime.now(timezone.utc)}
         with patch("lib.redis_client.get_shared_state", return_value=state):
             await store_reminder_context("CA-123", context)
         assert pending_reminder_calls["CA-123"] == context
-        assert state.data["reminder_ctx:CA-123"] == context
+        encrypted = state.data["reminder_ctx:CA-123"]
+        assert isinstance(encrypted, str)
+        assert encrypted.startswith("enc:")
+        decoded = decrypt_json(encrypted)
+        assert decoded["reminder"]["id"] == "r1"
+        assert isinstance(decoded["triggered_at"], str)
         assert state.ttls["reminder_ctx:CA-123"] == REMINDER_CONTEXT_TTL_SECONDS
 
     def test_clear_reminder_context(self):
@@ -195,7 +232,10 @@ class TestTriggerReminderCall:
             assert result is None
 
     @pytest.mark.asyncio
-    async def test_creates_call_and_delivery(self):
+    async def test_creates_call_and_delivery(self, monkeypatch):
+        from lib.encryption import decrypt_json
+
+        enable_test_encryption(monkeypatch)
         mock_call = MagicMock()
         mock_call.sid = "CA-new-123"
         mock_client = MagicMock()
@@ -217,7 +257,10 @@ class TestTriggerReminderCall:
             assert result is not None
             assert result["sid"] == "CA-new-123"
             assert "CA-new-123" in pending_reminder_calls
-            assert state.data["reminder_ctx:CA-new-123"]["memory_context"] == "Memory context"
+            encrypted = state.data["reminder_ctx:CA-new-123"]
+            assert isinstance(encrypted, str)
+            assert encrypted.startswith("enc:")
+            assert decrypt_json(encrypted)["memory_context"] == "Memory context"
             assert state.ttls["reminder_ctx:CA-new-123"] == REMINDER_CONTEXT_TTL_SECONDS
 
     @pytest.mark.asyncio

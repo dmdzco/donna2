@@ -25,6 +25,7 @@ class Settings:
     # ---- Server ----
     port: int = 7860
     environment: str = ""
+    log_level: str = ""
     base_url: str = ""
     pipecat_public_url: str = ""
     admin_url: str = ""
@@ -52,6 +53,12 @@ class Settings:
     tavily_api_key: str = ""
     cerebras_api_key: str = ""
     groq_api_key: str = ""
+
+    # ---- Audio ----
+    telephony_internal_input_sample_rate: int = 16000
+    elevenlabs_output_sample_rate: int = 44100
+    cartesia_output_sample_rate: int = 48000
+    gemini_internal_output_sample_rate: int = 24000
 
     # ---- Model Selection ----
     fast_observer_model: str = "gemini-3-flash-preview"
@@ -89,14 +96,21 @@ class Settings:
 
     # ---- Feature Flags ----
     scheduler_enabled: bool = False
+    pipecat_retention_enabled: bool = False
+    voice_backend: str = ""
+    tts_provider: str = ""
+    twilio_ws_handshake_timeout_seconds: float = 5.0
 
     # ---- Data Retention (HIPAA) ----
     retention_conversations_days: int = 365
+    retention_conversation_metadata_days: int = 1095
     retention_memories_days: int = 730
     retention_call_analyses_days: int = 365
     retention_daily_context_days: int = 90
     retention_call_metrics_days: int = 180
     retention_reminder_deliveries_days: int = 90
+    retention_notifications_days: int = 180
+    retention_waitlist_days: int = 365
     retention_audit_logs_days: int = 2190
 
     @property
@@ -198,10 +212,17 @@ def _load_settings() -> Settings:
     def _env(key: str, default: str = "") -> str:
         return os.environ.get(key, default)
 
+    def _env_int(key: str, default: int) -> int:
+        try:
+            return int(_env(key, str(default)))
+        except ValueError:
+            return default
+
     return Settings(
         # Server
         port=int(_env("PORT", "7860")),
         environment=_env("ENVIRONMENT"),
+        log_level=_env("LOG_LEVEL", "INFO" if is_production_environment() else "DEBUG"),
         base_url=_env("BASE_URL"),
         pipecat_public_url=_env("PIPECAT_PUBLIC_URL"),
         admin_url=_env("ADMIN_URL"),
@@ -226,6 +247,11 @@ def _load_settings() -> Settings:
         tavily_api_key=_env("TAVILY_API_KEY"),
         cerebras_api_key=_env("CEREBRAS_API_KEY"),
         groq_api_key=_env("GROQ_API_KEY"),
+        # Audio
+        telephony_internal_input_sample_rate=_env_int("TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE", 16000),
+        elevenlabs_output_sample_rate=_env_int("ELEVENLABS_OUTPUT_SAMPLE_RATE", 44100),
+        cartesia_output_sample_rate=_env_int("CARTESIA_OUTPUT_SAMPLE_RATE", 48000),
+        gemini_internal_output_sample_rate=_env_int("GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE", 24000),
         # Model Selection
         fast_observer_model=_env("FAST_OBSERVER_MODEL", "gemini-3-flash-preview"),
         cerebras_director_model=_env("CEREBRAS_DIRECTOR_MODEL", "gpt-oss-120b"),
@@ -256,16 +282,29 @@ def _load_settings() -> Settings:
         field_encryption_key=_env("FIELD_ENCRYPTION_KEY"),
         # Feature Flags
         scheduler_enabled=_env("SCHEDULER_ENABLED", "false").lower() == "true",
+        pipecat_retention_enabled=_truthy(_env("PIPECAT_RETENTION_ENABLED")),
+        voice_backend=_env("VOICE_BACKEND"),
+        tts_provider=_env("TTS_PROVIDER"),
+        twilio_ws_handshake_timeout_seconds=float(_env("TWILIO_WS_HANDSHAKE_TIMEOUT_SECONDS", "5")),
         # Data Retention (HIPAA)
         retention_conversations_days=int(_env("RETENTION_CONVERSATIONS_DAYS", "365")),
+        retention_conversation_metadata_days=int(_env("RETENTION_CONVERSATION_METADATA_DAYS", "1095")),
         retention_memories_days=int(_env("RETENTION_MEMORIES_DAYS", "730")),
         retention_call_analyses_days=int(_env("RETENTION_CALL_ANALYSES_DAYS", "365")),
         retention_daily_context_days=int(_env("RETENTION_DAILY_CONTEXT_DAYS", "90")),
         retention_call_metrics_days=int(_env("RETENTION_CALL_METRICS_DAYS", "180")),
         retention_reminder_deliveries_days=int(_env("RETENTION_REMINDER_DELIVERIES_DAYS", "90")),
+        retention_notifications_days=int(_env("RETENTION_NOTIFICATIONS_DAYS", "180")),
+        retention_waitlist_days=int(_env("RETENTION_WAITLIST_DAYS", "365")),
         retention_audit_logs_days=int(_env("RETENTION_AUDIT_LOGS_DAYS", "2190")),
     )
 
 
 # Module-level accessor — import this
 settings = _load_settings()
+
+
+def get_settings() -> Settings:
+    """Return a fresh settings snapshot for code paths that rely on env overrides."""
+    _load_settings.cache_clear()
+    return _load_settings()

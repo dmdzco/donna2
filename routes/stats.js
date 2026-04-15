@@ -4,6 +4,7 @@ import { reminders, seniors, conversations } from '../db/schema.js';
 import { eq, desc, gte, and, sql } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
 import { routeError } from './helpers.js';
+import { decryptReminderPhi } from '../lib/phi.js';
 
 const router = Router();
 
@@ -27,6 +28,7 @@ router.get('/api/stats', requireAdmin, async (req, res) => {
     const upcomingReminders = await db.select({
       id: reminders.id,
       title: reminders.title,
+      titleEncrypted: reminders.titleEncrypted,
       type: reminders.type,
       scheduledTime: reminders.scheduledTime,
       seniorName: seniors.name,
@@ -53,12 +55,19 @@ router.get('/api/stats', requireAdmin, async (req, res) => {
     .orderBy(desc(conversations.startedAt))
     .limit(5);
 
+    const [{ count: activeCalls }] = await db.select({ count: sql`count(*)` })
+      .from(conversations)
+      .where(and(
+        eq(conversations.status, 'in_progress'),
+        sql`started_at >= NOW() - interval '2 hours'`
+      ));
+
     res.json({
       totalSeniors: parseInt(totalSeniors) || 0,
       callsToday: parseInt(callsToday) || 0,
       upcomingRemindersCount: upcomingReminders.length,
-      activeCalls: 0,
-      upcomingReminders,
+      activeCalls: parseInt(activeCalls) || 0,
+      upcomingReminders: upcomingReminders.map(decryptReminderPhi),
       recentCalls,
     });
   } catch (error) {

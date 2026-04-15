@@ -351,9 +351,14 @@ class QuickObserverProcessor(FrameProcessor):
                 if tracker and hasattr(tracker, "record_quick_observer_signals"):
                     tracker.record_quick_observer_signals(analysis)
 
-            # Store token recommendation in session_state for Director
-            if self._session_state is not None and analysis.model_recommendation:
-                self._session_state["_token_recommendation"] = analysis.model_recommendation
+            # Store current-turn token recommendation for Director. Clear it
+            # when this turn has no recommendation so old response-length hints
+            # do not leak into later unrelated turns.
+            if self._session_state is not None:
+                if analysis.model_recommendation:
+                    self._session_state["_token_recommendation"] = analysis.model_recommendation
+                else:
+                    self._session_state.pop("_token_recommendation", None)
 
             # Track recent history for engagement detection
             self._recent_history.append({"role": "user", "content": text})
@@ -363,6 +368,8 @@ class QuickObserverProcessor(FrameProcessor):
             # Inject guidance into LLM context if there is any.
             # Use "user" role — Anthropic rejects "system" in the messages array.
             if analysis.guidance:
+                if self._session_state is not None:
+                    self._session_state["_pending_observer_guidance"] = analysis.guidance
                 guidance_msg = {
                     "role": "user",
                     "content": f"[EPHEMERAL: Observer guidance — do not read aloud]\n{analysis.guidance}",

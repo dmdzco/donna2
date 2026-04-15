@@ -87,6 +87,9 @@ env:
 - extendedWaitUntil:
     visible: "Edit Call"
     timeout: 5000
+- swipe:
+    start: 50%, 82%
+    end: 50%, 42%
 - tapOn: "Delete Call"
 
 # Confirmation modal

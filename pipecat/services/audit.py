@@ -23,8 +23,14 @@ async def log_audit(
     ip_address: str | None = None,
     user_agent: str | None = None,
     metadata: dict | None = None,
+    raise_on_error: bool = False,
 ) -> None:
-    """Insert an audit log row. Swallows errors — audit must never break requests."""
+    """Insert an audit log row.
+
+    By default this logs and swallows failures for latency-sensitive paths.
+    Set raise_on_error=True for high-risk PHI exports where audit durability
+    should be part of the request contract.
+    """
     try:
         await execute(
             """INSERT INTO audit_logs
@@ -42,6 +48,32 @@ async def log_audit(
         )
     except Exception as e:
         logger.error("Audit log insert failed: {err}", err=str(e))
+        if raise_on_error:
+            raise
+
+
+async def write_audit(
+    user_id: str,
+    user_role: str,
+    action: str,
+    resource_type: str,
+    resource_id: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    """Insert an audit log row and raise if it cannot be persisted."""
+    await log_audit(
+        user_id=user_id,
+        user_role=user_role,
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        metadata=metadata,
+        raise_on_error=True,
+    )
 
 
 def fire_and_forget_audit(

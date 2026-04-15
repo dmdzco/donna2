@@ -12,6 +12,8 @@ import re
 
 from loguru import logger
 from db import query_one, execute
+from lib.encryption import encrypt_json
+from lib.phi import decrypt_prospect_phi, prospect_details
 
 
 def _normalize_phone(phone: str) -> str:
@@ -23,7 +25,8 @@ def _normalize_phone(phone: str) -> str:
 async def find_by_phone(phone: str) -> dict | None:
     """Find a prospect by phone number (normalized to last 10 digits)."""
     normalized = _normalize_phone(phone)
-    return await query_one("SELECT * FROM prospects WHERE phone = $1", normalized)
+    row = await query_one("SELECT * FROM prospects WHERE phone = $1", normalized)
+    return decrypt_prospect_phi(row)
 
 
 async def create(phone: str) -> dict:
@@ -37,7 +40,7 @@ async def create(phone: str) -> dict:
         normalized,
     )
     logger.info("Created/found prospect")
-    return row
+    return decrypt_prospect_phi(row)
 
 
 async def update_after_call(prospect_id: str, data: dict) -> None:
@@ -48,29 +51,32 @@ async def update_after_call(prospect_id: str, data: dict) -> None:
         data: Dict with optional keys: learned_name, relationship,
               loved_one_name, caller_context (dict to merge).
     """
-    fields = ["call_count = call_count + 1", "last_call_at = NOW()", "updated_at = NOW()"]
-    values = []
-    idx = 1
+    existing = await query_one("SELECT * FROM prospects WHERE id = $1", prospect_id)
+    details = prospect_details(existing)
 
-    for key, col in [
-        ("learned_name", "learned_name"),
-        ("relationship", "relationship"),
-        ("loved_one_name", "loved_one_name"),
-    ]:
+    for key in ("learned_name", "relationship", "loved_one_name"):
         if data.get(key):
-            fields.append(f"{col} = ${idx}")
-            values.append(data[key])
-            idx += 1
+            details[key] = data[key]
 
-    # Merge caller_context into existing JSONB
+    current_context = details.get("caller_context") or {}
     if data.get("caller_context"):
-        fields.append(f"caller_context = caller_context || ${idx}::jsonb")
-        values.append(json.dumps(data["caller_context"]))
-        idx += 1
+        current_context = {**current_context, **data["caller_context"]}
+    details["caller_context"] = current_context
 
-    values.append(prospect_id)
-    sql = f"UPDATE prospects SET {', '.join(fields)} WHERE id = ${idx}"
-    await execute(sql, *values)
+    await execute(
+        """UPDATE prospects SET
+             call_count = call_count + 1,
+             last_call_at = NOW(),
+             updated_at = NOW(),
+             learned_name = NULL,
+             relationship = NULL,
+             loved_one_name = NULL,
+             caller_context = '{}'::jsonb,
+             details_encrypted = $1
+           WHERE id = $2""",
+        encrypt_json(details),
+        prospect_id,
+    )
     logger.info("Updated prospect after call")
 
 
@@ -159,6 +165,7 @@ async def extract_prospect_details(transcript: str) -> dict:
 
 def build_context_for_prompt(prospect: dict) -> str:
     """Format prospect data into context string for the onboarding system prompt."""
+    prospect = decrypt_prospect_phi(prospect) or {}
     parts: list[str] = []
 
     call_count = prospect.get("call_count", 0)

@@ -1,12 +1,6 @@
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
-import * as SecureStore from "expo-secure-store";
-
-const secureStorage = {
-  getItem: (name: string) => SecureStore.getItemAsync(name),
-  setItem: (name: string, value: string) => SecureStore.setItemAsync(name, value),
-  removeItem: (name: string) => SecureStore.deleteItemAsync(name),
-};
+import { createJSONStorage, persist } from "zustand/middleware";
+import { secureDraftStorage } from "@/src/lib/secureDraftStorage";
 
 export interface OnboardingCall {
   title: string;
@@ -72,6 +66,8 @@ const DEFAULT_CALL: OnboardingCall = {
   selectedReminderIds: [],
 };
 
+const ONBOARDING_DRAFT_KEY = "donna-onboarding-draft-v1";
+
 const INITIAL_STATE = {
   firstName: "",
   lastName: "",
@@ -89,6 +85,24 @@ const INITIAL_STATE = {
   reminders: [{ title: "", description: "" }],
   calls: [{ ...DEFAULT_CALL }],
 };
+
+const draftFields = (state: OnboardingState) => ({
+  firstName: state.firstName,
+  lastName: state.lastName,
+  email: state.email,
+  phone: state.phone,
+  lovedOneName: state.lovedOneName,
+  lovedOnePhone: state.lovedOnePhone,
+  relationship: state.relationship,
+  city: state.city,
+  state: state.state,
+  zipcode: state.zipcode,
+  selectedInterests: state.selectedInterests,
+  additionalTopics: state.additionalTopics,
+  topicsToAvoid: state.topicsToAvoid,
+  reminders: state.reminders,
+  calls: state.calls,
+});
 
 export const useOnboardingStore = create<OnboardingState>()(
   persist(
@@ -154,11 +168,17 @@ export const useOnboardingStore = create<OnboardingState>()(
           return { selectedInterests: next };
         }),
 
-      reset: () => set(INITIAL_STATE),
+      reset: () => set({ ...INITIAL_STATE }),
     }),
     {
-      name: "donna-onboarding",
-      storage: createJSONStorage(() => secureStorage),
-    }
-  )
+      name: ONBOARDING_DRAFT_KEY,
+      storage: createJSONStorage(() => secureDraftStorage),
+      partialize: draftFields,
+    },
+  ),
 );
+
+export async function clearOnboardingDraft() {
+  useOnboardingStore.setState({ ...INITIAL_STATE });
+  await secureDraftStorage.removeItem(ONBOARDING_DRAFT_KEY);
+}

@@ -42,6 +42,12 @@ Treat code as the runtime source of truth and compliance docs as intent. If docs
 - Export/delete and sensitive CRUD paths:
   - `pipecat/api/routes/export.py`
   - senior, conversation, memory, reminder, caregiver, and onboarding routes
+- Encrypted-field invariants:
+  - When encrypted companion columns exist, new PHI writes should store the sensitive body only in the encrypted column.
+  - Plaintext companion columns such as conversation summaries/transcripts, memory content, call analysis details, concerns, and similar fields are legacy read fallbacks only unless a minimized non-PHI placeholder is required by the schema.
+  - Authorized export routes may decrypt at the response boundary after auth and per-resource authorization; they should not return encrypted blobs or silently prefer stale plaintext over available encrypted values.
+  - Retention and deletion flows must cover any new encrypted cache/table that can hold PHI, including replay/idempotency caches.
+  - Replay/idempotency caches must not store raw request bodies or raw resource paths; use encrypted response payloads and stable keyed hashes for matching inputs.
 - Third-party exposure:
   - Twilio
   - Anthropic
@@ -58,6 +64,8 @@ Treat code as the runtime source of truth and compliance docs as intent. If docs
 - New routes that bypass existing auth middleware.
 - Python and Node implementations drifting on security-sensitive behavior.
 - Sensitive fields stored or returned in plaintext when encrypted or minimized alternatives already exist.
+- Export paths that drop encrypted columns, forget to decrypt encrypted values for authorized users, or expose ciphertext to caregivers/admins.
+- Encrypted replay/cache tables that store PHI-bearing responses without expiration cleanup.
 - Hardcoded secrets, debug bypasses, or "temporary" auth exemptions.
 - Retention/export/delete flows that miss mirrored tables or companion encrypted columns.
 

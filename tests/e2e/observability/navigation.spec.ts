@@ -24,11 +24,18 @@ test.describe('Observability Navigation', () => {
     }
   });
 
-  test('switch between Timeline, Observer, and Metrics views', async ({ page }) => {
+  test('switch between Context, Timeline, Observer, and Metrics views', async ({ page }) => {
     await page.goto('/');
 
     await page.locator('.call-list-item').first().click();
     await page.waitForTimeout(500);
+
+    const contextBtn = page.locator('.view-toggle').getByText('Context');
+    if (await contextBtn.isVisible()) {
+      await contextBtn.click();
+      await expect(page.locator('.context-panel')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('LLM Context Flow')).toBeVisible();
+    }
 
     const analysisBtn = page.locator('.view-toggle').getByText('Analysis');
     if (await analysisBtn.isVisible()) {

@@ -15,7 +15,6 @@ No Director, no Observer, no FlowManager, no separate STT/TTS.
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 
 from loguru import logger
@@ -24,6 +23,7 @@ from pipecat.frames.frames import EndFrame, InputTextRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from config import get_settings
 
 try:
     from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
@@ -139,6 +139,15 @@ async def run_gemini_pipeline(
 
     system_prompt = _build_system_prompt(session_state)
     logger.debug("[{cs}] Gemini system prompt: {n} chars", cs=call_sid, n=len(system_prompt))
+    cfg = get_settings()
+    audio_in_sample_rate = cfg.telephony_internal_input_sample_rate
+    audio_out_sample_rate = cfg.gemini_internal_output_sample_rate
+    logger.info(
+        "[{cs}] Gemini audio profile in={audio_in}Hz out={audio_out}Hz",
+        cs=call_sid,
+        audio_in=audio_in_sample_rate,
+        audio_out=audio_out_sample_rate,
+    )
 
     # task_ref: mutable container so end_call handler can queue EndFrame
     task_ref = [None]
@@ -146,7 +155,7 @@ async def run_gemini_pipeline(
     from flows.gemini_tools import _build_gemini_tools, register_gemini_tools
 
     llm = GeminiLiveLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY", ""),
+        api_key=cfg.google_api_key,
         model="models/gemini-3.1-flash-live-preview",
         voice_id="Aoede",
         system_instruction=system_prompt,
@@ -172,8 +181,8 @@ async def run_gemini_pipeline(
             allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
-            audio_in_sample_rate=16000,  # Gemini expects 16kHz; Twilio serializer upsamples from 8kHz mulaw
-            audio_out_sample_rate=8000,  # Twilio output; serializer downsamples Gemini's 24kHz PCM
+            audio_in_sample_rate=audio_in_sample_rate,
+            audio_out_sample_rate=audio_out_sample_rate,
         ),
     )
 

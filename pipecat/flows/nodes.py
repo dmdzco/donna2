@@ -33,10 +33,44 @@ from prompts import (
     ONBOARDING_TASK_RETURN_CALLER,
     ONBOARDING_CLOSING_TASK,
 )
+from services.context_trace import record_context_event
 
 
 _EMPATHY_KEYWORDS = {"pain", "hurt", "ache", "sore", "discomfort", "bothering", "bother",
                       "tired", "exhausted", "dizzy", "fell", "fall", "swollen", "stiff"}
+
+
+def _record_prompt_event(
+    session_state: dict,
+    *,
+    source: str,
+    label: str,
+    content: str | None,
+    provider: str = "pipecat_flows",
+    item_count: int | None = None,
+    metadata: dict | None = None,
+    dedupe_key: str | None = None,
+) -> None:
+    if not content:
+        return
+    record_context_event(
+        session_state,
+        source=source,
+        action="seeded",
+        label=label,
+        content=content,
+        provider=provider,
+        item_count=item_count,
+        metadata=metadata,
+        dedupe_key=dedupe_key,
+    )
+
+
+def _line_item_count(text: str | None) -> int | None:
+    if not text:
+        return None
+    count = sum(1 for line in text.splitlines() if line.strip().startswith("-"))
+    return count or None
 
 
 def _format_analysis_insights(analysis: dict) -> str | None:
@@ -47,9 +81,16 @@ def _format_analysis_insights(analysis: dict) -> str | None:
     # Follow-up suggestions — highest signal for personalization
     follow_ups = analysis.get("follow_up_suggestions") or []
     if follow_ups:
-        lines.append("From last call, follow up on:")
+        time_label = analysis.get("call_time_label")
+        if time_label:
+            lines.append(f"From last call ({time_label}), follow up on:")
+        else:
+            lines.append("From last call, follow up on:")
         for fu in follow_ups[:4]:
             lines.append(f"- {fu}")
+        lines.append(
+            "Timing guard: if the follow-up is about a future plan, only ask if it happened after that date/time has arrived."
+        )
 
     # Positive observations — what lit them up
     positives = analysis.get("positive_observations") or []
@@ -94,34 +135,119 @@ def _build_senior_context(session_state: dict) -> str:
     except Exception:
         tz = ZoneInfo("America/New_York")
     local_now = datetime.now(tz)
-    parts.append(f"Current time: {local_now.strftime('%A, %B %d, %Y at %I:%M %p')}.")
+    local_time_text = f"Current time: {local_now.strftime('%A, %B %d, %Y at %I:%M %p')}."
+    parts.append(local_time_text)
+    timing_guard_text = (
+        "Use prior-call time labels literally. If an earlier-today call said something would happen tomorrow, "
+        "do not ask whether it already happened yet."
+    )
+    parts.append(timing_guard_text)
+    _record_prompt_event(
+        session_state,
+        source="local_time",
+        label="Senior local time",
+        content=f"{local_time_text}\n{timing_guard_text}",
+        provider="runtime_clock",
+        metadata={"timezone": tz_name},
+        dedupe_key="senior_context:local_time",
+    )
 
     first_name = (senior.get("name") or "").split(" ")[0] or "there"
     city = senior.get("city") or ""
     state = senior.get("state") or ""
     location = f"{city}, {state}" if city and state else city or state or ""
     location_note = f" They live in {location}." if location else ""
-    parts.append(f"You are speaking with {first_name}.{location_note}")
+    profile_text = f"You are speaking with {first_name}.{location_note}"
+    parts.append(profile_text)
+    _record_prompt_event(
+        session_state,
+        source="senior_profile",
+        label="Senior profile context",
+        content=profile_text,
+        provider="seniors",
+        metadata={"has_location": bool(location)},
+        dedupe_key="senior_context:profile",
+    )
 
     interests = senior.get("interests") or []
     if interests:
-        parts.append(f"They enjoy: {', '.join(interests)}.")
+        interests_text = f"They enjoy: {', '.join(interests)}."
+        parts.append(interests_text)
+        _record_prompt_event(
+            session_state,
+            source="interests",
+            label="Senior interests",
+            content=interests_text,
+            provider="seniors",
+            item_count=len(interests),
+            dedupe_key="senior_context:interests",
+        )
 
     medical = senior.get("medical_notes") or senior.get("medicalNotes")
     if medical:
-        parts.append(f"Health notes: {medical}")
+        medical_text = f"Health notes: {medical}"
+        parts.append(medical_text)
+        _record_prompt_event(
+            session_state,
+            source="medical_notes",
+            label="Health notes",
+            content=medical_text,
+            provider="seniors",
+            dedupe_key="senior_context:medical_notes",
+        )
 
     summaries = session_state.get("previous_calls_summary")
     if summaries:
-        parts.append(f"\nRecent calls:\n{summaries}")
+        previous_calls_text = f"\nRecent calls:\n{summaries}"
+        parts.append(previous_calls_text)
+        _record_prompt_event(
+            session_state,
+            source="previous_calls_summary",
+            label="Recent call summary context",
+            content=previous_calls_text,
+            provider="context_cache",
+            item_count=_line_item_count(summaries),
+            dedupe_key="senior_context:previous_calls_summary",
+        )
+
+    recent_turns = session_state.get("recent_turns")
+    if recent_turns:
+        turns_text = str(recent_turns)
+        if len(turns_text) > 1600:
+            turns_text = turns_text[:1600].rsplit("\n", 1)[0] + "\n..."
+        parts.append(
+            "\nRecent turn excerpts from previous calls:\n"
+            f"{turns_text}\n"
+            "Use these for continuity. Respect any dates or time labels exactly."
+        )
 
     todays_ctx = session_state.get("todays_context")
     if todays_ctx:
-        parts.append(f"\n{todays_ctx}")
+        todays_text = f"\n{todays_ctx}"
+        parts.append(todays_text)
+        _record_prompt_event(
+            session_state,
+            source="daily_context",
+            label="Same-day call context",
+            content=todays_text,
+            provider="daily_context",
+            item_count=_line_item_count(todays_ctx),
+            dedupe_key="senior_context:daily_context",
+        )
 
     memory_ctx = session_state.get("memory_context")
     if memory_ctx:
-        parts.append(f"\n{memory_ctx}")
+        memory_text = f"\n{memory_ctx}"
+        parts.append(memory_text)
+        _record_prompt_event(
+            session_state,
+            source="memory_context",
+            label="Initial memory context",
+            content=memory_text,
+            provider="context_cache",
+            item_count=_line_item_count(memory_ctx),
+            dedupe_key="senior_context:memory_context",
+        )
         logger.info("System prompt includes memory context ({n} chars)", n=len(memory_ctx))
     else:
         logger.warning("No memory context in session_state for system prompt")
@@ -129,24 +255,60 @@ def _build_senior_context(session_state: dict) -> str:
     # --- Pre-cached news (fetched daily based on interests) ---
     news_ctx = session_state.get("news_context")
     if news_ctx:
-        parts.append(f"\n{news_ctx}")
-        logger.info("System prompt includes news context ({n} chars)", n=len(news_ctx))
+        news_availability_text = (
+            "\nFresh interest-based news is available for this call. "
+            "Bring it up only if the conversation is neutral or positive, "
+            "the topic is winding down, or they ask about current events."
+        )
+        parts.append(news_availability_text)
+        _record_prompt_event(
+            session_state,
+            source="news_context",
+            label="Pre-cached news availability note",
+            content=news_availability_text,
+            provider="context_cache",
+            item_count=_line_item_count(news_ctx),
+            metadata={"full_context_chars": len(news_ctx), "content_deferred": True},
+            dedupe_key="senior_context:news_context",
+        )
+        logger.info("System prompt notes fresh news availability ({n} chars)", n=len(news_ctx))
 
     # --- Insights from last call analysis ---
     analysis = session_state.get("last_call_analysis") or {}
     analysis_parts = _format_analysis_insights(analysis)
     if analysis_parts:
-        parts.append(f"\n{analysis_parts}")
+        analysis_text = f"\n{analysis_parts}"
+        parts.append(analysis_text)
+        _record_prompt_event(
+            session_state,
+            source="last_call_analysis",
+            label="Last-call analysis follow-up context",
+            content=analysis_text,
+            provider="call_analysis",
+            item_count=_line_item_count(analysis_parts),
+            dedupe_key="senior_context:last_call_analysis",
+        )
 
     # Caregiver notes: pre-fetched at call start, injected into system prompt
     notes = session_state.get("_caregiver_notes_content") or []
     if notes:
-        parts.append("\nFamily messages to share during this call:")
+        note_lines = ["\nFamily messages to share during this call:"]
         for note in notes:
             content = note.get("content", "") if isinstance(note, dict) else str(note)
             if content:
-                parts.append(f"- {content}")
-        parts.append("Share naturally: \"Oh, your daughter wanted me to mention...\" Don't force it if the moment isn't right.")
+                note_lines.append(f"- {content}")
+        note_lines.append("Share naturally: \"Oh, your daughter wanted me to mention...\" Don't force it if the moment isn't right.")
+        caregiver_notes_text = "\n".join(note_lines)
+        parts.append(caregiver_notes_text)
+        _record_prompt_event(
+            session_state,
+            source="caregiver_notes",
+            label="Caregiver notes",
+            content=caregiver_notes_text,
+            provider="caregivers",
+            item_count=len(notes),
+            dedupe_key="senior_context:caregiver_notes",
+        )
 
     return "\n".join(parts)
 
@@ -210,6 +372,34 @@ def _build_greeting_task(session_state: dict) -> str:
         greeting_task += f'\n\nUse this greeting to start: "{greeting}"'
 
     return greeting_task
+
+
+def _record_node_prompts(
+    session_state: dict,
+    *,
+    node_name: str,
+    system_prompt: str | None = None,
+    task_prompt: str | None = None,
+    prompt_variant: str = "subscriber",
+) -> None:
+    if system_prompt:
+        _record_prompt_event(
+            session_state,
+            source="system_prompt",
+            label=f"{prompt_variant.title()} system prompt",
+            content=system_prompt,
+            metadata={"node": node_name, "variant": prompt_variant},
+            dedupe_key=f"node:{node_name}:system_prompt:{prompt_variant}",
+        )
+    if task_prompt:
+        _record_prompt_event(
+            session_state,
+            source="flow_task",
+            label=f"{node_name.replace('_', ' ').title()} task prompt",
+            content=task_prompt,
+            metadata={"node": node_name, "variant": prompt_variant},
+            dedupe_key=f"node:{node_name}:task_prompt:{prompt_variant}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +497,18 @@ def build_reminder_node(
     if with_greeting:
         senior_ctx = _build_senior_context(session_state)
         system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
+        _record_node_prompts(
+            session_state,
+            node_name="reminder",
+            system_prompt=BASE_SYSTEM_PROMPT,
+            task_prompt=reminder_task,
+        )
         role_messages = [{"role": "system", "content": system_content}]
+    _record_node_prompts(
+        session_state,
+        node_name="reminder",
+        task_prompt=reminder_task,
+    )
 
     return NodeConfig(
         name="reminder",
@@ -362,7 +563,18 @@ def build_main_node(
     if with_greeting:
         senior_ctx = _build_senior_context(session_state)
         system_content = BASE_SYSTEM_PROMPT + "\n\n" + senior_ctx
+        _record_node_prompts(
+            session_state,
+            node_name="main",
+            system_prompt=BASE_SYSTEM_PROMPT,
+            task_prompt=main_task,
+        )
         role_messages = [{"role": "system", "content": system_content}]
+    _record_node_prompts(
+        session_state,
+        node_name="main",
+        task_prompt=main_task,
+    )
 
     return NodeConfig(
         name="main",
@@ -386,6 +598,12 @@ def build_winding_down_node(session_state: dict, flows_tools: dict) -> NodeConfi
 
     if reminder_ctx:
         winding_task += f"\n\n{reminder_ctx}"
+
+    _record_node_prompts(
+        session_state,
+        node_name="winding_down",
+        task_prompt=winding_task,
+    )
 
     functions: list = []
     if "mark_reminder_acknowledged" in flows_tools:
@@ -419,6 +637,11 @@ def build_closing_node(session_state: dict) -> NodeConfig:
     first_name = (senior.get("name") or "").split(" ")[0] or "there"
 
     closing_task = CLOSING_TASK_TEMPLATE.format(first_name=first_name)
+    _record_node_prompts(
+        session_state,
+        node_name="closing",
+        task_prompt=closing_task,
+    )
 
     return NodeConfig(
         name="closing",
@@ -489,6 +712,15 @@ def build_onboarding_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     memory_ctx = session_state.get("memory_context")
     if memory_ctx:
         task += f"\n\nPREVIOUS CONVERSATION CONTEXT:\n{memory_ctx}"
+        _record_prompt_event(
+            session_state,
+            source="memory_context",
+            label="Onboarding return-caller memory context",
+            content=memory_ctx,
+            provider="context_cache",
+            item_count=_line_item_count(memory_ctx),
+            dedupe_key="onboarding:memory_context",
+        )
 
     # Tools: all onboarding tools + transition
     functions: list = list(flows_tools.values())
@@ -501,6 +733,21 @@ def build_onboarding_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     ))
 
     system_content = ONBOARDING_SYSTEM_PROMPT + "\n\n" + prospect_ctx
+    _record_prompt_event(
+        session_state,
+        source="prospect_context",
+        label="Prospect onboarding context",
+        content=prospect_ctx,
+        provider="prospects",
+        dedupe_key="onboarding:prospect_context",
+    )
+    _record_node_prompts(
+        session_state,
+        node_name="onboarding",
+        system_prompt=ONBOARDING_SYSTEM_PROMPT,
+        task_prompt=task,
+        prompt_variant="onboarding",
+    )
 
     return NodeConfig(
         name="onboarding",
@@ -514,6 +761,12 @@ def build_onboarding_node(session_state: dict, flows_tools: dict) -> NodeConfig:
 
 def build_onboarding_closing_node(session_state: dict) -> NodeConfig:
     """Build the closing node for onboarding calls."""
+    _record_node_prompts(
+        session_state,
+        node_name="onboarding_closing",
+        task_prompt=ONBOARDING_CLOSING_TASK,
+        prompt_variant="onboarding",
+    )
     return NodeConfig(
         name="onboarding_closing",
         role_messages=[],

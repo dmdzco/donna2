@@ -6,6 +6,7 @@
  */
 
 import rateLimit from 'express-rate-limit';
+import { withRequestId } from '../lib/http-response.js';
 
 /**
  * Standard error response for rate limiting
@@ -15,6 +16,7 @@ const rateLimitHandler = (req, res) => {
     error: 'Too many requests',
     message: 'Please slow down and try again later',
     retryAfter: res.getHeader('Retry-After'),
+    ...withRequestId(req),
   });
 };
 

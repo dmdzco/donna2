@@ -14,6 +14,10 @@ import { Button, Input, Modal, ProgressBar } from "@/src/components/ui";
 import { COLORS, RELATIONSHIP_OPTIONS } from "@/src/constants/theme";
 import { useOnboardingStore } from "@/src/stores/onboarding";
 
+function sanitizePhoneInput(value: string): string {
+  return value.replace(/[^\d+\-\s()]/g, "").slice(0, 20);
+}
+
 export default function Step2Screen() {
   const router = useRouter();
   const {
@@ -102,10 +106,13 @@ export default function Step2Screen() {
               label="Their Phone Number"
               placeholder="(555) 987-6543"
               value={lovedOnePhone}
-              onChangeText={(v) => setField("lovedOnePhone", v)}
+              onChangeText={(v) =>
+                setField("lovedOnePhone", sanitizePhoneInput(v))
+              }
               error={errors.lovedOnePhone}
               keyboardType="phone-pad"
-              textContentType="telephoneNumber"
+              autoComplete="off"
+              maxLength={20}
               testID="input-their-phone"
             />
 

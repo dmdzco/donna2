@@ -24,7 +24,7 @@ Linear pipeline of Pipecat `FrameProcessor`s. Frames flow top to bottom:
 ```
 Twilio Audio ──► FastAPIWebsocketTransport
                         │
-                   Deepgram STT (Nova 3, 8kHz mulaw)
+                   Deepgram STT (Nova 3, internal 16kHz PCM)
                         │ TranscriptionFrame
                         ▼
               ┌─────────────────────┐
@@ -51,14 +51,29 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               Conversation Tracker (topics, questions, advice + stripped transcript)
                         ▼
-              ElevenLabs TTS (eleven_turbo_v2_5)
+              ElevenLabs TTS (44.1kHz PCM) or Cartesia Sonic 3 (48kHz PCM)
                         ▼
-              FastAPIWebsocketTransport ──► Twilio Audio (mulaw 8kHz)
+              FastAPIWebsocketTransport ──► Twilio Audio (final 8kHz μ-law)
                         ▼
               Context Aggregator (assistant) ← tracks assistant responses
 ```
 
 **Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. Guidance appears as user-role messages before the next LLM call.
+
+### Runtime Audio Profile
+
+Source of truth: `pipecat/bot.py`, `pipecat/bot_gemini.py`, and the active telephony serializer.
+
+| Segment | Runtime default | Why |
+|---|---:|---|
+| Twilio wire input | 8kHz μ-law | Twilio Media Streams format |
+| Internal STT input | 16kHz PCM | `TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE`; improves STT path without changing Twilio wire |
+| Cartesia TTS output | 48kHz `pcm_s16le` | `CARTESIA_OUTPUT_SAMPLE_RATE`; keeps high-quality PCM until serializer edge |
+| ElevenLabs TTS output | 44.1kHz PCM | `ELEVENLABS_OUTPUT_SAMPLE_RATE`; highest supported ElevenLabs PCM rate in current Pipecat service |
+| Gemini Live internal output | 24kHz PCM | `GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE`; preserved internally before serializer output |
+| Twilio wire output | 8kHz μ-law | Final conversion performed by `TwilioFrameSerializer` |
+
+The guiding rule is: keep high-quality PCM internally, then convert once at the telephony edge. Do not request `pcm_mulaw` from Cartesia; that double-encodes with `TwilioFrameSerializer`.
 
 ---
 
@@ -151,8 +166,8 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 | Director LLM (active fast path) | Groq | gpt-oss-20b |
 | Director LLM (regular fallback helper) | Google Gemini Flash | gemini-3-flash-preview |
 | Post-Call Analysis | Google Gemini Flash | gemini-3-flash-preview |
-| STT | Deepgram Nova 3 | 8kHz mulaw |
-| TTS | ElevenLabs by default; Cartesia behind provider flag | eleven_turbo_v2_5 |
+| STT | Deepgram Nova 3 | Twilio 8kHz μ-law is converted to internal 16kHz PCM before STT |
+| TTS | ElevenLabs by default; Cartesia behind provider flag | ElevenLabs internal `44100`; Cartesia `pcm_s16le` internal `48000`; serializer converts to Twilio at the edge |
 | VAD | Silero | confidence=0.6, stop_secs=1.2 |
 | Embeddings | OpenAI | text-embedding-3-small |
 | News / Web Search | OpenAI GPT-4o-mini + Tavily | OpenAI cached news; Tavily first/OpenAI fallback for in-call web_search |

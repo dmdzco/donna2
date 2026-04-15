@@ -7,7 +7,7 @@ from TextFrames, transcript building, and frame passthrough.
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from pipecat.frames.frames import TextFrame
+from pipecat.frames.frames import LLMFullResponseEndFrame, TextFrame
 
 from processors.conversation_tracker import ConversationState, ConversationTrackerProcessor
 from tests.conftest import make_transcription, run_processor_test
@@ -129,6 +129,7 @@ class TestSplitPipelineTracking:
                 frames_to_inject=[
                     make_transcription("I was gardening today"),
                     TextFrame(text="How is your garden growing?"),
+                    LLMFullResponseEndFrame(),
                 ],
             )
             await user_tracker.flush_pending_persistence()
@@ -142,11 +143,52 @@ class TestSplitPipelineTracking:
         assert [turn["role"] for turn in full_transcript] == ["user", "assistant"]
         assert "gardening" in full_transcript[0]["content"]
         assert "garden growing" in full_transcript[1]["content"]
+        assert [turn["sequence"] for turn in full_transcript] == [0, 1]
+        assert all("timestamp" in turn for turn in full_transcript)
 
         assert mock_update.await_count >= 1
         call_sid, persisted = mock_update.await_args.args
         assert call_sid == "CA-split-001"
         assert [turn["role"] for turn in persisted] == ["user", "assistant"]
+
+    @pytest.mark.asyncio
+    async def test_split_trackers_preserve_multi_turn_order(self, session_state):
+        session_state["call_sid"] = "CA-split-002"
+        session_state["_transcript_persistence_enabled"] = True
+        state = ConversationState()
+        user_tracker = ConversationTrackerProcessor(
+            session_state=session_state,
+            state=state,
+            track_assistant=False,
+        )
+        assistant_tracker = ConversationTrackerProcessor(
+            session_state=session_state,
+            state=state,
+            track_user=False,
+        )
+
+        with patch("services.conversations.update_transcript", new_callable=AsyncMock):
+            await run_processor_test(
+                processors=[user_tracker, assistant_tracker],
+                frames_to_inject=[
+                    make_transcription("First user turn"),
+                    TextFrame(text="First Donna response."),
+                    LLMFullResponseEndFrame(),
+                    make_transcription("Second user turn"),
+                    TextFrame(text="Second Donna response."),
+                    LLMFullResponseEndFrame(),
+                ],
+            )
+            await user_tracker.flush_pending_persistence()
+            await assistant_tracker.flush_pending_persistence()
+
+        assert [turn["role"] for turn in session_state["_full_transcript"]] == [
+            "user",
+            "assistant",
+            "user",
+            "assistant",
+        ]
+        assert [turn["sequence"] for turn in session_state["_full_transcript"]] == [0, 1, 2, 3]
 
 
 class TestTrackerPassthrough:

@@ -15,8 +15,10 @@ import Animated, {
 } from "react-native-reanimated";
 import { Button } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
-import { api } from "@/src/lib/api";
+import { api, getErrorMessage } from "@/src/lib/api";
+import { useStableIdempotencyKey } from "@/src/hooks/useStableIdempotencyKey";
 import {
+  clearOnboardingDraft,
   useOnboardingStore,
   type OnboardingCall,
 } from "@/src/stores/onboarding";
@@ -147,6 +149,7 @@ export default function SuccessScreen() {
   const store = useOnboardingStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const idempotency = useStableIdempotencyKey("onboarding-complete");
 
   // Entrance animation for icon
   const iconScale = useSharedValue(0);
@@ -206,14 +209,21 @@ export default function SuccessScreen() {
         callSchedule: buildCallSchedule(store.calls[0]),
       };
 
-      await api.onboarding.complete(payload, token!);
+      await api.onboarding.complete(payload, token!, {
+        idempotencyKey: idempotency.getKey(payload),
+      });
 
-      store.reset();
+      idempotency.reset();
+      await clearOnboardingDraft();
       router.replace("/(tabs)");
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Something went wrong. Please try again.";
-      setError(message);
+      setError(
+        getErrorMessage(
+          err,
+          "We couldn't finish setup. Your information is still here. Check your connection and try again.",
+          "save",
+        ),
+      );
     } finally {
       setLoading(false);
     }

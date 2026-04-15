@@ -50,11 +50,16 @@ export interface CallAnalysis {
   conversationId: string;
   seniorId: string;
   summary?: string;
+  sentiment?: string;
+  mood?: string;
   topics?: string[];
   engagementScore?: number;
   concerns?: Array<string | Record<string, unknown>>;
   positiveObservations?: string[];
   followUpSuggestions?: string[];
+  caregiverSms?: string | null;
+  caregiverTakeaways?: string[];
+  recommendedCaregiverAction?: string | null;
   callQuality?: Record<string, unknown> | string | null;
 }
 

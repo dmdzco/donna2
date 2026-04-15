@@ -15,6 +15,7 @@ Fixed on branch `codex/voice-pipeline-todos`:
 - Assistant transcript tracking now receives guidance-stripped text.
 - Gemini Live now schedules and awaits post-call processing on both disconnect and normal pipeline end.
 - General in-call web search no longer caches arbitrary live-query results.
+- Node-scheduled reminder calls now include a reminder call hint, and Pipecat waits briefly for the `reminder_deliveries.call_sid` row before falling back to generic outbound handling.
 
 ## High Priority
 
@@ -45,6 +46,13 @@ Fixed on branch `codex/voice-pipeline-todos`:
 - **Why it matters**: `/ws` accepts a WebSocket and consumes the call semaphore before the Twilio start frame is parsed and the `ws_token` is validated.
 - **Risk**: A client can connect and stall before auth, tying up active-call capacity without starting AI services.
 - **Fix direction**: Add a short handshake/auth timeout and only count calls as active after the Twilio start frame is received and the token validates.
+
+### 4.5. Avoid the Node reminder delivery row race
+
+- **Status**: Fixed. Node and Pipecat reminder schedulers tag Twilio answer URLs with `call_type=reminder`; Pipecat uses that tag to retry the DB lookup briefly before treating the call as generic outbound.
+- **Why it matters**: Twilio can request `/voice/answer` before Node has committed the `reminder_deliveries` row containing the new `call_sid`.
+- **Risk**: A medication or appointment reminder can hydrate as a generic outbound check-in and skip the reminder prompt/acknowledgment tracking.
+- **Fix direction**: Keep the retry path scoped to tagged reminder calls so manual and welfare calls do not pay the delay.
 
 ## Medium Priority
 

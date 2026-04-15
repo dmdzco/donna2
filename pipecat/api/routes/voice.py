@@ -11,7 +11,9 @@ import asyncio
 import os
 import secrets
 import time
+from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape as xml_escape
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request, Response
 from loguru import logger
@@ -117,6 +119,68 @@ def _senior_is_inactive(senior: dict | None) -> bool:
     return senior.get("is_active") is False or senior.get("isActive") is False
 
 
+def _parse_db_timestamp(value) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    else:
+        return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _cached_news_context_from_senior(senior: dict, *, max_age_hours: int = 36) -> str | None:
+    """Return selected cached news only when the daily cache is fresh."""
+    raw_cached_news = senior.get("cached_news") or senior.get("cachedNews")
+    if not raw_cached_news:
+        return None
+
+    updated_at = _parse_db_timestamp(
+        senior.get("cached_news_updated_at") or senior.get("cachedNewsUpdatedAt")
+    )
+    sid = str(senior.get("id", ""))[:8]
+    if not updated_at:
+        logger.warning("[News] Cached news has no freshness timestamp; skipping senior={sid}", sid=sid)
+        return None
+
+    timezone_name = senior.get("timezone") or "America/New_York"
+    try:
+        senior_tz = ZoneInfo(timezone_name)
+    except Exception:
+        senior_tz = ZoneInfo("America/New_York")
+    if updated_at.astimezone(senior_tz).date() != datetime.now(senior_tz).date():
+        logger.warning("[News] Cached news not from today; skipping senior={sid}", sid=sid)
+        return None
+
+    age = datetime.now(timezone.utc) - updated_at
+    if age > timedelta(hours=max_age_hours):
+        logger.warning(
+            "[News] Cached news stale; skipping senior={sid} age_hours={age}",
+            sid=sid,
+            age=round(age.total_seconds() / 3600, 1),
+        )
+        return None
+
+    try:
+        from services.news import select_stories_for_call
+        return select_stories_for_call(
+            raw_cached_news,
+            interests=senior.get("interests"),
+            interest_scores=senior.get("interest_scores"),
+            count=3,
+        )
+    except Exception:
+        return raw_cached_news
+
+
 async def _hydrate_senior_call_context(
     *,
     senior: dict,
@@ -160,18 +224,8 @@ async def _hydrate_senior_call_context(
             elif name == "caregiver_notes_content":
                 caregiver_notes_content = result or []
 
-    raw_cached_news = senior.get("cached_news")
-    if news_context is None and raw_cached_news:
-        try:
-            from services.news import select_stories_for_call
-            news_context = select_stories_for_call(
-                raw_cached_news,
-                interests=senior.get("interests"),
-                interest_scores=senior.get("interest_scores"),
-                count=3,
-            )
-        except Exception:
-            news_context = raw_cached_news
+    if news_context is None:
+        news_context = _cached_news_context_from_senior(senior)
 
     snapshot = senior.get("call_context_snapshot")
     if isinstance(snapshot, str):
@@ -431,20 +485,9 @@ async def voice_answer(request: Request):
             has_caregiver_notes = bool(caregiver_notes)
             caregiver_notes_content = caregiver_notes if caregiver_notes else []
 
-            # --- News: read from DB (pre-cached daily at 5 AM, never fetched live) ---
+            # --- News: read fresh DB cache only (pre-cached daily; no live fetch here) ---
             import json as _json
-            raw_cached_news = senior.get("cached_news")
-            if raw_cached_news:
-                try:
-                    from services.news import select_stories_for_call
-                    news_context = select_stories_for_call(
-                        raw_cached_news,
-                        interests=senior.get("interests"),
-                        interest_scores=senior.get("interest_scores"),
-                        count=3,
-                    )
-                except Exception:
-                    news_context = raw_cached_news  # fallback: use full cached text
+            news_context = _cached_news_context_from_senior(senior)
 
             # --- Read pre-computed snapshot (came with find_by_phone) ---
             snapshot = senior.get("call_context_snapshot")

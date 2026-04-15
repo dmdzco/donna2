@@ -433,6 +433,7 @@ export const schedulerService = {
 
     let memoryContext = null;
     let preGeneratedGreeting = null;
+    let newsContext = null;
 
     if (senior) {
       // Check cache first
@@ -442,6 +443,7 @@ export const schedulerService = {
         // Use cached context
         memoryContext = cached.memoryContext;
         preGeneratedGreeting = cached.greeting;
+        newsContext = cached.newsContext;
         log.info('Using cached context', { name: senior.name });
       } else {
         // Build fresh context
@@ -456,12 +458,13 @@ export const schedulerService = {
       senior,
       memoryContext,
       preGeneratedGreeting,
+      newsContext,
       fetchedAt: new Date(),
       _createdAt: Date.now(),
     });
 
     log.info('Pre-fetch complete', { phone: normalized, greetingReady: !!preGeneratedGreeting });
-    return { senior, memoryContext, preGeneratedGreeting };
+    return { senior, memoryContext, preGeneratedGreeting, newsContext };
   },
 
   /**

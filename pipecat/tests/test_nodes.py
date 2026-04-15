@@ -104,11 +104,21 @@ class TestSeniorContext:
         ctx = _build_senior_context(state)
         assert "arthritis" in ctx
 
-    def test_news_in_system_prompt(self):
-        """News is pre-cached daily and included in system prompt."""
+    def test_news_availability_in_system_prompt(self):
+        """Full news is injected ephemerally when Director recommends it."""
         state = _make_session_state(news_context="Here are some recent news items about gardening...")
         ctx = _build_senior_context(state)
-        assert "recent news" in ctx
+        assert "Fresh interest-based news is available" in ctx
+        assert "Here are some recent news items about gardening" not in ctx
+
+    def test_includes_recent_turns(self):
+        state = _make_session_state(
+            recent_turns="Earlier today at 3:00 PM - SENIOR: I will work out tomorrow."
+        )
+        ctx = _build_senior_context(state)
+        assert "Recent turn excerpts" in ctx
+        assert "I will work out tomorrow" in ctx
+        assert "Respect any dates or time labels exactly" in ctx
 
 
 

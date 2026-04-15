@@ -1,15 +1,19 @@
 """Tests for LLM tool schemas and handler factory."""
 
 import asyncio
+from datetime import date
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from flows.tools import (
     MARK_REMINDER_SCHEMA,
     WEB_SEARCH_SCHEMA,
+    get_web_search_schema,
     make_tool_handlers,
     make_flows_tools,
     make_onboarding_flows_tools,
+    sanitize_web_search_query,
 )
 
 
@@ -23,6 +27,33 @@ class TestToolSchemas:
         assert MARK_REMINDER_SCHEMA["name"] == "mark_reminder_acknowledged"
         assert "reminder_id" in MARK_REMINDER_SCHEMA["properties"]
         assert "status" in MARK_REMINDER_SCHEMA["properties"]
+
+    def test_web_search_schema_can_be_generated_per_call_date(self):
+        schema = get_web_search_schema(today_date=date(2030, 1, 2))
+        assert "January 02, 2030" in schema["description"]
+        assert "2030" in schema["properties"]["query"]["description"]
+
+    def test_web_search_sanitizer_removes_known_identifiers(self):
+        session_state = {
+            "senior": {
+                "name": "Margaret Smith",
+                "phone": "5551234567",
+                "city": "Springfield",
+            }
+        }
+        query = "Can Margaret Smith at 555-123-4567 find weather in Springfield?"
+        sanitized = sanitize_web_search_query(query, session_state)
+
+        assert "Margaret" not in sanitized
+        assert "Smith" not in sanitized
+        assert "555" not in sanitized
+        assert "Springfield" in sanitized
+        assert "weather" in sanitized
+
+    def test_web_search_sanitizer_genericizes_health_question(self):
+        session_state = {"senior": {"city": "Springfield"}}
+        sanitized = sanitize_web_search_query("I take metformin and feel dizzy in Springfield", session_state)
+        assert sanitized == "a person take metformin and feel dizzy"
 
 
 class TestToolHandlerFactory:
@@ -52,6 +83,21 @@ class TestToolHandlerFactory:
         })
         assert result["status"] == "success"
         assert "rem-1" in session_state.get("reminders_delivered", set())
+
+    @pytest.mark.asyncio
+    async def test_web_search_uses_sanitized_query(self):
+        session_state = {
+            "senior_id": "test",
+            "senior": {"name": "Margaret Smith"},
+        }
+        handlers = make_tool_handlers(session_state)
+
+        with patch("lib.growthbook.is_on", return_value=True), \
+             patch("services.news.web_search_query", new_callable=AsyncMock, return_value="result") as mock_search:
+            result = await handlers["web_search"]({"query": "Margaret Smith metformin side effects"})
+
+        assert result["status"] == "success"
+        mock_search.assert_awaited_once_with("metformin side effects")
 
 
 class TestFlowsTools:

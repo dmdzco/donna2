@@ -96,6 +96,90 @@ async def _wait_for_reminder_ack_task(session_state: dict, timeout: float = 5.0)
         pass
 
 
+_REMINDER_WORD_RE = re.compile(r"[a-z0-9']+")
+_REMINDER_STOP_WORDS = {
+    "about", "after", "again", "also", "and", "are", "call", "called",
+    "for", "from", "have", "just", "let", "remember", "reminder", "take",
+    "that", "the", "this", "time", "with", "you", "your",
+}
+
+
+def _reminder_keywords(session_state: dict) -> set[str]:
+    texts: list[str] = []
+    delivery = session_state.get("reminder_delivery") or {}
+    reminder = session_state.get("reminder") or {}
+    for source in (delivery, reminder):
+        if isinstance(source, dict):
+            texts.extend(
+                str(source.get(key) or "")
+                for key in ("title", "description", "type", "reminder_type")
+            )
+    if session_state.get("reminder_prompt"):
+        texts.append(str(session_state["reminder_prompt"]))
+
+    words: set[str] = set()
+    for text in texts:
+        words.update(
+            word
+            for word in _REMINDER_WORD_RE.findall(text.lower())
+            if len(word) > 2 and word not in _REMINDER_STOP_WORDS
+        )
+    return words
+
+
+def _assistant_delivered_reminder(text: str, keywords: set[str]) -> bool:
+    if not text:
+        return False
+    lower = text.lower()
+    if not re.search(r"\b(remind|remember|take|appointment|medication|medicine|pill)\b", lower):
+        return False
+    if not keywords:
+        return True
+    words = set(_REMINDER_WORD_RE.findall(lower))
+    overlap = words & keywords
+    return len(overlap) >= min(2, len(keywords))
+
+
+def _infer_reminder_ack_from_transcript(session_state: dict, transcript: list | str) -> dict | None:
+    """Infer a missed tool acknowledgment only from transcript evidence.
+
+    A short "okay" is accepted only after Donna appears to have delivered the
+    reminder. This avoids treating generic greeting acknowledgments as reminder
+    acknowledgments.
+    """
+    if not isinstance(transcript, list):
+        return None
+
+    keywords = _reminder_keywords(session_state)
+    delivered_idx: int | None = None
+    for idx, turn in enumerate(transcript):
+        if not isinstance(turn, dict):
+            continue
+        role = turn.get("role")
+        text = _content_to_text(turn.get("content")).strip()
+        if role == "assistant" and _assistant_delivered_reminder(text, keywords):
+            delivered_idx = idx
+            continue
+        if role == "assistant":
+            delivered_idx = None
+            continue
+        if role != "user" or delivered_idx is None:
+            continue
+
+        try:
+            from processors.quick_observer import quick_analyze
+            response = quick_analyze(text).reminder_response
+        except Exception:
+            response = None
+
+        if response and response.get("confidence", 0) >= 0.75:
+            return {
+                "status": response.get("type") or "acknowledged",
+                "user_response": text[:300],
+            }
+    return None
+
+
 async def run_post_call(
     session_state: dict,
     conversation_tracker,
@@ -210,12 +294,29 @@ async def run_post_call(
 
         from services.reminder_delivery import (
             get_delivery_status,
+            mark_reminder_acknowledged,
             mark_call_ended_without_acknowledgment,
         )
         await _wait_for_reminder_ack_task(session_state)
         current = await get_delivery_status(delivery_id)
         if current and current.get("status") in ("acknowledged", "confirmed"):
             return
+
+        inferred_ack = _infer_reminder_ack_from_transcript(session_state, transcript)
+        if inferred_ack:
+            row = await mark_reminder_acknowledged(
+                delivery_id,
+                inferred_ack["status"],
+                inferred_ack.get("user_response"),
+            )
+            if row:
+                session_state["_reminder_ack_persisted"] = True
+                logger.info(
+                    "[{cs}] Reminder acknowledgment recovered from transcript evidence",
+                    cs=call_sid,
+                )
+                return
+
         await mark_call_ended_without_acknowledgment(delivery_id)
 
     async def _step6_cache():

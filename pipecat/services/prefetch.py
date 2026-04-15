@@ -86,6 +86,7 @@ class PrefetchCache:
     def __init__(self, ttl: float = DEFAULT_TTL):
         self._ttl = ttl
         self._entries: dict[str, dict[str, Any]] = {}
+        self._inflight: dict[str, dict[str, Any]] = {}
         self._hits = 0
         self._misses = 0
 
@@ -98,6 +99,44 @@ class PrefetchCache:
             for w in re.findall(r"[a-z0-9]+", text.lower())
             if w and w not in _MEMORY_CACHE_STOP_WORDS
         }
+
+    def _purge_expired(self, entries: dict[str, dict[str, Any]] | None = None) -> None:
+        now = time.time()
+        target = entries if entries is not None else self._entries
+        for key, entry in list(target.items()):
+            if now - entry["ts"] > self._ttl:
+                del target[key]
+
+    def _best_match(
+        self,
+        query: str,
+        entries: dict[str, dict[str, Any]],
+        threshold: float,
+    ) -> dict[str, Any] | None:
+        self._purge_expired(entries)
+        query_words = self._word_set(query)
+        if not query_words:
+            return None
+
+        best_match: dict[str, Any] | None = None
+        best_sim = 0.0
+
+        for entry in entries.values():
+            entry_words = self._word_set(entry["query"])
+            if not entry_words:
+                continue
+
+            intersection = len(query_words & entry_words)
+            union = len(query_words | entry_words)
+            sim = intersection / union if union > 0 else 0.0
+
+            if sim > best_sim:
+                best_sim = sim
+                best_match = entry
+
+        if best_match and best_sim >= threshold:
+            return best_match
+        return None
 
     def put(self, query: str, results: list[dict], source: str = "prefetch") -> None:
         """Store prefetch results. Evicts oldest entry if at capacity."""
@@ -114,55 +153,54 @@ class PrefetchCache:
             "ts": time.time(),
             "query": query,
         }
+        self.clear_inflight(query)
 
     def get(self, query: str, threshold: float = 0.3) -> list[dict] | None:
         """Fuzzy lookup via Jaccard word-overlap similarity.
 
         Returns cached results if a matching entry is found and not expired.
         """
-        now = time.time()
-        query_words = self._word_set(query)
-        if not query_words:
-            self._misses += 1
-            return None
-
-        best_match: dict | None = None
-        best_sim = 0.0
-
-        for key, entry in list(self._entries.items()):
-            # Expire old entries
-            if now - entry["ts"] > self._ttl:
-                del self._entries[key]
-                continue
-
-            entry_words = self._word_set(entry["query"])
-            if not entry_words:
-                continue
-
-            # Jaccard similarity
-            intersection = len(query_words & entry_words)
-            union = len(query_words | entry_words)
-            sim = intersection / union if union > 0 else 0.0
-
-            if sim > best_sim:
-                best_sim = sim
-                best_match = entry
-
-        if best_match and best_sim >= threshold:
+        best_match = self._best_match(query, self._entries, threshold)
+        if best_match:
             self._hits += 1
             return best_match["results"]
 
         self._misses += 1
         return None
 
+    def has_cached(self, query: str, threshold: float = 0.3) -> bool:
+        """Return whether a relevant cached result exists without mutating stats."""
+        return self._best_match(query, self._entries, threshold) is not None
+
+    def mark_inflight(self, query: str, source: str = "prefetch") -> None:
+        """Track a memory search that is currently running for this call."""
+        if not query:
+            return
+        self._inflight[self._normalize_key(query)] = {
+            "source": source,
+            "ts": time.time(),
+            "query": query,
+        }
+
+    def clear_inflight(self, query: str) -> None:
+        """Clear in-flight tracking for a completed or skipped query."""
+        if not query:
+            return
+        self._inflight.pop(self._normalize_key(query), None)
+
+    def has_relevant_inflight(self, query: str, threshold: float = 0.3) -> bool:
+        """Return whether a relevant search is in flight without mutating stats."""
+        return self._best_match(query, self._inflight, threshold) is not None
+
+    def get_inflight_queries(self) -> list[str]:
+        """Return non-expired in-flight query strings."""
+        self._purge_expired(self._inflight)
+        return [entry["query"] for entry in self._inflight.values()]
+
     def get_recent_queries(self) -> list[str]:
         """Return queries from non-expired entries (for dedup + hints)."""
-        now = time.time()
-        return [
-            entry["query"]
-            for entry in self._entries.values()
-            if now - entry["ts"] <= self._ttl
-        ]
+        self._purge_expired(self._entries)
+        return [entry["query"] for entry in self._entries.values()]
 
     def stats(self) -> dict[str, int]:
         """Cache statistics for metrics logging."""
@@ -173,6 +211,7 @@ class PrefetchCache:
             "total": total,
             "hit_rate_pct": round(self._hits / total * 100) if total > 0 else 0,
             "entries": len(self._entries),
+            "inflight": len(self._inflight),
         }
 
 
@@ -292,21 +331,29 @@ async def run_prefetch(
     if not queries or not senior_id:
         return 0
 
-    # Dedup: skip queries already cached
-    recent = set(q.lower() for q in cache.get_recent_queries())
-    new_queries = [q for q in queries if q.lower() not in recent]
+    # Dedup: skip queries already cached or being searched by another
+    # overlapping interim/final prefetch task. Similarity is intentionally
+    # higher than the injection threshold so related-but-distinct topics can
+    # still search while repeated interim refinements collapse together.
+    new_queries = [
+        q for q in queries
+        if not cache.has_cached(q, threshold=0.75)
+        and not cache.has_relevant_inflight(q, threshold=0.75)
+    ]
 
     if not new_queries:
         return 0
 
-    # Limit concurrency
+    # Limit concurrency, then mark before yielding so overlapping tasks see it.
     new_queries = new_queries[:_MAX_CONCURRENT_SEARCHES]
+    for query in new_queries:
+        cache.mark_inflight(query)
 
     async def _search_one(query: str) -> bool:
         try:
             from services.memory import search
             start = time.time()
-            results = await search(senior_id, query, limit=3)
+            results = await search(senior_id, query, limit=3, track_access=False)
             elapsed_ms = round((time.time() - start) * 1000)
             if results:
                 cache.put(query, results, source="prefetch")
@@ -324,6 +371,8 @@ async def run_prefetch(
         except Exception as e:
             logger.warning("[Prefetch] Search failed (query_chars={chars}): {err}", chars=len(query), err=str(e))
             return False
+        finally:
+            cache.clear_inflight(query)
 
     results = await asyncio.gather(*[_search_one(q) for q in new_queries])
     return sum(1 for r in results if r)

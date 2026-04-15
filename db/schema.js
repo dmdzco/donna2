@@ -24,6 +24,8 @@ export const seniors = pgTable('seniors', {
   additionalInfoEncrypted: text('additional_info_encrypted'),
   callContextSnapshot: json('call_context_snapshot'),
   callContextSnapshotEncrypted: text('call_context_snapshot_encrypted'),
+  cachedNews: text('cached_news'),
+  cachedNewsUpdatedAt: timestamp('cached_news_updated_at'),
 });
 
 // Conversations (call history)

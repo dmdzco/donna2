@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date
+import re
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 from pipecat_flows import FlowsFunctionSchema
@@ -38,8 +40,19 @@ SEARCH_MEMORIES_SCHEMA = {
     "required": ["query"],
 }
 
-def _web_search_schema() -> dict:
-    today = date.today().strftime("%B %d, %Y")
+def _local_date_for_session(session_state: dict | None = None) -> date:
+    senior = (session_state or {}).get("senior") or {}
+    timezone_name = senior.get("timezone") or "America/New_York"
+    try:
+        from datetime import datetime
+        return datetime.now(ZoneInfo(timezone_name)).date()
+    except Exception:
+        return date.today()
+
+
+def _web_search_schema(today_date: date | None = None) -> dict:
+    today_date = today_date or date.today()
+    today = today_date.strftime("%B %d, %Y")
     return {
         "name": "web_search",
         "description": (
@@ -47,6 +60,8 @@ def _web_search_schema() -> dict:
             "Use this whenever the senior asks about news, weather, sports, facts, "
             "or anything you're unsure about. Always include the current year in "
             "queries about recent events, scores, or elections. "
+            "Never include names, phone numbers, addresses, caregiver names, or private "
+            "medical history in the query. Use anonymous general wording for health questions. "
             "IMPORTANT: Before calling this tool, always say a brief natural filler "
             "like 'Let me look that up for you', 'One moment while I check on that', "
             "or 'Hmm, let me find out'. This gives the senior something to hear while "
@@ -55,14 +70,21 @@ def _web_search_schema() -> dict:
         "properties": {
             "query": {
                 "type": "string",
-                "description": f"What to search for (include {date.today().year} for recent events)",
+                "description": (
+                    f"What to search for (include {today_date.year} for recent events). "
+                    "Do not include personal names, phone numbers, addresses, or private history."
+                ),
             },
         },
         "required": ["query"],
     }
 
 
-WEB_SEARCH_SCHEMA = _web_search_schema()
+def get_web_search_schema(session_state: dict | None = None, today_date: date | None = None) -> dict:
+    return _web_search_schema(today_date or _local_date_for_session(session_state))
+
+
+WEB_SEARCH_SCHEMA = get_web_search_schema()
 
 MARK_REMINDER_SCHEMA = {
     "name": "mark_reminder_acknowledged",
@@ -112,6 +134,85 @@ CHECK_CAREGIVER_NOTES_SCHEMA = {
     "properties": {},
     "required": [],
 }
+
+
+_PHONE_RE = re.compile(r"\b(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b")
+_EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
+_SSN_RE = re.compile(r"\b\d{3}[-.\s]?\d{2}[-.\s]?\d{4}\b")
+_ADDRESS_RE = re.compile(
+    r"\b\d{1,6}\s+[A-Za-z0-9 .'-]+?\s+"
+    r"(?:street|st|avenue|ave|road|rd|boulevard|blvd|lane|ln|drive|dr|court|ct|way)\b",
+    re.I,
+)
+_SPACE_RE = re.compile(r"\s+")
+
+
+def _known_private_terms(session_state: dict | None) -> set[str]:
+    senior = (session_state or {}).get("senior") or {}
+    terms: set[str] = set()
+
+    def _add_name(value) -> None:
+        if not value or not isinstance(value, str):
+            return
+        cleaned = value.strip()
+        if len(cleaned) < 3:
+            return
+        terms.add(cleaned)
+        for part in re.findall(r"[A-Za-z][A-Za-z'-]{2,}", cleaned):
+            terms.add(part)
+
+    _add_name(senior.get("name"))
+
+    family_info = senior.get("family_info") or senior.get("familyInfo") or {}
+    if isinstance(family_info, dict):
+        for value in family_info.values():
+            if isinstance(value, str):
+                _add_name(value)
+            elif isinstance(value, dict):
+                for nested in value.values():
+                    if isinstance(nested, str):
+                        _add_name(nested)
+
+    for note in (session_state or {}).get("_caregiver_notes_content") or []:
+        if isinstance(note, dict):
+            _add_name(note.get("caregiver_name") or note.get("caregiverName"))
+
+    return {term for term in terms if len(term) >= 3}
+
+
+def _known_location_terms(session_state: dict | None) -> set[str]:
+    senior = (session_state or {}).get("senior") or {}
+    terms: set[str] = set()
+    for key in ("city", "zip_code", "zipCode"):
+        value = senior.get(key)
+        if isinstance(value, str) and len(value.strip()) >= 3:
+            terms.add(value.strip())
+    return terms
+
+
+def sanitize_web_search_query(query: str, session_state: dict | None = None) -> str:
+    """Remove direct identifiers before sending a live web-search query."""
+    sanitized = query or ""
+    sanitized = _EMAIL_RE.sub("", sanitized)
+    sanitized = _PHONE_RE.sub("", sanitized)
+    sanitized = _SSN_RE.sub("", sanitized)
+    sanitized = _ADDRESS_RE.sub("", sanitized)
+
+    for term in sorted(_known_private_terms(session_state), key=len, reverse=True):
+        sanitized = re.sub(rf"\b{re.escape(term)}\b", "", sanitized, flags=re.I)
+
+    # Genericize first-person health phrasing. This still lets Donna answer a
+    # general medication/symptom question without exposing whose question it is.
+    if re.search(r"\b(medicine|medication|pill|metformin|lisinopril|dizzy|pain|doctor|symptom|side effect)\b", sanitized, re.I):
+        for term in sorted(_known_location_terms(session_state), key=len, reverse=True):
+            sanitized = re.sub(rf"\b{re.escape(term)}\b", "", sanitized, flags=re.I)
+        sanitized = re.sub(r"\b(in|near|around)\s*(?=$|[?.!,;:])", "", sanitized, flags=re.I)
+        sanitized = re.sub(r"\bmy\s+", "", sanitized, flags=re.I)
+        sanitized = re.sub(r"\bI\s+(take|took|have|feel|felt|am|was)\b", r"a person \1", sanitized, flags=re.I)
+        sanitized = re.sub(r"\bme\b", "a person", sanitized, flags=re.I)
+
+    sanitized = _SPACE_RE.sub(" ", sanitized).strip(" ,.;:-")
+    return sanitized
 
 
 # ---------------------------------------------------------------------------
@@ -176,14 +277,25 @@ def make_tool_handlers(session_state: dict) -> dict:
         if not query:
             return {"status": "success", "result": "No query provided."}
 
+        sanitized_query = sanitize_web_search_query(query, session_state)
+        if not sanitized_query:
+            logger.warning("Tool: web_search empty after sanitization")
+            return {"status": "success", "result": "I need a less personal search query for that."}
+        if sanitized_query != query:
+            logger.info(
+                "Tool: web_search sanitized query original_chars={orig} sanitized_chars={san}",
+                orig=len(query),
+                san=len(sanitized_query),
+            )
+
         start = _time.time()
         try:
             from services.news import web_search_query
-            result = await asyncio.wait_for(web_search_query(query), timeout=15.0)
+            result = await asyncio.wait_for(web_search_query(sanitized_query), timeout=15.0)
             elapsed_ms = round((_time.time() - start) * 1000)
             if not result:
                 logger.info("Tool: web_search empty result ({ms}ms)", ms=elapsed_ms)
-                return {"status": "success", "result": f"I couldn't find information about {query}."}
+                return {"status": "success", "result": "I couldn't find reliable information about that."}
             logger.info("Tool: web_search SUCCESS ({ms}ms, {n} chars)", ms=elapsed_ms, n=len(result))
             return {"status": "success", "result": f"[NEWS] {result}"}
         except asyncio.TimeoutError:
@@ -370,7 +482,7 @@ def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
     handlers = make_tool_handlers(session_state)
 
     all_schemas = [
-        WEB_SEARCH_SCHEMA,
+        get_web_search_schema(session_state),
         MARK_REMINDER_SCHEMA,
     ]
 
@@ -398,11 +510,12 @@ def make_onboarding_flows_tools(session_state: dict) -> dict[str, FlowsFunctionS
     schemas = {}
 
     # web_search (for onboarding too)
+    web_search_schema = get_web_search_schema(session_state)
     schemas["web_search"] = FlowsFunctionSchema(
-        name=WEB_SEARCH_SCHEMA["name"],
-        description=WEB_SEARCH_SCHEMA["description"],
-        properties=WEB_SEARCH_SCHEMA["properties"],
-        required=WEB_SEARCH_SCHEMA["required"],
+        name=web_search_schema["name"],
+        description=web_search_schema["description"],
+        properties=web_search_schema["properties"],
+        required=web_search_schema["required"],
         handler=subscriber_handlers["web_search"],
     )
 

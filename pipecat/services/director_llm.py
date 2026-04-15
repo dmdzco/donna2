@@ -133,7 +133,8 @@ Direct Donna, an AI companion calling elderly people. Return JSON guidance.
 
 Phases: opening(0-30s) → main(30s-8min) → winding_down(8-9min) → closing(9-10min). Past 30s still opening → "main".
 Reminders: natural pauses + high engagement only. Never during emotions/low engagement. Never repeat delivered.
-Low engagement: suggest personal questions or memories. News: medium+ engagement, topic winding down.
+Low engagement: suggest personal questions, memories, or one uplifting news item if Has news=true.
+News: if Has news=true and tone is neutral/positive, suggest it during lulls, low/medium engagement, or topic wind-down. Avoid news during sadness, health/safety concerns, or active reminders.
 Onboarding calls (call_type="onboarding"): no reminders, no re-engage signals, focus on discovery.
 
 JSON:{"analysis":{"call_phase":"str","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"str","priority_action":"str","specific_instruction":"str"}}"""

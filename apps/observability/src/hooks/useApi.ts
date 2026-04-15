@@ -1,5 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Call, Timeline, Turn, ObserverSummary, Continuity, MetricsData, ContextTraceData } from '../types';
+import type {
+  Call,
+  Timeline,
+  Turn,
+  ObserverSummary,
+  Continuity,
+  MetricsData,
+  ContextTraceData,
+  ContextLatency,
+} from '../types';
 
 export type ApiEnvironment = 'dev' | 'prod';
 
@@ -265,7 +274,7 @@ export interface InfraMetric {
   end_reason: string | null;
   turn_count: number;
   phase_durations: Record<string, number> | null;
-  latency: Record<string, number> | null;
+  latency: ContextLatency | null;
   breaker_states: Record<string, string> | null;
   tools_used: string[] | null;
   token_usage: Record<string, number> | null;

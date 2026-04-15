@@ -332,6 +332,8 @@ async def _hydrate_senior_call_context(
 @router.post("/voice/answer", dependencies=[Depends(verify_twilio_signature)])
 async def voice_answer(request: Request):
     """Twilio calls this when a call is answered — returns TwiML pointing to WebSocket."""
+    request_started_at = time.time()
+
     # Check capacity before doing any work
     from main import _call_semaphore
     if _call_semaphore.locked():
@@ -687,6 +689,7 @@ async def voice_answer(request: Request):
     # 3. Store metadata for WebSocket handler (locked for concurrent writes)
     ws_token = secrets.token_urlsafe(32)
     ws_token_expires_at = time.time() + 300
+    context_ready_at = time.time()
     async with _metadata_lock:
         call_metadata[call_sid] = {
             "senior": senior,
@@ -711,7 +714,19 @@ async def voice_answer(request: Request):
             "ws_token": ws_token,
             "ws_token_expires_at": ws_token_expires_at,
             "ws_token_consumed": False,
+            "_trace_start_time": request_started_at,
+            "_voice_answer_started_at": request_started_at,
+            "_voice_answer_context_ready_at": context_ready_at,
         }
+
+    voice_answer_completed_at = time.time()
+    call_metadata[call_sid]["_voice_answer_completed_at"] = voice_answer_completed_at
+    call_metadata[call_sid]["_voice_answer_context_ms"] = round(
+        (context_ready_at - request_started_at) * 1000
+    )
+    call_metadata[call_sid]["_voice_answer_total_ms"] = round(
+        (voice_answer_completed_at - request_started_at) * 1000
+    )
 
     # Also persist to Redis for multi-instance routing
     await _persist_metadata(call_sid, call_metadata[call_sid])

@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 from pipecat_flows import FlowsFunctionSchema
-from services.context_trace import record_context_event
+from services.context_trace import record_context_event, record_latency_event
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +442,7 @@ def make_tool_handlers(session_state: dict) -> dict:
 
     def _wrap(name, fn):
         async def tracked(args):
+            turn_sequence = session_state.get("_current_turn_sequence")
             if name not in tools_used:
                 tools_used.append(name)
             logger.info("Tool CALL: {name}", name=name)
@@ -451,20 +452,23 @@ def make_tool_handlers(session_state: dict) -> dict:
                 action="called",
                 label=f"{name} called",
                 provider="llm_tool",
+                turn_sequence=turn_sequence,
                 metadata={"tool": name, "arguments": args or {}},
             )
             start = time.time()
             result = await fn(args)
             elapsed_ms = round((time.time() - start) * 1000)
             result_text = result.get("result", "") if isinstance(result, dict) else str(result)
-            record_context_event(
+            record_latency_event(
                 session_state,
+                stage=f"tool.{name}",
                 source=name,
                 action="result",
                 label=f"{name} result",
                 content=result_text,
                 provider="llm_tool",
                 latency_ms=elapsed_ms,
+                turn_sequence=turn_sequence,
                 metadata={
                     "tool": name,
                     "status": result.get("status", "?") if isinstance(result, dict) else "unknown",

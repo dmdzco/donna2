@@ -1295,6 +1295,10 @@ input:focus-visible {
   border-left: 4px solid var(--green);
 }
 
+.event-latency {
+  border-left: 4px solid var(--accent-strong);
+}
+
 .event-error {
   border-left: 4px solid var(--red);
 }

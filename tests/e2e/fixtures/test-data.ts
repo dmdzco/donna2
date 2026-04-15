@@ -196,10 +196,13 @@ export const mockTimeline = {
   status: 'completed',
   timeline: [
     { type: 'call.initiated', timestamp: '2026-03-08T14:00:00Z', data: { initiatedBy: 'scheduled' } },
-    { type: 'call.connected', timestamp: '2026-03-08T14:00:02Z', data: {} },
+    { type: 'call.connected', timestamp: '2026-03-08T14:00:02Z', data: { label: 'Voice answer to media stream', latencyMs: 1200, stage: 'call.answer_to_ws' } },
+    { type: 'call.lifecycle', timestamp: '2026-03-08T14:00:03Z', data: { label: 'Flow initialized', latencyMs: 180, stage: 'call.flow_initialize' } },
     { type: 'turn.response', timestamp: '2026-03-08T14:00:05Z', data: { content: 'Good morning Martha!' } },
     { type: 'turn.transcribed', timestamp: '2026-03-08T14:00:15Z', data: { content: 'Hi Donna!' } },
+    { type: 'latency.llm', timestamp: '2026-03-08T14:00:16Z', data: { label: 'LLM first token', latencyMs: 420, turnSequence: 1, stage: 'llm_ttfb' } },
     { type: 'observer.signal', timestamp: '2026-03-08T14:00:16Z', data: { signal: { engagementLevel: 'high', emotionalState: 'positive', confidenceScore: 92, concerns: [], shouldDeliverReminder: false, shouldEndCall: false } } },
+    { type: 'latency.tool', timestamp: '2026-03-08T14:04:10Z', data: { label: 'web_search result', latencyMs: 640, turnSequence: 3, stage: 'tool.web_search' } },
     { type: 'call.ended', timestamp: '2026-03-08T14:10:00Z', data: { status: 'completed', duration: 600 } },
   ],
 };
@@ -250,12 +253,27 @@ export const mockContextTraceData = {
   durationSeconds: 600,
   captured: true,
   schemaReady: true,
-  latency: { llm_ttfb_avg_ms: 420, turn_avg_ms: 1180 },
+  latency: {
+    llm_ttfb_avg_ms: 420,
+    turn_avg_ms: 1180,
+    stage_breakdown: {
+      'call.answer_to_ws': { count: 1, avg_ms: 1200, p95_ms: 1200, max_ms: 1200, last_ms: 1200 },
+      'tool.web_search': { count: 1, avg_ms: 640, p95_ms: 640, max_ms: 640, last_ms: 640 },
+    },
+  },
   toolsUsed: ['web_search'],
   contextTrace: {
     version: 1,
     captured_at: '2026-03-08T14:10:05Z',
     event_count: 4,
+    latency_breakdown: {
+      'call.answer_to_ws': { count: 1, avg_ms: 1200, p95_ms: 1200, max_ms: 1200, last_ms: 1200 },
+      'call.flow_initialize': { count: 1, avg_ms: 180, p95_ms: 180, max_ms: 180, last_ms: 180 },
+      'director.query': { count: 2, avg_ms: 165, p95_ms: 180, max_ms: 180, last_ms: 150 },
+      'tool.web_search': { count: 1, avg_ms: 640, p95_ms: 640, max_ms: 640, last_ms: 640 },
+      'llm_ttfb': { count: 3, avg_ms: 420, p95_ms: 480, max_ms: 480, last_ms: 410 },
+      'turn.total': { count: 3, avg_ms: 1180, p95_ms: 1310, max_ms: 1310, last_ms: 1090 },
+    },
     events: [
       {
         sequence: 0,

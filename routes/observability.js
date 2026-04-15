@@ -24,21 +24,66 @@ function readConcerns(call, analysis = null) {
   return Array.isArray(analysis?.concerns) ? analysis.concerns : [];
 }
 
+function readJsonObject(value) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return typeof value === 'object' ? value : null;
+}
+
+function readLatency(metric) {
+  return readJsonObject(metric?.latency) || {};
+}
+
+function readLatencyBreakdown(metric) {
+  const latency = readLatency(metric);
+  const breakdown = latency?.stage_breakdown;
+  return breakdown && typeof breakdown === 'object' && !Array.isArray(breakdown) ? breakdown : {};
+}
+
+function pickLatencyBreakdown(traceBreakdown, fallbackBreakdown) {
+  return traceBreakdown && Object.keys(traceBreakdown).length > 0
+    ? traceBreakdown
+    : fallbackBreakdown;
+}
+
 function readContextTrace(metric) {
+  const fallbackBreakdown = readLatencyBreakdown(metric);
   const trace = metric?.context_trace_encrypted
     ? decryptJson(metric.context_trace_encrypted)
     : null;
-  if (!trace) return null;
+  if (!trace) {
+    return Object.keys(fallbackBreakdown).length > 0
+      ? { version: 1, event_count: 0, latency_breakdown: fallbackBreakdown, events: [] }
+      : null;
+  }
   if (Array.isArray(trace)) {
-    return { version: 1, event_count: trace.length, events: trace };
+    return {
+      version: 1,
+      event_count: trace.length,
+      latency_breakdown: fallbackBreakdown,
+      events: trace,
+    };
   }
   if (!Array.isArray(trace.events)) {
-    return { ...trace, event_count: 0, events: [] };
+    return {
+      ...trace,
+      event_count: 0,
+      latency_breakdown: pickLatencyBreakdown(trace.latency_breakdown, fallbackBreakdown),
+      events: [],
+    };
   }
   return {
     version: trace.version || 1,
     captured_at: trace.captured_at || null,
     event_count: trace.event_count ?? trace.events.length,
+    latency_breakdown: pickLatencyBreakdown(trace.latency_breakdown, fallbackBreakdown),
     events: trace.events,
   };
 }
@@ -121,6 +166,83 @@ function readTurnTimestamp(call, turn, index, totalTurns) {
       : Math.max(totalTurns, 1) * 12000;
   const estimatedOffset = Math.round(((index + 1) / (totalTurns + 1)) * durationMs);
   return { timestamp: new Date(startedMs + estimatedOffset).toISOString(), estimated: true };
+}
+
+function readContextEventTimestamp(call, event) {
+  const explicitMs = toMs(event?.timestamp);
+  if (explicitMs != null) {
+    return { timestamp: new Date(explicitMs).toISOString(), estimated: false };
+  }
+
+  const startedMs = toMs(call.startedAt);
+  if (startedMs == null) {
+    return { timestamp: call.startedAt, estimated: true };
+  }
+
+  const offsetMs = Number(event?.timestamp_offset_ms ?? event?.timestampOffsetMs);
+  if (Number.isFinite(offsetMs) && offsetMs >= 0) {
+    return { timestamp: new Date(startedMs + offsetMs).toISOString(), estimated: false };
+  }
+
+  return { timestamp: call.startedAt, estimated: true };
+}
+
+function contextEventTimelineType(event) {
+  const source = String(event?.source || '').toLowerCase();
+  const stage = String(event?.metadata?.stage || '').toLowerCase();
+
+  if (source === 'call_lifecycle') {
+    return stage === 'call.answer_to_ws' ? 'call.connected' : 'call.lifecycle';
+  }
+  if (stage.startsWith('tool.')) return 'latency.tool';
+  if (stage.startsWith('director.')) return 'latency.director';
+  if (stage.startsWith('prefetch.') || stage.startsWith('memory_gate.')) return 'latency.memory';
+  if (stage.startsWith('transcription.')) return 'latency.transcription';
+  if (stage === 'llm_ttfb') return 'latency.llm';
+  if (stage === 'tts_ttfb') return 'latency.tts';
+  if (stage === 'turn.total') return 'latency.turn';
+  if (source.includes('tool')) return 'latency.tool';
+  return 'latency.stage';
+}
+
+function shouldIncludeContextTimelineEvent(event) {
+  if (!event) return false;
+  const source = String(event.source || '').toLowerCase();
+  const action = String(event.action || '').toLowerCase();
+  const stage = String(event?.metadata?.stage || '').toLowerCase();
+
+  return source === 'call_lifecycle'
+    || event.latency_ms != null
+    || stage !== ''
+    || action === 'called'
+    || action === 'result'
+    || action === 'failed';
+}
+
+function buildContextTimelineEvents(call, contextTrace) {
+  const events = Array.isArray(contextTrace?.events) ? contextTrace.events : [];
+  return events
+    .filter(shouldIncludeContextTimelineEvent)
+    .map((event) => {
+      const { timestamp, estimated } = readContextEventTimestamp(call, event);
+      return {
+        type: contextEventTimelineType(event),
+        timestamp,
+        data: {
+          label: event.label,
+          source: event.source,
+          action: event.action,
+          provider: event.provider,
+          stage: event?.metadata?.stage || null,
+          latencyMs: event.latency_ms ?? null,
+          turnSequence: event.turn_sequence ?? null,
+          itemCount: event.item_count ?? null,
+          content: event.content || null,
+          estimatedTimestamp: estimated,
+        },
+        metadata: event.metadata || {},
+      };
+    });
 }
 
 function auditObservabilityRead(req, resourceId = null, metadata = {}) {
@@ -336,6 +458,9 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
       return res.status(404).json({ error: 'Call not found' });
     }
 
+    const infraMetric = await fetchLatestInfraMetric(call.callSid);
+    const contextTrace = readContextTrace(infraMetric);
+
     // Build timeline from transcript
     const timeline = [];
     const transcript = readTranscript(call);
@@ -394,10 +519,21 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
       });
     }
 
+    timeline.push(...buildContextTimelineEvents(call, contextTrace));
+
+    const orderedTimeline = timeline
+      .map((event, index) => ({ event, index }))
+      .sort((a, b) => {
+        const aMs = toMs(a.event.timestamp) ?? 0;
+        const bMs = toMs(b.event.timestamp) ?? 0;
+        return aMs - bMs || a.index - b.index;
+      })
+      .map(({ event }) => event);
+
     auditObservabilityRead(req, call.id, {
       endpoint: 'timeline',
       seniorId: call.seniorId,
-      eventCount: timeline.length,
+      eventCount: orderedTimeline.length,
     });
     res.json({
       callId: call.id,
@@ -406,7 +542,7 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
       startedAt: call.startedAt,
       endedAt: call.endedAt,
       status: call.status || 'completed',
-      timeline,
+      timeline: orderedTimeline,
     });
   } catch (error) {
     routeError(res, error, 'GET /api/observability/calls/:id/timeline');
@@ -643,8 +779,9 @@ router.get('/api/observability/calls/:id/context', requireAdmin, async (req, res
 
     const infraMetric = await fetchLatestInfraMetric(call.callSid);
     const contextTrace = readContextTrace(infraMetric);
-    const latency = infraMetric?.latency || {};
+    const latency = readLatency(infraMetric);
     const toolsUsed = infraMetric?.tools_used || [];
+    const hasLatencyBreakdown = Object.keys(contextTrace?.latency_breakdown || {}).length > 0;
 
     auditObservabilityRead(req, req.params.id, {
       endpoint: 'call_context',
@@ -656,10 +793,10 @@ router.get('/api/observability/calls/:id/context', requireAdmin, async (req, res
       callSid: call.callSid,
       status: call.status,
       durationSeconds: call.durationSeconds,
-      contextTrace: contextTrace || { version: 1, event_count: 0, events: [] },
+      contextTrace: contextTrace || { version: 1, event_count: 0, latency_breakdown: {}, events: [] },
       latency,
       toolsUsed,
-      captured: Boolean(contextTrace?.events?.length),
+      captured: Boolean((contextTrace?.events?.length || 0) || hasLatencyBreakdown),
       schemaReady: Boolean(infraMetric && Object.prototype.hasOwnProperty.call(infraMetric, 'context_trace_encrypted')),
     });
   } catch (error) {

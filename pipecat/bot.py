@@ -45,6 +45,7 @@ from processors.conversation_tracker import ConversationState, ConversationTrack
 from processors.guidance_stripper import GuidanceStripperProcessor
 from processors.metrics_logger import MetricsLoggerProcessor
 from processors.quick_observer import QuickObserverProcessor
+from services.context_trace import record_context_event, record_latency_event
 from services.post_call import run_post_call
 
 class WebSocketAuthError(Exception):
@@ -306,9 +307,11 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     stream_sid = call_data.get("stream_id", "")
     call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "unknown")
     session_state["call_sid"] = call_sid
+    trace_start = None
 
     # Populate session_state from call_metadata (pre-fetched by /voice/answer)
     if metadata:
+        trace_start = metadata.get("_trace_start_time")
         # Use `or` assignment — setdefault won't overwrite pre-initialized None values
         session_state["senior"] = session_state.get("senior") or metadata.get("senior")
         session_state["senior_id"] = session_state.get("senior_id") or (metadata.get("senior") or {}).get("id")
@@ -381,6 +384,62 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             mem_len=len(session_state.get("memory_context") or ""),
             gr=bool(session_state.get("greeting")),
             rem=bool(session_state.get("reminder_prompt")),
+        )
+
+    if trace_start is None:
+        trace_start = session_state.get("_trace_start_time") or start_time
+    try:
+        session_state["_trace_start_time"] = float(trace_start)
+    except (TypeError, ValueError):
+        session_state["_trace_start_time"] = start_time
+
+    if metadata:
+        if metadata.get("_voice_answer_context_ms") is not None:
+            record_latency_event(
+                session_state,
+                stage="call.voice_answer_context",
+                source="call_lifecycle",
+                action="completed",
+                label="Voice answer context ready",
+                provider="voice_answer",
+                latency_ms=metadata.get("_voice_answer_context_ms"),
+                metadata={"phase": "voice_answer"},
+            )
+        if metadata.get("_voice_answer_total_ms") is not None:
+            record_latency_event(
+                session_state,
+                stage="call.voice_answer_total",
+                source="call_lifecycle",
+                action="completed",
+                label="Voice answer TwiML returned",
+                provider="voice_answer",
+                latency_ms=metadata.get("_voice_answer_total_ms"),
+                metadata={"phase": "voice_answer"},
+            )
+        completed_at = metadata.get("_voice_answer_completed_at")
+        if completed_at:
+            try:
+                answer_to_ws_ms = round((time.time() - float(completed_at)) * 1000)
+            except (TypeError, ValueError):
+                answer_to_ws_ms = None
+            if answer_to_ws_ms is not None:
+                record_latency_event(
+                    session_state,
+                    stage="call.answer_to_ws",
+                    source="call_lifecycle",
+                    action="connected",
+                    label="Voice answer to media stream",
+                    provider="twilio_media_stream",
+                    latency_ms=answer_to_ws_ms,
+                    metadata={"stream_sid": stream_sid},
+                )
+        record_context_event(
+            session_state,
+            source="call_lifecycle",
+            action="connected",
+            label="Twilio media stream connected",
+            provider="twilio_media_stream",
+            metadata={"stream_sid": stream_sid, "call_sid": call_sid},
         )
 
     # Also merge custom parameters from TwiML <Stream> params
@@ -610,7 +669,18 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
         # Warm up Groq TCP+TLS immediately before greeting plays.
         from services.director_llm import warmup_fast_providers
         asyncio.create_task(warmup_fast_providers())
+        init_start = time.time()
         await flow_manager.initialize(initial_node)
+        record_latency_event(
+            session_state,
+            stage="call.flow_initialize",
+            source="call_lifecycle",
+            action="initialized",
+            label="Flow initialized",
+            provider="pipecat_flows",
+            latency_ms=(time.time() - init_start) * 1000,
+            metadata={"node": getattr(initial_node, "name", None)},
+        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_disconnected(transport_ref, websocket_ref):

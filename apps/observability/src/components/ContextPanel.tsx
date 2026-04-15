@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useCallContextTrace } from '../hooks/useApi';
-import type { ContextTraceEvent } from '../types';
+import type { ContextTraceEvent, LatencyBreakdownStat } from '../types';
 
 interface ContextPanelProps {
   callId: string;
@@ -10,6 +10,11 @@ export function ContextPanel({ callId }: ContextPanelProps) {
   const { data, loading, error } = useCallContextTrace(callId);
   const events = data?.contextTrace.events || [];
   const stats = useMemo(() => summarizeEvents(events), [events]);
+  const latencyBreakdown = useMemo(
+    () => sortLatencyBreakdown(readLatencyBreakdown(data)),
+    [data?.contextTrace.latency_breakdown, data?.latency?.stage_breakdown]
+  );
+  const hasTraceData = events.length > 0 || latencyBreakdown.length > 0;
 
   if (loading) {
     return <div className="context-panel loading">Loading context flow...</div>;
@@ -19,7 +24,7 @@ export function ContextPanel({ callId }: ContextPanelProps) {
     return <div className="context-panel error">Error: {error}</div>;
   }
 
-  if (!data || events.length === 0) {
+  if (!data || !hasTraceData) {
     return (
       <div className="context-panel empty">
         <p>No LLM context trace for this call</p>
@@ -45,17 +50,54 @@ export function ContextPanel({ callId }: ContextPanelProps) {
         <ContextStat label="Prompt Seeds" value={stats.seeded.toLocaleString()} />
         <ContextStat label="Memory Events" value={stats.memory.toLocaleString()} />
         <ContextStat label="Web Search" value={stats.web.toLocaleString()} tone={stats.web > 0 ? 'good' : undefined} />
+        <ContextStat label="Latency Stages" value={latencyBreakdown.length.toLocaleString()} />
         <ContextStat label="LLM TTFB" value={formatMs(data.latency?.llm_ttfb_avg_ms)} />
         <ContextStat label="Turn Latency" value={formatMs(data.latency?.turn_avg_ms)} />
       </div>
 
+      {latencyBreakdown.length > 0 && (
+        <section className="context-section">
+          <h4>Latency Breakdown</h4>
+          <div className="metrics-table-wrapper">
+            <table className="metrics-table">
+              <thead>
+                <tr>
+                  <th>Stage</th>
+                  <th>Avg</th>
+                  <th>P95</th>
+                  <th>Max</th>
+                  <th>Samples</th>
+                </tr>
+              </thead>
+              <tbody>
+                {latencyBreakdown.map(([stage, entry]) => (
+                  <tr key={stage}>
+                    <td>{formatStageLabel(stage)}</td>
+                    <td>{formatMs(entry.avg_ms)}</td>
+                    <td>{formatMs(entry.p95_ms)}</td>
+                    <td>{formatMs(entry.max_ms)}</td>
+                    <td>{entry.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       <section className="context-section">
         <h4>Context Timeline</h4>
-        <div className="context-flow">
-          {events.map((event) => (
-            <ContextEventCard key={`${event.sequence}-${event.source}-${event.action}`} event={event} />
-          ))}
-        </div>
+        {events.length > 0 ? (
+          <div className="context-flow">
+            {events.map((event) => (
+              <ContextEventCard key={`${event.sequence}-${event.source}-${event.action}`} event={event} />
+            ))}
+          </div>
+        ) : (
+          <p className="empty-hint">
+            Encrypted prompt-context events were not available for this call. Latency summaries were recovered from persisted call metrics.
+          </p>
+        )}
       </section>
     </div>
   );
@@ -172,4 +214,57 @@ function formatMetadataValue(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function sortLatencyBreakdown(
+  breakdown: Record<string, LatencyBreakdownStat>
+): Array<[string, LatencyBreakdownStat]> {
+  return Object.entries(breakdown).sort((a, b) => {
+    const stageOrder = preferredStageOrder(a[0]) - preferredStageOrder(b[0]);
+    if (stageOrder !== 0) return stageOrder;
+    return (b[1]?.avg_ms || 0) - (a[1]?.avg_ms || 0);
+  });
+}
+
+function readLatencyBreakdown(
+  data: ReturnType<typeof useCallContextTrace>['data']
+): Record<string, LatencyBreakdownStat> {
+  const traceBreakdown = data?.contextTrace.latency_breakdown || {};
+  if (Object.keys(traceBreakdown).length > 0) {
+    return traceBreakdown;
+  }
+  return data?.latency?.stage_breakdown || {};
+}
+
+function preferredStageOrder(stage: string): number {
+  const order = [
+    'call.voice_answer_context',
+    'call.voice_answer_total',
+    'call.answer_to_ws',
+    'call.flow_initialize',
+    'transcription.window',
+    'transcription.finalize_gap',
+    'director.query',
+    'director.speculative',
+    'director.fallback',
+    'prefetch.interim',
+    'prefetch.final',
+    'prefetch.director',
+    'memory_gate.wait',
+    'tool.web_search',
+    'tool.mark_reminder_acknowledged',
+    'llm_ttfb',
+    'tts_ttfb',
+    'turn.total',
+  ];
+  const index = order.indexOf(stage);
+  return index === -1 ? order.length + 1 : index;
+}
+
+function formatStageLabel(stage: string): string {
+  return stage
+    .split('.')
+    .map((part) => part.replace(/_/g, ' '))
+    .map((part) => part.replace(/\b\w/g, (char) => char.toUpperCase()))
+    .join(' / ');
 }

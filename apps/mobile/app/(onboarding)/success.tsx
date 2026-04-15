@@ -15,7 +15,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Button } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
-import { api } from "@/src/lib/api";
+import { ApiError, api } from "@/src/lib/api";
 import { useStableIdempotencyKey } from "@/src/hooks/useStableIdempotencyKey";
 import {
   useOnboardingStore,
@@ -166,6 +166,28 @@ export default function SuccessScreen() {
     opacity: iconOpacity.value,
   }));
 
+  function getAlertMessage(err: unknown): string {
+    if (err instanceof ApiError) {
+      const details = Array.isArray(err.body?.details) ? err.body.details : [];
+      const firstDetail = details.find(
+        (detail): detail is { field?: unknown; message?: unknown } =>
+          typeof detail === "object" && detail !== null,
+      );
+
+      if (firstDetail?.field && firstDetail?.message) {
+        return `${String(firstDetail.field)}: ${String(firstDetail.message)}`;
+      }
+
+      return err.message;
+    }
+
+    if (err instanceof Error) {
+      return err.message;
+    }
+
+    return "Something went wrong";
+  }
+
   async function handleContinue() {
     setLoading(true);
     try {
@@ -214,9 +236,7 @@ export default function SuccessScreen() {
       store.reset();
       router.replace("/(tabs)");
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Something went wrong";
-      Alert.alert("Error", message);
+      Alert.alert("Error", getAlertMessage(err));
     } finally {
       setLoading(false);
     }

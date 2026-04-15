@@ -151,8 +151,12 @@ appId: com.donna.caregiver
 - tapOn:
     id: "input-email"
 - inputText: "jane+clerk_test@getdonna.ai"
+- pressKey: enter
 - tapOn:
     id: "input-phone"
+- tapOn:
+    id: "input-phone"
+    optional: true
 - inputText: "5551234567"
 
 # Dismiss phone-pad keyboard (no Return key) by tapping non-interactive heading
@@ -169,8 +173,13 @@ appId: com.donna.caregiver
 - tapOn:
     id: "input-their-name"
 - inputText: "Margaret"
+- pressKey: enter
 - tapOn:
     id: "input-their-phone"
+- tapOn:
+    id: "input-their-phone"
+    optional: true
+- eraseText: 20
 - inputText: ${output.onboardingSeniorPhone}
 
 # Relationship picker

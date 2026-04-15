@@ -15,6 +15,8 @@ import {
 import { getAccessibleSeniorIds, canAccessSenior, routeError } from './helpers.js';
 import { logAudit, writeAudit, authToRole } from '../services/audit.js';
 import { decrypt, decryptJson } from '../lib/encryption.js';
+import { normalizeCallAnalysis } from '../services/call-analyses.js';
+import { decryptDailyContextPhi, decryptReminderPhi } from '../lib/phi.js';
 
 const router = Router();
 
@@ -318,9 +320,9 @@ router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamS
       senior,
       conversations: seniorConversations.map(decryptExportConversation),
       memories: seniorMemories.map(decryptExportMemory),
-      reminders: seniorReminders,
-      callAnalyses: seniorAnalyses,
-      dailyContext: seniorDailyContext,
+      reminders: seniorReminders.map(decryptReminderPhi),
+      callAnalyses: seniorAnalyses.map(normalizeCallAnalysis).filter(Boolean),
+      dailyContext: seniorDailyContext.map(decryptDailyContextPhi),
       caregiverLinks: seniorCaregiverLinks,
     });
   } catch (error) {

@@ -8,8 +8,11 @@ export const seniors = pgTable('seniors', {
   timezone: varchar('timezone', { length: 100 }).default('America/New_York'),
   interests: text('interests').array(),
   familyInfo: json('family_info'),
+  familyInfoEncrypted: text('family_info_encrypted'),
   medicalNotes: text('medical_notes'),
+  medicalNotesEncrypted: text('medical_notes_encrypted'),
   preferredCallTimes: json('preferred_call_times'),
+  preferredCallTimesEncrypted: text('preferred_call_times_encrypted'),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
@@ -18,6 +21,9 @@ export const seniors = pgTable('seniors', {
   state: varchar('state', { length: 50 }),
   zipCode: varchar('zip_code', { length: 20 }),
   additionalInfo: text('additional_info'),
+  additionalInfoEncrypted: text('additional_info_encrypted'),
+  callContextSnapshot: json('call_context_snapshot'),
+  callContextSnapshotEncrypted: text('call_context_snapshot_encrypted'),
 });
 
 // Conversations (call history)
@@ -61,7 +67,9 @@ export const reminders = pgTable('reminders', {
   seniorId: uuid('senior_id').references(() => seniors.id),
   type: varchar('type', { length: 50 }), // medication, appointment, custom
   title: varchar('title', { length: 255 }).notNull(),
+  titleEncrypted: text('title_encrypted'),
   description: text('description'),
+  descriptionEncrypted: text('description_encrypted'),
   scheduledTime: timestamp('scheduled_time'),
   isRecurring: boolean('is_recurring').default(false),
   cronExpression: varchar('cron_expression', { length: 100 }),
@@ -78,6 +86,7 @@ export const reminderDeliveries = pgTable('reminder_deliveries', {
   deliveredAt: timestamp('delivered_at'),             // When call was made
   acknowledgedAt: timestamp('acknowledged_at'),       // When user acknowledged
   userResponse: text('user_response'),                // What user said
+  userResponseEncrypted: text('user_response_encrypted'),
   // Status: pending, delivered, acknowledged, confirmed, retry_pending, max_attempts
   status: varchar('status', { length: 50 }).default('pending'),
   attemptCount: integer('attempt_count').default(0),  // Number of delivery attempts
@@ -121,6 +130,7 @@ export const dailyCallContext = pgTable('daily_call_context', {
   adviceGiven: text('advice_given').array(),
   keyMoments: json('key_moments'),
   summary: text('summary'),
+  contextEncrypted: text('context_encrypted'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -155,7 +165,9 @@ export const notifications = pgTable('notifications', {
   eventType: varchar('event_type', { length: 50 }).notNull(), // call_completed, concern_detected, reminder_missed, weekly_summary
   channel: varchar('channel', { length: 20 }).notNull(),      // sms, email
   content: text('content').notNull(),
+  contentEncrypted: text('content_encrypted'),
   metadata: json('metadata'),    // event-specific data (analysis id, concern details, etc.)
+  metadataEncrypted: text('metadata_encrypted'),
   sentAt: timestamp('sent_at').defaultNow(),
   readAt: timestamp('read_at'),  // for future in-app notification center
 });
@@ -190,6 +202,7 @@ export const waitlist = pgTable('waitlist', {
   phone: varchar('phone', { length: 50 }),
   whoFor: varchar('who_for', { length: 100 }),
   thoughts: text('thoughts'),
+  payloadEncrypted: text('payload_encrypted'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

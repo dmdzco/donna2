@@ -7,6 +7,7 @@ import { validateBody } from '../middleware/validate.js';
 import { onboardingSchema } from '../validators/schemas.js';
 import { maskName } from '../lib/sanitize.js';
 import { cronExpressionFromTime, resolveTimezoneFromProfile, wallTimeTodayToUtcDate } from '../lib/timezone.js';
+import { decryptReminderPhi, decryptSeniorPhi, encryptReminderPhi, encryptSeniorPhi } from '../lib/phi.js';
 import { routeError } from './helpers.js';
 
 const router = Router();
@@ -54,7 +55,7 @@ router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardin
 
     const { senior, createdReminders } = await db.transaction(async (tx) => {
       const [senior] = await tx.insert(seniors).values({
-        ...seniorCreateData,
+        ...encryptSeniorPhi(seniorCreateData),
         phone: normalizePhone(seniorCreateData.phone),
         timezone: resolveTimezoneFromProfile(seniorCreateData),
       }).returning();
@@ -75,19 +76,21 @@ router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardin
         for (const reminderTitle of reminderStrings) {
           if (reminderTitle.trim()) {
             const [reminder] = await tx.insert(reminders).values({
-              seniorId: senior.id,
-              type: 'custom',
-              title: reminderTitle.trim(),
+              ...encryptReminderPhi({
+                seniorId: senior.id,
+                type: 'custom',
+                title: reminderTitle.trim(),
+              }),
               isRecurring: true,
               scheduledTime: reminderScheduledTime,
               cronExpression: reminderCronExpression,
             }).returning();
-            createdReminders.push(reminder);
+            createdReminders.push(decryptReminderPhi(reminder));
           }
         }
       }
 
-      return { senior, createdReminders };
+      return { senior: decryptSeniorPhi(senior), createdReminders };
     });
 
     console.log(`[Onboarding] Completed: user=${clerkUserId}, senior=${maskName(senior.name)}, reminders=${createdReminders.length}`);

@@ -5,6 +5,7 @@ import twilio from 'twilio';
 import { Resend } from 'resend';
 import { clerkClient } from '@clerk/express';
 import { createLogger } from '../lib/logger.js';
+import { decryptNotificationPhi, encryptNotificationPhi } from '../lib/phi.js';
 
 const log = createLogger('Notifications');
 
@@ -28,6 +29,10 @@ const getResendClient = () => {
 
 const FROM_PHONE = process.env.TWILIO_PHONE_NUMBER;
 const FROM_EMAIL = process.env.NOTIFICATION_FROM_EMAIL || 'Donna <notifications@donna.care>';
+
+export function decryptNotificationRow(row) {
+  return decryptNotificationPhi(row);
+}
 
 // ---------------------------------------------------------------------------
 // Clerk contact info cache (clerkUserId → { email, phone, firstName })
@@ -250,12 +255,14 @@ export const notificationService = {
   async _sendSms(caregiverId, seniorId, eventType, content, metadata, phone) {
     // Always record the notification
     await db.insert(notifications).values({
-      caregiverId,
-      seniorId,
-      eventType,
-      channel: 'sms',
-      content,
-      metadata,
+      ...encryptNotificationPhi({
+        caregiverId,
+        seniorId,
+        eventType,
+        channel: 'sms',
+        content,
+        metadata,
+      }),
     });
 
     const client = getTwilioClient();
@@ -284,12 +291,14 @@ export const notificationService = {
   async _sendEmail(caregiverId, seniorId, eventType, content, metadata, email) {
     // Always record the notification
     await db.insert(notifications).values({
-      caregiverId,
-      seniorId,
-      eventType,
-      channel: 'email',
-      content,
-      metadata,
+      ...encryptNotificationPhi({
+        caregiverId,
+        seniorId,
+        eventType,
+        channel: 'email',
+        content,
+        metadata,
+      }),
     });
 
     const resend = getResendClient();
@@ -359,12 +368,14 @@ export const notificationService = {
       }
 
       await db.insert(notifications).values({
-        caregiverId,
-        seniorId,
-        eventType: 'weekly_summary',
-        channel: 'email',
-        content: `Weekly report for ${report.senior.name}`,
-        metadata: { period: report.period, calls: report.calls },
+        ...encryptNotificationPhi({
+          caregiverId,
+          seniorId,
+          eventType: 'weekly_summary',
+          channel: 'email',
+          content: `Weekly report for ${report.senior.name}`,
+          metadata: { period: report.period, calls: report.calls },
+        }),
       });
     } catch (error) {
       log.error('Weekly report failed', { error: error.message, caregiverId, seniorId });

@@ -138,13 +138,16 @@ class TestBuildTurnContent:
 
     def test_includes_today_date(self):
         from services.director_llm import _build_turn_content
-        from datetime import date
+        from datetime import datetime
+        from services.time_context import get_timezone
+
         session = {
             "senior": {"name": "Margaret"},
             "_call_start_time": time.time(),
         }
         result = _build_turn_content("Hello", session)
-        assert date.today().strftime("%B %d, %Y") in result
+        expected = datetime.now(get_timezone(None)).strftime("%B %d, %Y")
+        assert expected in result
 
 
 class TestGetDefaultDirection:

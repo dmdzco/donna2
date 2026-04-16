@@ -25,7 +25,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 ### Core Capabilities
 - Real-time voice calls (Telnyx Voice API → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3)
-- LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
+- LLM responses (Claude Haiku 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - Text-to-speech (ElevenLabs by default; Cartesia available behind provider flag; high-rate PCM internally before telephony conversion)
 - Semantic memory with decay + deduplication (pgvector + HNSW index)
 - Full in-call context retention (APPEND strategy, no summary truncation)
@@ -158,7 +158,7 @@ Phone Call → Telnyx → WebSocket → Pipecat Pipeline
                                        ▼
                              Context Aggregator (user)
                                        ▼
-                             Claude Sonnet 4.5 + Pipecat Flows (2 tools)
+                             Claude Haiku 4.5 + Pipecat Flows (2 tools)
                                        │ TextFrame
                                        ▼
                              Guidance Stripper → Conversation Tracker
@@ -289,7 +289,8 @@ TELNYX_L16_OUTPUT_BYTE_ORDER=little
 DATABASE_URL=postgresql://...           # Neon PostgreSQL + pgvector
 
 # AI Services
-ANTHROPIC_API_KEY=...                   # Claude Sonnet 4.5 (voice LLM)
+ANTHROPIC_API_KEY=...                   # Claude Haiku 4.5 (voice LLM)
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001 # Voice LLM model
 GOOGLE_API_KEY=...                      # Gemini 3 Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...                    # STT (Nova 3)
 ELEVENLABS_API_KEY=...                  # TTS

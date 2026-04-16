@@ -1,7 +1,7 @@
 """LLM-to-LLM voice simulation tests.
 
 Runs Haiku (synthetic caller) against the real Donna pipeline with:
-- Real Claude Sonnet (LLM responses)
+- Real Claude Haiku (LLM responses)
 - Real Director (Groq speculative analysis)
 - Real Quick Observer (268 regex patterns, goodbye detection)
 - Real tool handlers (web_search -> Tavily, mark_reminder -> DB)

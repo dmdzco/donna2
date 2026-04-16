@@ -18,7 +18,7 @@ User speaks → [STT] → [Observer] → [Director] → [LLM] → [TTS] → Audi
 | Deepgram STT | ~200-300ms | Streaming | Nova 3, Telnyx L16/16k PCM, interim results |
 | Quick Observer | 0ms | Blocking | Regex pattern data, inline |
 | Conversation Director | Async | Non-blocking | Groq primary, Gemini fallback; speculative results can be injected same-turn |
-| Claude Sonnet 4.5 | ~500-1500ms | Streaming | Token-by-token via Pipecat |
+| Claude Haiku 4.5 | ~400-900ms | Streaming | Token-by-token via Pipecat; live dev calls showed materially lower TTFB than Sonnet |
 | TTS | ~200-400ms | Streaming | ElevenLabs by default; active Telnyx calls request 16kHz PCM for stable output frames |
 | **Total perceived** | **~1-2s** | | First audio chunk to user |
 

@@ -71,7 +71,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Context Pre-caching** - Senior context + news cached at 5 AM local time, news persisted to `seniors.cached_news`
 - Real-time voice calls (Telnyx Voice API → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3 via Pipecat)
-- LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
+- LLM responses (Claude Haiku 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - TTS (ElevenLabs via Pipecat)
 - VAD (Silero — confidence=0.6, min_volume=0.5; stop_secs=1.2 for senior calls, 0.8 for onboarding calls)
 - News via OpenAI web search (1hr cache), in-call web search via Tavily (raw results, no LLM answer)
@@ -149,7 +149,7 @@ Telnyx Audio ──► FastAPIWebsocketTransport
                         ▼
               Context Aggregator (user) ← builds LLM context from transcriptions
                         ▼
-              Claude Sonnet 4.5 + FlowManager (4-phase state machine)
+              Claude Haiku 4.5 + FlowManager (4-phase state machine)
                         │ TextFrame
                         ▼
               Conversation Tracker (topics, questions, advice + shared transcript)
@@ -568,7 +568,8 @@ TELNYX_CONNECTION_ID=...
 DATABASE_URL=...                 # Neon PostgreSQL
 
 # AI Services
-ANTHROPIC_API_KEY=...            # Claude Sonnet (voice LLM)
+ANTHROPIC_API_KEY=...            # Claude Haiku (voice LLM)
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001 # Voice LLM model
 GOOGLE_API_KEY=...               # Gemini Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...             # STT
 ELEVENLABS_API_KEY=...           # TTS (ElevenLabs)

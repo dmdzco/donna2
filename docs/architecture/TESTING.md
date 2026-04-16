@@ -97,7 +97,7 @@ Full call lifecycle from WebSocket connect to post-call processing:
 
 Set `LOAD_TEST_MODE=true` to swap real services for mocks in the pipeline:
 - Deepgram STT → MockSTTProcessor
-- Claude Sonnet → MockLLMProcessor (returns canned responses)
+- Claude Haiku → MockLLMProcessor (returns canned responses)
 - TTS service → MockTTSProcessor
 
 This isolates pipeline/transport/DB performance from external API latency during load tests.

@@ -2,7 +2,7 @@
 
 Assembles the production pipeline from ``bot.py`` but replaces external
 I/O components (Twilio transport, Deepgram STT, ElevenLabs/Cartesia TTS)
-with test doubles.  Everything else -- Claude Sonnet, Quick Observer,
+with test doubles.  Everything else -- Claude Haiku, Quick Observer,
 Conversation Director, FlowManager, tool handlers -- runs for real.
 
 Usage::
@@ -62,7 +62,7 @@ class LiveSimComponents:
         conversation_director: Layer 2 Groq speculative analysis.
         conversation_tracker: Assistant-side question/advice tracking.
         flow_manager: 4-phase call state machine.
-        llm: Real ``AnthropicLLMService`` (Claude Sonnet with prompt caching).
+        llm: Real ``AnthropicLLMService`` (Claude Haiku with prompt caching).
         tts: ``MockTTSProcessor`` that captures text without audio.
         session_state: The shared session dict.
     """
@@ -134,11 +134,11 @@ def build_live_sim_pipeline(session_state: dict) -> LiveSimComponents:
     output_transport = TestOutputTransport()
 
     # -----------------------------------------------------------------
-    # Real LLM (Claude Sonnet with prompt caching)
+    # Real LLM (Claude Haiku with prompt caching)
     # -----------------------------------------------------------------
     llm = AnthropicLLMService(
         api_key=api_key,
-        model="claude-sonnet-4-5-20250929",
+        model="claude-haiku-4-5-20251001",
         params=AnthropicLLMService.InputParams(
             enable_prompt_caching=True,
         ),

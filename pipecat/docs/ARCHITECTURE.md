@@ -10,10 +10,11 @@
                      └─────────────┬────────────────────────┘
                                    │
                     ┌──────────────▼──────────────┐
-                    │   /telnyx/events + /outbound  │
-                    │   Fetches senior context,      │
-                    │   creates conversation,        │
-                    │   starts media stream to /ws   │
+                    │ /telnyx/prewarm + events     │
+                    │ + /outbound                  │
+                    │ Reuses or fetches senior     │
+                    │ context, creates conversation│
+                    │ starts media stream to /ws   │
                     └──────────────┬───────────────┘
                                    │ WebSocket
                     ┌──────────────▼──────────────┐

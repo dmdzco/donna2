@@ -56,6 +56,7 @@ export async function initiateTelnyxOutboundCall({
   reminderId,
   scheduledFor,
   existingDeliveryId,
+  prewarmedContext,
   baseUrl,
 }) {
   return postPipecat('/telnyx/outbound', {
@@ -64,6 +65,22 @@ export async function initiateTelnyxOutboundCall({
     ...(reminderId ? { reminderId } : {}),
     ...(scheduledFor ? { scheduledFor } : {}),
     ...(existingDeliveryId ? { existingDeliveryId } : {}),
+    ...(prewarmedContext ? { prewarmedContext } : {}),
+  }, { baseUrl });
+}
+
+export async function prewarmTelnyxOutboundContext({
+  seniorId,
+  callType = 'reminder',
+  reminderId,
+  scheduledFor,
+  baseUrl,
+}) {
+  return postPipecat('/telnyx/prewarm', {
+    seniorId,
+    callType,
+    ...(reminderId ? { reminderId } : {}),
+    ...(scheduledFor ? { scheduledFor } : {}),
   }, { baseUrl });
 }
 

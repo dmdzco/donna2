@@ -101,6 +101,8 @@ The Node.js scheduler is authoritative for production reminder and welfare calls
 
 Node builds a unified call plan, prioritizes reminders over welfare checks, gates all calls through the senior's local calling window, retries service-to-service Telnyx outbound requests, and asks Pipecat `/telnyx/outbound` to create the calls.
 
+For scheduled reminder calls, the leader scheduler also runs a short lookahead sweep and prewarms reminder context before the call is due. It asks Pipecat `/telnyx/prewarm` to build the outbound senior context, stores that payload in a short-lived local cache keyed by `reminder_id + scheduled_for`, and reuses it on the later `/telnyx/outbound` request. If the warm entry is missing or stale, Pipecat falls back to live hydration.
+
 Pipecat's helper scheduler still supports parallel initiation with a limiter:
 
 ```python

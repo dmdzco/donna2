@@ -6,7 +6,7 @@
 
 **Architecture:** `TextCallerTransport` injects `InterimTranscriptionFrame` + `TranscriptionFrame` with simulated speech timing into a real Pipecat pipeline (minus Twilio/STT/TTS). `CallerAgent` (Haiku) improvises natural speech from a scenario persona + goals. `ResponseCollector` captures Donna's output, tool calls, and latency. Multi-call runner sequences calls against the Neon dev DB, asserting on DB state between calls. Phase 2 swaps `TextCallerTransport` for `AudioCallerTransport` (real TTS+STT at the boundaries) with zero changes to CallerAgent, scenarios, or assertions.
 
-**Tech Stack:** pytest, asyncio, anthropic SDK (Haiku), Pipecat pipeline (real Claude Sonnet / Director / Observer), Neon dev DB (asyncpg), existing test infrastructure (`tests/mocks/`, `tests/helpers/`)
+**Tech Stack:** pytest, asyncio, anthropic SDK (Haiku), Pipecat pipeline (real Claude Haiku / Director / Observer), Neon dev DB (asyncpg), existing test infrastructure (`tests/mocks/`, `tests/helpers/`)
 
 ---
 
@@ -800,7 +800,7 @@ async def build_live_sim_pipeline(session_state: dict) -> LiveSimComponents:
     """Build a real pipeline for LLM-to-LLM simulation.
 
     Uses real:
-    - AnthropicLLMService (Claude Sonnet) with prompt caching
+    - AnthropicLLMService (Claude Haiku) with prompt caching
     - ConversationDirectorProcessor (Groq/Cerebras speculative analysis)
     - QuickObserverProcessor (268 regex patterns + goodbye detection)
     - Tool handlers (web_search calls real Tavily, mark_reminder writes real DB)
@@ -823,7 +823,7 @@ async def build_live_sim_pipeline(session_state: dict) -> LiveSimComponents:
     # Real LLM
     llm = AnthropicLLMService(
         api_key=os.environ["ANTHROPIC_API_KEY"],
-        model="claude-sonnet-4-5-20250929",
+        model="claude-haiku-4-5-20251001",
         params=AnthropicLLMService.InputParams(
             enable_prompt_caching=True,
         ),
@@ -1622,7 +1622,7 @@ The actual pytest test file. Runs multi-call scenarios against the dev database.
 """LLM-to-LLM voice simulation tests.
 
 Runs Haiku (synthetic caller) against the real Donna pipeline with:
-- Real Claude Sonnet (LLM responses)
+- Real Claude Haiku (LLM responses)
 - Real Director (Groq/Cerebras speculative analysis)
 - Real Quick Observer (268 regex patterns, goodbye detection)
 - Real tool handlers (web_search → Tavily, mark_reminder → DB)

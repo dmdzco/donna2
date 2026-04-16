@@ -168,6 +168,7 @@ get_public_url() {
 
 # Read key production vars from Pipecat service
 ANTHROPIC_API_KEY=$(get_prod_var donna-pipecat ANTHROPIC_API_KEY)
+ANTHROPIC_MODEL=$(get_prod_var donna-pipecat ANTHROPIC_MODEL)
 DEEPGRAM_API_KEY=$(get_prod_var donna-pipecat DEEPGRAM_API_KEY)
 ELEVENLABS_API_KEY=$(get_prod_var donna-pipecat ELEVENLABS_API_KEY)
 ELEVENLABS_VOICE_ID=$(get_prod_var donna-pipecat ELEVENLABS_VOICE_ID)
@@ -296,6 +297,7 @@ set_dev_var donna-pipecat TELNYX_PUBLIC_KEY "$TELNYX_PUBLIC_KEY"
 set_dev_var donna-pipecat TELNYX_PHONE_NUMBER "$DEV_TELNYX_NUMBER"
 set_dev_var donna-pipecat TELNYX_CONNECTION_ID "$TELNYX_CONNECTION_ID"
 set_dev_var donna-pipecat ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
+set_dev_var donna-pipecat ANTHROPIC_MODEL "${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}"
 set_dev_var donna-pipecat DEEPGRAM_API_KEY "$DEEPGRAM_API_KEY"
 set_dev_var donna-pipecat ELEVENLABS_API_KEY "$ELEVENLABS_API_KEY"
 set_dev_var donna-pipecat ELEVENLABS_VOICE_ID "$ELEVENLABS_VOICE_ID"
@@ -353,6 +355,7 @@ set_staging_var donna-pipecat TELNYX_PUBLIC_KEY "$TELNYX_PUBLIC_KEY"
 set_staging_var donna-pipecat TELNYX_PHONE_NUMBER "$DEV_TELNYX_NUMBER"
 set_staging_var donna-pipecat TELNYX_CONNECTION_ID "$TELNYX_CONNECTION_ID"
 set_staging_var donna-pipecat ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
+set_staging_var donna-pipecat ANTHROPIC_MODEL "${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}"
 set_staging_var donna-pipecat DEEPGRAM_API_KEY "$DEEPGRAM_API_KEY"
 set_staging_var donna-pipecat ELEVENLABS_API_KEY "$ELEVENLABS_API_KEY"
 set_staging_var donna-pipecat ELEVENLABS_VOICE_ID "$ELEVENLABS_VOICE_ID"

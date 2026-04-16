@@ -93,7 +93,7 @@ The **senior** sells the product to the **caregiver**. No ads, no hard sell. "Mo
 |---------|------|
 | TTS (ElevenLabs default) | ~$0.30 |
 | Voice carrier + stream (Twilio) | ~$0.18 |
-| Voice LLM (Claude Sonnet 4.5, cached) | ~$0.08 |
+| Voice LLM (Claude Haiku 4.5, cached) | ~$0.03 |
 | STT (Deepgram Nova 3) | ~$0.08 |
 | News/search + caregiver SMS | ~$0.04 |
 | Director/post-call/memory/compute | ~$0.02 |
@@ -232,7 +232,7 @@ Real-time voice pipeline built on Pipecat (open source):
 
 ```
 Phone call → Deepgram STT → Quick Observer (regex) → Conversation Director (Groq)
-  → Claude Sonnet 4.5 → ElevenLabs TTS by default (Cartesia optional) → Phone call
+  → Claude Haiku 4.5 → ElevenLabs TTS by default (Cartesia optional) → Phone call
 
 Background: Memory prefetch, Claude web_search tool when needed, call analysis, caregiver notifications
 ```

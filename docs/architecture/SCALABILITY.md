@@ -305,7 +305,7 @@ The ~700ms at 500 users includes network round-trip from macOS to us-east-1 Neon
 
 | Provider | Service | Current Limit | Need at 500 Concurrent | Status |
 |----------|---------|---------------|------------------------|--------|
-| **Anthropic** | Claude Sonnet 4.5 | 1,000 RPM / 450K input TPM | ~1,000 RPM / ~5M input TPM | **BLOCKER** — input tokens 11x over limit |
+| **Anthropic** | Claude Haiku 4.5 | 1,000 RPM / 450K input TPM | ~1,000 RPM / ~5M input TPM | **BLOCKER** — input tokens 11x over limit |
 | **ElevenLabs** | TTS Streaming | ~5 concurrent (Creator tier) | 500 concurrent | **BLOCKER** — 100x under capacity |
 | **Deepgram** | STT Streaming (Nova 3) | Unknown (pay-as-you-go) | 500 concurrent streams | **VERIFY** — contact Deepgram |
 | **Telnyx** | Voice Calls | Active Voice API application | 500 concurrent | **VERIFY** — confirm account capacity and WebSocket media limits |

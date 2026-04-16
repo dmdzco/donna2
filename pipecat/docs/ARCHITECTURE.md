@@ -80,7 +80,7 @@ Telnyx Audio ──► FastAPIWebsocketTransport
                         │
                         ▼
               ┌─────────────────────┐
-              │   Anthropic LLM      │  Claude Sonnet 4.5 (streaming)
+              │   Anthropic LLM      │  Claude Haiku 4.5 (streaming)
               │   + Flow Manager     │  2 tools, conditional reminder + main/wind-down/closing
               └─────────┬───────────┘
                         │ TextFrame
@@ -554,7 +554,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
 | **Phone** | Telnyx Voice API media streaming | WebSocket audio (L16 16kHz) |
-| **Voice LLM** | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | AnthropicLLMService (prompt caching enabled) |
+| **Voice LLM** | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Groq (`gpt-oss-20b`) | Primary fast provider |
 | **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Full guidance fallback when Groq unavailable |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
@@ -613,7 +613,8 @@ TELNYX_CONNECTION_ID=...
 DATABASE_URL=...
 
 # AI Services
-ANTHROPIC_API_KEY=...            # Claude Sonnet (voice LLM)
+ANTHROPIC_API_KEY=...            # Claude Haiku (voice LLM)
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001
 GOOGLE_API_KEY=...               # Gemini Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...             # STT
 ELEVENLABS_API_KEY=...           # TTS

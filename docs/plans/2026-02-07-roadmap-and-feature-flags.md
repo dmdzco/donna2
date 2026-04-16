@@ -560,7 +560,7 @@ Once GrowthBook is deployed, seed flags in these categories:
 | `vad_confidence` | value | 0.6 | VAD confidence threshold |
 | `vad_stop_secs` | value | 1.2 | Silence duration before speech end |
 | `vad_min_volume` | value | 0.5 | Minimum volume threshold |
-| `llm_model` | value | "claude-sonnet-4-5-20250929" | LLM model selection |
+| `llm_model` | value | "claude-haiku-4-5-20251001" | LLM model selection |
 | `llm_max_tokens` | value | 150 | Default max response tokens |
 | `stt_model` | value | "nova-3-general" | Deepgram STT model |
 | `audio_sample_rate` | value | 8000 | Audio sample rate |

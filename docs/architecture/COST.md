@@ -78,7 +78,7 @@ This document is now a forward-looking Telnyx model. It is not a historical carr
 |---|---|---|
 | Phone carrier | Telnyx Voice API + Elastic SIP Trunking + Media Streaming over WebSockets | Outbound local call model uses Voice API fee, SIP outbound fee, and media streaming fee. |
 | STT | Deepgram Nova-3 General streaming | Continuous stream for full call duration. |
-| Main voice LLM | Anthropic Claude Sonnet 4.x | Prompt caching remains assumed. Sonnet 4.5 and 4.6 have the same published token prices. |
+| Main voice LLM | Anthropic Claude Haiku 4.5 | Prompt caching remains assumed. Live dev tests showed materially lower TTFB than Sonnet while preserving Donna's voice quality. |
 | Director LLM | Groq `openai/gpt-oss-20b`, Gemini fallback | Runs off critical path for guidance/query extraction. |
 | Post-call analysis | Gemini 3 Flash Preview | Summaries, concerns, engagement, caregiver SMS copy. |
 | Memory extraction | OpenAI small model + embeddings | Runs post-call; embeddings are de minimis in cost. |
@@ -107,7 +107,7 @@ Important correction: the carrier baseline is Telnyx from this document forward,
 | Deepgram Aura-1 TTS | $0.015/1K chars | [Deepgram pricing](https://deepgram.com/pricing) |
 | ElevenLabs Flash TTS | $0.05/1K chars | [ElevenLabs API pricing](https://elevenlabs.io/pricing/api) |
 | Cartesia Sonic TTS | 1 credit/char; Scale annual plan implies about $0.030/1K chars | [Cartesia pricing](https://cartesia.ai/pricing) |
-| Claude Sonnet 4.x | $3/MTok input, $15/MTok output, $0.30/MTok cache read | [Anthropic pricing](https://claude.com/pricing) |
+| Claude Haiku 4.5 | $1/MTok input, $5/MTok output, $0.10/MTok cache read | [Anthropic pricing](https://claude.com/pricing) |
 | Groq GPT OSS 20B | $0.075/MTok input, $0.30/MTok output | [Groq pricing](https://groq.com/pricing) |
 | Gemini 3 Flash Preview | $0.50/MTok input, $3/MTok output | [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing) |
 | OpenAI web search preview | $25/1K calls for non-reasoning preview models | [OpenAI API pricing](https://developers.openai.com/api/docs/pricing) |
@@ -157,13 +157,13 @@ Sensitivity:
 
 ## Current Per-Call Cost
 
-**Forward default stack: Telnyx + Deepgram STT + Claude Sonnet + Groq Director + Gemini post-call + ElevenLabs TTS.**
+**Forward default stack: Telnyx + Deepgram STT + Claude Haiku + Groq Director + Gemini post-call + ElevenLabs TTS.**
 
 | Component | Usage | Cost / 10-min call |
 |---|---:|---:|
 | ElevenLabs TTS | 6,000 chars at $0.05/1K | $0.300 |
 | Telnyx voice + media streaming | 10 min at $0.0105/min | $0.105 |
-| Claude Sonnet 4.x | 15K uncached in, 55K cache-read, 1.5K out | $0.084 |
+| Claude Haiku 4.5 | 15K uncached in, 55K cache-read, 1.5K out | $0.028 |
 | Deepgram Nova-3 STT | 10 min stream | $0.077 |
 | Daily news + web search | 1 daily OpenAI news fetch + low Tavily usage | $0.027 |
 | Caregiver SMS | 1 outbound SMS segment plus blended carrier fee estimate | $0.010 |

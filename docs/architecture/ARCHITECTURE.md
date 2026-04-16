@@ -44,7 +44,7 @@ Telnyx L16/16k audio ──► FastAPIWebsocketTransport
                         ▼ (no delay)
               Context Aggregator (user) ← builds LLM context from transcriptions
                         ▼
-              Claude Sonnet 4.5 + FlowManager (4-phase state machine)
+              Claude Haiku 4.5 + FlowManager (4-phase state machine)
                         │ TextFrame
                         ▼
               Guidance Stripper (strips <guidance> tags + [BRACKETED] directives)
@@ -163,7 +163,7 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 |-----------|-----------|---------|
 | Voice Pipeline | Pipecat | v0.0.101+ |
 | Call State Machine | Pipecat Flows | v0.0.22+ |
-| Primary LLM | Anthropic Claude Sonnet 4.5 | claude-sonnet-4-5-20250929 |
+| Primary LLM | Anthropic Claude Haiku 4.5 | claude-haiku-4-5-20251001 |
 | Director LLM (active fast path) | Groq | gpt-oss-20b |
 | Director LLM (regular fallback helper) | Google Gemini Flash | gemini-3-flash-preview |
 | Post-Call Analysis | Google Gemini Flash | gemini-3-flash-preview |

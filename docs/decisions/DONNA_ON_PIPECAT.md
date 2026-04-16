@@ -29,7 +29,7 @@ Twilio → TwiML <Stream> → WebSocket
 │  │  ↓                                               │   │
 │  │ UserContextAggregator                            │   │
 │  │  ↓                                               │   │
-│  │ AnthropicLLMService (Claude Sonnet, tools)       │   │
+│  │ AnthropicLLMService (Claude Haiku, tools)        │   │
 │  │  ↓                                               │   │
 │  │ GuidanceStripperProcessor (strip <guidance> tags)│   │
 │  │  ↓                                               │   │
@@ -328,7 +328,7 @@ async def bot(runner_args: RunnerArguments):
         stt,
         quick_observer,         # Regex analysis → injects signals into context
         user_aggregator,        # Collects transcriptions → LLM context
-        llm,                    # Claude Sonnet with tools
+        llm,                    # Claude Haiku with tools
         guidance_stripper,      # Strip <guidance> tags before TTS
         tts,                    # ElevenLabs WebSocket TTS
         transport.output(),     # Audio back to Twilio

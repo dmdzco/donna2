@@ -8,35 +8,35 @@
 
 ## Executive Summary
 
-Donna's forward voice workflow assumes **Telnyx for phone voice, media streaming, and SMS**, **Claude Haiku 4.5 for the live voice LLM**, **Gemini 3 Flash Preview for completed-call analysis**, and **ElevenLabs Flash for TTS**. On that basis, the current modeled stack costs about **$0.56 per 10-minute completed outbound call**, or **$0.056 per live call minute**, before customer support, payroll, App Store fees, payment processing, compliance counsel, or CAC.
+Donna's forward voice workflow assumes **Telnyx for phone voice, media streaming, and SMS**, **Claude Haiku 4.5 for the live voice LLM**, **Gemini 3 Flash Preview for completed-call analysis**, and **ElevenLabs Flash for TTS**. Using measured production speech volume from **March 16, 2026 through April 15, 2026** as the baseline, the current modeled stack costs about **$0.47 per 10-minute completed outbound call**, or **$0.047 per live call minute**, before customer support, payroll, App Store fees, payment processing, compliance counsel, or CAC.
 
 For investor planning, model Donna as:
 
 | Usage profile | Minutes / user / week | ElevenLabs base COGS / user / month | Gross margin at $29 |
 |---|---:|---:|---:|
-| Light / sustainable | 60 | ~$15 | ~49% |
-| Moderate | 100 | ~$24 | ~16% |
-| Heavy companion usage | 130 | ~$32 | Negative |
+| Light / sustainable | 60 | ~$12 | ~58% |
+| Moderate | 100 | ~$21 | ~29% |
+| Heavy companion usage | 130 | ~$27 | ~8% |
 
-Carrier savings help, but the business implication is still clear: a **$29 unlimited plan only works if average usage stays near normal companion usage** and if we package usage carefully. At 130 minutes/week, the default Telnyx + ElevenLabs stack is still upside down.
+Carrier savings help, but the business implication is still clear: a **$29 unlimited plan only works if average usage stays near normal companion usage** and if we package usage carefully. At 130 minutes/week, the default Telnyx + ElevenLabs stack is still too thin for a healthy consumer gross margin once non-infra costs are included.
 
 Near-term operating assumption:
 
 | Stack | Cost / 10-min call | Cost / minute | Heavy user COGS at 130 min/week | Gross margin at $29 |
 |---|---:|---:|---:|---:|
-| Telnyx + ElevenLabs default | ~$0.56 | ~$0.056 | ~$32/mo | Negative |
+| Telnyx + ElevenLabs default | ~$0.47 | ~$0.047 | ~$27/mo | ~8% |
 
 Future speech-cost sensitivity only:
 
 | Stack | Cost / 10-min call | Cost / minute | Heavy user COGS at 130 min/week | Gross margin at $29 |
 |---|---:|---:|---:|---:|
-| Telnyx + Cartesia Sonic / Deepgram Aura-2 | ~$0.44 | ~$0.044 | ~$25/mo | ~14% |
-| Telnyx + Deepgram Aura-1 | ~$0.35 | ~$0.035 | ~$20/mo | ~31% |
-| Telnyx speech evaluation: Telnyx STT + Telnyx TTS | ~$0.36 | ~$0.036 | ~$20/mo | ~31% |
+| Telnyx + Cartesia Sonic / Deepgram Aura-2 | ~$0.37 | ~$0.037 | ~$21/mo | ~28% |
+| Telnyx + Deepgram Aura-1 | ~$0.32 | ~$0.032 | ~$18/mo | ~39% |
+| Telnyx speech evaluation: Telnyx STT + Telnyx TTS | ~$0.35 | ~$0.035 | ~$20/mo | ~32% |
 
 Deck-safe phrasing:
 
-> With Telnyx as the carrier baseline, Claude Haiku as the live voice LLM, Gemini Flash for post-call analysis, and ElevenLabs kept for voice quality, Donna's current infra COGS are roughly 5.6 cents per live call minute. At 60 minutes/week, that can support a $29 consumer plan before non-infra costs. At 130 minutes/week, Donna needs pricing tiers, usage caps, or premium packaging. Lower-cost TTS is upside, not the current base case.
+> With Telnyx as the carrier baseline, Claude Haiku as the live voice LLM, Gemini Flash for post-call analysis, and ElevenLabs kept for voice quality, Donna's current infra COGS are roughly 4.7 cents per live call minute on measured production speech volume. At 60 minutes/week, that can support a $29 consumer plan before non-infra costs. At 130 minutes/week, margins are still too thin without pricing tiers, usage caps, or premium packaging. Lower-cost TTS is upside, not the current base case.
 
 ### Margin Upside With Optimizations
 
@@ -46,27 +46,27 @@ Modeling cases:
 
 | Case | Cost / minute | What has to be true |
 |---|---:|---|
-| ElevenLabs base | ~$0.056 | Telnyx voice/media/SMS, Deepgram STT, Claude Haiku, Gemini Flash post-call, ElevenLabs TTS. |
-| Future lower-TTS sensitivity | ~$0.035 | Lower-cost TTS or Telnyx speech path passes senior-listening quality tests. |
+| ElevenLabs base | ~$0.047 | Telnyx voice/media/SMS, Deepgram STT, Claude Haiku, Gemini Flash post-call, ElevenLabs TTS, and measured Donna speech volume around 3.5K chars per 10-minute call. |
+| Future lower-TTS sensitivity | ~$0.037 | Lower-cost TTS or Telnyx speech path passes senior-listening quality tests. |
 | Aggressive future sensitivity | ~$0.028 | Lower assistant speech volume, cheaper TTS, controlled search/SMS, possible volume discounts. |
 
 Gross margin by price point:
 
 | Price | Usage | ElevenLabs base | Future lower-TTS sensitivity | Aggressive future sensitivity |
 |---|---:|---:|---:|---:|
-| $29/mo | 60 min/week | ~49% | ~68% | ~75% |
-| $29/mo | 100 min/week | ~16% | ~47% | ~58% |
-| $29/mo | 130 min/week | Negative | ~31% | ~45% |
-| $39/mo | 60 min/week | ~62% | ~76% | ~81% |
-| $39/mo | 100 min/week | ~37% | ~61% | ~68% |
-| $39/mo | 130 min/week | ~19% | ~49% | ~59% |
-| $49/mo | 60 min/week | ~70% | ~81% | ~85% |
-| $49/mo | 100 min/week | ~50% | ~69% | ~75% |
-| $49/mo | 130 min/week | ~35% | ~59% | ~67% |
+| $29/mo | 60 min/week | ~58% | ~67% | ~75% |
+| $29/mo | 100 min/week | ~29% | ~45% | ~58% |
+| $29/mo | 130 min/week | ~8% | ~28% | ~46% |
+| $39/mo | 60 min/week | ~68% | ~75% | ~81% |
+| $39/mo | 100 min/week | ~47% | ~59% | ~69% |
+| $39/mo | 130 min/week | ~32% | ~47% | ~60% |
+| $49/mo | 60 min/week | ~75% | ~80% | ~85% |
+| $49/mo | 100 min/week | ~58% | ~67% | ~75% |
+| $49/mo | 130 min/week | ~46% | ~58% | ~68% |
 
 Investor-safe margin claim:
 
-> With Telnyx + Claude Haiku + Gemini Flash + ElevenLabs, Donna can reach about **49% gross margin on normal 60 min/week usage at $29/month**, before non-infra costs. To get software-like margins while keeping ElevenLabs, Donna needs usage-aware packaging and heavier users priced closer to **$49/month**. Lower-cost TTS can lift margins later, but it is not the current assumption.
+> With Telnyx + Claude Haiku + Gemini Flash + ElevenLabs, Donna can reach about **58% gross margin on normal 60 min/week usage at $29/month** on today's measured speech volume, before non-infra costs. To get software-like margins with heavier companion usage, Donna still benefits from usage-aware packaging and heavier users priced closer to **$49/month**. Lower-cost TTS can lift margins later, but it is not the current assumption.
 
 ---
 
@@ -105,7 +105,7 @@ Important correction: the carrier baseline is Telnyx from this document forward,
 | Deepgram Nova-3 streaming STT | $0.0077/min pay-as-you-go | [Deepgram pricing](https://deepgram.com/pricing) |
 | Deepgram Aura-2 TTS | $0.030/1K chars | [Deepgram pricing](https://deepgram.com/pricing) |
 | Deepgram Aura-1 TTS | $0.015/1K chars | [Deepgram pricing](https://deepgram.com/pricing) |
-| ElevenLabs Flash TTS | $0.05/1K chars | [ElevenLabs API pricing](https://elevenlabs.io/pricing/api) |
+| ElevenLabs Flash TTS | $0.06/1K chars | [ElevenLabs API pricing](https://elevenlabs.io/pricing/api) |
 | Cartesia Sonic TTS | 1 credit/char; Scale annual plan implies about $0.030/1K chars | [Cartesia pricing](https://cartesia.ai/pricing) |
 | Claude Haiku 4.5 | $1/MTok input, $5/MTok output, $0.10/MTok cache read | [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) |
 | Groq GPT OSS 20B | $0.075/MTok input, $0.30/MTok output | [Groq pricing](https://groq.com/pricing) |
@@ -131,11 +131,50 @@ Telnyx STT is modeled as an evaluation path, not as the default cost winner. At 
 
 Base unit: **one 10-minute completed outbound local call**.
 
+### Observed Production Speech Metrics
+
+Production measurement window: **March 16, 2026 through April 15, 2026**.
+
+The current investor model now anchors on observed Donna speech volume instead of the earlier 6,000-character placeholder.
+
+Transcript-derived production sample:
+
+- **78** completed production calls with usable assistant transcript text and duration of at least **60 seconds**
+- **190.2** total measured call minutes
+- **58,871** total assistant characters
+- **309.6 weighted assistant characters/minute** across the full sample
+- **253.6 median characters/minute**
+- **172.2 p25 / 460.0 p75 characters/minute**
+- **755 average assistant characters/call**
+- **509 median assistant characters/call**
+- **2.4 average call minutes**, **2.1 median call minutes**
+
+Longer-call buckets from the same production window:
+
+| Bucket | Calls | Weighted chars/min | Avg assistant chars/call | Avg duration |
+|---|---:|---:|---:|---:|
+| 1-3 min | 65 | 270.8 | 536 | 2.0 min |
+| 3-5 min | 9 | 419.4 | 1,510 | 3.6 min |
+| 5-10 min | 4 | 359.1 | 2,611 | 7.3 min |
+
+Direct `call_metrics.token_usage.tts_characters` spot-check:
+
+- **11** production calls currently have direct `tts_characters` populated
+- **353.4 weighted characters/minute**
+- This is directionally consistent with the transcript-derived longer-call range
+
+Planning baseline used below:
+
+- **3.1K-3.6K Donna characters per 10-minute call** is the current measured production band
+- The default modeled base case uses **3.5K characters per 10-minute call**
+
+### Planning Assumptions
+
 | Assumption | Base value | Why |
 |---|---:|---|
 | Call duration | 10 minutes | Current product target; hard stop around 12 minutes. |
 | Turns | ~20 assistant responses | Typical companion call shape. |
-| TTS characters | ~6,000 chars/call | Based on ~1,500 Claude output tokens at roughly 4 chars/token. |
+| TTS characters | ~3,500 chars/call | Based on measured production Donna speech volume from March 16, 2026 through April 15, 2026, using a planning band of roughly 3.1K-3.6K chars per 10-minute call. |
 | Claude usage | 70K input, 55K cache-read, 15K uncached, 1.5K output | Matches prompt-cached append architecture. |
 | Director usage | 35K input, 8K output | Query + guidance analysis across the call. |
 | Post-call Gemini | 6K input, 800 output | Summary/concerns/caregiver SMS analysis. |
@@ -147,11 +186,12 @@ Base unit: **one 10-minute completed outbound local call**.
 
 Sensitivity:
 
-- If Donna speaks only ~3,000 chars in a 10-minute call, subtract about **$0.15/call** from the ElevenLabs model.
+- If Donna tracks the low end of the current production band at about **3,100 chars** in a 10-minute call, subtract about **$0.02-$0.03/call** from the 3.5K-character base model.
+- If Donna drifts back up to about **6,000 chars** in a 10-minute call, add about **$0.15/call** to the 3.5K-character base model.
 - If daily news is disabled, subtract about **$0.025/calling day**.
 - If SMS is disabled or email-only, subtract about **$0.010/completed call**.
 - Inbound local AI calls are about **$0.015 cheaper per 10-minute call** than outbound local AI calls at list prices.
-- Telnyx carrier and media cost is about **19% of current Telnyx default call COGS**; TTS remains the largest cost center.
+- Telnyx carrier and media cost is about **22% of current Telnyx default call COGS**; TTS remains the largest cost center.
 
 ---
 
@@ -161,7 +201,7 @@ Sensitivity:
 
 | Component | Usage | Cost / 10-min call |
 |---|---:|---:|
-| ElevenLabs TTS | 6,000 chars at $0.05/1K | $0.300 |
+| ElevenLabs TTS | 3,500 chars at $0.06/1K | $0.210 |
 | Telnyx voice + media streaming | 10 min at $0.0105/min | $0.105 |
 | Claude Haiku 4.5 | 15K uncached in, 55K cache-read, 1.5K out | $0.028 |
 | Deepgram Nova-3 STT | 10 min stream | $0.077 |
@@ -171,22 +211,22 @@ Sensitivity:
 | Groq Director | 35K in, 8K out | $0.005 |
 | OpenAI memory + embeddings | post-call extraction/storage | $0.002 |
 | Railway/Neon variable placeholder | per-call amortized | $0.005 |
-| **Total** |  | **~$0.56** |
-| **Per live call minute** |  | **~$0.056** |
+| **Total** |  | **~$0.47** |
+| **Per live call minute** |  | **~$0.047** |
 
-Moving the main voice LLM from Claude Sonnet 4.5 to Claude Haiku 4.5 reduces the modeled Claude line from about **$0.084** to **$0.028** per 10-minute call. That saves about **$0.056/call**, or roughly **9% of total call COGS**. Gemini Flash post-call analysis remains small at about half a cent per completed call.
+Moving the main voice LLM from Claude Sonnet 4.5 to Claude Haiku 4.5 reduces the modeled Claude line from about **$0.084** to **$0.028** per 10-minute call. That saves about **$0.056/call**, or roughly **12% of total call COGS** on the current measured speech baseline. Gemini Flash post-call analysis remains small at about half a cent per completed call.
 
 Current cost concentration:
 
 | Rank | Cost center | Share |
 |---:|---|---:|
-| 1 | TTS | ~53% |
-| 2 | Telnyx carrier/media | ~19% |
-| 3 | STT | ~14% |
-| 4 | Search/SMS/post-call/other | ~10% |
-| 5 | Claude Haiku | ~5% |
+| 1 | TTS | ~44% |
+| 2 | Telnyx carrier/media | ~22% |
+| 3 | STT | ~16% |
+| 4 | Search/SMS/post-call/other | ~11% |
+| 5 | Claude Haiku | ~6% |
 
-The main LLM is no longer a major cost center. **TTS + STT + carrier/media are roughly 86% of current call COGS.**
+The main LLM is no longer a major cost center. **TTS + STT + carrier/media are roughly 83% of current call COGS.**
 
 ---
 
@@ -196,32 +236,32 @@ Uses 52 weeks / 12 months = 4.33 weeks/month. The first row is the current opera
 
 | Stack | 60 min/week | 100 min/week | 130 min/week |
 |---|---:|---:|---:|
-| Telnyx + ElevenLabs default | $14.66 | $24.44 | $31.77 |
-| Telnyx + Cartesia Sonic | $11.52 | $19.20 | $24.96 |
-| Telnyx + Deepgram Aura-2 | $11.54 | $19.24 | $25.01 |
-| Telnyx + Deepgram Aura-1 | $9.20 | $15.34 | $19.94 |
-| Telnyx STT + Telnyx TTS evaluation | $9.23 | $15.38 | $19.99 |
+| Telnyx + ElevenLabs default | $12.32 | $20.54 | $26.70 |
+| Telnyx + Cartesia Sonic | $9.59 | $15.99 | $20.79 |
+| Telnyx + Deepgram Aura-2 | $9.59 | $15.99 | $20.79 |
+| Telnyx + Deepgram Aura-1 | $8.23 | $13.71 | $17.83 |
+| Telnyx STT + Telnyx TTS evaluation | $9.04 | $15.06 | $19.58 |
 
 Gross margin at $29/month:
 
 | Stack | 60 min/week | 100 min/week | 130 min/week |
 |---|---:|---:|---:|
-| Telnyx + ElevenLabs default | 49% | 16% | Negative |
-| Telnyx + Cartesia Sonic | 60% | 34% | 14% |
-| Telnyx + Deepgram Aura-2 | 60% | 34% | 14% |
-| Telnyx + Deepgram Aura-1 | 68% | 47% | 31% |
-| Telnyx STT + Telnyx TTS evaluation | 68% | 47% | 31% |
+| Telnyx + ElevenLabs default | 58% | 29% | 8% |
+| Telnyx + Cartesia Sonic | 67% | 45% | 28% |
+| Telnyx + Deepgram Aura-2 | 67% | 45% | 28% |
+| Telnyx + Deepgram Aura-1 | 72% | 53% | 39% |
+| Telnyx STT + Telnyx TTS evaluation | 69% | 48% | 32% |
 
 Gross margin at $49/month for heavy 130 min/week users:
 
 | Stack | Heavy-user COGS | Gross margin at $49 |
 |---|---:|---:|
-| Telnyx + ElevenLabs default | $31.77 | 35% |
-| Telnyx + Cartesia Sonic | $24.96 | 49% |
-| Telnyx + Deepgram Aura-1 | $19.94 | 59% |
-| Telnyx STT + Telnyx TTS evaluation | $19.99 | 59% |
+| Telnyx + ElevenLabs default | $26.70 | 46% |
+| Telnyx + Cartesia Sonic | $20.79 | 58% |
+| Telnyx + Deepgram Aura-1 | $17.83 | 64% |
+| Telnyx STT + Telnyx TTS evaluation | $19.58 | 60% |
 
-Pricing implication: **$29/month is viable for light users, but not for heavy unlimited usage on the default Telnyx + ElevenLabs stack.** To make $29 work broadly while keeping ElevenLabs, we need usage tiers or a monthly minute allowance. Lower-cost TTS remains upside only.
+Pricing implication: **$29/month is viable for light and moderate users on the current measured speech baseline, but heavy unlimited usage is still thin on the default Telnyx + ElevenLabs stack.** To make $29 work broadly while keeping ElevenLabs, we still benefit from usage tiers or a monthly minute allowance. Lower-cost TTS remains upside only.
 
 ---
 
@@ -231,12 +271,12 @@ The current free trial cap is 120 minutes over 30 days.
 
 | Stack | Trial COGS at 120 minutes |
 |---|---:|
-| Telnyx + ElevenLabs default | ~$6.77 |
-| Telnyx + Cartesia / Aura-2 | ~$5.33 |
-| Telnyx + Deepgram Aura-1 | ~$4.25 |
-| Telnyx STT + Telnyx TTS evaluation | ~$4.26 |
+| Telnyx + ElevenLabs default | ~$5.69 |
+| Telnyx + Cartesia / Aura-2 | ~$4.43 |
+| Telnyx + Deepgram Aura-1 | ~$3.80 |
+| Telnyx STT + Telnyx TTS evaluation | ~$4.17 |
 
-With ElevenLabs kept as the default, a full 120-minute trial costs about **$6.77** in variable infra. The old "$5 trial cost" is achievable only if average trial usage is below the cap or if a future TTS change passes quality tests.
+With ElevenLabs kept as the default, a full 120-minute trial costs about **$5.69** in variable infra on the current measured speech baseline. The old "$5 trial cost" is still roughly the right planning frame, but it depends on keeping Donna near today's actual speech volume rather than drifting back toward the old 6,000-character placeholder.
 
 ---
 
@@ -248,17 +288,17 @@ Assumption: 1 user = 1 senior profile. Variable COGS only; fixed platform costs 
 
 | Usage | ElevenLabs base | Future lower-TTS sensitivity |
 |---|---:|---:|
-| 60 min/week | ~$14.7K/mo | ~$9.2K/mo |
-| 100 min/week | ~$24.4K/mo | ~$15.3K/mo |
-| 130 min/week | ~$31.8K/mo | ~$19.9K/mo |
+| 60 min/week | ~$12.3K/mo | ~$9.6K/mo |
+| 100 min/week | ~$20.5K/mo | ~$16.0K/mo |
+| 130 min/week | ~$26.7K/mo | ~$20.8K/mo |
 
 ### 10,000 Users
 
 | Usage | ElevenLabs base | Future lower-TTS sensitivity |
 |---|---:|---:|
-| 60 min/week | ~$147K/mo | ~$92K/mo |
-| 100 min/week | ~$244K/mo | ~$153K/mo |
-| 130 min/week | ~$318K/mo | ~$199K/mo |
+| 60 min/week | ~$123K/mo | ~$96K/mo |
+| 100 min/week | ~$205K/mo | ~$160K/mo |
+| 130 min/week | ~$267K/mo | ~$208K/mo |
 
 Fixed platform cost estimate:
 
@@ -275,9 +315,15 @@ These fixed/platform estimates exclude headcount, support labor, legal/complianc
 
 ## Optimization Plan
 
-### 1. Measure Real TTS Characters And Token Usage
+### 1. Use The Measured Speech Baseline And Improve Direct Coverage
 
-Before changing speech vendors, capture actual per-call:
+Measured production baseline as of **March 16, 2026 through April 15, 2026**:
+
+- transcript-derived Donna speech volume: **309.6 weighted chars/minute** across the full 78-call sample
+- longer-call transcript range: roughly **3.1K-3.6K characters per 10-minute call**
+- direct `tts_characters` spot-check: **353.4 weighted chars/minute** across 11 calls
+
+Next instrumentation step:
 
 - assistant TTS characters
 - Claude prompt tokens, cache-read tokens, output tokens
@@ -286,7 +332,7 @@ Before changing speech vendors, capture actual per-call:
 - search/news calls
 - Telnyx billed voice, SIP, and media streaming minutes
 
-Investor model sensitivity is dominated by TTS characters. A shift from 6,000 chars to 3,000 chars cuts current cost by about $0.15 per 10-minute call.
+Investor model sensitivity is still dominated by TTS characters, but the current gap is no longer between 6,000 and 3,000 chars. The real risk is speech volume drifting away from today's measured **3.1K-3.6K** band.
 
 ### 2. Keep ElevenLabs For Now, But Track TTS Sensitivity
 
@@ -294,13 +340,13 @@ Do not assume a near-term TTS vendor switch in the investor base case. ElevenLab
 
 Future sensitivity:
 
-| Provider | Modeled TTS cost at 6,000 chars | Savings vs ElevenLabs |
+| Provider | Modeled TTS cost at 3,500 chars | Savings vs ElevenLabs |
 |---|---:|---:|
-| ElevenLabs Flash | $0.300 | Baseline |
-| Cartesia Sonic | ~$0.179 | ~$0.121/call |
-| Deepgram Aura-2 | $0.180 | ~$0.120/call |
-| Deepgram Aura-1 | $0.090 | ~$0.210/call |
-| Telnyx TTS | $0.018 | ~$0.282/call |
+| ElevenLabs Flash | $0.210 | Baseline |
+| Cartesia Sonic | ~$0.105 | ~$0.105/call |
+| Deepgram Aura-2 | $0.105 | ~$0.105/call |
+| Deepgram Aura-1 | $0.053 | ~$0.158/call |
+| Telnyx TTS | $0.011 | ~$0.200/call |
 
 Future evaluation order, only if we revisit TTS:
 
@@ -351,8 +397,8 @@ Example:
 
 | Plan framing | Included usage | ElevenLabs base margin | Future lower-TTS margin |
 |---|---:|---:|---:|
-| $29 starter | ~60 min/week | ~49% | ~68% |
-| $49 companion | ~130 min/week | ~35% | ~59% |
+| $29 starter | ~60 min/week | ~58% | ~67% |
+| $49 companion | ~130 min/week | ~46% | ~58% |
 | B2B / care org | negotiated | depends on usage | target 60%+ |
 
 ---

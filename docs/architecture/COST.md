@@ -228,6 +228,15 @@ Current cost concentration:
 
 The main LLM is no longer a major cost center. **TTS + STT + carrier/media are roughly 83% of current call COGS.**
 
+Search and memory are not major cost drivers on the current baseline:
+
+- **Daily news + web search:** **$0.027/call**, or about **5.7%** of current call COGS
+- **OpenAI memory extraction + embeddings:** **$0.002/call**, or about **0.4%**
+- **Combined explicit search + memory extraction:** **$0.029/call**, or about **6.1%**
+- Even if the full **Railway/Neon variable placeholder** is treated as memory/prefetch-adjacent overhead, that bucket is still only about **$0.034/call**, or **7.2%**
+
+Cost take-away: **search is a small but real line item; memory extraction is close to rounding error.** If Donna needs material margin improvement, the first levers are still **TTS, carrier/media, and STT**, not memory work.
+
 ---
 
 ## Per-User Monthly COGS

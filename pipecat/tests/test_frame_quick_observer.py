@@ -136,3 +136,57 @@ class TestQuickObserverGoodbyeEndFrame:
         await asyncio.wait_for(runner.run(task), timeout=5.0)
 
         assert session_state.get("_goodbye_in_progress") is True
+
+    @pytest.mark.asyncio
+    async def test_early_goodbye_does_not_force_end(self, session_state, frame_capture):
+        """Avoid random early-call hangups from false goodbye transcription."""
+        import time
+
+        session_state["_call_start_time"] = time.time()
+        processor = QuickObserverProcessor(session_state=session_state)
+        processor.GOODBYE_DELAY_SECONDS = 0.1
+        capture = frame_capture
+
+        pipeline = Pipeline([processor, capture])
+        task = PipelineTask(pipeline, params=PipelineParams(enable_metrics=False))
+        processor.set_pipeline_task(task)
+        runner = PipelineRunner(handle_sigint=False)
+
+        async def inject():
+            await task.queue_frame(make_transcription("Goodbye, talk to you later"))
+            await asyncio.sleep(0.3)
+            await task.queue_frame(EndFrame())
+
+        asyncio.create_task(inject())
+        await asyncio.wait_for(runner.run(task), timeout=5.0)
+
+        assert session_state.get("_goodbye_in_progress") is not True
+
+    @pytest.mark.asyncio
+    async def test_goodbye_continuation_does_not_force_end(self, session_state, frame_capture):
+        """A same-utterance continuation should not hang up an otherwise mature call."""
+        import time
+
+        session_state["_call_start_time"] = time.time() - (
+            QuickObserverProcessor.PROGRAMMATIC_GOODBYE_MIN_ELAPSED_SECONDS + 5
+        )
+        processor = QuickObserverProcessor(session_state=session_state)
+        processor.GOODBYE_DELAY_SECONDS = 0.1
+        capture = frame_capture
+
+        pipeline = Pipeline([processor, capture])
+        task = PipelineTask(pipeline, params=PipelineParams(enable_metrics=False))
+        processor.set_pipeline_task(task)
+        runner = PipelineRunner(handle_sigint=False)
+
+        async def inject():
+            await task.queue_frame(
+                make_transcription("Alright, goodbye... Oh wait, I forgot to tell you something!")
+            )
+            await asyncio.sleep(0.3)
+            await task.queue_frame(EndFrame())
+
+        asyncio.create_task(inject())
+        await asyncio.wait_for(runner.run(task), timeout=5.0)
+
+        assert session_state.get("_goodbye_in_progress") is not True

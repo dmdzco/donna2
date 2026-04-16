@@ -174,7 +174,8 @@ railway logs --service donna-api --environment production --since "2026-01-01T00
 | Rotate API keys | Railway dashboard > Environment variables | If any API key compromised |
 | Rotate JWT secret | Update `JWT_SECRET` in Railway env vars (all environments) | If JWT secret compromised |
 | Revoke Clerk sessions | Clerk dashboard > Sessions > Revoke all | If Clerk tokens compromised |
-| Rotate Twilio auth token | Twilio console > Account > Auth Token > Rotate | If Twilio credentials compromised |
+| Rotate Telnyx API key / public-key configuration | Telnyx Mission Control + Railway env vars | If Telnyx credentials or webhook configuration are compromised |
+| Rotate Twilio auth token | Twilio console > Account > Auth Token > Rotate | Only if archived Twilio credentials are still present or Twilio is reintroduced |
 | Disable compromised admin accounts | Database: `UPDATE admin_users SET ...` or delete account | If admin account compromised |
 
 #### 3. System Isolation
@@ -561,6 +562,7 @@ Maintain an up-to-date contact list for incident response. Update this section w
 | CEO | TBD | TBD | TBD | TBD |
 | Legal Counsel | TBD | TBD | TBD | TBD |
 | Cyber Insurance Provider | TBD | TBD | TBD | TBD |
+| Telnyx Account Manager | TBD | TBD | TBD | TBD |
 | Twilio Account Manager | TBD | TBD | TBD | TBD |
 | Neon Account Manager | TBD | TBD | TBD | TBD |
 

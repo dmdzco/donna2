@@ -42,6 +42,22 @@ This avoids the old 8kHz μ-law bottleneck and keeps the production phone path a
 
 ---
 
+## Scheduled Outbound Reminder Prewarm
+
+**Active files**: `services/scheduler.js`, `services/telnyx.js`, `pipecat/api/routes/telnyx.py`
+
+Scheduled reminder calls no longer rely on doing the full senior-context hydrate on the exact dial request. The Node scheduler looks ahead roughly 2-3 minutes, asks Pipecat `/telnyx/prewarm` to assemble the outbound reminder context early, caches that payload locally for a few minutes, and includes it on the eventual `/telnyx/outbound` call.
+
+This shifts the expensive reminder-context work off the dial critical path while keeping the existing safety net:
+
+- Node still re-checks that the reminder is due before dialing.
+- Pipecat validates that the prewarmed payload matches `seniorId`, `callType`, `reminderId`, and `scheduledFor`.
+- If the warm payload is missing, expired, or mismatched, Pipecat falls back to the existing live hydration path.
+
+Result: scheduled reminder calls usually spend ring time on Telnyx setup and conversation creation, not on memory/context assembly.
+
+---
+
 ## Predictive Context Engine
 
 **File**: `pipecat/services/prefetch.py` (329 LOC)

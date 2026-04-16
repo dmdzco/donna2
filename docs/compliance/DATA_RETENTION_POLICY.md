@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| Last Updated | April 4, 2026 |
+| Last Updated | April 16, 2026 |
 | Owner | TBD (HIPAA Security Officer) |
 | Review Cadence | Annually |
 | Related Docs | [HIPAA Overview](HIPAA_OVERVIEW.md), [BAA Tracker](BAA_TRACKER.md), [Breach Notification](BREACH_NOTIFICATION.md) |
@@ -44,7 +44,7 @@ HIPAA does not prescribe specific retention periods for PHI itself, but requires
 This policy applies to all data stored in:
 - **Neon PostgreSQL database** (all environments: production, staging, dev)
 - **Application logs** (Railway, Sentry)
-- **Third-party vendor systems** (Twilio, Anthropic, Deepgram, etc. -- see [Vendor Data Retention](#third-party-vendor-data-retention))
+- **Third-party vendor systems** (Telnyx, Anthropic, Deepgram, etc. -- see [Vendor Data Retention](#third-party-vendor-data-retention))
 - **Developer machines** (if any PHI is present locally)
 - **Backups** (Neon point-in-time recovery)
 
@@ -81,7 +81,7 @@ This policy applies to all data stored in:
 | **Application logs** | Railway | Possible (despite sanitization) | Railway default (7 days) + explicit export for incidents | Railway auto-purges; exported logs follow incident retention (6 years) |
 | **Error traces** | Sentry | Possible (error context) | 90 days (Sentry default) | Sentry auto-purges; adjust in Sentry settings |
 | **Database backups** | Neon (PITR) | Yes (full database) | Neon plan default (7 days PITR for Pro) | Neon auto-manages; ensure PITR window does not exceed retention policy |
-| **Call recordings** | Twilio (if enabled) | Yes (CRITICAL) | **Do not enable call recording** unless required; if enabled, 30 days max | Twilio auto-delete or API deletion |
+| **Call recordings** | Telnyx (if enabled) | Yes (CRITICAL) | **Do not enable call recording** unless required; if enabled, 30 days max | Telnyx auto-delete or API deletion |
 | **Voice audio (real-time)** | Deepgram (transient) | Yes | Not retained by Deepgram (streaming STT) | Verify with Deepgram BAA; ensure no log retention |
 | **TTS requests** | ElevenLabs / Cartesia | Yes (text content) | Verify vendor policy | Request deletion or confirm no-retention via BAA |
 | **LLM request logs** | Anthropic, Google, Groq (Cerebras legacy/not active) | Yes (conversation content) | Verify vendor policy (Anthropic: 30 days default) | Opt out of training data retention; confirm via BAA |
@@ -347,7 +347,8 @@ Donna sends PHI to multiple vendors. Each vendor's data retention policy must be
 | **Cerebras** | Legacy/not active; conversation turns only if re-enabled | Check vendor policy before any re-enable | Keep disabled/remove stale env references unless BAA is signed |
 | **OpenAI** | Memory text, search queries | API: not used for training (opt-out); check retention | Confirm via BAA |
 | **Tavily** | Search queries | Check vendor policy | Confirm via vendor inquiry |
-| **Twilio** | Audio, phone numbers, SMS | Configurable; default varies | Configure retention limits in Twilio console; confirm via BAA |
+| **Telnyx** | Voice audio/media streaming, phone numbers, call metadata, optional recordings if enabled | Configurable; default varies | Configure retention limits in Telnyx Mission Control; keep recording disabled; confirm BAA/conduit-exception posture |
+| **Twilio** | No active data flow while SMS remains disabled and Twilio voice stays archived | N/A while inactive | Reassess retention and BAA needs before reintroducing SMS or Twilio voice |
 | **Neon** | All database data | Customer-controlled (PITR 7 days on Pro) | Managed by this retention policy |
 | **Sentry** | Error traces | 90 days default; configurable | Set appropriate retention in Sentry settings |
 | **Railway** | Application logs | 7 days default | Acceptable; export incident-relevant logs before expiry |

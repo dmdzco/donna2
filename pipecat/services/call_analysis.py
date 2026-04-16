@@ -33,7 +33,7 @@ Return JSON with:
 - reminders_delivered
 - engagement_score: 1-10
 - mood: one or two caregiver-friendly words, such as cheerful, calm, content, quiet, tired, worried, sad
-- caregiver_sms: a warm, privacy-respecting caregiver message. Keep it high-level, never expose vulnerability or repeat sensitive details; if mood seems low, subtly suggest the caregiver give them a call; include call duration naturally; max 280 chars.
+- caregiver_sms: legacy field name for a warm, privacy-respecting caregiver message used by email/in-app notifications. Keep it high-level, never expose vulnerability or repeat sensitive details; if mood seems low, subtly suggest the caregiver give them a call; include call duration naturally; max 280 chars.
 - caregiver_takeaways: 1-4 concise items a caregiver would care about
 - recommended_caregiver_action: short action or empty string if no action is needed
 - concerns: health/cognitive/emotional/safety with severity low/medium/high, description, evidence, recommended_action

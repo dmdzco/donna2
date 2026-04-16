@@ -41,7 +41,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
     - Ephemeral context: All injections tagged `[EPHEMERAL:`, stripped each turn
     - Metrics: Logs speculative hit rate per call
   - Post-Call: Analysis, memory extraction, daily context, snapshot rebuild (Gemini Flash)
-- **Caregiver Mood Summary SMS** — Post-call Gemini analysis generates a privacy-respecting, mood-aware SMS for caregivers. If the senior seems down, subtly suggests the caregiver give them a call.
+- **Caregiver summaries and alerts** — Post-call Gemini analysis generates privacy-respecting caregiver-facing summaries and follow-up guidance for email/in-app notifications. SMS is inactive for now.
 - **Director-First Architecture** — Eliminated ~14s of Claude tool-call latency per call:
   - `search_memories` → Director injects memories as ephemeral context (500ms gate)
   - `save_important_detail` → Removed; post-call `extract_from_conversation` handles it
@@ -95,7 +95,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Hard Delete** - Complete senior data deletion across all tables (`DELETE /api/seniors/:id/data`) with audit logging
 - **Sentry PII Scrubbing** - Senior IDs SHA-256 hashed in error reports, exception values truncated to 200 chars, `send_default_pii=False`
 - **PII-Safe Logging** - `maskName()` and `maskPhone()` helpers across both backends
-- **Compliance Documentation** - Full HIPAA docs in `docs/compliance/`: overview, BAA tracker (16 vendors), breach notification runbook, data retention policy, vendor security evaluations
+- **Compliance Documentation** - Full HIPAA docs in `docs/compliance/`: overview, BAA tracker (active vendors plus inactive legacy providers), breach notification runbook, data retention policy, vendor security evaluations
 
 ### Frontend Apps (unchanged, on Vercel/separate)
 - **Admin Dashboard (v2)** - React + Vite + Tailwind (`apps/admin-v2/`) on Vercel
@@ -123,7 +123,7 @@ Telnyx Audio ──► FastAPIWebsocketTransport
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1 (0ms): 268 regex patterns
               │   (BLOCKING)         │  Injects guidance for THIS turn
-              │                      │  Strong goodbye → EndFrame in 2s
+              │                      │  Strong goodbye → guarded EndFrame after minimum call age
               └─────────┬───────────┘
                         │
                         ▼
@@ -131,12 +131,12 @@ Telnyx Audio ──► FastAPIWebsocketTransport
               │ Conversation         │────►│  Background Analysis      │
               │ Director             │     │  (asyncio.create_task)    │
               │ (PASS-THROUGH)       │     │                           │
-              │                      │     │  Cerebras (~70ms) primary │
+              │                      │     │  Groq (~200-400ms) primary│
               │ 1. Check speculative │     │  Gemini Flash fallback    │
               │    → inject SAME or  │     │                           │
               │    PREVIOUS turn's   │     │  Speculative: on 250ms    │
               │    guidance          │     │  silence onset, starts    │
-              │ 2. Web search gate:  │     │  Cerebras analysis early  │
+              │ 2. Web search gate:  │     │  Groq analysis early      │
               │    if search in-     │     │                           │
               │    flight, hold frame│     │  Also: Director-owned web │
               │    + push filler TTS │     │  search (filler + gate),  │
@@ -163,9 +163,9 @@ Telnyx Audio ──► FastAPIWebsocketTransport
               Context Aggregator (assistant) ← tracks assistant responses
 ```
 
-**Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. Quick Observer's guidance is for the **current** turn (instant regex). Director's guidance can be **same-turn** (when speculative Cerebras analysis completes before the final transcription) or **previous-turn** (fallback). Both appear as user-role messages in Claude's context before the next LLM call.
+**Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. Quick Observer's guidance is for the **current** turn (instant regex). Director's guidance can be **same-turn** (when speculative Groq analysis completes before the final transcription) or **previous-turn** (fallback). Both appear as user-role messages in Claude's context before the next LLM call.
 
-**Predictive Context Engine**: The Director also runs speculative memory prefetch in the background. On each transcription, regex extracts topics/entities and pre-fetches memories. After Groq analysis completes (~70ms), a second wave prefetches based on `next_topic`, upcoming reminders, and news topics. Results are cached in `session_state["_prefetch_cache"]` (TTL=30s, Jaccard fuzzy match). When Claude calls `search_memories`, the tool handler checks the cache first — cache hit returns instantly (~0ms vs 200-300ms). Interim transcriptions also trigger debounced prefetch while the user is still speaking.
+**Predictive Context Engine**: The Director also runs speculative memory prefetch in the background. On each transcription, regex extracts topics/entities and pre-fetches memories. After Groq analysis completes, a second wave prefetches based on memory queries, upcoming reminders, and news topics. Results are cached in `session_state["_prefetch_cache"]` (TTL=30s, Jaccard fuzzy match). Memory retrieval is now Director-owned context injection, so Claude does not need a `search_memories` tool call in the live path. Interim transcriptions also trigger debounced prefetch while the user is still speaking.
 
 **Director-Owned Web Search**: When the Groq speculative analysis returns `web_queries`, the Director starts a web search immediately. When the final TranscriptionFrame arrives, if a web search is in-flight, the Director gates the frame: pushes a `TTSSpeakFrame` filler ("Let me check on that for you"), awaits the search result (max 10s), injects it as a `[WEB RESULT]` message into Claude's context, then releases the frame. Claude never calls `web_search` — it just uses the injected result naturally.
 
@@ -575,11 +575,11 @@ DEEPGRAM_API_KEY=...             # STT
 ELEVENLABS_API_KEY=...           # TTS (ElevenLabs)
 ELEVENLABS_VOICE_ID=...          # Voice ID (optional)
 ELEVENLABS_MODEL=eleven_flash_v2_5 # TTS model (optional, has default)
-CARTESIA_API_KEY=...             # TTS (Cartesia — alternative to ElevenLabs)
-CARTESIA_VOICE_ID=...            # Cartesia voice ID (optional, has default)
-TTS_PROVIDER=cartesia            # Override GrowthBook flag: "cartesia" or "elevenlabs"
+CARTESIA_API_KEY=...             # Optional/evaluation TTS provider
+CARTESIA_VOICE_ID=...            # Optional/evaluation Cartesia voice override
+TTS_PROVIDER=elevenlabs          # Override GrowthBook flag: "elevenlabs" or "cartesia"
 OPENAI_API_KEY=...               # Embeddings + news search
-CEREBRAS_API_KEY=...             # Cerebras (Director primary, speculative pre-processing)
+GROQ_API_KEY=...                 # Groq primary Director
 
 # Auth
 JWT_SECRET=...
@@ -605,7 +605,7 @@ SENTRY_DSN=...                               # Error monitoring (optional, both 
 
 # Optional
 FAST_OBSERVER_MODEL=gemini-3-flash-preview   # Director model (Gemini fallback)
-CEREBRAS_DIRECTOR_MODEL=gpt-oss-120b         # Director model (Cerebras primary)
+GROQ_DIRECTOR_MODEL=openai/gpt-oss-20b       # Director model (Groq primary)
 CALL_ANALYSIS_MODEL=gemini-3-flash-preview   # Post-call analysis model
 LOG_LEVEL=INFO                               # DEBUG for verbose pipecat logs
 REDIS_URL=redis://...                        # Required before multiple Pipecat instances

@@ -89,7 +89,7 @@ Ask David to invite you to each of these:
 | **Vercel** | Frontend deploys (admin, consumer, observability) | vercel.com |
 | **GrowthBook** | Feature flags | app.growthbook.io |
 | **Sentry** | Error monitoring | sentry.io |
-| **Twilio** | Phone calls, SMS | twilio.com |
+| **Telnyx** | Voice calls, phone numbers, media streaming | portal.telnyx.com |
 | **Clerk** | Consumer auth (if working on consumer app) | clerk.com |
 
 After you have access:
@@ -248,7 +248,7 @@ railway logs --service donna-pipecat --environment dev
 
 **Don't test voice locally with ngrok.** Always deploy to Railway dev environment and test with real phone calls.
 
-**API keys are shared across environments.** You don't need your own Anthropic, Deepgram, ElevenLabs, Cartesia, Groq, Google, OpenAI, Telnyx, or Twilio SMS keys for normal dev work — Railway injects the configured environment values. Production-like environments must also have `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `PIPECAT_PUBLIC_URL`, and Telnyx voice credentials set so Pipecat can fail closed.
+**API keys are shared across environments.** You don't need your own Anthropic, Deepgram, ElevenLabs, Cartesia, Groq, Google, OpenAI, or Telnyx keys for normal dev work — Railway injects the configured environment values. SMS is inactive for now. Production-like environments must also have `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `PIPECAT_PUBLIC_URL`, and Telnyx voice credentials set so Pipecat can fail closed.
 
 **Commit messages should be specific.** Not `feat: update memory system` but `feat: reduce memory context to 20 items (recent turns already cover last 3 calls)`. See the commit message guidelines in `CLAUDE.md`.
 

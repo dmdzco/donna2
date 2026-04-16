@@ -91,22 +91,22 @@ The **senior** sells the product to the **caregiver**. No ads, no hard sell. "Mo
 
 | Service | Cost |
 |---------|------|
-| TTS (ElevenLabs default) | ~$0.30 |
-| Voice carrier + stream (Twilio) | ~$0.18 |
+| TTS (ElevenLabs Flash default) | ~$0.18 |
+| Voice carrier + media stream (Telnyx) | ~$0.11 |
 | Voice LLM (Claude Haiku 4.5, cached) | ~$0.03 |
 | STT (Deepgram Nova 3) | ~$0.08 |
-| News/search + caregiver SMS | ~$0.04 |
-| Director/post-call/memory/compute | ~$0.02 |
-| **Total per call** | **~$0.70 current → ~$0.36-0.49 optimized** |
+| News/search + post-call/memory/compute | ~$0.04 |
+| Email/in-app notifications | ~$0.00 |
+| **Total per call** | **~$0.43 current → ~$0.31-0.36 with lower-cost TTS/STT** |
 
 ### Per-User Monthly Cost
 
 | Stack | 60 min/week COGS | 130 min/week COGS | Gross margin at $29, 60 min/week |
 |-------|------------------|-------------------|-------------------------------|
-| Current (Twilio + ElevenLabs) | ~$18 | ~$39 | ~37% |
-| Twilio + cheaper TTS | ~$13-15 | ~$27-32 | ~48-56% |
-| Telnyx + cheaper TTS | ~$9-12 | ~$20-25 | ~60-68% |
-| Target (optimized) | ~$9-10 | ~$20 | **65%+ at 60 min/week** |
+| Current (Telnyx + ElevenLabs Flash) | ~$11 | ~$24 | ~62% |
+| Telnyx + cheaper TTS | ~$8-9 | ~$17-20 | ~68-72% |
+| Telnyx + cheaper STT/TTS | ~$8 | ~$17 | ~72% |
+| Target (optimized) | ~$8-9 | ~$17-20 | **70%+ at 60 min/week** |
 
 ### Margin Upside
 
@@ -221,7 +221,7 @@ Pre-seed money is expensive (20-25% dilution for $750K-1.5M) and unnecessary if 
 | Caregiver doesn't see value | Post-call summaries with specific details ("Mom mentioned her knee is hurting") prove value instantly. |
 | AI says something harmful | Safety boundaries in prompt. Call analysis flags concerns. Caregiver gets alerts. |
 | Competitor with more resources | First-mover advantage in voice + memory + caregiver integration. Switching cost = senior's relationship with Donna. |
-| Regulation (HIPAA, FCC) | Not a medical device (companionship, not diagnosis). Twilio/Telnyx handle TCPA compliance. No PHI stored beyond what senior voluntarily shares. |
+| Regulation (HIPAA, FCC) | Not a medical device (companionship, not diagnosis). Telnyx handles voice infrastructure; Donna still needs outbound consent/TCPA processes and signed BAAs for PHI-bearing vendors. |
 | Cost structure doesn't scale | Telnyx + TTS optimization path to 70% margins is clear and achievable in 1-2 months of engineering. |
 
 ---
@@ -240,7 +240,7 @@ Background: Memory prefetch, Claude web_search tool when needed, call analysis, 
 - **2 active LLM tools** available to Claude during subscribed calls (`web_search`, `mark_reminder_acknowledged`); memories and caregiver notes are prefetched/injected outside Claude tool calls
 - **Semantic memory** with pgvector — Donna remembers across calls
 - **2-layer observer architecture** — instant regex patterns + background LLM analysis
-- **Post-call pipeline** — analysis, memory extraction, caregiver SMS, snapshot rebuild
+- **Post-call pipeline** — analysis, memory extraction, caregiver email/in-app notifications, snapshot rebuild
 
 Full technical docs: [pipecat/docs/ARCHITECTURE.md](../pipecat/docs/ARCHITECTURE.md) and [CLAUDE.md](../CLAUDE.md)
 

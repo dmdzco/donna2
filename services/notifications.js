@@ -1,22 +1,12 @@
 import { db } from '../db/client.js';
 import { notificationPreferences, notifications, caregivers, seniors } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
-import twilio from 'twilio';
 import { Resend } from 'resend';
 import { clerkClient } from '@clerk/express';
 import { createLogger } from '../lib/logger.js';
 import { decryptNotificationPhi, encryptNotificationPhi } from '../lib/phi.js';
 
 const log = createLogger('Notifications');
-
-// Lazy-init Twilio
-let twilioClient = null;
-const getTwilioClient = () => {
-  if (!twilioClient && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-    twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  }
-  return twilioClient;
-};
 
 // Lazy-init Resend
 let resendClient = null;
@@ -27,7 +17,6 @@ const getResendClient = () => {
   return resendClient;
 };
 
-const FROM_PHONE = process.env.TWILIO_PHONE_NUMBER;
 const FROM_EMAIL = process.env.NOTIFICATION_FROM_EMAIL || 'Donna <notifications@donna.care>';
 
 export function decryptNotificationRow(row) {
@@ -126,7 +115,7 @@ export const notificationService = {
         concernDetected: true,
         reminderMissed: true,
         weeklySummary: true,
-        smsEnabled: true,
+        smsEnabled: false,
         emailEnabled: true,
         quietHoursStart: null,
         quietHoursEnd: null,
@@ -136,10 +125,12 @@ export const notificationService = {
       };
     }
 
-    return prefs;
+    return { ...prefs, smsEnabled: false };
   },
 
   async upsertPreferences(caregiverId, data) {
+    const normalizedData = { ...data, smsEnabled: false };
+
     // Try update first
     const [existing] = await db.select({ id: notificationPreferences.id })
       .from(notificationPreferences)
@@ -148,16 +139,16 @@ export const notificationService = {
 
     if (existing) {
       const [updated] = await db.update(notificationPreferences)
-        .set({ ...data, updatedAt: new Date() })
+        .set({ ...normalizedData, updatedAt: new Date() })
         .where(eq(notificationPreferences.caregiverId, caregiverId))
         .returning();
-      return updated;
+      return { ...updated, smsEnabled: false };
     }
 
     const [created] = await db.insert(notificationPreferences)
-      .values({ caregiverId, ...data })
+      .values({ caregiverId, ...normalizedData })
       .returning();
-    return created;
+    return { ...created, smsEnabled: false };
   },
 
   // -------------------------------------------------------------------------
@@ -169,8 +160,8 @@ export const notificationService = {
     const senior = await this._getSenior(seniorId);
     const seniorName = senior?.name || 'your loved one';
 
-    // Prefer the AI-generated caregiver SMS (mood-aware, privacy-respecting)
-    // Fall back to generic summary format if not available
+    // Prefer the AI-generated caregiver message. The payload key is still
+    // caregiver_sms for legacy schema compatibility, even though SMS is inactive.
     const content = data.caregiver_sms
       || `Donna just finished a call with ${seniorName}. ${data.summary || 'Call completed successfully.'}`;
 
@@ -243,48 +234,10 @@ export const notificationService = {
     // Resolve contact info from Clerk
     const contact = await getClerkContact(clerkUserId);
 
-    // Send via enabled channels
-    if (prefs.smsEnabled) {
-      await this._sendSms(caregiverId, seniorId, eventType, content, metadata, contact.phone);
-    }
+    // SMS is intentionally inactive for now; keep the preference field only for
+    // backward-compatible API responses and legacy rows.
     if (prefs.emailEnabled) {
       await this._sendEmail(caregiverId, seniorId, eventType, content, metadata, contact.email);
-    }
-  },
-
-  async _sendSms(caregiverId, seniorId, eventType, content, metadata, phone) {
-    // Always record the notification
-    await db.insert(notifications).values({
-      ...encryptNotificationPhi({
-        caregiverId,
-        seniorId,
-        eventType,
-        channel: 'sms',
-        content,
-        metadata,
-      }),
-    });
-
-    const client = getTwilioClient();
-    if (!client || !FROM_PHONE) {
-      log.warn('Twilio not configured, SMS recorded but not delivered');
-      return;
-    }
-
-    if (!phone) {
-      log.warn('No phone number for caregiver, SMS recorded but not delivered', { caregiverId });
-      return;
-    }
-
-    try {
-      const message = await client.messages.create({
-        to: phone,
-        from: FROM_PHONE,
-        body: content,
-      });
-      log.info('SMS sent', { caregiverId, sid: message.sid, eventType });
-    } catch (err) {
-      log.error('SMS delivery failed', { caregiverId, error: err.message });
     }
   },
 

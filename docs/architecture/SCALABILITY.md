@@ -101,6 +101,8 @@ The Node.js scheduler is authoritative for production reminder and welfare calls
 
 Node builds a unified call plan, prioritizes reminders over welfare checks, gates all calls through the senior's local calling window, retries service-to-service Telnyx outbound requests, and asks Pipecat `/telnyx/outbound` to create the calls.
 
+For scheduled reminder calls, the leader scheduler also runs a short lookahead sweep and prewarms reminder context before the call is due. It asks Pipecat `/telnyx/prewarm` to build the outbound senior context, stores that payload in a short-lived local cache keyed by `reminder_id + scheduled_for`, and reuses it on the later `/telnyx/outbound` request. If the warm entry is missing or stale, Pipecat falls back to live hydration.
+
 Pipecat's helper scheduler still supports parallel initiation with a limiter:
 
 ```python
@@ -268,7 +270,7 @@ Each cohort transition:
 
 | Query | Requests | Failures | Avg | p50 | p95 | p99 |
 |-------|----------|----------|-----|-----|-----|-----|
-| search_memories (pgvector HNSW) | 5,492 | **0%** | 105ms | 98ms | 110ms | 460ms |
+| Director memory retrieval (pgvector HNSW) | 5,492 | **0%** | 105ms | 98ms | 110ms | 460ms |
 | get_recent_summaries | 4,130 | **0%** | 98ms | 96ms | 110ms | 150ms |
 | get_critical_memories | 2,745 | **0%** | 98ms | 96ms | 110ms | 150ms |
 | get_due_reminders | 1,233 | **0%** | 98ms | 96ms | 110ms | 150ms |
@@ -278,7 +280,7 @@ Each cohort transition:
 
 | Query | Requests | Failures | Avg | p50 | p95 | p99 |
 |-------|----------|----------|-----|-----|-----|-----|
-| search_memories (pgvector HNSW) | 16,210 | **0%** | 737ms | 710ms | 820ms | 1.3s |
+| Director memory retrieval (pgvector HNSW) | 16,210 | **0%** | 737ms | 710ms | 820ms | 1.3s |
 | get_recent_summaries | 12,229 | **0%** | 728ms | 710ms | 810ms | 1.0s |
 | get_critical_memories | 8,120 | **0%** | 732ms | 710ms | 820ms | 1.2s |
 | get_due_reminders | 4,099 | **0%** | 725ms | 710ms | 800ms | 940ms |
@@ -353,10 +355,10 @@ Groq is the current primary Director provider (`GROQ_API_KEY`, `GROQ_DIRECTOR_MO
 
 ```
 Current limits: 3,000 RPM / 1,000,000 TPM
-Peak demand: 500 calls × 4-8 search_memories/call = 2,000-4,000 RPM
+Peak demand: 500 calls × 4-8 memory retrieval/prefetch attempts per call = 2,000-4,000 RPM
 ```
 
-Mitigated by predictive prefetch cache (most `search_memories` calls hit cache at ~0ms). Real embedding API calls estimated at ~500-1,000 RPM after cache hits. **Should be OK** but monitor during rollout.
+Mitigated by predictive prefetch cache and Director-owned memory injection; most repeated memory requests hit the session cache at ~0ms and Claude no longer calls a separate `search_memories` tool in the live path. Real embedding API calls estimated at ~500-1,000 RPM after cache hits. **Should be OK** but monitor during rollout.
 
 ### Required Actions Before 500 Concurrent
 

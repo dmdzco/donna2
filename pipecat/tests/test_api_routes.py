@@ -2,6 +2,7 @@
 
 import base64
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -145,6 +146,30 @@ class TestTelnyxAndCallContext:
         assert response.status_code == 200
         assert response.json() == {"received": True}
 
+    def test_telnyx_events_deduplicate_event_ids(self, client):
+        from api.routes import telnyx
+
+        telnyx._recent_telnyx_event_ids.clear()
+        payload = {
+            "data": {
+                "id": "evt-duplicate",
+                "event_type": "call.answered",
+                "payload": {"call_control_id": "v3:test-call"},
+            }
+        }
+
+        try:
+            with patch.object(telnyx, "_handle_call_answered", new=AsyncMock()) as mock_answered:
+                first = client.post("/telnyx/events", json=payload)
+                second = client.post("/telnyx/events", json=payload)
+
+            assert first.status_code == 200
+            assert second.status_code == 200
+            assert second.json() == {"received": True, "duplicate": True}
+            assert mock_answered.await_count == 1
+        finally:
+            telnyx._recent_telnyx_event_ids.clear()
+
     @pytest.mark.asyncio
     async def test_bot_loads_metadata_from_local_state_first(self):
         """WebSocket setup should use local metadata before shared state."""
@@ -228,6 +253,304 @@ class TestTelnyxAndCallContext:
             metadata = await _load_call_metadata("CAmissing", session_state)
 
         assert metadata == {}
+
+    @pytest.mark.asyncio
+    async def test_outbound_call_seeds_metadata_before_context_hydration(self):
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        senior = {
+            "id": "senior-1",
+            "name": "Test Senior",
+            "phone": "+15557654321",
+            "timezone": "America/Chicago",
+            "call_settings": {},
+        }
+        call_metadata.clear()
+
+        try:
+            with patch("services.seniors.get_by_id", new=AsyncMock(return_value=senior)), \
+                 patch.object(telnyx, "_telnyx_event_url", return_value="https://pipecat.example.test/telnyx/events"), \
+                 patch.object(telnyx, "_telnyx_post", new=AsyncMock(return_value={"data": {"call_control_id": "v3:test-call"}})) as mock_post, \
+                 patch.object(telnyx, "_prepare_reminder_context", new=AsyncMock(return_value=(None, None))), \
+                 patch.object(telnyx, "_store_senior_metadata", new=AsyncMock(return_value={})) as mock_store:
+                result = await telnyx.create_telnyx_outbound_call(
+                    telnyx.TelnyxOutboundCallRequest(seniorId="senior-1", callType="check-in")
+                )
+
+            dial_payload = mock_post.await_args.args[1]
+            metadata = call_metadata["v3:test-call"]
+
+            assert result["callSid"] == "v3:test-call"
+            assert "stream_url" not in dial_payload
+            assert "stream_auth_token" not in dial_payload
+            assert metadata["telnyx_start_stream_after_answer"] is True
+            assert metadata["telnyx_context_ready"] is False
+            assert metadata["telnyx_answered"] is False
+            assert metadata["senior"]["id"] == "senior-1"
+            mock_store.assert_awaited_once()
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
+    async def test_prewarm_telnyx_outbound_context_returns_hydrated_payload(self):
+        from api.routes import telnyx
+
+        senior = {
+            "id": "senior-1",
+            "name": "Test Senior",
+            "phone": "+15557654321",
+            "timezone": "America/Chicago",
+            "call_settings": {},
+        }
+        seed = {
+            "memory_context": "Warm memory",
+            "pre_generated_greeting": "Hi there",
+            "previous_calls_summary": "Previous summary",
+            "recent_turns": "Recent turns",
+            "news_context": "Fresh news",
+        }
+        hydrated = {
+            "memory_context": "Warm memory",
+            "pre_generated_greeting": "Hi there",
+            "news_context": "Fresh news",
+            "recent_turns": "Recent turns",
+            "previous_calls_summary": "Previous summary",
+            "todays_context": "Today",
+            "last_call_analysis": {"summary": "Yesterday"},
+            "call_settings": {"preferred_call_window": "morning"},
+            "has_caregiver_notes": True,
+            "caregiver_notes_content": [{"note": "Bring water"}],
+        }
+
+        with patch("services.seniors.get_by_id", new=AsyncMock(return_value=senior)), \
+             patch.object(telnyx, "_cached_senior_context_seed", return_value=(seed, True)), \
+             patch.object(telnyx, "_hydrate_senior_call_context", new=AsyncMock(return_value=hydrated)):
+            payload = await telnyx.prewarm_telnyx_outbound_context(
+                telnyx.TelnyxOutboundCallRequest(
+                    seniorId="senior-1",
+                    callType="reminder",
+                    reminderId="reminder-1",
+                    scheduledFor=datetime.now(timezone.utc),
+                )
+            )
+
+        assert payload["seniorId"] == "senior-1"
+        assert payload["callType"] == "reminder"
+        assert payload["contextSeedSource"] == "context_cache"
+        assert payload["hydratedContext"]["memoryContext"] == "Warm memory"
+        assert payload["hydratedContext"]["todaysContext"] == "Today"
+        assert payload["hydratedContext"]["caregiverNotesContent"] == [{"note": "Bring water"}]
+
+    @pytest.mark.asyncio
+    async def test_outbound_call_uses_valid_prewarmed_context(self):
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        senior = {
+            "id": "senior-1",
+            "name": "Test Senior",
+            "phone": "+15557654321",
+            "timezone": "America/Chicago",
+            "call_settings": {},
+        }
+        scheduled_for = datetime.now(timezone.utc)
+        prewarmed_context = {
+            "version": 1,
+            "seniorId": "senior-1",
+            "callType": "reminder",
+            "reminderId": "reminder-1",
+            "scheduledFor": scheduled_for.isoformat(),
+            "warmedAt": scheduled_for.isoformat(),
+            "expiresAt": (scheduled_for + timedelta(minutes=5)).isoformat(),
+            "contextSeedSource": "context_cache",
+            "hydratedContext": {
+                "memoryContext": "Warm memory",
+                "preGeneratedGreeting": "Hi there",
+                "newsContext": "Fresh news",
+                "recentTurns": "Recent turns",
+                "previousCallsSummary": "Previous summary",
+                "todaysContext": "Today",
+                "lastCallAnalysis": {"summary": "Yesterday"},
+                "callSettings": {"preferred_call_window": "morning"},
+                "caregiverNotesContent": [],
+            },
+        }
+        call_metadata.clear()
+
+        try:
+            with patch("services.seniors.get_by_id", new=AsyncMock(return_value=senior)), \
+                 patch.object(telnyx, "_telnyx_event_url", return_value="https://pipecat.example.test/telnyx/events"), \
+                 patch.object(telnyx, "_telnyx_post", new=AsyncMock(return_value={"data": {"call_control_id": "v3:test-call"}})), \
+                 patch.object(telnyx, "_prepare_reminder_context", new=AsyncMock(return_value=(None, None))), \
+                 patch.object(telnyx, "_store_senior_metadata", new=AsyncMock(return_value={})) as mock_store:
+                await telnyx.create_telnyx_outbound_call(
+                    telnyx.TelnyxOutboundCallRequest(
+                        seniorId="senior-1",
+                        callType="reminder",
+                        reminderId="reminder-1",
+                        scheduledFor=scheduled_for,
+                        prewarmedContext=prewarmed_context,
+                    )
+                )
+
+            metadata = call_metadata["v3:test-call"]
+            assert metadata["memory_context"] == "Warm memory"
+            assert metadata["telnyx_context_seed_source"] == "prewarmed:context_cache"
+            assert mock_store.await_args.kwargs["prewarmed_hydrated_context"]["todays_context"] == "Today"
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
+    async def test_handle_call_answered_waits_for_context_before_starting_stream(self):
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        call_metadata.clear()
+        call_metadata["v3:test-call"] = {
+            "ws_token": "token-123",
+            "ws_token_expires_at": time.time() + 300,
+            "ws_token_consumed": False,
+            "telephony_provider": "telnyx",
+            "telnyx_start_stream_after_answer": True,
+            "telnyx_answered": False,
+            "telnyx_context_ready": False,
+            "telnyx_stream_started": False,
+        }
+
+        try:
+            with patch.object(telnyx, "_persist_metadata", new=AsyncMock()), \
+                 patch.object(telnyx, "_start_telnyx_stream", new=AsyncMock()) as mock_start:
+                await telnyx._handle_call_answered("v3:test-call")
+
+            assert call_metadata["v3:test-call"]["telnyx_answered"] is True
+            assert call_metadata["v3:test-call"]["telnyx_stream_started"] is False
+            mock_start.assert_not_awaited()
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
+    async def test_store_senior_metadata_starts_stream_when_answer_already_received(self):
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        senior = {
+            "id": "senior-1",
+            "name": "Test Senior",
+            "phone": "+15557654321",
+            "timezone": "America/Chicago",
+            "call_settings": {},
+        }
+        hydrated = {
+            "memory_context": "Known routine context",
+            "pre_generated_greeting": "Hi there",
+            "news_context": "Fresh news",
+            "recent_turns": "Recent turns",
+            "previous_calls_summary": "Previous summary",
+            "todays_context": "Today",
+            "last_call_analysis": {"summary": "Yesterday"},
+            "call_settings": {"preferred_call_window": "morning"},
+            "has_caregiver_notes": False,
+            "caregiver_notes_content": [],
+        }
+
+        call_metadata.clear()
+        call_metadata["v3:test-call"] = {
+            "senior": senior,
+            "ws_token": "token-123",
+            "ws_token_expires_at": time.time() + 300,
+            "ws_token_consumed": False,
+            "telephony_provider": "telnyx",
+            "telnyx_start_stream_after_answer": True,
+            "telnyx_answered": True,
+            "telnyx_context_ready": False,
+            "telnyx_stream_started": False,
+            "telnyx_outbound_seeded_at": time.time(),
+        }
+
+        try:
+            with patch.object(telnyx, "_hydrate_senior_call_context", new=AsyncMock(return_value=hydrated)), \
+                 patch.object(telnyx, "_persist_metadata", new=AsyncMock()), \
+                 patch.object(telnyx, "_start_telnyx_stream", new=AsyncMock()) as mock_start, \
+                 patch("services.conversations.create", new=AsyncMock(return_value={"id": "conv-1"})):
+                metadata = await telnyx._store_senior_metadata(
+                    call_control_id="v3:test-call",
+                    senior=senior,
+                    is_outbound=True,
+                    call_type="check-in",
+                    target_phone="+15557654321",
+                    ws_token="token-123",
+                    start_stream_after_answer=True,
+                )
+
+            assert metadata["telnyx_context_ready"] is True
+            assert metadata["conversation_id"] == "conv-1"
+            assert call_metadata["v3:test-call"]["telnyx_stream_started"] is True
+            mock_start.assert_awaited_once_with("v3:test-call", "token-123")
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
+    async def test_store_senior_metadata_uses_prewarmed_context_without_live_hydration(self):
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        senior = {
+            "id": "senior-1",
+            "name": "Test Senior",
+            "phone": "+15557654321",
+            "timezone": "America/Chicago",
+            "call_settings": {},
+        }
+        hydrated = {
+            "memory_context": "Warm memory",
+            "pre_generated_greeting": "Hi there",
+            "news_context": "Fresh news",
+            "recent_turns": "Recent turns",
+            "previous_calls_summary": "Previous summary",
+            "todays_context": "Today",
+            "last_call_analysis": {"summary": "Yesterday"},
+            "call_settings": {"preferred_call_window": "morning"},
+            "has_caregiver_notes": False,
+            "caregiver_notes_content": [],
+        }
+
+        call_metadata.clear()
+        call_metadata["v3:test-call"] = {
+            "senior": senior,
+            "ws_token": "token-123",
+            "ws_token_expires_at": time.time() + 300,
+            "ws_token_consumed": False,
+            "telephony_provider": "telnyx",
+            "telnyx_start_stream_after_answer": True,
+            "telnyx_answered": True,
+            "telnyx_context_ready": False,
+            "telnyx_stream_started": False,
+            "telnyx_outbound_seeded_at": time.time(),
+        }
+
+        try:
+            with patch.object(telnyx, "_hydrate_senior_call_context", new=AsyncMock()) as mock_hydrate, \
+                 patch.object(telnyx, "_persist_metadata", new=AsyncMock()), \
+                 patch.object(telnyx, "_start_telnyx_stream", new=AsyncMock()) as mock_start, \
+                 patch("services.conversations.create", new=AsyncMock(return_value={"id": "conv-1"})):
+                metadata = await telnyx._store_senior_metadata(
+                    call_control_id="v3:test-call",
+                    senior=senior,
+                    is_outbound=True,
+                    call_type="reminder",
+                    target_phone="+15557654321",
+                    ws_token="token-123",
+                    start_stream_after_answer=True,
+                    prewarmed_hydrated_context=hydrated,
+                )
+
+            assert metadata["memory_context"] == "Warm memory"
+            assert metadata["conversation_id"] == "conv-1"
+            mock_hydrate.assert_not_awaited()
+            mock_start.assert_awaited_once_with("v3:test-call", "token-123")
+        finally:
+            call_metadata.clear()
 
 
 

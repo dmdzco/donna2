@@ -54,6 +54,8 @@ class WebSocketAuthError(Exception):
 
 
 HANDSHAKE_TIMEOUT_SECONDS = settings.telephony_ws_handshake_timeout_seconds
+WS_METADATA_LOOKUP_TIMEOUT_SECONDS = 2.0
+WS_METADATA_LOOKUP_POLL_INTERVAL_SECONDS = 0.05
 
 
 def _provider_call_id(call_data: dict, session_state: dict | None = None) -> str:
@@ -69,9 +71,50 @@ def _provider_call_id(call_data: dict, session_state: dict | None = None) -> str
 
 def _provider_ws_token(call_data: dict) -> str:
     """Extract the one-time WebSocket token from provider-specific metadata."""
-    body_token = (call_data.get("body") or {}).get("ws_token", "")
-    query_token = (call_data.get("query_params") or {}).get("ws_token", "")
-    return body_token or query_token
+    body = call_data.get("body") or {}
+    query_params = call_data.get("query_params") or {}
+
+    custom_token = ""
+    custom_parameters = body.get("custom_parameters") or call_data.get("custom_parameters") or []
+    if isinstance(custom_parameters, list):
+        for param in custom_parameters:
+            if not isinstance(param, dict):
+                continue
+            if str(param.get("name") or "") not in {"ws_token", "stream_auth_token"}:
+                continue
+            candidate = str(param.get("value") or "")
+            if candidate:
+                custom_token = candidate
+                break
+
+    body_token = body.get("ws_token") or body.get("stream_auth_token") or ""
+    query_token = query_params.get("ws_token") or query_params.get("stream_auth_token") or ""
+    return str(body_token or custom_token or query_token)
+
+
+async def _wait_for_call_metadata(call_sid: str) -> dict | None:
+    from api.routes.call_context import get_call_metadata
+
+    deadline = time.monotonic() + WS_METADATA_LOOKUP_TIMEOUT_SECONDS
+    attempts = 0
+
+    while True:
+        attempts += 1
+        metadata = await get_call_metadata(call_sid)
+        if metadata:
+            if attempts > 1:
+                logger.info(
+                    "[{cs}] WebSocket metadata became available after {attempts} checks",
+                    cs=call_sid,
+                    attempts=attempts,
+                )
+            return metadata
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+
+        await asyncio.sleep(min(WS_METADATA_LOOKUP_POLL_INTERVAL_SECONDS, remaining))
 
 
 async def authenticate_websocket_call(
@@ -85,9 +128,9 @@ async def authenticate_websocket_call(
     if not call_sid:
         raise WebSocketAuthError("missing call_sid")
 
-    from api.routes.call_context import get_call_metadata, mark_ws_token_consumed
+    from api.routes.call_context import mark_ws_token_consumed
 
-    metadata = await get_call_metadata(call_sid)
+    metadata = await _wait_for_call_metadata(call_sid)
     if not metadata:
         raise WebSocketAuthError("unknown call_sid")
 

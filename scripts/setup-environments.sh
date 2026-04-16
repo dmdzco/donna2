@@ -175,18 +175,6 @@ ELEVENLABS_VOICE_ID=$(get_prod_var donna-pipecat ELEVENLABS_VOICE_ID)
 ELEVENLABS_MODEL=$(get_prod_var donna-pipecat ELEVENLABS_MODEL)
 GOOGLE_API_KEY=$(get_prod_var donna-pipecat GOOGLE_API_KEY)
 OPENAI_API_KEY=$(get_prod_var donna-pipecat OPENAI_API_KEY)
-TWILIO_ACCOUNT_SID=$(get_prod_var donna-api TWILIO_ACCOUNT_SID)
-if [ -z "$TWILIO_ACCOUNT_SID" ]; then
-  TWILIO_ACCOUNT_SID=$(get_prod_var donna-pipecat TWILIO_ACCOUNT_SID)
-fi
-TWILIO_AUTH_TOKEN=$(get_prod_var donna-api TWILIO_AUTH_TOKEN)
-if [ -z "$TWILIO_AUTH_TOKEN" ]; then
-  TWILIO_AUTH_TOKEN=$(get_prod_var donna-pipecat TWILIO_AUTH_TOKEN)
-fi
-TWILIO_PHONE_NUMBER=$(get_prod_var donna-api TWILIO_PHONE_NUMBER)
-if [ -z "$TWILIO_PHONE_NUMBER" ]; then
-  TWILIO_PHONE_NUMBER=$(get_prod_var donna-pipecat TWILIO_PHONE_NUMBER)
-fi
 TELNYX_API_KEY=$(get_prod_var donna-pipecat TELNYX_API_KEY)
 TELNYX_PUBLIC_KEY=$(get_prod_var donna-pipecat TELNYX_PUBLIC_KEY)
 TELNYX_CONNECTION_ID=$(get_prod_var donna-pipecat TELNYX_CONNECTION_ID)
@@ -223,7 +211,6 @@ if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$DONNA_API_KEYS" ] || [ -z "$FIELD_ENCRY
   echo "  TELNYX_PHONE_NUMBER   = $DEV_TELNYX_NUMBER"
   echo "  TELNYX_CONNECTION_ID  = <Telnyx Voice API application id>"
   echo "  TELEPHONY_PROVIDER    = telnyx"
-  echo "  TWILIO_*              = optional SMS notification credentials on donna-api"
   echo "  NODE_API_URL          = https://<dev-node-domain>   (on donna-pipecat)"
   echo "  CLERK_SECRET_KEY      = <Clerk secret>              (on donna-api)"
   echo "  SCHEDULER_ENABLED     = false   (on donna-pipecat)"
@@ -316,9 +303,6 @@ set_dev_var donna-api ENVIRONMENT "production"
 set_dev_var donna-api DATABASE_URL "$DEV_DB_URL"
 set_dev_var donna-api PIPECAT_PUBLIC_URL "$DEV_PIPECAT_PUBLIC_URL"
 set_dev_var donna-api TELEPHONY_PROVIDER "telnyx"
-set_dev_var donna-api TWILIO_ACCOUNT_SID "$TWILIO_ACCOUNT_SID"
-set_dev_var donna-api TWILIO_AUTH_TOKEN "$TWILIO_AUTH_TOKEN"
-set_dev_var donna-api TWILIO_PHONE_NUMBER "$TWILIO_PHONE_NUMBER"
 set_dev_var donna-api GOOGLE_API_KEY "$GOOGLE_API_KEY"
 set_dev_var donna-api OPENAI_API_KEY "$OPENAI_API_KEY"
 set_dev_var donna-api JWT_SECRET "$JWT_SECRET"
@@ -371,9 +355,6 @@ set_staging_var donna-api ENVIRONMENT "production"
 set_staging_var donna-api DATABASE_URL "$STAGING_DB_URL"
 set_staging_var donna-api PIPECAT_PUBLIC_URL "$STAGING_PIPECAT_PUBLIC_URL"
 set_staging_var donna-api TELEPHONY_PROVIDER "telnyx"
-set_staging_var donna-api TWILIO_ACCOUNT_SID "$TWILIO_ACCOUNT_SID"
-set_staging_var donna-api TWILIO_AUTH_TOKEN "$TWILIO_AUTH_TOKEN"
-set_staging_var donna-api TWILIO_PHONE_NUMBER "$TWILIO_PHONE_NUMBER"
 set_staging_var donna-api GOOGLE_API_KEY "$GOOGLE_API_KEY"
 set_staging_var donna-api OPENAI_API_KEY "$OPENAI_API_KEY"
 set_staging_var donna-api JWT_SECRET "$JWT_SECRET"
@@ -412,7 +393,7 @@ echo ""
 echo "  3. Seed dev database (copy a test senior from prod):"
 echo "     You can use the admin dashboard or insert directly"
 echo ""
-echo "  4. Test with a real call to $DEV_TWILIO_NUMBER"
+echo "  4. Test with a real call to $DEV_TELNYX_NUMBER"
 echo ""
 echo "  5. Iterate: edit → make deploy-dev-pipecat → call → repeat"
 echo ""

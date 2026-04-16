@@ -146,7 +146,7 @@ export const notificationPreferences = pgTable('notification_preferences', {
   reminderMissed: boolean('reminder_missed').default(true),
   weeklySummary: boolean('weekly_summary').default(true),
   // Channel preferences
-  smsEnabled: boolean('sms_enabled').default(true),
+  smsEnabled: boolean('sms_enabled').default(false),
   emailEnabled: boolean('email_enabled').default(true),
   // Quiet hours (in caregiver's local time)
   quietHoursStart: varchar('quiet_hours_start', { length: 5 }), // "22:00"
@@ -165,7 +165,7 @@ export const notifications = pgTable('notifications', {
   caregiverId: uuid('caregiver_id').references(() => caregivers.id).notNull(),
   seniorId: uuid('senior_id').references(() => seniors.id),
   eventType: varchar('event_type', { length: 50 }).notNull(), // call_completed, concern_detected, reminder_missed, weekly_summary
-  channel: varchar('channel', { length: 20 }).notNull(),      // sms, email
+  channel: varchar('channel', { length: 20 }).notNull(),      // email; legacy rows may be sms
   content: text('content').notNull(),
   contentEncrypted: text('content_encrypted'),
   metadata: json('metadata'),    // event-specific data (analysis id, concern details, etc.)

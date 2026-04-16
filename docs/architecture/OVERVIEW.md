@@ -191,11 +191,6 @@ The Director runs **non-blocking** via `asyncio.create_task()`. The active specu
     "priority_action": "main thing to do",
     "specific_instruction": "actionable guidance"
   },
-  "model_recommendation": {
-    "use_sonnet": false,
-    "max_tokens": 150,
-    "reason": "why this token count"
-  },
   "prefetch": {
     "memory_queries": ["gardening", "grandson Jake"]
   }
@@ -212,7 +207,7 @@ Quick Observer pattern categories:
 | **Emotion** | 25+ patterns with valence/intensity | Emotional tone detection |
 | **Family** | 25+ relationship patterns including pets | Context enrichment |
 | **Safety** | Scams, strangers, emergencies | Safety concern flags |
-| **Goodbye** | Strong goodbye detection (bye, gotta go, take care) | Schedules programmatic EndFrame after goodbye audio |
+| **Goodbye** | Explicit strong goodbye detection ("goodbye", "I gotta go", "talk to you later") | Schedules programmatic EndFrame only after the minimum call-age guard and goodbye audio delay |
 | **Factual/Curiosity** | Question patterns ("what year", "how tall") | Direct-answer guidance |
 | **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 

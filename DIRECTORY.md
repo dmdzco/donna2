@@ -74,7 +74,7 @@ Donna runs two backend services. Change the wrong one and nothing happens.
 3. Telnyx connects WebSocket → `/ws` validates `call_control_id` + `ws_token` before consuming active-call capacity → **Pipecat runs full pipeline** (STT → Observer → Director → Claude → TTS)
 4. Call ends → Pipecat `services/post_call.py` runs analysis, memory extraction, daily context save
 
-**Note:** Frontends hit Node.js APIs for call initiation. The active Node `routes/calls.js` calls Pipecat `/telnyx/outbound`; Node does not call Twilio for voice. Twilio voice code is archived under `archive/twilio-voice/`. Twilio SMS notifications remain in `services/notifications.js`.
+**Note:** Frontends hit Node.js APIs for call initiation. The active Node `routes/calls.js` calls Pipecat `/telnyx/outbound`; Node does not call Twilio for voice. Twilio voice code is archived under `archive/twilio-voice/`. SMS notifications are inactive; `services/notifications.js` only sends email/in-app notifications while preserving legacy `smsEnabled` fields for compatibility.
 
 **Current audio profile:** Telnyx voice uses `L16` at `16kHz` on the wire. Donna keeps the active Telnyx path linear PCM through the pipeline and uses little-endian L16 at the Telnyx WebSocket edge (`TELNYX_STREAM_CODEC=L16`, `TELNYX_STREAM_SAMPLE_RATE=16000`, `TELNYX_L16_INPUT_BYTE_ORDER=little`, `TELNYX_L16_OUTPUT_BYTE_ORDER=little`). Browser/internal TTS can still use higher-rate PCM when not constrained by a Telnyx call.
 

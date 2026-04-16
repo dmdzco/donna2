@@ -30,6 +30,7 @@ def test_telnyx_stream_options_default_to_l16_16k():
     assert options["stream_bidirectional_codec"] == "L16"
     assert options["stream_bidirectional_sampling_rate"] == 16000
     assert options["stream_bidirectional_target_legs"] == "both"
+    assert options["stream_auth_token"] == "test-token"
     assert options["stream_url"].startswith("wss://pipecat.example.test/ws?")
 
 

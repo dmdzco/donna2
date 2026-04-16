@@ -1,6 +1,6 @@
 import { db } from '../db/client.js';
 import { reminders, seniors, reminderDeliveries, conversations, notificationPreferences, notifications, caregivers } from '../db/schema.js';
-import { eq, and, lte, isNull, or, sql, ne, lt, gte, desc } from 'drizzle-orm';
+import { eq, and, lte, isNull, or, sql, ne, lt, gte, gt, desc } from 'drizzle-orm';
 import { contextCacheService } from './context-cache.js';
 import { runDailyPurgeIfNeeded } from './data-retention.js';
 import { createLogger } from '../lib/logger.js';
@@ -13,7 +13,7 @@ import {
   resolveTimezoneFromProfile,
   zonedWallTimeToUtcDate,
 } from '../lib/timezone.js';
-import { initiateTelnyxOutboundCall } from './telnyx.js';
+import { initiateTelnyxOutboundCall, prewarmTelnyxOutboundContext } from './telnyx.js';
 
 const log = createLogger('Scheduler');
 
@@ -34,6 +34,81 @@ async function retryTelnyxCall(params, maxAttempts = 3) {
 // Welfare check tracking — prevents calling the same senior twice per day
 const welfareCalledToday = new Set();
 let lastWelfareClearDate = new Date().toISOString().slice(0, 10);
+
+const REMINDER_PREWARM_TARGET_LEAD_MS = 2 * 60 * 1000;
+const REMINDER_PREWARM_LOOKAHEAD_MS = REMINDER_PREWARM_TARGET_LEAD_MS + 60 * 1000;
+const REMINDER_PREWARM_TTL_MS = 10 * 60 * 1000;
+const REMINDER_PREWARM_MAX_CONCURRENCY = 5;
+const REMINDER_PREWARM_SCHEDULE_TOLERANCE_MS = 60 * 1000;
+const reminderPrewarmCache = new Map();
+
+function coerceDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function reminderPrewarmKey(reminderId, scheduledFor) {
+  const scheduledAt = coerceDate(scheduledFor);
+  if (!reminderId || !scheduledAt) return null;
+  return `${reminderId}:${scheduledAt.toISOString()}`;
+}
+
+function cleanupReminderPrewarmCache(nowMs = Date.now()) {
+  let removed = 0;
+  for (const [key, context] of reminderPrewarmCache.entries()) {
+    const expiresAt = coerceDate(context?.expiresAt);
+    const warmedAt = coerceDate(context?.warmedAt);
+    const ttlExpired = warmedAt ? nowMs - warmedAt.getTime() > REMINDER_PREWARM_TTL_MS : true;
+    if (!expiresAt || expiresAt.getTime() <= nowMs || ttlExpired) {
+      reminderPrewarmCache.delete(key);
+      removed++;
+    }
+  }
+  return removed;
+}
+
+function datesWithinTolerance(a, b, toleranceMs = REMINDER_PREWARM_SCHEDULE_TOLERANCE_MS) {
+  const left = coerceDate(a);
+  const right = coerceDate(b);
+  if (!left || !right) return false;
+  return Math.abs(left.getTime() - right.getTime()) <= toleranceMs;
+}
+
+function isReminderPrewarmUsable(spec, prewarmedContext, now = new Date()) {
+  if (!prewarmedContext || prewarmedContext.callType !== 'reminder') {
+    return false;
+  }
+  if (!prewarmedContext.hydratedContext) {
+    return false;
+  }
+  if (prewarmedContext.seniorId !== spec?.senior?.id) {
+    return false;
+  }
+  if (prewarmedContext.reminderId !== spec?.reminder?.id) {
+    return false;
+  }
+  if (!datesWithinTolerance(prewarmedContext.scheduledFor, spec?.scheduledFor)) {
+    return false;
+  }
+  const expiresAt = coerceDate(prewarmedContext.expiresAt);
+  return Boolean(expiresAt && expiresAt.getTime() > now.getTime());
+}
+
+async function runWithConcurrency(items, limit, worker) {
+  let cursor = 0;
+
+  async function runNext() {
+    while (cursor < items.length) {
+      const current = items[cursor];
+      cursor += 1;
+      await worker(current);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => runNext());
+  await Promise.all(workers);
+}
 
 /**
  * Check if a senior's local time is within the acceptable call window.
@@ -121,6 +196,186 @@ export const schedulerService = {
     return getScheduledForTimeInTimezone(reminder, senior, now);
   },
 
+  clearReminderPrewarmCache() {
+    reminderPrewarmCache.clear();
+  },
+
+  getReminderPrewarmStats() {
+    cleanupReminderPrewarmCache();
+    return { total: reminderPrewarmCache.size };
+  },
+
+  getReminderPrewarm(spec, now = new Date()) {
+    cleanupReminderPrewarmCache(now.getTime());
+    const key = reminderPrewarmKey(spec?.reminder?.id, spec?.scheduledFor);
+    if (!key) return null;
+
+    const prewarmedContext = reminderPrewarmCache.get(key);
+    if (!isReminderPrewarmUsable(spec, prewarmedContext, now)) {
+      if (prewarmedContext) reminderPrewarmCache.delete(key);
+      return null;
+    }
+    return prewarmedContext;
+  },
+
+  async _findReminderDeliveryByStatuses(reminderId, scheduledFor, statuses) {
+    const rows = await db.select()
+      .from(reminderDeliveries)
+      .where(and(
+        eq(reminderDeliveries.reminderId, reminderId),
+        sql`${reminderDeliveries.scheduledFor} BETWEEN ${new Date(scheduledFor.getTime() - 5 * 60 * 1000)} AND ${new Date(scheduledFor.getTime() + 5 * 60 * 1000)}`,
+        or(...statuses.map(status => eq(reminderDeliveries.status, status)))
+      ))
+      .limit(1);
+    return rows[0] || null;
+  },
+
+  async getReminderPrewarmCandidates(now = new Date(), lookaheadMs = REMINDER_PREWARM_LOOKAHEAD_MS) {
+    cleanupReminderPrewarmCache(now.getTime());
+
+    const dueCutoff = new Date(now.getTime() + 60 * 1000);
+    const horizon = new Date(now.getTime() + lookaheadMs);
+
+    const nonRecurring = (await db.select({
+      reminder: reminders,
+      senior: seniors
+    })
+      .from(reminders)
+      .innerJoin(seniors, eq(reminders.seniorId, seniors.id))
+      .where(and(
+        eq(reminders.isActive, true),
+        eq(reminders.isRecurring, false),
+        gt(reminders.scheduledTime, dueCutoff),
+        lte(reminders.scheduledTime, horizon),
+        eq(seniors.isActive, true)
+      ))).map(({ reminder, senior }) => ({
+        type: 'reminder',
+        reminder: decryptReminderPhi(reminder),
+        senior: decryptSeniorPhi(senior),
+      }));
+
+    const recurring = (await db.select({
+      reminder: reminders,
+      senior: seniors
+    })
+      .from(reminders)
+      .innerJoin(seniors, eq(reminders.seniorId, seniors.id))
+      .where(and(
+        eq(reminders.isActive, true),
+        eq(reminders.isRecurring, true),
+        eq(seniors.isActive, true)
+      ))).map(({ reminder, senior }) => ({
+        type: 'reminder',
+        reminder: decryptReminderPhi(reminder),
+        senior: decryptSeniorPhi(senior),
+      }));
+
+    const recurringSoon = recurring
+      .map(candidate => ({
+        ...candidate,
+        scheduledFor: this.getScheduledForTime(candidate.reminder, candidate.senior, now),
+      }))
+      .filter(candidate => {
+        const scheduledAt = coerceDate(candidate.scheduledFor);
+        return Boolean(
+          scheduledAt &&
+          scheduledAt.getTime() > dueCutoff.getTime() &&
+          scheduledAt.getTime() <= horizon.getTime()
+        );
+      });
+
+    const candidates = [];
+    for (const candidate of [...nonRecurring, ...recurringSoon]) {
+      const scheduledFor = candidate.scheduledFor || this.getScheduledForTime(candidate.reminder, candidate.senior, now);
+      if (!scheduledFor) continue;
+
+      const spec = { ...candidate, scheduledFor };
+      if (this.getReminderPrewarm(spec, now)) continue;
+
+      const completedDelivery = await this._findReminderDeliveryByStatuses(
+        candidate.reminder.id,
+        scheduledFor,
+        ['acknowledged', 'confirmed', 'max_attempts'],
+      );
+      if (completedDelivery) continue;
+
+      const pendingDelivery = await this._findReminderDeliveryByStatuses(
+        candidate.reminder.id,
+        scheduledFor,
+        ['delivered', 'retry_pending'],
+      );
+      if (pendingDelivery) continue;
+
+      candidates.push(spec);
+    }
+
+    return candidates;
+  },
+
+  async prewarmReminderCalls(specs, baseUrl) {
+    cleanupReminderPrewarmCache();
+
+    const reminderSpecs = specs.filter(spec =>
+      spec?.type === 'reminder' &&
+      spec?.reminder?.id &&
+      spec?.senior?.id &&
+      coerceDate(spec?.scheduledFor)
+    );
+    if (reminderSpecs.length === 0) {
+      return { attempted: 0, warmed: 0, cacheHits: 0, failed: 0 };
+    }
+
+    let warmed = 0;
+    let cacheHits = 0;
+    let failed = 0;
+
+    await runWithConcurrency(reminderSpecs, REMINDER_PREWARM_MAX_CONCURRENCY, async (spec) => {
+      if (this.getReminderPrewarm(spec)) {
+        cacheHits++;
+        return;
+      }
+
+      try {
+        const response = await prewarmTelnyxOutboundContext({
+          seniorId: spec.senior.id,
+          callType: 'reminder',
+          reminderId: spec.reminder.id,
+          scheduledFor: coerceDate(spec.scheduledFor)?.toISOString(),
+          baseUrl,
+        });
+        const prewarmedContext = response?.prewarmedContext;
+        if (!isReminderPrewarmUsable(spec, prewarmedContext)) {
+          failed++;
+          return;
+        }
+
+        const key = reminderPrewarmKey(spec.reminder.id, spec.scheduledFor);
+        if (key) {
+          reminderPrewarmCache.set(key, prewarmedContext);
+        }
+        warmed++;
+      } catch (error) {
+        failed++;
+        log.warn('Reminder prewarm failed', {
+          seniorId: spec.senior.id,
+          reminderId: spec.reminder.id,
+          error: error.message,
+        });
+      }
+    });
+
+    if (warmed > 0 || failed > 0) {
+      log.info('Reminder prewarm sweep', {
+        attempted: reminderSpecs.length,
+        warmed,
+        cacheHits,
+        failed,
+      });
+    }
+
+    return { attempted: reminderSpecs.length, warmed, cacheHits, failed };
+  },
+
   /**
    * Find reminders that are due now
    * - scheduledTime is in the past or within next minute
@@ -176,41 +431,22 @@ export const schedulerService = {
       const scheduledFor = this.getScheduledForTime(candidate.reminder, candidate.senior, now);
       if (!scheduledFor) continue;
 
-      // Check if there's already an acknowledged/confirmed delivery for this instance
-      const existingDelivery = await db.select()
-        .from(reminderDeliveries)
-        .where(and(
-          eq(reminderDeliveries.reminderId, candidate.reminder.id),
-          // Match the scheduled_for time within a 10-minute window
-          sql`${reminderDeliveries.scheduledFor} BETWEEN ${new Date(scheduledFor.getTime() - 5 * 60 * 1000)} AND ${new Date(scheduledFor.getTime() + 5 * 60 * 1000)}`,
-          // Has been acknowledged, confirmed, or hit max attempts
-          or(
-            eq(reminderDeliveries.status, 'acknowledged'),
-            eq(reminderDeliveries.status, 'confirmed'),
-            eq(reminderDeliveries.status, 'max_attempts')
-          )
-        ))
-        .limit(1);
+      const existingDelivery = await this._findReminderDeliveryByStatuses(
+        candidate.reminder.id,
+        scheduledFor,
+        ['acknowledged', 'confirmed', 'max_attempts'],
+      );
+      if (existingDelivery) continue;
 
-      if (existingDelivery.length === 0) {
-        // Check if there's a delivered/retry_pending delivery we should skip (first attempt already made)
-        const pendingDelivery = await db.select()
-          .from(reminderDeliveries)
-          .where(and(
-            eq(reminderDeliveries.reminderId, candidate.reminder.id),
-            sql`${reminderDeliveries.scheduledFor} BETWEEN ${new Date(scheduledFor.getTime() - 5 * 60 * 1000)} AND ${new Date(scheduledFor.getTime() + 5 * 60 * 1000)}`,
-            or(
-              eq(reminderDeliveries.status, 'delivered'),
-              eq(reminderDeliveries.status, 'retry_pending')
-            )
-          ))
-          .limit(1);
+      const pendingDelivery = await this._findReminderDeliveryByStatuses(
+        candidate.reminder.id,
+        scheduledFor,
+        ['delivered', 'retry_pending'],
+      );
+      if (pendingDelivery) continue;
 
-        if (pendingDelivery.length === 0) {
-          // No delivery yet for this instance - it's due
-          dueReminders.push({ ...candidate, scheduledFor });
-        }
-      }
+      // No delivery yet for this instance - it's due
+      dueReminders.push({ ...candidate, scheduledFor });
     }
 
     // Also find retry_pending deliveries that are ready for retry (>30 min since last attempt)
@@ -285,6 +521,7 @@ export const schedulerService = {
    */
   async triggerOutboundCall(spec, baseUrl) {
     const { type, senior } = spec;
+    cleanupReminderPrewarmCache();
 
     // Gate ALL outbound calls through the timezone call window.
     // Reminder calls with an explicit caregiver-set time are allowed as early as 5 AM.
@@ -315,6 +552,8 @@ export const schedulerService = {
     const { senior, reminder, scheduledFor, existingDelivery } = spec;
 
     const targetScheduledFor = scheduledFor || this.getScheduledForTime(reminder, senior) || new Date();
+    const reminderSpec = { ...spec, scheduledFor: targetScheduledFor };
+    const prewarmedContext = this.getReminderPrewarm(reminderSpec);
     log.info('Triggering Telnyx reminder call', { seniorId: senior.id, reminderId: reminder.id });
 
     const call = await retryTelnyxCall({
@@ -323,9 +562,14 @@ export const schedulerService = {
       reminderId: reminder.id,
       scheduledFor: targetScheduledFor.toISOString(),
       existingDeliveryId: existingDelivery?.id,
+      ...(prewarmedContext ? { prewarmedContext } : {}),
       baseUrl,
     });
 
+    if (prewarmedContext) {
+      const key = reminderPrewarmKey(reminder.id, targetScheduledFor);
+      if (key) reminderPrewarmCache.delete(key);
+    }
     log.info('Reminder call initiated', { callSid: call.callSid, seniorId: senior.id });
     return { sid: call.callSid, callSid: call.callSid, callControlId: call.callControlId };
   },
@@ -527,9 +771,10 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
       }
 
       // Fetch both sources in parallel
-      const [dueReminders, welfareSeniors] = await Promise.all([
+      const [dueReminders, welfareSeniors, reminderPrewarmCandidates] = await Promise.all([
         schedulerService.getDueReminders(),
-        schedulerService.getSeniorsNeedingWelfareCheck()
+        schedulerService.getSeniorsNeedingWelfareCheck(),
+        schedulerService.getReminderPrewarmCandidates(),
       ]);
 
       // Merge and deduplicate into a single call plan
@@ -540,6 +785,13 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
         const welfareCount = callPlan.filter(s => s.type === 'welfare').length;
         log.info('Unified call plan', { total: callPlan.length, reminders: reminderCount, welfare: welfareCount });
       }
+
+      const prewarmPromise = reminderPrewarmCandidates.length > 0
+        ? schedulerService.prewarmReminderCalls(reminderPrewarmCandidates, baseUrl).catch(error => {
+            log.warn('Reminder prewarm sweep failed', { error: error.message });
+            return null;
+          })
+        : null;
 
       // Resolve flags once per scheduler cycle
       const flags = await resolveFlags({ source: 'scheduler' });
@@ -576,6 +828,10 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
       };
 
       const results = await Promise.allSettled(callPlan.map(triggerOne));
+
+      if (prewarmPromise) {
+        await prewarmPromise;
+      }
 
       if (succeeded > 0) {
         log.info('Unified check complete', { succeeded, failed, planned: callPlan.length });

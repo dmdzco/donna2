@@ -30,7 +30,7 @@ Telnyx L16/16k audio ──► FastAPIWebsocketTransport
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1 (0ms): 250+ regex patterns
               │   (BLOCKING)         │  Injects guidance via LLMMessagesAppendFrame
-              │                      │  Strong goodbye → EndFrame
+              │                      │  Strong goodbye → guarded EndFrame
               └─────────┬───────────┘
                         ▼
               ┌─────────────────────┐   ┌─────────────────────────┐
@@ -84,7 +84,7 @@ The guiding rule is: keep PCM throughout the pipeline and match active Telnyx ca
 - **Latency**: 0ms (blocking, inline)
 - **Method**: 250+ regex patterns across 19 categories (health, goodbye, emotion, cognitive, activity, etc.)
 - **Output**: Injects guidance for the current turn
-- **Goodbye detection**: Strong goodbye → programmatic EndFrame after configured delay (bypasses unreliable LLM tool calls)
+- **Goodbye detection**: Explicit strong goodbye → programmatic EndFrame after the minimum call-age guard and configured delay (bypasses unreliable LLM tool calls)
 
 ### Layer 2: Conversation Director (`processors/conversation_director.py`)
 - **Latency**: non-blocking via `asyncio.create_task`; Groq is the active fast provider

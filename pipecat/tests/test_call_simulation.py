@@ -7,10 +7,12 @@ and topic tracking.
 
 import asyncio
 import re
+import time
 import pytest
 from unittest.mock import AsyncMock, patch
 
 from pipecat.frames.frames import EndFrame
+from processors.quick_observer import QuickObserverProcessor
 
 from tests.scenarios.happy_path import HAPPY_PATH_SCENARIO, HAPPY_PATH_LLM_RESPONSES
 from tests.scenarios.goodbye_detection import STRONG_GOODBYE_SCENARIO
@@ -30,6 +32,9 @@ class TestHappyPathCall:
     async def test_happy_path_completes(self):
         """Normal check-in call should complete with EndFrame and tracked topics."""
         session_state = HAPPY_PATH_SCENARIO.to_session_state()
+        session_state["_call_start_time"] = time.time() - (
+            QuickObserverProcessor.PROGRAMMATIC_GOODBYE_MIN_ELAPSED_SECONDS + 5
+        )
 
         with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock_spec, \
              patch("processors.conversation_director.analyze_queries", new_callable=AsyncMock) as mock_queries, \
@@ -83,6 +88,9 @@ class TestGoodbyeScenarios:
     async def test_strong_goodbye_ends_call(self):
         """A strong goodbye should end the call via EndFrame."""
         session_state = STRONG_GOODBYE_SCENARIO.to_session_state()
+        session_state["_call_start_time"] = time.time() - (
+            QuickObserverProcessor.PROGRAMMATIC_GOODBYE_MIN_ELAPSED_SECONDS + 5
+        )
 
         with patch("processors.conversation_director.analyze_turn_speculative", new_callable=AsyncMock) as mock_spec, \
              patch("processors.conversation_director.analyze_queries", new_callable=AsyncMock) as mock_queries, \

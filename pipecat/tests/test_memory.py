@@ -98,11 +98,16 @@ class TestFormatGroupedMemories:
             "created_at": datetime(2026, 4, 14, 20, 30, tzinfo=timezone.utc),
         }
 
-        result = format_memory_for_context(memory, "America/Chicago")
+        with patch(
+            "services.memory.format_call_time_label",
+            return_value="Tuesday at 3:30 PM (2 days ago)",
+        ) as mock_label:
+            result = format_memory_for_context(memory, "America/Chicago")
 
+        mock_label.assert_called_once_with(memory["created_at"], "America/Chicago")
         assert "Plans to work out tomorrow" in result
         assert "recorded" in result
-        assert any(label in result for label in ("Earlier today", "Yesterday", "April"))
+        assert result.endswith("(recorded Tuesday at 3:30 PM (2 days ago))")
 
 
 class TestGenerateEmbedding:

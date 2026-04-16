@@ -113,7 +113,7 @@ YAML-based conversation scripts that simulate full calls:
 | Scenario | Tests |
 |----------|-------|
 | Happy path | Greeting → topics → natural goodbye |
-| Strong goodbye | "I gotta go" → immediate EndFrame (3.5s) |
+| Strong goodbye | "I gotta go" → goodbye response, minimum call-age guard, then delayed EndFrame |
 | Reminder delivery | Medication reminder → acknowledged |
 | Emotional support | Distress signals → empathetic response |
 | Multiple topics | Topic switching during conversation |

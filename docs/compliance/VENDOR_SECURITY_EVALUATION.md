@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| Last Updated | April 4, 2026 |
+| Last Updated | April 16, 2026 |
 | Owner | TBD (HIPAA Security Officer) |
 | Review Cadence | Annually + before adding any new vendor |
 | Related Docs | [HIPAA Overview](HIPAA_OVERVIEW.md), [BAA Tracker](BAA_TRACKER.md), [Data Retention](DATA_RETENTION_POLICY.md) |
@@ -58,7 +58,7 @@ Senior (phone call)
     │
     ▼
 ┌─────────┐     ┌───────────┐     ┌──────────────┐     ┌────────────────┐
-│ Twilio   │────►│ Deepgram  │────►│ Groq/Google  │────►│ Anthropic      │
+│ Telnyx   │────►│ Deepgram  │────►│ Groq/Google  │────►│ Anthropic      │
 │ (audio + │     │ (audio →  │     │ Groq/Google  │     │ (Claude:       │
 │  phone#) │     │  text)    │     │ (Director    │     │  full convo)   │
 └─────────┘     └───────────┘     │  analysis)   │     └───────┬────────┘
@@ -80,37 +80,49 @@ Senior (phone call)
                               ┌────────────────┼────────────────┐
                               ▼                ▼                ▼
                         ┌──────────┐    ┌───────────┐    ┌──────────┐
-                        │ Railway  │    │ Sentry    │    │ Twilio   │
-                        │ (logs,   │    │ (errors)  │    │ (SMS to  │
-                        │  runtime)│    └───────────┘    │caregiver)│
+                        │ Railway  │    │ Sentry    │    │ Resend   │
+                        │ (logs,   │    │ (errors)  │    │ (email   │
+                        │  runtime)│    └───────────┘    │ notices) │
                         └──────────┘                     └──────────┘
 ```
 
-**PHI touches 12+ external vendors** during or shortly after a single phone call. This is the primary compliance risk.
+**PHI touches 12+ external vendors** during or shortly after a single phone call. This is the primary compliance risk. SMS is inactive for now; Twilio is not part of the active PHI flow.
 
 ---
 
 ## Vendor Evaluations by Category
 
-### 1. Telephony: Twilio
+### 1. Telephony: Telnyx
 
 | Criterion | Assessment |
 |-----------|-----------|
-| **PHI Exposure** | HIGH -- raw voice audio (both directions), phone numbers, call metadata, SMS content to caregivers |
-| **BAA Available** | **Yes** -- Twilio offers HIPAA-eligible products with BAA |
+| **PHI Exposure** | HIGH -- raw voice audio/media streaming, phone numbers, call metadata, phone number inventory, optional call recordings if enabled |
+| **BAA Available** | **Yes / confirm scope** -- Telnyx publishes HIPAA guidance for BAA-covered and conduit-exception workflows; confirm Donna's Voice API + media streaming posture with Telnyx sales/legal |
 | **Security Certifications** | SOC 2 Type II, ISO 27001, PCI DSS Level 1 |
-| **Data Retention** | Configurable -- call logs retained by default, recordings if enabled. Must configure retention limits. |
+| **Data Retention** | Configurable -- call logs retained by default, recordings if enabled. Must configure retention limits and keep recording disabled unless explicitly needed. |
 | **Encryption** | TLS in transit, AES-256 at rest for recordings |
-| **Data Residency** | US data centers available; configurable per project |
+| **Data Residency** | US routing/data center options available; confirm for Voice API/media streaming setup |
 | **Incident Response** | Documented; breach notification per BAA terms |
 | **Risk Rating** | **MEDIUM** (BAA available but not yet signed; high PHI exposure) |
 
 **Actions:**
-1. Enable "HIPAA-eligible" in Twilio project settings
-2. Sign Twilio BAA (available through console or sales)
+1. Confirm Telnyx Voice API + media streaming HIPAA/BAA scope with Telnyx sales/legal
+2. Sign Telnyx BAA or file legal approval for a conduit-exception posture
 3. Configure data retention limits (minimize call log retention)
 4. Ensure call recording is disabled unless explicitly needed (currently disabled)
-5. Review Twilio subprocessor list
+5. Review Telnyx subprocessor list
+
+### 1a. Inactive Telephony/SMS: Twilio
+
+| Criterion | Assessment |
+|-----------|-----------|
+| **PHI Exposure** | None in active runtime. Historical Twilio voice code is archived, and SMS notifications are disabled. |
+| **BAA Available** | **Yes** if Twilio is reintroduced |
+| **Risk Rating** | **LOW while inactive** |
+
+**Actions:**
+1. Keep Twilio out of active PHI paths while SMS remains disabled.
+2. Re-run vendor/security review and execute a BAA before reintroducing Twilio SMS or Twilio voice.
 
 ---
 
@@ -609,7 +621,8 @@ Quick reference comparing compliance readiness across all vendors:
 
 | Vendor | PHI Level | BAA | SOC 2 | HIPAA Cert | Risk | Action |
 |--------|-----------|-----|-------|------------|------|--------|
-| Twilio | High | Available | Yes | No | Medium | Sign BAA |
+| Telnyx | High | Available / confirm scope | Yes | No | Medium | Sign BAA or file conduit-exception review |
+| Twilio | None while inactive | Available if reintroduced | Yes | No | Low | Keep inactive unless SMS/voice returns |
 | Anthropic | Critical | Available | Yes | No | Medium | Sign BAA |
 | Google (Gemini) | High | Available | Yes | Yes | Low | Sign BAA |
 | Groq | High | Unclear | Claimed | No | High | Evaluate or replace |

@@ -24,6 +24,24 @@ from processors.patterns import (
 )
 
 
+_GOODBYE_CONTINUATION_MARKERS = (
+    "oh wait",
+    "wait,",
+    "wait ",
+    "i forgot",
+    "forgot to tell",
+    "one more thing",
+    "before i go",
+    "real quick",
+    "actually",
+)
+
+
+def _has_goodbye_continuation(text: str) -> bool:
+    normalized = f" {text.lower()} "
+    return any(marker in normalized for marker in _GOODBYE_CONTINUATION_MARKERS)
+
+
 # =============================================================================
 # Analysis result
 # =============================================================================
@@ -50,7 +68,7 @@ class AnalysisResult:
     question_type: str | None = None
     engagement_level: str = "normal"
     guidance: str | None = None
-    model_recommendation: dict | None = None
+    token_recommendation: dict | None = None
     reminder_response: dict | None = None
     needs_web_search: bool = False
 
@@ -101,6 +119,10 @@ def quick_analyze(user_message: str, recent_history: list[dict] | None = None) -
             result.needs_web_search = True
 
     _scan(GOODBYE_PATTERNS, result.goodbye_signals, strength_key=True)
+    if result.goodbye_signals and _has_goodbye_continuation(text):
+        for signal in result.goodbye_signals:
+            if signal.get("strength") == "strong":
+                signal["strength"] = "weak"
 
     # Questions
     for p in QUESTION_PATTERNS:
@@ -134,7 +156,7 @@ def quick_analyze(user_message: str, recent_history: list[dict] | None = None) -
     result.reminder_response = best
 
     result.guidance = _build_guidance(result)
-    result.model_recommendation = _build_model_recommendation(result)
+    result.token_recommendation = _build_token_recommendation(result)
     return result
 
 
@@ -221,70 +243,70 @@ def _build_guidance(r: AnalysisResult) -> str | None:
 
 
 # =============================================================================
-# Model recommendation — 16 priority-ordered token rules
+# Token recommendation — 16 priority-ordered response-length rules
 # =============================================================================
 
-def _build_model_recommendation(r: AnalysisResult) -> dict | None:
+def _build_token_recommendation(r: AnalysisResult) -> dict | None:
     # End of life critical
     crit_eol = [s for s in r.end_of_life_signals if s["signal"] in ("death_wish", "hopelessness", "burden_concern")]
     if crit_eol:
-        return {"use_sonnet": True, "max_tokens": 350, "reason": "crisis_support"}
+        return {"max_tokens": 350, "reason": "crisis_support"}
 
     if any(s["severity"] == "high" for s in r.safety_signals):
-        return {"use_sonnet": True, "max_tokens": 300, "reason": "safety_concern"}
+        return {"max_tokens": 300, "reason": "safety_concern"}
 
     if any(s["severity"] == "high" for s in r.adl_signals):
-        return {"use_sonnet": True, "max_tokens": 250, "reason": "functional_concern"}
+        return {"max_tokens": 250, "reason": "functional_concern"}
 
     if any(s["severity"] == "high" for s in r.cognitive_signals):
-        return {"use_sonnet": True, "max_tokens": 250, "reason": "cognitive_concern"}
+        return {"max_tokens": 250, "reason": "cognitive_concern"}
 
     if any(s["severity"] == "high" for s in r.hydration_signals):
-        return {"use_sonnet": True, "max_tokens": 220, "reason": "nutrition_concern"}
+        return {"max_tokens": 220, "reason": "nutrition_concern"}
 
     if any(s["severity"] == "high" for s in r.health_signals):
-        return {"use_sonnet": True, "max_tokens": 250, "reason": "health_safety"}
+        return {"max_tokens": 250, "reason": "health_safety"}
 
     if any(s["severity"] == "medium" for s in r.health_signals):
-        return {"use_sonnet": True, "max_tokens": 200, "reason": "health_mention"}
+        return {"max_tokens": 200, "reason": "health_mention"}
 
     if r.end_of_life_signals:
-        return {"use_sonnet": True, "max_tokens": 250, "reason": "end_of_life_topic"}
+        return {"max_tokens": 250, "reason": "end_of_life_topic"}
 
     if any(s["severity"] == "medium" for s in r.adl_signals):
-        return {"use_sonnet": True, "max_tokens": 200, "reason": "functional_mention"}
+        return {"max_tokens": 200, "reason": "functional_mention"}
 
     if any(s["severity"] == "medium" for s in r.cognitive_signals):
-        return {"use_sonnet": True, "max_tokens": 200, "reason": "cognitive_mention"}
+        return {"max_tokens": 200, "reason": "cognitive_mention"}
 
     if any(s["severity"] == "high" for s in r.transport_signals):
-        return {"use_sonnet": True, "max_tokens": 200, "reason": "mobility_isolation"}
+        return {"max_tokens": 200, "reason": "mobility_isolation"}
 
     if r.help_request_signals:
-        return {"use_sonnet": True, "max_tokens": 200, "reason": "help_request"}
+        return {"max_tokens": 200, "reason": "help_request"}
 
     high_neg = [e for e in r.emotion_signals if e["valence"] == "negative" and e["intensity"] == "high"]
     if high_neg:
-        return {"use_sonnet": True, "max_tokens": 250, "reason": "emotional_support"}
+        return {"max_tokens": 250, "reason": "emotional_support"}
 
     med_neg = [e for e in r.emotion_signals if e["valence"] == "negative" and e["intensity"] == "medium"]
     if med_neg:
-        return {"use_sonnet": True, "max_tokens": 200, "reason": "emotional_support"}
+        return {"max_tokens": 200, "reason": "emotional_support"}
 
     if r.engagement_level == "low":
-        return {"use_sonnet": True, "max_tokens": 180, "reason": "low_engagement"}
+        return {"max_tokens": 180, "reason": "low_engagement"}
 
     if any(s in r.time_signals for s in ("reminiscing", "childhood_memory")):
-        return {"use_sonnet": False, "max_tokens": 170, "reason": "memory_sharing"}
+        return {"max_tokens": 170, "reason": "memory_sharing"}
 
     if r.engagement_level == "high":
-        return {"use_sonnet": False, "max_tokens": 150, "reason": "high_engagement"}
+        return {"max_tokens": 150, "reason": "high_engagement"}
 
     if r.is_question and not r.health_signals and not high_neg:
-        return {"use_sonnet": False, "max_tokens": 100, "reason": "simple_question"}
+        return {"max_tokens": 100, "reason": "simple_question"}
 
     if r.family_signals:
-        return {"use_sonnet": False, "max_tokens": 150, "reason": "family_warmth"}
+        return {"max_tokens": 150, "reason": "family_warmth"}
 
     return None
 
@@ -304,6 +326,7 @@ class QuickObserverProcessor(FrameProcessor):
     # Seconds to wait after goodbye detection before forcing call end.
     # Gives the LLM time to generate and TTS to speak the goodbye audio.
     GOODBYE_DELAY_SECONDS = 5.0
+    PROGRAMMATIC_GOODBYE_MIN_ELAPSED_SECONDS = 60.0
 
     def __init__(self, session_state: dict | None = None, **kwargs):
         super().__init__(**kwargs)
@@ -335,6 +358,16 @@ class QuickObserverProcessor(FrameProcessor):
         except Exception as e:
             logger.error("[QuickObserver] Error forcing call end: {err}", err=str(e))
 
+    def _call_elapsed_seconds(self) -> float | None:
+        started = (self._session_state or {}).get("_call_start_time")
+        if started is None:
+            return None
+        try:
+            import time
+            return max(0.0, time.time() - float(started))
+        except (TypeError, ValueError):
+            return None
+
     async def process_frame(self, frame: Frame, direction):
         await super().process_frame(frame, direction)
 
@@ -355,8 +388,8 @@ class QuickObserverProcessor(FrameProcessor):
             # when this turn has no recommendation so old response-length hints
             # do not leak into later unrelated turns.
             if self._session_state is not None:
-                if analysis.model_recommendation:
-                    self._session_state["_token_recommendation"] = analysis.model_recommendation
+                if analysis.token_recommendation:
+                    self._session_state["_token_recommendation"] = analysis.token_recommendation
                 else:
                     self._session_state.pop("_token_recommendation", None)
 
@@ -385,6 +418,19 @@ class QuickObserverProcessor(FrameProcessor):
                 has_strong = any(g["strength"] == "strong" for g in analysis.goodbye_signals)
                 if has_strong:
                     settings = (self._session_state or {}).get("call_settings") or {}
+                    min_elapsed = settings.get(
+                        "programmatic_goodbye_min_elapsed_seconds",
+                        self.PROGRAMMATIC_GOODBYE_MIN_ELAPSED_SECONDS,
+                    )
+                    elapsed = self._call_elapsed_seconds()
+                    if elapsed is not None and elapsed < min_elapsed:
+                        logger.info(
+                            "[QuickObserver] Strong goodbye before minimum elapsed ({e:.1f}s < {m:.1f}s); not forcing end",
+                            e=elapsed,
+                            m=min_elapsed,
+                        )
+                        await self.push_frame(frame, direction)
+                        return
                     delay = settings.get("goodbye_delay_seconds", self.GOODBYE_DELAY_SECONDS)
                     logger.info(
                         "[QuickObserver] Strong goodbye detected signals={n} - scheduling forced end in {d}s",

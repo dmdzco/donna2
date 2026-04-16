@@ -12,9 +12,8 @@ process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/donna_test';
 process.env.ANTHROPIC_API_KEY = 'test-anthropic-key';
 process.env.GOOGLE_API_KEY = 'test-google-key';
 process.env.OPENAI_API_KEY = 'test-openai-key';
-process.env.TWILIO_ACCOUNT_SID = 'test-twilio-sid';
-process.env.TWILIO_AUTH_TOKEN = 'test-twilio-token';
-process.env.TWILIO_PHONE_NUMBER = '+15551234567';
+process.env.TELNYX_API_KEY = 'test-telnyx-key';
+process.env.TELNYX_PHONE_NUMBER = '+15551234567';
 
 // Global test utilities
 beforeAll(() => {

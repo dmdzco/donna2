@@ -26,7 +26,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Real-time voice calls (Telnyx Voice API → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3)
 - LLM responses (Claude Haiku 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
-- Text-to-speech (ElevenLabs by default; Cartesia available behind provider flag; high-rate PCM internally before telephony conversion)
+- Text-to-speech (ElevenLabs by default; Cartesia remains an evaluation-only provider flag; active Telnyx calls use 16kHz PCM)
 - Semantic memory with decay + deduplication (pgvector + HNSW index)
 - Full in-call context retention (APPEND strategy, no summary truncation)
 - Cross-call turn history (recent turns from previous calls in system prompt)
@@ -163,7 +163,7 @@ Phone Call → Telnyx → WebSocket → Pipecat Pipeline
                                        ▼
                              Guidance Stripper → Conversation Tracker
                                        ▼
-                             TTS high-rate PCM → Telnyx Audio Out (16kHz L16)
+                             TTS 16kHz PCM → Telnyx Audio Out (L16)
                                        │
                                        ▼ (on disconnect)
                              Post-Call: Analysis + Memory + Daily Context

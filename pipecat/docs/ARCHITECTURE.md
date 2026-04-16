@@ -236,11 +236,6 @@ The Director classifies calls into 5 analytical phases (including "rapport" betw
     "priority_action": "main thing to do",
     "specific_instruction": "actionable guidance"
   },
-  "model_recommendation": {
-    "use_sonnet": false,
-    "max_tokens": 150,
-    "reason": "why this token count"
-  },
   "prefetch": {
     "memory_queries": ["gardening", "grandson Jake"]
   }
@@ -396,8 +391,8 @@ The opening phase is merged into main — the bot starts directly in main (or re
 When the telephony client disconnects, `run_post_call()` in `services/post_call.py` executes:
 
 1. **Complete conversation** — Updates DB with duration, status, transcript
-2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions. Now also includes `mood` (e.g., happy, lonely, anxious) and `caregiver_sms` (a privacy-respecting, mood-aware message for caregivers)
-2.5. **Caregiver notes + notifications** — Marks caregiver notes delivered only when assistant transcript evidence shows Donna delivered them. POSTs to Node.js API for call_completed + concern_detected alerts, raising on non-2xx responses and retrying transient failures once. The `caregiver_sms` from analysis is sent to caregivers via this pipeline; if the senior seems down, it subtly suggests the caregiver give them a call
+2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), mood, caregiver takeaways, recommended caregiver action, and follow-up suggestions. The encrypted JSON still includes a legacy `caregiver_sms` key, but SMS delivery is inactive.
+2.5. **Caregiver notes + notifications** — Marks caregiver notes delivered only when assistant transcript evidence shows Donna delivered them. POSTs to Node.js API for call_completed + concern_detected alerts, raising on non-2xx responses and retrying transient failures once. Node sends email/in-app notification records; SMS is inactive.
 3. **Summary persistence** — Writes analysis summary to `conversations.summary` (enables `get_recent_summaries()` and cross-call context)
 3.5. **Interest discovery** — Extracts new interests from conversation, updates senior profile
 3.6. **Interest scores** — Computes engagement scores per interest topic
@@ -635,10 +630,12 @@ FIELD_ENCRYPTION_KEY=...         # 32-byte base64url key for PHI encryption
 SCHEDULER_ENABLED=false
 
 # Audio profile
-TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE=16000
-ELEVENLABS_OUTPUT_SAMPLE_RATE=44100
-CARTESIA_OUTPUT_SAMPLE_RATE=48000
-GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE=24000
+TELNYX_STREAM_CODEC=L16
+TELNYX_STREAM_SAMPLE_RATE=16000
+TELNYX_STREAM_TRACK=inbound_track
+TELNYX_BIDIRECTIONAL_TARGET_LEGS=both
+TELNYX_L16_INPUT_BYTE_ORDER=little
+TELNYX_L16_OUTPUT_BYTE_ORDER=little
 
 # Director models
 FAST_OBSERVER_MODEL=gemini-3-flash-preview   # Gemini fallback model

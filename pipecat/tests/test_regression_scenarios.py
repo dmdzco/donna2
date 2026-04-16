@@ -72,6 +72,7 @@ async def _run_scenario(components, scenario):
 def _build_with_mocked_director(scenario, llm_responses, default_response="That sounds nice!"):
     """Build test pipeline with Director's analyze_turn mocked out."""
     session_state = scenario.to_session_state()
+    session_state["_call_start_time"] = time.time() - 65
 
     mock_analyze_patcher = patch(
         "processors.conversation_director.analyze_turn_speculative",

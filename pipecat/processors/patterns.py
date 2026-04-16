@@ -324,12 +324,13 @@ NEWS_PATTERNS = [
 
 # --- GOODBYE (11) ---
 GOODBYE_PATTERNS = [
-    _p(r"\b(goodbye|good bye|bye bye|bye)\b", "goodbye", strength="strong"),
+    _p(r"\b(goodbye|good bye|bye bye)\b", "goodbye", strength="strong"),
+    _p(r"\bbye\b", "goodbye", strength="weak"),
     _p(r"\b(goodnight|good night|nighty night)\b", "goodnight", strength="strong"),
     _p(r"\b(talk to you (later|soon|tomorrow|next time))\b", "talk_later", strength="strong"),
     _p(r"\b(see you (later|soon|tomorrow|next time))\b", "see_you", strength="strong"),
-    _p(r"\b(take care( of yourself)?)\b", "take_care", strength="strong"),
-    _p(r"\b(have a (good|great|nice|lovely|wonderful) (day|night|evening|afternoon|one))\b", "have_good_day", strength="strong"),
+    _p(r"\b(take care( of yourself)?)\b", "take_care", strength="weak"),
+    _p(r"\b(have a (good|great|nice|lovely|wonderful) (day|night|evening|afternoon|one))\b", "have_good_day", strength="weak"),
     _p(r"\b(i('ll| will) let you go)\b", "let_you_go", strength="strong"),
     _p(r"\b(i (should|gotta|got to|have to|need to|better) go)\b", "need_to_go", strength="strong"),
     _p(r"\b(thanks for (calling|the call|chatting|talking))\b", "thanks_for_call", strength="strong"),

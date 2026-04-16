@@ -94,7 +94,7 @@ export interface NotificationPreferences {
   concernDetected?: boolean;
   reminderMissed?: boolean;
   weeklySummary?: boolean;
-  smsEnabled?: boolean;
+  smsEnabled?: boolean; // Legacy compatibility only; SMS notifications are inactive.
   emailEnabled?: boolean;
   quietHoursStart?: string | null;
   quietHoursEnd?: string | null;

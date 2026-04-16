@@ -82,7 +82,7 @@ export const authLimiter = rateLimit({
 
 /**
  * Webhook rate limit - generous but bounded - 500 per minute.
- * Twilio sends many rapid webhook requests during calls.
+ * Telephony providers can send many rapid webhook requests during calls.
  */
 export const webhookLimiter = rateLimit({
   windowMs: 60 * 1000,

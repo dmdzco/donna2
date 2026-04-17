@@ -15,20 +15,52 @@ User speaks → [STT] → [Observer] → [Director] → [LLM] → [TTS] → Audi
 
 | Component | Latency | Type | Notes |
 |-----------|---------|------|-------|
-| Deepgram STT | ~200-300ms | Streaming | Nova 3, 8kHz mulaw, interim results |
+| Deepgram STT | ~200-300ms | Streaming | Nova 3, Telnyx L16/16k PCM, interim results |
 | Quick Observer | 0ms | Blocking | Regex pattern data, inline |
 | Conversation Director | Async | Non-blocking | Groq primary, Gemini fallback; speculative results can be injected same-turn |
-| Claude Sonnet 4.5 | ~500-1500ms | Streaming | Token-by-token via Pipecat |
-| ElevenLabs TTS | ~200-400ms | Streaming | turbo_v2_5, first chunk |
+| Claude Haiku 4.5 | ~400-900ms | Streaming | Token-by-token via Pipecat; live dev calls showed materially lower TTFB than Sonnet |
+| TTS | ~200-400ms | Streaming | ElevenLabs by default; active Telnyx calls request 16kHz PCM for stable output frames |
 | **Total perceived** | **~1-2s** | | First audio chunk to user |
 
 **Key insight**: The Director runs asynchronously — it doesn't add to the pipeline's critical path. Its analysis from the previous turn is injected before the current LLM call.
+
+### Audio Quality Policy
+
+Runtime source of truth: `pipecat/bot.py:get_audio_profile()`, `pipecat/bot_gemini.py`, and the active telephony serializer.
+
+Donna keeps audio linear and wideband across the active Telnyx phone path:
+
+- Telnyx media streams use `L16` at `16000Hz`.
+- `TELNYX_L16_INPUT_BYTE_ORDER=little` and `TELNYX_L16_OUTPUT_BYTE_ORDER=little` match the verified Telnyx media payload behavior.
+- Active Telnyx phone calls request `16000Hz` TTS output to avoid live resampling artifacts.
+- `ELEVENLABS_OUTPUT_SAMPLE_RATE=44100` for non-phone ElevenLabs TTS output.
+- `CARTESIA_OUTPUT_SAMPLE_RATE=48000` with `pcm_s16le` for non-phone Cartesia Sonic 3 output.
+- `GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE=24000` for the Gemini Live evaluation path.
+- `DonnaTelnyxFrameSerializer` owns the final Telnyx L16/16k wire boundary.
+
+This avoids the old 8kHz μ-law bottleneck and keeps the production phone path at 16kHz until carrier/PSTN limits take over.
+
+---
+
+## Scheduled Outbound Reminder Prewarm
+
+**Active files**: `services/scheduler.js`, `services/telnyx.js`, `pipecat/api/routes/telnyx.py`
+
+Scheduled reminder calls no longer rely on doing the full senior-context hydrate on the exact dial request. The Node scheduler looks ahead roughly 2-3 minutes, asks Pipecat `/telnyx/prewarm` to assemble the outbound reminder context early, caches that payload locally for a few minutes, and includes it on the eventual `/telnyx/outbound` call.
+
+This shifts the expensive reminder-context work off the dial critical path while keeping the existing safety net:
+
+- Node still re-checks that the reminder is due before dialing.
+- Pipecat validates that the prewarmed payload matches `seniorId`, `callType`, `reminderId`, and `scheduledFor`.
+- If the warm payload is missing, expired, or mismatched, Pipecat falls back to the existing live hydration path.
+
+Result: scheduled reminder calls usually spend ring time on Telnyx setup and conversation creation, not on memory/context assembly.
 
 ---
 
 ## Predictive Context Engine
 
-**File**: `pipecat/services/prefetch.py` (250 LOC)
+**File**: `pipecat/services/prefetch.py` (329 LOC)
 
 Speculative memory prefetch that starts while the user is still speaking:
 
@@ -130,7 +162,7 @@ Alert thresholds:
 
 ## Circuit Breakers
 
-**File**: `pipecat/lib/circuit_breaker.py` (89 LOC)
+**File**: `pipecat/lib/circuit_breaker.py` (109 LOC)
 
 Prevents cascading failures when external services are slow or unavailable:
 
@@ -231,7 +263,7 @@ User: "Bye Donna!"
     │
     ▼ (3.5s later — lets Claude finish speaking)
     │
-    EndFrame injected → Pipeline shutdown → TwilioFrameSerializer terminates call
+    EndFrame injected → Pipeline shutdown → active telephony serializer terminates call
 ```
 
 - 3.5s delay allows Claude to complete a natural goodbye response
@@ -242,7 +274,19 @@ User: "Bye Donna!"
 
 ## Performance Monitoring
 
-### Health Endpoint (`/health`)
+### Liveness Endpoint (`/live`)
+
+Railway deploy health checks use Pipecat's lightweight `/live` endpoint. It
+only verifies that the FastAPI process is serving requests and does not touch
+Postgres, Redis, LLM providers, or other external dependencies. This keeps
+deploys from failing during a short staging cold-start window before the
+readiness smoke test can run.
+
+### Readiness Endpoint (`/health`)
+
+`/health` remains the readiness endpoint for CI smoke tests and monitoring. It
+verifies database reachability and reports pool, cache, circuit breaker, and
+call metrics.
 
 ```json
 {
@@ -278,9 +322,9 @@ User: "Bye Donna!"
 
 | File | Purpose |
 |------|---------|
-| `pipecat/services/prefetch.py` | Predictive context prefetch engine (250 LOC) |
-| `pipecat/lib/circuit_breaker.py` | Circuit breaker pattern (89 LOC) |
-| `pipecat/db/client.py` | Pool config, slow query logging (115 LOC) |
-| `pipecat/main.py` | Health endpoint, graceful shutdown (300 LOC) |
-| `pipecat/processors/quick_observer.py` | Programmatic call ending (386 LOC) |
+| `pipecat/services/prefetch.py` | Predictive context prefetch engine (329 LOC) |
+| `pipecat/lib/circuit_breaker.py` | Circuit breaker pattern (109 LOC) |
+| `pipecat/db/client.py` | Pool config, slow query logging (126 LOC) |
+| `pipecat/main.py` | Health endpoint, graceful shutdown (438 LOC) |
+| `pipecat/processors/quick_observer.py` | Programmatic call ending (404 LOC) |
 | `db/migrations/001_add_indexes.sql` | HNSW + B-tree indexes |

@@ -29,6 +29,7 @@ Last updated: April 13, 2026.
 
    - Create or choose the Clerk production instance.
    - Set `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` to the production publishable key for mobile builds.
+   - Set `EXPO_PUBLIC_API_URL` to the production Node API base URL for mobile builds.
    - Set the backend `CLERK_SECRET_KEY` to the matching production secret key.
    - Confirm allowed redirects/deep links include the `donna` scheme and the final bundle ID.
 

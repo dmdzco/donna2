@@ -1,5 +1,8 @@
 # Donna Voice AI: Framework Analysis, SOTA Takeaways & Migration Plan
 
+> Historical framework analysis. Donna has since migrated active live-call handling to the Pipecat service.
+> Use `DIRECTORY.md`, `docs/architecture/ARCHITECTURE.md`, and `pipecat/docs/ARCHITECTURE.md` for current architecture.
+
 > **Purpose:** Deep analysis of open-source voice AI frameworks (Pipecat, LiveKit) compared to Donna's current implementation, with SOTA best practices and a concrete migration plan.
 
 ## Sources
@@ -14,11 +17,11 @@
 
 ---
 
-## Critical Finding: Claude Sonnet TTFT for Voice
+## Prior Finding: Claude Sonnet TTFT for Voice
 
 **The SOTA guide reports Claude Sonnet's median TTFT at ~1,410ms**, calling it "unsuitable for voice despite its capabilities." For comparison: GPT-4o achieves ~460ms and Gemini 2.0 Flash reaches ~380ms.
 
-Donna currently uses Claude Sonnet as the **primary voice model**. This means the LLM step alone may consume 1,000-1,400ms of the ~600-1,100ms target voice-to-voice latency. Our measured ~600ms time-to-first-audio is likely achieved through sentence-level streaming (the first token arrives ~400ms, but the first *complete sentence* takes longer).
+Donna previously used Claude Sonnet as the **primary voice model**. That meant the LLM step alone could consume 1,000-1,400ms of the ~600-1,100ms target voice-to-voice latency. Donna's default voice LLM is now Claude Haiku 4.5 after live tests showed good quality with lower latency.
 
 **Implication:** Switching to Gemini Flash for the voice model (keeping Claude for complex reasoning tasks) could cut LLM TTFT by ~1,000ms. This is potentially the single highest-impact latency improvement available — more impactful than any framework migration.
 
@@ -359,7 +362,7 @@ LiveKit Server → dispatches jobs to → Worker Pool → each worker runs → A
 | GPT-4o | ~460ms | Good (industry standard) | ~$0.009/3min |
 | Claude Sonnet | ~1,410ms | Poor for real-time voice | Higher |
 
-**Donna uses Claude Sonnet** — the slowest option for voice. The SOTA guide's recommendation: use fast models (Gemini Flash, GPT-4o) for the real-time voice path and reserve powerful models (Claude) for async tasks (post-call analysis, memory extraction, complex reasoning).
+**Donna previously used Claude Sonnet** — the slowest option for voice. The SOTA guide's recommendation is to use fast models for the real-time voice path and reserve heavier models for async tasks or escalation. Donna's default voice LLM is now Claude Haiku 4.5.
 
 ### 3.3 TTS Provider Comparison
 
@@ -367,7 +370,7 @@ LiveKit Server → dispatches jobs to → Worker Pool → each worker runs → A
 |----------|----------|-------------|----------|-----------|
 | **Cartesia** | $0.02 | **190ms** | 260ms | State-space architecture, streaming, word timestamps |
 | **Deepgram** | $0.008 | **150ms** | 320ms | Lowest cost, reliable |
-| **ElevenLabs Turbo** | $0.08 | 300ms | 510ms | Best emotional realism |
+| **ElevenLabs Flash** | $0.08 | 300ms | 510ms | Best emotional realism |
 | **Rime** | $0.024 | 340ms | 980ms | Conversational fine-tuning |
 
 **Donna uses ElevenLabs** — the most expensive and 2nd slowest option. Cartesia offers word-level timestamps (critical for interruption context), lower latency, and lower cost. Trade-off: ElevenLabs has the most emotionally realistic voices, which matters for elderly companionship.

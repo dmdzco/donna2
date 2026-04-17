@@ -5,6 +5,8 @@ import { eq, desc, and, sql } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
 import { decrypt, decryptJson } from '../lib/encryption.js';
 import { callAnalysisService } from '../services/call-analyses.js';
+import { routeError } from './helpers.js';
+import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
 
@@ -20,6 +22,240 @@ function readTranscript(call) {
 function readConcerns(call, analysis = null) {
   if (Array.isArray(call.concerns) && call.concerns.length > 0) return call.concerns;
   return Array.isArray(analysis?.concerns) ? analysis.concerns : [];
+}
+
+function readJsonObject(value) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return typeof value === 'object' ? value : null;
+}
+
+function readLatency(metric) {
+  return readJsonObject(metric?.latency) || {};
+}
+
+function readLatencyBreakdown(metric) {
+  const latency = readLatency(metric);
+  const breakdown = latency?.stage_breakdown;
+  return breakdown && typeof breakdown === 'object' && !Array.isArray(breakdown) ? breakdown : {};
+}
+
+function pickLatencyBreakdown(traceBreakdown, fallbackBreakdown) {
+  return traceBreakdown && Object.keys(traceBreakdown).length > 0
+    ? traceBreakdown
+    : fallbackBreakdown;
+}
+
+function readContextTrace(metric) {
+  const fallbackBreakdown = readLatencyBreakdown(metric);
+  const trace = metric?.context_trace_encrypted
+    ? decryptJson(metric.context_trace_encrypted)
+    : null;
+  if (!trace) {
+    return Object.keys(fallbackBreakdown).length > 0
+      ? { version: 1, event_count: 0, latency_breakdown: fallbackBreakdown, events: [] }
+      : null;
+  }
+  if (Array.isArray(trace)) {
+    return {
+      version: 1,
+      event_count: trace.length,
+      latency_breakdown: fallbackBreakdown,
+      events: trace,
+    };
+  }
+  if (!Array.isArray(trace.events)) {
+    return {
+      ...trace,
+      event_count: 0,
+      latency_breakdown: pickLatencyBreakdown(trace.latency_breakdown, fallbackBreakdown),
+      events: [],
+    };
+  }
+  return {
+    version: trace.version || 1,
+    captured_at: trace.captured_at || null,
+    event_count: trace.event_count ?? trace.events.length,
+    latency_breakdown: pickLatencyBreakdown(trace.latency_breakdown, fallbackBreakdown),
+    events: trace.events,
+  };
+}
+
+function isUndefinedColumnError(error) {
+  return error?.code === '42703'
+    || error?.cause?.code === '42703'
+    || /context_trace_encrypted|column .* does not exist/i.test(error?.message || '');
+}
+
+async function fetchLatestInfraMetric(callSid, includeContextTrace = true) {
+  if (!callSid) return null;
+  if (includeContextTrace) {
+    try {
+      const rows = await db.execute(sql`
+        SELECT call_sid, senior_id, call_type, duration_seconds,
+               end_reason, turn_count, phase_durations, latency,
+               breaker_states, tools_used, token_usage, error_count,
+               context_trace_encrypted, created_at
+        FROM call_metrics
+        WHERE call_sid = ${callSid}
+        ORDER BY created_at DESC
+        LIMIT 1
+      `);
+      return rows.rows[0] || null;
+    } catch (error) {
+      if (!isUndefinedColumnError(error)) throw error;
+    }
+  }
+
+  const rows = await db.execute(sql`
+    SELECT call_sid, senior_id, call_type, duration_seconds,
+           end_reason, turn_count, phase_durations, latency,
+           breaker_states, tools_used, token_usage, error_count,
+           created_at
+    FROM call_metrics
+    WHERE call_sid = ${callSid}
+    ORDER BY created_at DESC
+    LIMIT 1
+  `);
+  return rows.rows[0] || null;
+}
+
+function toMs(value) {
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function readTurnSequence(turn, fallback) {
+  const sequence = Number(turn?.sequence);
+  return Number.isFinite(sequence) ? sequence : fallback;
+}
+
+function readTurnOffsetMs(turn) {
+  const offset = Number(turn?.timestamp_offset_ms ?? turn?.timestampOffsetMs);
+  return Number.isFinite(offset) && offset >= 0 ? offset : null;
+}
+
+function readTurnTimestamp(call, turn, index, totalTurns) {
+  const explicitMs = toMs(turn?.timestamp);
+  if (explicitMs != null) {
+    return { timestamp: new Date(explicitMs).toISOString(), estimated: false };
+  }
+
+  const startedMs = toMs(call.startedAt);
+  if (startedMs == null) {
+    return { timestamp: call.startedAt, estimated: true };
+  }
+
+  const offsetMs = readTurnOffsetMs(turn);
+  if (offsetMs != null) {
+    return { timestamp: new Date(startedMs + offsetMs).toISOString(), estimated: false };
+  }
+
+  const endedMs = toMs(call.endedAt);
+  const durationMs = Number(call.durationSeconds) > 0
+    ? Number(call.durationSeconds) * 1000
+    : endedMs != null && endedMs > startedMs
+      ? endedMs - startedMs
+      : Math.max(totalTurns, 1) * 12000;
+  const estimatedOffset = Math.round(((index + 1) / (totalTurns + 1)) * durationMs);
+  return { timestamp: new Date(startedMs + estimatedOffset).toISOString(), estimated: true };
+}
+
+function readContextEventTimestamp(call, event) {
+  const explicitMs = toMs(event?.timestamp);
+  if (explicitMs != null) {
+    return { timestamp: new Date(explicitMs).toISOString(), estimated: false };
+  }
+
+  const startedMs = toMs(call.startedAt);
+  if (startedMs == null) {
+    return { timestamp: call.startedAt, estimated: true };
+  }
+
+  const offsetMs = Number(event?.timestamp_offset_ms ?? event?.timestampOffsetMs);
+  if (Number.isFinite(offsetMs) && offsetMs >= 0) {
+    return { timestamp: new Date(startedMs + offsetMs).toISOString(), estimated: false };
+  }
+
+  return { timestamp: call.startedAt, estimated: true };
+}
+
+function contextEventTimelineType(event) {
+  const source = String(event?.source || '').toLowerCase();
+  const stage = String(event?.metadata?.stage || '').toLowerCase();
+
+  if (source === 'call_lifecycle') {
+    return stage === 'call.answer_to_ws' ? 'call.connected' : 'call.lifecycle';
+  }
+  if (stage.startsWith('tool.')) return 'latency.tool';
+  if (stage.startsWith('director.')) return 'latency.director';
+  if (stage.startsWith('prefetch.') || stage.startsWith('memory_gate.')) return 'latency.memory';
+  if (stage.startsWith('transcription.')) return 'latency.transcription';
+  if (stage === 'llm_ttfb') return 'latency.llm';
+  if (stage === 'tts_ttfb') return 'latency.tts';
+  if (stage === 'turn.total') return 'latency.turn';
+  if (source.includes('tool')) return 'latency.tool';
+  return 'latency.stage';
+}
+
+function shouldIncludeContextTimelineEvent(event) {
+  if (!event) return false;
+  const source = String(event.source || '').toLowerCase();
+  const action = String(event.action || '').toLowerCase();
+  const stage = String(event?.metadata?.stage || '').toLowerCase();
+
+  return source === 'call_lifecycle'
+    || event.latency_ms != null
+    || stage !== ''
+    || action === 'called'
+    || action === 'result'
+    || action === 'failed';
+}
+
+function buildContextTimelineEvents(call, contextTrace) {
+  const events = Array.isArray(contextTrace?.events) ? contextTrace.events : [];
+  return events
+    .filter(shouldIncludeContextTimelineEvent)
+    .map((event) => {
+      const { timestamp, estimated } = readContextEventTimestamp(call, event);
+      return {
+        type: contextEventTimelineType(event),
+        timestamp,
+        data: {
+          label: event.label,
+          source: event.source,
+          action: event.action,
+          provider: event.provider,
+          stage: event?.metadata?.stage || null,
+          latencyMs: event.latency_ms ?? null,
+          turnSequence: event.turn_sequence ?? null,
+          itemCount: event.item_count ?? null,
+          content: event.content || null,
+          estimatedTimestamp: estimated,
+        },
+        metadata: event.metadata || {},
+      };
+    });
+}
+
+function auditObservabilityRead(req, resourceId = null, metadata = {}) {
+  logAudit({
+    userId: req.auth.userId,
+    userRole: authToRole(req.auth),
+    action: 'read',
+    resourceType: 'conversation',
+    resourceId,
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent'),
+    metadata: { surface: 'observability', ...metadata },
+  });
 }
 
 // One-time cleanup: mark stale in_progress calls (older than 1 hour) as completed
@@ -88,16 +324,59 @@ router.get('/api/observability/calls', requireAdmin, async (req, res) => {
       };
     });
 
+    auditObservabilityRead(req, null, { endpoint: 'calls', limit, count: formattedCalls.length });
     res.json({ calls: formattedCalls });
   } catch (error) {
-    console.error('Error fetching calls:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls');
   }
 });
 
 // Get active calls — voice sessions are tracked by Pipecat, not Node.js
 router.get('/api/observability/active', requireAdmin, async (req, res) => {
-  res.json({ activeCalls: [] });
+  try {
+    const active = await db.select({
+      id: conversations.id,
+      callSid: conversations.callSid,
+      seniorId: conversations.seniorId,
+      seniorName: seniors.name,
+      seniorPhone: seniors.phone,
+      startedAt: conversations.startedAt,
+      endedAt: conversations.endedAt,
+      durationSeconds: conversations.durationSeconds,
+      status: conversations.status,
+      transcript: conversations.transcript,
+      transcriptEncrypted: conversations.transcriptEncrypted,
+    })
+    .from(conversations)
+    .leftJoin(seniors, eq(conversations.seniorId, seniors.id))
+    .where(and(
+      eq(conversations.status, 'in_progress'),
+      sql`started_at >= NOW() - interval '2 hours'`
+    ))
+    .orderBy(desc(conversations.startedAt))
+    .limit(20);
+
+    const activeCalls = active.map(call => {
+      const transcript = readTranscript(call);
+      return {
+        id: call.id,
+        call_sid: call.callSid,
+        senior_id: call.seniorId,
+        senior_name: call.seniorName,
+        senior_phone: call.seniorPhone,
+        started_at: call.startedAt,
+        ended_at: call.endedAt,
+        duration_seconds: call.durationSeconds,
+        status: call.status,
+        turn_count: Array.isArray(transcript) ? transcript.length : 0,
+      };
+    });
+
+    auditObservabilityRead(req, null, { endpoint: 'active', count: activeCalls.length });
+    res.json({ activeCalls });
+  } catch (error) {
+    routeError(res, error, 'GET /api/observability/active');
+  }
 });
 
 // Get call details by ID
@@ -132,6 +411,11 @@ router.get('/api/observability/calls/:id', requireAdmin, async (req, res) => {
     const analysis = analyses.get(call.id) || null;
     const transcript = readTranscript(call);
 
+    auditObservabilityRead(req, call.id, {
+      endpoint: 'call_detail',
+      seniorId: call.seniorId,
+      includesTranscript: Boolean(transcript),
+    });
     res.json({
       id: call.id,
       call_sid: call.callSid,
@@ -149,8 +433,7 @@ router.get('/api/observability/calls/:id', requireAdmin, async (req, res) => {
       analysis,
     });
   } catch (error) {
-    console.error('Error fetching call:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id');
   }
 });
 
@@ -175,6 +458,9 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
       return res.status(404).json({ error: 'Call not found' });
     }
 
+    const infraMetric = await fetchLatestInfraMetric(call.callSid);
+    const contextTrace = readContextTrace(infraMetric);
+
     // Build timeline from transcript
     const timeline = [];
     const transcript = readTranscript(call);
@@ -188,26 +474,37 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
 
     // Add transcript events if available
     if (Array.isArray(transcript)) {
-      transcript.forEach((turn, index) => {
+      const orderedTranscript = transcript
+        .map((turn, index) => ({ turn, originalIndex: index, sequence: readTurnSequence(turn, index) }))
+        .sort((a, b) => a.sequence - b.sequence || a.originalIndex - b.originalIndex);
+
+      orderedTranscript.forEach(({ turn, originalIndex }, index) => {
+        const { timestamp, estimated } = readTurnTimestamp(call, turn, index, orderedTranscript.length);
+        const baseData = {
+          content: turn.content,
+          turnIndex: originalIndex,
+          sequence: readTurnSequence(turn, originalIndex),
+          estimatedTimestamp: estimated,
+        };
         if (turn.role === 'user') {
           timeline.push({
             type: 'turn.transcribed',
-            timestamp: turn.timestamp || call.startedAt,
-            data: { content: turn.content, turnIndex: index },
+            timestamp,
+            data: baseData,
           });
         } else if (turn.role === 'assistant') {
           timeline.push({
             type: 'turn.response',
-            timestamp: turn.timestamp || call.startedAt,
-            data: { content: turn.content, turnIndex: index },
+            timestamp,
+            data: baseData,
           });
         }
         // Add observer signals if present
         if (turn.observer) {
           timeline.push({
             type: 'observer.signal',
-            timestamp: turn.timestamp || call.startedAt,
-            data: turn.observer,
+            timestamp,
+            data: { ...turn.observer, turnIndex: originalIndex, estimatedTimestamp: estimated },
           });
         }
       });
@@ -222,6 +519,22 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
       });
     }
 
+    timeline.push(...buildContextTimelineEvents(call, contextTrace));
+
+    const orderedTimeline = timeline
+      .map((event, index) => ({ event, index }))
+      .sort((a, b) => {
+        const aMs = toMs(a.event.timestamp) ?? 0;
+        const bMs = toMs(b.event.timestamp) ?? 0;
+        return aMs - bMs || a.index - b.index;
+      })
+      .map(({ event }) => event);
+
+    auditObservabilityRead(req, call.id, {
+      endpoint: 'timeline',
+      seniorId: call.seniorId,
+      eventCount: orderedTimeline.length,
+    });
     res.json({
       callId: call.id,
       callSid: call.callSid,
@@ -229,11 +542,10 @@ router.get('/api/observability/calls/:id/timeline', requireAdmin, async (req, re
       startedAt: call.startedAt,
       endedAt: call.endedAt,
       status: call.status || 'completed',
-      timeline,
+      timeline: orderedTimeline,
     });
   } catch (error) {
-    console.error('Error fetching timeline:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/timeline');
   }
 });
 
@@ -259,10 +571,13 @@ router.get('/api/observability/calls/:id/turns', requireAdmin, async (req, res) 
       timestamp: turn.timestamp,
     }));
 
+    auditObservabilityRead(req, req.params.id, {
+      endpoint: 'turns',
+      turnCount: turns.length,
+    });
     res.json({ turns });
   } catch (error) {
-    console.error('Error fetching turns:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/turns');
   }
 });
 
@@ -270,6 +585,7 @@ router.get('/api/observability/calls/:id/turns', requireAdmin, async (req, res) 
 router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, res) => {
   try {
     const [call] = await db.select({
+      id: conversations.id,
       transcript: conversations.transcript,
       transcriptEncrypted: conversations.transcriptEncrypted,
       concerns: conversations.concerns,
@@ -322,7 +638,21 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
     }
 
     const uniqueConcerns = [...new Set([...allConcerns, ...(call.concerns || [])])];
+    const analyses = await callAnalysisService.getLatestByConversationIds([call.id]);
+    const analysis = analyses.get(call.id) || null;
+    const analysisConcerns = Array.isArray(analysis?.concerns) ? analysis.concerns : [];
+    const allUniqueConcerns = [
+      ...new Set([...uniqueConcerns, ...analysisConcerns.map(concern => (
+        typeof concern === 'string'
+          ? concern
+          : concern?.description || concern?.concern || concern?.text || 'Concern noted'
+      ))]),
+    ];
 
+    auditObservabilityRead(req, req.params.id, {
+      endpoint: 'observer',
+      signalCount: signals.length,
+    });
     res.json({
       signals,
       count: signals.length,
@@ -330,13 +660,35 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
         averageConfidence: signals.length > 0 ? totalConfidence / signals.length : 0,
         engagementDistribution,
         emotionalStateDistribution,
-        totalConcerns: uniqueConcerns.length,
-        uniqueConcerns,
+        totalConcerns: allUniqueConcerns.length,
+        uniqueConcerns: allUniqueConcerns,
+      },
+      postCall: analysis ? {
+        sentiment: call.sentiment || analysis.sentiment || null,
+        mood: analysis.mood || null,
+        engagementScore: analysis.engagementScore ?? null,
+        topics: analysis.topics || [],
+        concerns: analysisConcerns,
+        positiveObservations: analysis.positiveObservations || [],
+        followUpSuggestions: analysis.followUpSuggestions || [],
+        caregiverTakeaways: analysis.caregiverTakeaways || [],
+        recommendedCaregiverAction: analysis.recommendedCaregiverAction || null,
+        callQuality: analysis.callQuality || null,
+      } : {
+        sentiment: call.sentiment || null,
+        mood: null,
+        engagementScore: null,
+        topics: [],
+        concerns: call.concerns || [],
+        positiveObservations: [],
+        followUpSuggestions: [],
+        caregiverTakeaways: [],
+        recommendedCaregiverAction: null,
+        callQuality: null,
       },
     });
   } catch (error) {
-    console.error('Error fetching observer data:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/observer');
   }
 });
 
@@ -344,6 +696,7 @@ router.get('/api/observability/calls/:id/observer', requireAdmin, async (req, re
 router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res) => {
   try {
     const [call] = await db.select({
+      callSid: conversations.callSid,
       transcript: conversations.transcript,
       transcriptEncrypted: conversations.transcriptEncrypted,
       callMetrics: conversations.callMetrics,
@@ -355,6 +708,8 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
     if (!call) {
       return res.status(404).json({ error: 'Call not found' });
     }
+
+    const infraMetric = await fetchLatestInfraMetric(call.callSid);
 
     // Extract per-turn metrics from transcript
     const turnMetrics = [];
@@ -371,14 +726,81 @@ router.get('/api/observability/calls/:id/metrics', requireAdmin, async (req, res
       });
     }
 
+    const tokenUsage = infraMetric?.token_usage || {};
+    const latency = infraMetric?.latency || {};
+    const infraCallMetrics = infraMetric ? {
+      durationSeconds: Number(infraMetric.duration_seconds || call.durationSeconds || 0),
+      totalInputTokens: Number(tokenUsage.prompt_tokens || 0),
+      totalOutputTokens: Number(tokenUsage.completion_tokens || 0),
+      totalTokens: Number(tokenUsage.prompt_tokens || 0) + Number(tokenUsage.completion_tokens || 0),
+      avgResponseTime: latency.turn_avg_ms != null ? Number(latency.turn_avg_ms) : null,
+      avgTtfa: latency.tts_ttfb_avg_ms != null ? Number(latency.tts_ttfb_avg_ms) : null,
+      turnCount: Number(infraMetric.turn_count || 0),
+      estimatedCost: null,
+      modelsUsed: [],
+      llmTtfbAvgMs: latency.llm_ttfb_avg_ms != null ? Number(latency.llm_ttfb_avg_ms) : null,
+      ttsTtfbAvgMs: latency.tts_ttfb_avg_ms != null ? Number(latency.tts_ttfb_avg_ms) : null,
+      endReason: infraMetric.end_reason || null,
+      errorCount: Number(infraMetric.error_count || 0),
+      toolsUsed: infraMetric.tools_used || [],
+      breakerStates: infraMetric.breaker_states || null,
+    } : null;
+
+    auditObservabilityRead(req, req.params.id, {
+      endpoint: 'call_metrics',
+      metricTurnCount: turnMetrics.length,
+    });
     res.json({
       turnMetrics,
-      callMetrics: call.callMetrics || null,
+      callMetrics: infraCallMetrics || call.callMetrics || null,
+      infraMetric: infraMetric ? { ...infraMetric, context_trace_encrypted: undefined } : null,
       durationSeconds: call.durationSeconds,
     });
   } catch (error) {
-    console.error('Error fetching metrics:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/calls/:id/metrics');
+  }
+});
+
+// Get LLM context provenance for a call.
+router.get('/api/observability/calls/:id/context', requireAdmin, async (req, res) => {
+  try {
+    const [call] = await db.select({
+      id: conversations.id,
+      callSid: conversations.callSid,
+      durationSeconds: conversations.durationSeconds,
+      status: conversations.status,
+    })
+    .from(conversations)
+    .where(eq(conversations.id, req.params.id));
+
+    if (!call) {
+      return res.status(404).json({ error: 'Call not found' });
+    }
+
+    const infraMetric = await fetchLatestInfraMetric(call.callSid);
+    const contextTrace = readContextTrace(infraMetric);
+    const latency = readLatency(infraMetric);
+    const toolsUsed = infraMetric?.tools_used || [];
+    const hasLatencyBreakdown = Object.keys(contextTrace?.latency_breakdown || {}).length > 0;
+
+    auditObservabilityRead(req, req.params.id, {
+      endpoint: 'call_context',
+      contextEventCount: contextTrace?.events?.length || 0,
+    });
+
+    res.json({
+      callId: call.id,
+      callSid: call.callSid,
+      status: call.status,
+      durationSeconds: call.durationSeconds,
+      contextTrace: contextTrace || { version: 1, event_count: 0, latency_breakdown: {}, events: [] },
+      latency,
+      toolsUsed,
+      captured: Boolean((contextTrace?.events?.length || 0) || hasLatencyBreakdown),
+      schemaReady: Boolean(infraMetric && Object.prototype.hasOwnProperty.call(infraMetric, 'context_trace_encrypted')),
+    });
+  } catch (error) {
+    routeError(res, error, 'GET /api/observability/calls/:id/context');
   }
 });
 
@@ -405,8 +827,7 @@ router.get('/api/observability/metrics/calls', requireAdmin, async (req, res) =>
 
     res.json({ metrics: rows.rows, hours });
   } catch (error) {
-    console.error('Error fetching call metrics:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/metrics/calls');
   }
 });
 
@@ -442,8 +863,7 @@ router.get('/api/observability/metrics/summary', requireAdmin, async (req, res) 
       hours,
     });
   } catch (error) {
-    console.error('Error fetching metrics summary:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/metrics/summary');
   }
 });
 
@@ -469,8 +889,7 @@ router.get('/api/observability/metrics/latency', requireAdmin, async (req, res) 
 
     res.json({ latency: rows.rows, hours });
   } catch (error) {
-    console.error('Error fetching latency trends:', error);
-    res.status(500).json({ error: error.message });
+    routeError(res, error, 'GET /api/observability/metrics/latency');
   }
 });
 

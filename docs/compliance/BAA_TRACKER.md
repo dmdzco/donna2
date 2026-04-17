@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| Last Updated | April 4, 2026 |
+| Last Updated | April 16, 2026 |
 | Owner | TBD |
 | Review Cadence | Quarterly |
 | Related Docs | [HIPAA Overview](HIPAA_OVERVIEW.md), [Vendor Security Evaluation](VENDOR_SECURITY_EVALUATION.md) |
@@ -41,7 +41,7 @@ A **Business Associate Agreement (BAA)** is a legally binding contract required 
 | Status | Count | Services |
 |--------|-------|----------|
 | BAA Signed | 0 | -- |
-| BAA Available (not yet signed) | 8 | Twilio, Anthropic, Google, Deepgram, OpenAI, Neon, Sentry, Clerk |
+| BAA Available (not yet signed) | 8 | Telnyx, Anthropic, Google, Deepgram, OpenAI, Neon, Sentry, Clerk |
 | BAA Availability Unclear | 3 | ElevenLabs, Groq, Railway |
 | BAA Unlikely | 3 | Cerebras (legacy/not active), Cartesia, Tavily |
 | BAA Not Required | 2 | Vercel, GrowthBook |
@@ -56,14 +56,15 @@ A **Business Associate Agreement (BAA)** is a legally binding contract required 
 
 | Service | Data Processed | BAA Required? | BAA Status | BAA Available? | Plan Required | Notes |
 |---------|---------------|---------------|------------|----------------|---------------|-------|
-| **Twilio** | Voice audio (real-time streaming), phone numbers, call metadata, call recordings (if enabled), SMS notifications to caregivers | **Yes** | NOT SIGNED | **Yes** | Enterprise or HIPAA-eligible | Twilio has a dedicated HIPAA product offering. Must enable "HIPAA eligible" project settings. Contact Twilio sales or enable via console. |
+| **Telnyx** | Voice audio/media streaming, phone numbers, call metadata, phone number inventory, optional call recordings if enabled | **Yes** | NOT SIGNED | **Yes** | HIPAA-eligible services / BAA or conduit-exception review | Active voice carrier. Telnyx publishes HIPAA guidance for BAA-covered and conduit-exception workflows; confirm Donna's Voice API + media streaming configuration with Telnyx sales/legal and keep call recording disabled unless explicitly approved. |
+| **Twilio** | No active PHI flow. Historical voice implementation is archived and SMS notifications are inactive. | No while inactive | N/A | Yes if reintroduced | HIPAA-eligible | Keep Twilio out of active PHI paths unless SMS or Twilio voice is intentionally reintroduced with a BAA/compliance review. |
 
 ### LLM / AI Services
 
 | Service | Data Processed | BAA Required? | BAA Status | BAA Available? | Plan Required | Notes |
 |---------|---------------|---------------|------------|----------------|---------------|-------|
-| **Anthropic (Claude)** | Full conversation transcripts (system prompt + all user/assistant turns), medication reminders, health discussions, senior names, memory context | **Yes** | NOT SIGNED | **Yes** | Enterprise | Claude Sonnet 4.5 is the primary conversational LLM. All conversation content passes through Anthropic. Contact sales@anthropic.com for enterprise BAA. |
-| **Google (Gemini)** | Conversation transcripts (Director fallback), post-call analysis transcripts, call quality assessments, health concerns detected | **Yes** | NOT SIGNED | **Yes** | Google Cloud with BAA enabled | Gemini Flash used for: (1) Director fallback analysis, (2) Post-call analysis + call quality scoring, (3) Caregiver mood summary generation. Enable BAA in Google Cloud Console under "Healthcare" settings. |
+| **Anthropic (Claude)** | Full conversation transcripts (system prompt + all user/assistant turns), medication reminders, health discussions, senior names, memory context | **Yes** | NOT SIGNED | **Yes** | Enterprise | Claude Haiku 4.5 is the primary conversational LLM. All conversation content passes through Anthropic. Contact sales@anthropic.com for enterprise BAA. |
+| **Google (Gemini)** | Conversation transcripts (Director fallback), post-call analysis transcripts, call quality assessments, health concerns detected | **Yes** | NOT SIGNED | **Yes** | Google Cloud with BAA enabled | Gemini Flash used for: (1) Director fallback analysis, (2) Post-call analysis + call quality scoring, (3) caregiver-facing summary/takeaway generation. Enable BAA in Google Cloud Console under "Healthcare" settings. |
 | **Groq** | Conversation transcriptions (recent turns), Director analysis context | **Yes** | NOT SIGNED | **Unclear** | Enterprise (likely) | Current primary Director LLM for Query Director + Guidance Director. Contact Groq sales to inquire about BAA availability. |
 | **Cerebras** | Conversation transcriptions if old env/code paths are restored | **Yes** | NOT SIGNED | **Unlikely** | Unknown | Legacy/not active in current `pipecat/services/director_llm.py` runtime path. Remove stale env/config/docs if no deployed branch still uses it. |
 
@@ -71,8 +72,8 @@ A **Business Associate Agreement (BAA)** is a legally binding contract required 
 
 | Service | Data Processed | BAA Required? | BAA Status | BAA Available? | Plan Required | Notes |
 |---------|---------------|---------------|------------|----------------|---------------|-------|
-| **Deepgram** | Raw voice audio stream (8kHz mulaw), produces transcriptions containing health discussions, medication info, personal details | **Yes** | NOT SIGNED | **Yes** | Enterprise | Deepgram offers HIPAA-compliant deployments on enterprise plans. Contact sales for BAA. All spoken words -- including medication names, health complaints, personal details -- pass through Deepgram. |
-| **ElevenLabs** | Text-to-speech input: all of Donna's spoken responses, which may reference medications, health advice, appointment reminders | **Yes** | NOT SIGNED | **Unclear** | Enterprise (if available) | ElevenLabs is used for TTS (eleven_turbo_v2_5). The text input includes Donna's side of conversation, which may contain medication reminders and health references. Contact ElevenLabs support to inquire about HIPAA compliance and BAA. |
+| **Deepgram** | Raw caller audio stream (Telnyx wire is 16kHz L16; Pipecat keeps internal STT input at 16kHz PCM), produces transcriptions containing health discussions, medication info, personal details | **Yes** | NOT SIGNED | **Yes** | Enterprise | Deepgram offers HIPAA-compliant deployments on enterprise plans. Contact sales for BAA. All spoken words -- including medication names, health complaints, personal details -- pass through Deepgram. |
+| **ElevenLabs** | Text-to-speech input: all of Donna's spoken responses, which may reference medications, health advice, appointment reminders | **Yes** | NOT SIGNED | **Unclear** | Enterprise (if available) | ElevenLabs is used for TTS (`eleven_flash_v2_5` by default). The text input includes Donna's side of conversation, which may contain medication reminders and health references. Contact ElevenLabs support to inquire about HIPAA compliance and BAA. |
 | **Cartesia** | Same as ElevenLabs -- TTS input text containing Donna's spoken responses | **Yes** | NOT SIGNED | **Unlikely** | Unknown | Alternative TTS provider (selected via GrowthBook feature flag `tts_provider`). Cartesia is a smaller company; HIPAA BAA is unlikely. **HIGH RISK -- evaluate alternatives.** |
 
 ### Search & Embeddings
@@ -114,7 +115,7 @@ These vendors offer BAAs and process significant PHI. Signing should begin immed
 | # | Vendor | Action | Contact | Estimated Time |
 |---|--------|--------|---------|----------------|
 | 1 | **Neon** | Enable BAA in dashboard or contact sales | dashboard.neon.tech or sales@neon.tech | 1-2 weeks |
-| 2 | **Twilio** | Enable HIPAA-eligible project, request BAA | Twilio Console > Settings or sales | 1-2 weeks |
+| 2 | **Telnyx** | Confirm HIPAA-eligible Voice API/media streaming setup and execute BAA or documented conduit-exception/legal review | Telnyx Mission Control or sales@telnyx.com | 1-2 weeks |
 | 3 | **Anthropic** | Contact enterprise sales for BAA | sales@anthropic.com | 2-4 weeks |
 | 4 | **Deepgram** | Contact enterprise sales for BAA | sales@deepgram.com | 2-4 weeks |
 | 5 | **Google (Gemini)** | Enable BAA in GCP Console | Google Cloud Console > Healthcare | 1-2 weeks |
@@ -154,7 +155,7 @@ These vendors are unlikely to offer BAAs. Evaluate HIPAA-compliant alternatives.
 ### Week 1-2: Initiate Contact
 
 - [ ] Contact Neon to enable BAA (self-service or sales)
-- [ ] Enable HIPAA-eligible project in Twilio Console
+- [ ] Confirm Telnyx HIPAA-eligible Voice API/media streaming setup and BAA/conduit-exception posture
 - [ ] Contact Anthropic enterprise sales
 - [ ] Contact Deepgram enterprise sales
 - [ ] Enable BAA in Google Cloud Console
@@ -165,7 +166,7 @@ These vendors are unlikely to offer BAAs. Evaluate HIPAA-compliant alternatives.
 ### Week 3-4: Evaluate and Negotiate
 
 - [ ] Review and sign Neon BAA
-- [ ] Review and sign Twilio BAA
+- [ ] Review and sign Telnyx BAA or file legal approval for a conduit-exception posture
 - [ ] Review and sign Google Cloud BAA
 - [ ] Review and sign Sentry BAA
 - [ ] Evaluate responses from ElevenLabs, Groq, Railway

@@ -41,7 +41,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
     - Ephemeral context: All injections tagged `[EPHEMERAL:`, stripped each turn
     - Metrics: Logs speculative hit rate per call
   - Post-Call: Analysis, memory extraction, daily context, snapshot rebuild (Gemini Flash)
-- **Caregiver Mood Summary SMS** — Post-call Gemini analysis generates a privacy-respecting, mood-aware SMS for caregivers. If the senior seems down, subtly suggests the caregiver give them a call.
+- **Caregiver summaries and alerts** — Post-call Gemini analysis generates privacy-respecting caregiver-facing summaries and follow-up guidance for email/in-app notifications. SMS is inactive for now.
 - **Director-First Architecture** — Eliminated ~14s of Claude tool-call latency per call:
   - `search_memories` → Director injects memories as ephemeral context (500ms gate)
   - `save_important_detail` → Removed; post-call `extract_from_conversation` handles it
@@ -69,13 +69,13 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Scheduled Reminder Calls** - Polling scheduler with prefetch + delivery tracking
 - **Call Context Snapshot** - Pre-computed JSONB snapshot (analysis, summaries, turns, daily context) rebuilt after each call, eliminates 6 DB queries at call time
 - **Context Pre-caching** - Senior context + news cached at 5 AM local time, news persisted to `seniors.cached_news`
-- Real-time voice calls (Twilio Media Streams → Pipecat WebSocket)
+- Real-time voice calls (Telnyx Voice API → Pipecat WebSocket)
 - Speech transcription (Deepgram Nova 3 via Pipecat)
-- LLM responses (Claude Sonnet 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
+- LLM responses (Claude Haiku 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - TTS (ElevenLabs via Pipecat)
 - VAD (Silero — confidence=0.6, min_volume=0.5; stop_secs=1.2 for senior calls, 0.8 for onboarding calls)
 - News via OpenAI web search (1hr cache), in-call web search via Tavily (raw results, no LLM answer)
-- Security: JWT admin auth, API key auth, Twilio webhook validation, rate limiting, security headers
+- Security: JWT admin auth, API key auth, Telnyx webhook validation, rate limiting, security headers
 
 ### Infrastructure & Reliability
 - **Circuit Breakers** - Gemini (5s), OpenAI embedding (10s), news (10s) — `lib/circuit_breaker.py`
@@ -95,7 +95,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Hard Delete** - Complete senior data deletion across all tables (`DELETE /api/seniors/:id/data`) with audit logging
 - **Sentry PII Scrubbing** - Senior IDs SHA-256 hashed in error reports, exception values truncated to 200 chars, `send_default_pii=False`
 - **PII-Safe Logging** - `maskName()` and `maskPhone()` helpers across both backends
-- **Compliance Documentation** - Full HIPAA docs in `docs/compliance/`: overview, BAA tracker (16 vendors), breach notification runbook, data retention policy, vendor security evaluations
+- **Compliance Documentation** - Full HIPAA docs in `docs/compliance/`: overview, BAA tracker (active vendors plus inactive legacy providers), breach notification runbook, data retention policy, vendor security evaluations
 
 ### Frontend Apps (unchanged, on Vercel/separate)
 - **Admin Dashboard (v2)** - React + Vite + Tailwind (`apps/admin-v2/`) on Vercel
@@ -115,15 +115,15 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 Linear pipeline of `FrameProcessor`s. Frames flow top to bottom. The Conversation Director is in the pipeline but **non-blocking** — it passes frames through instantly while running Gemini analysis in the background.
 
 ```
-Twilio Audio ──► FastAPIWebsocketTransport
+Telnyx Audio ──► FastAPIWebsocketTransport
                         │
-                   Deepgram STT (Nova 3, 8kHz)
+                   Deepgram STT (Nova 3, 16kHz)
                         │ TranscriptionFrame
                         ▼
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1 (0ms): 268 regex patterns
               │   (BLOCKING)         │  Injects guidance for THIS turn
-              │                      │  Strong goodbye → EndFrame in 2s
+              │                      │  Strong goodbye → guarded EndFrame after minimum call age
               └─────────┬───────────┘
                         │
                         ▼
@@ -131,12 +131,12 @@ Twilio Audio ──► FastAPIWebsocketTransport
               │ Conversation         │────►│  Background Analysis      │
               │ Director             │     │  (asyncio.create_task)    │
               │ (PASS-THROUGH)       │     │                           │
-              │                      │     │  Cerebras (~70ms) primary │
+              │                      │     │  Groq (~200-400ms) primary│
               │ 1. Check speculative │     │  Gemini Flash fallback    │
               │    → inject SAME or  │     │                           │
               │    PREVIOUS turn's   │     │  Speculative: on 250ms    │
               │    guidance          │     │  silence onset, starts    │
-              │ 2. Web search gate:  │     │  Cerebras analysis early  │
+              │ 2. Web search gate:  │     │  Groq analysis early      │
               │    if search in-     │     │                           │
               │    flight, hold frame│     │  Also: Director-owned web │
               │    + push filler TTS │     │  search (filler + gate),  │
@@ -149,23 +149,23 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼
               Context Aggregator (user) ← builds LLM context from transcriptions
                         ▼
-              Claude Sonnet 4.5 + FlowManager (4-phase state machine)
+              Claude Haiku 4.5 + FlowManager (4-phase state machine)
                         │ TextFrame
                         ▼
               Conversation Tracker (topics, questions, advice + shared transcript)
                         ▼
               Guidance Stripper (strips <guidance> tags + [BRACKETED] directives)
                         ▼
-              ElevenLabs TTS (eleven_turbo_v2_5)
+              ElevenLabs TTS (eleven_flash_v2_5)
                         ▼
-              FastAPIWebsocketTransport ──► Twilio Audio (mulaw 8kHz)
+              FastAPIWebsocketTransport ──► Telnyx Audio (L16 16kHz)
                         ▼
               Context Aggregator (assistant) ← tracks assistant responses
 ```
 
-**Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. Quick Observer's guidance is for the **current** turn (instant regex). Director's guidance can be **same-turn** (when speculative Cerebras analysis completes before the final transcription) or **previous-turn** (fallback). Both appear as user-role messages in Claude's context before the next LLM call.
+**Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. Quick Observer's guidance is for the **current** turn (instant regex). Director's guidance can be **same-turn** (when speculative Groq analysis completes before the final transcription) or **previous-turn** (fallback). Both appear as user-role messages in Claude's context before the next LLM call.
 
-**Predictive Context Engine**: The Director also runs speculative memory prefetch in the background. On each transcription, regex extracts topics/entities and pre-fetches memories. After Groq analysis completes (~70ms), a second wave prefetches based on `next_topic`, upcoming reminders, and news topics. Results are cached in `session_state["_prefetch_cache"]` (TTL=30s, Jaccard fuzzy match). When Claude calls `search_memories`, the tool handler checks the cache first — cache hit returns instantly (~0ms vs 200-300ms). Interim transcriptions also trigger debounced prefetch while the user is still speaking.
+**Predictive Context Engine**: The Director also runs speculative memory prefetch in the background. On each transcription, regex extracts topics/entities and pre-fetches memories. After Groq analysis completes, a second wave prefetches based on memory queries, upcoming reminders, and news topics. Results are cached in `session_state["_prefetch_cache"]` (TTL=30s, Jaccard fuzzy match). Memory retrieval is now Director-owned context injection, so Claude does not need a `search_memories` tool call in the live path. Interim transcriptions also trigger debounced prefetch while the user is still speaking.
 
 **Director-Owned Web Search**: When the Groq speculative analysis returns `web_queries`, the Director starts a web search immediately. When the final TranscriptionFrame arrives, if a web search is in-flight, the Director gates the frame: pushes a `TTSSpeakFrame` filler ("Let me check on that for you"), awaits the search result (max 10s), injects it as a `[WEB RESULT]` message into Claude's context, then releases the frame. Claude never calls `web_search` — it just uses the injected result naturally.
 
@@ -234,7 +234,8 @@ pipecat/
 │
 ├── api/
 │   ├── routes/
-│   │   ├── voice.py                 ← /voice/answer (TwiML + parallel fetch + snapshot), /voice/status (330 LOC)
+│   │   ├── telnyx.py                ← /telnyx/events, /telnyx/outbound, Telnyx signature validation
+│   │   ├── call_context.py          ← Shared encrypted call metadata + senior context hydration
 │   │   ├── calls.py                 ← /api/call, /api/calls
 │   │   ├── auth.py                  ← Token revocation: revoke-token, revoke-all, logout
 │   │   └── export.py                ← HIPAA right-to-access: /api/seniors/{id}/export
@@ -272,9 +273,9 @@ pipecat/
 
 ### Three Environments
 
-Donna runs three fully isolated environments. Each has its own Railway services, Neon database branch, and Twilio phone number.
+Donna runs fully isolated environments. Each has its own Railway services, Neon database branch, and Telnyx voice number.
 
-| Environment | Purpose | Database | Twilio # | Pipecat URL | API URL |
+| Environment | Purpose | Database | Voice # | Pipecat URL | API URL |
 |---|---|---|---|---|---|
 | **production** | Live customers | Neon `main` branch | +18064508649 | donna-pipecat-production.up.railway.app | donna-api-production-2450.up.railway.app |
 | **staging** | Pre-merge CI validation | Neon `staging` branch | +19789235477 | (created on deploy) | (created on deploy) |
@@ -282,7 +283,7 @@ Donna runs three fully isolated environments. Each has its own Railway services,
 
 **Isolation guarantees:**
 - Each environment has its own database (Neon copy-on-write branches) — bad writes in dev never touch production data
-- Each environment uses its own Twilio phone number — dev calls never reach real seniors
+- Each environment uses its own Telnyx voice number — dev calls never reach real seniors
 - API keys (Anthropic, Deepgram, ElevenLabs, etc.) are shared across environments (safe — they're stateless services)
 
 ### Daily Development Workflow
@@ -555,27 +556,30 @@ Live: https://admin-v2-liart.vercel.app
 # Server
 PORT=7860
 ENVIRONMENT=production                  # Enables production fail-closed security checks
-PIPECAT_PUBLIC_URL=https://...          # Public Pipecat URL; used for Twilio signatures + wss:// streams
+PIPECAT_PUBLIC_URL=https://...          # Public Pipecat URL; used for Telnyx signatures + wss:// streams
 
-# Twilio
-TWILIO_ACCOUNT_SID=...
-TWILIO_AUTH_TOKEN=...
-TWILIO_PHONE_NUMBER=+1...
+# Telnyx
+TELNYX_API_KEY=...
+TELNYX_PUBLIC_KEY=...
+TELNYX_PHONE_NUMBER=+1...
+TELNYX_CONNECTION_ID=...
 
 # Database
 DATABASE_URL=...                 # Neon PostgreSQL
 
 # AI Services
-ANTHROPIC_API_KEY=...            # Claude Sonnet (voice LLM)
+ANTHROPIC_API_KEY=...            # Claude Haiku (voice LLM)
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001 # Voice LLM model
 GOOGLE_API_KEY=...               # Gemini Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...             # STT
 ELEVENLABS_API_KEY=...           # TTS (ElevenLabs)
 ELEVENLABS_VOICE_ID=...          # Voice ID (optional)
-CARTESIA_API_KEY=...             # TTS (Cartesia — alternative to ElevenLabs)
-CARTESIA_VOICE_ID=...            # Cartesia voice ID (optional, has default)
-TTS_PROVIDER=cartesia            # Override GrowthBook flag: "cartesia" or "elevenlabs"
+ELEVENLABS_MODEL=eleven_flash_v2_5 # TTS model (optional, has default)
+CARTESIA_API_KEY=...             # Optional/evaluation TTS provider
+CARTESIA_VOICE_ID=...            # Optional/evaluation Cartesia voice override
+TTS_PROVIDER=elevenlabs          # Override GrowthBook flag: "elevenlabs" or "cartesia"
 OPENAI_API_KEY=...               # Embeddings + news search
-CEREBRAS_API_KEY=...             # Cerebras (Director primary, speculative pre-processing)
+GROQ_API_KEY=...                 # Groq primary Director
 
 # Auth
 JWT_SECRET=...
@@ -601,7 +605,7 @@ SENTRY_DSN=...                               # Error monitoring (optional, both 
 
 # Optional
 FAST_OBSERVER_MODEL=gemini-3-flash-preview   # Director model (Gemini fallback)
-CEREBRAS_DIRECTOR_MODEL=gpt-oss-120b         # Director model (Cerebras primary)
+GROQ_DIRECTOR_MODEL=openai/gpt-oss-20b       # Director model (Groq primary)
 CALL_ANALYSIS_MODEL=gemini-3-flash-preview   # Post-call analysis model
 LOG_LEVEL=INFO                               # DEBUG for verbose pipecat logs
 REDIS_URL=redis://...                        # Required before multiple Pipecat instances
@@ -611,8 +615,8 @@ PIPECAT_REQUIRE_REDIS=true                   # Enforce Redis when horizontally s
 Production boot intentionally fails closed if required security env vars are missing or unsafe. `DONNA_API_KEY` is only a local/test compatibility fallback; production must use labeled `DONNA_API_KEYS`.
 
 Security deploy smoke tests before promotion:
-- unsigned `/voice/answer` and `/voice/status` reject;
-- valid Twilio-signed `/voice/answer` returns TwiML with `ws_token`;
+- unsigned `/telnyx/events` rejects in production;
+- valid Telnyx-signed `/telnyx/events` creates call metadata with `ws_token`;
 - `/ws` rejects missing/invalid/expired/reused tokens;
 - calls longer than five minutes continue normally after connection;
 - manual call initiation uses `seniorId` and resolves the phone server-side after authZ.

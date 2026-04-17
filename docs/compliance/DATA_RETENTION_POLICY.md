@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| Last Updated | April 4, 2026 |
+| Last Updated | April 16, 2026 |
 | Owner | TBD (HIPAA Security Officer) |
 | Review Cadence | Annually |
 | Related Docs | [HIPAA Overview](HIPAA_OVERVIEW.md), [BAA Tracker](BAA_TRACKER.md), [Breach Notification](BREACH_NOTIFICATION.md) |
@@ -44,7 +44,7 @@ HIPAA does not prescribe specific retention periods for PHI itself, but requires
 This policy applies to all data stored in:
 - **Neon PostgreSQL database** (all environments: production, staging, dev)
 - **Application logs** (Railway, Sentry)
-- **Third-party vendor systems** (Twilio, Anthropic, Deepgram, etc. -- see [Vendor Data Retention](#third-party-vendor-data-retention))
+- **Third-party vendor systems** (Telnyx, Anthropic, Deepgram, etc. -- see [Vendor Data Retention](#third-party-vendor-data-retention))
 - **Developer machines** (if any PHI is present locally)
 - **Backups** (Neon point-in-time recovery)
 
@@ -58,20 +58,20 @@ This policy applies to all data stored in:
 |-----------|----------|---------------|-----------------|---------|-------------------|
 | **Conversation transcripts and summaries** | `conversations.transcript_encrypted`, `transcript_text_encrypted`, `summary_encrypted`; legacy `conversations.transcript` / `.summary` read fallback | Yes (HIGH) | 1 year from call date | `conversations.started_at` | Automated purge job: set transcript/summary fields to NULL, retain metadata |
 | **Conversation metadata** | `conversations` (non-PHI fields: id, senior_id, started_at, ended_at, duration, status, sentiment) | Low | 3 years from call date | `conversations.started_at` | Automated purge job: DELETE row |
-| **Semantic memories** | `memories` | Yes (HIGH) | 2 years from creation OR 1 year after senior becomes inactive | `memories.created_at` or `seniors.is_active` + last call date | Automated purge job: DELETE row (including embedding vector) |
-| **Call analyses** | `call_analyses` | Yes (MEDIUM) | 1 year from creation | `call_analyses.created_at` | Automated purge job: DELETE row |
-| **Daily call context** | `daily_call_context` | Yes (MEDIUM) | 90 days from call date | `daily_call_context.call_date` | Automated purge job: DELETE row |
-| **Reminder definitions** | `reminders` | Yes (medication names/schedules) | Retained while active + 1 year after deactivation | `reminders.is_active` = false date | Automated purge job: DELETE row + associated deliveries |
-| **Reminder deliveries** | `reminder_deliveries` | Yes (LOW) | 90 days from delivery date | `reminder_deliveries.created_at` | Automated purge job: DELETE row |
+| **Semantic memories** | `memories.content_encrypted`; legacy `memories.content` placeholder/fallback | Yes (HIGH) | 2 years from creation OR 1 year after senior becomes inactive | `memories.created_at` or `seniors.is_active` + last call date | Automated purge job: DELETE row (including embedding vector) |
+| **Call analyses** | `call_analyses.analysis_encrypted`; legacy structured columns fallback | Yes (MEDIUM) | 1 year from creation | `call_analyses.created_at` | Automated purge job: DELETE row |
+| **Daily call context** | `daily_call_context.context_encrypted`; legacy structured columns fallback | Yes (MEDIUM) | 90 days from call date | `daily_call_context.call_date` | Automated purge job: DELETE row |
+| **Reminder definitions** | `reminders.title_encrypted`, `description_encrypted`; legacy title/description fallback | Yes (medication names/schedules) | Retained while active + 1 year after deactivation | `reminders.is_active` = false date | Automated purge job: DELETE row + associated deliveries |
+| **Reminder deliveries** | `reminder_deliveries.user_response_encrypted`; legacy `user_response` fallback | Yes (LOW) | 90 days from delivery date | `reminder_deliveries.created_at` | Automated purge job: DELETE row |
 | **Senior profiles** | `seniors` | Yes (HIGH) | Retained while active + 1 year after last call | `seniors.is_active` + last `conversations.started_at` | Manual review + DELETE row (cascades to all related data) |
-| **Senior medical notes** | `seniors.medical_notes` | Yes (CRITICAL) | Same as senior profile | Same as senior profile | Cleared when senior is purged |
+| **Senior medical notes** | `seniors.medical_notes_encrypted`; legacy `medical_notes` fallback | Yes (CRITICAL) | Same as senior profile | Same as senior profile | Cleared when senior is purged |
 | **Caregiver relationships** | `caregivers` | Low | Retained while linked + 90 days after unlinking | Manual unlinking date | Manual review + DELETE row |
-| **Caregiver notifications** | `notifications` | Yes (MEDIUM) | 180 days from send date | `notifications.sent_at` | Automated purge job: DELETE row |
+| **Caregiver notifications** | `notifications.content_encrypted`, `metadata_encrypted`; legacy content/metadata fallback | Yes (MEDIUM) | 180 days from send date | `notifications.sent_at` | Automated purge job: DELETE row |
 | **Notification preferences** | `notification_preferences` | No | Retained while caregiver exists | Cascade from caregiver deletion | CASCADE DELETE |
-| **Call context snapshot** | `seniors.call_context_snapshot` (JSONB) | Yes (HIGH) | Overwritten on each call; set to NULL when senior is purged | N/A (ephemeral by design) | Set to NULL on senior purge |
+| **Call context snapshot** | `seniors.call_context_snapshot_encrypted`; legacy `call_context_snapshot` fallback | Yes (HIGH) | Overwritten on each call; set to NULL when senior is purged | N/A (ephemeral by design) | Set to NULL on senior purge |
 | **Cached news** | `seniors.cached_news` | No | Overwritten daily at 5 AM; set to NULL on senior purge | N/A (ephemeral) | Set to NULL on senior purge |
 | **Admin users** | `admin_users` | No (email/password hash) | Retained while active | Manual deactivation | DELETE row |
-| **Waitlist signups** | `waitlist` | Possible (name, email, phone) | 1 year from signup | `waitlist.created_at` | Automated purge job: DELETE row |
+| **Waitlist signups** | `waitlist.payload_encrypted`; legacy contact columns fallback | Possible (name, email, phone) | 1 year from signup | `waitlist.created_at` | Automated purge job: DELETE row |
 | **Audit logs** | `audit_logs` (to be created) | Yes (references PHI) | **6 years** (HIPAA minimum) | `audit_logs.created_at` | Automated purge job: DELETE row |
 
 ### Non-Database Data
@@ -81,7 +81,7 @@ This policy applies to all data stored in:
 | **Application logs** | Railway | Possible (despite sanitization) | Railway default (7 days) + explicit export for incidents | Railway auto-purges; exported logs follow incident retention (6 years) |
 | **Error traces** | Sentry | Possible (error context) | 90 days (Sentry default) | Sentry auto-purges; adjust in Sentry settings |
 | **Database backups** | Neon (PITR) | Yes (full database) | Neon plan default (7 days PITR for Pro) | Neon auto-manages; ensure PITR window does not exceed retention policy |
-| **Call recordings** | Twilio (if enabled) | Yes (CRITICAL) | **Do not enable call recording** unless required; if enabled, 30 days max | Twilio auto-delete or API deletion |
+| **Call recordings** | Telnyx (if enabled) | Yes (CRITICAL) | **Do not enable call recording** unless required; if enabled, 30 days max | Telnyx auto-delete or API deletion |
 | **Voice audio (real-time)** | Deepgram (transient) | Yes | Not retained by Deepgram (streaming STT) | Verify with Deepgram BAA; ensure no log retention |
 | **TTS requests** | ElevenLabs / Cartesia | Yes (text content) | Verify vendor policy | Request deletion or confirm no-retention via BAA |
 | **LLM request logs** | Anthropic, Google, Groq (Cerebras legacy/not active) | Yes (conversation content) | Verify vendor policy (Anthropic: 30 days default) | Opt out of training data retention; confirm via BAA |
@@ -347,7 +347,8 @@ Donna sends PHI to multiple vendors. Each vendor's data retention policy must be
 | **Cerebras** | Legacy/not active; conversation turns only if re-enabled | Check vendor policy before any re-enable | Keep disabled/remove stale env references unless BAA is signed |
 | **OpenAI** | Memory text, search queries | API: not used for training (opt-out); check retention | Confirm via BAA |
 | **Tavily** | Search queries | Check vendor policy | Confirm via vendor inquiry |
-| **Twilio** | Audio, phone numbers, SMS | Configurable; default varies | Configure retention limits in Twilio console; confirm via BAA |
+| **Telnyx** | Voice audio/media streaming, phone numbers, call metadata, optional recordings if enabled | Configurable; default varies | Configure retention limits in Telnyx Mission Control; keep recording disabled; confirm BAA/conduit-exception posture |
+| **Twilio** | No active data flow while SMS remains disabled and Twilio voice stays archived | N/A while inactive | Reassess retention and BAA needs before reintroducing SMS or Twilio voice |
 | **Neon** | All database data | Customer-controlled (PITR 7 days on Pro) | Managed by this retention policy |
 | **Sentry** | Error traces | 90 days default; configurable | Set appropriate retention in Sentry settings |
 | **Railway** | Application logs | 7 days default | Acceptable; export incident-relevant logs before expiry |

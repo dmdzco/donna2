@@ -59,10 +59,23 @@ def test_defaults_to_elevenlabs_when_no_flags(cartesia_env):
     session_state = {}  # No _flags key
     tts = create_tts_service(session_state)
     assert isinstance(tts, ElevenLabsTTSService)
+    assert tts._init_sample_rate == 44100
+    assert tts.model_name == "eleven_flash_v2_5"
+
+
+def test_blank_elevenlabs_model_uses_flash_default(cartesia_env):
+    """Blank ELEVENLABS_MODEL keeps the Flash v2.5 default."""
+    from bot import create_tts_service
+
+    with patch.dict(os.environ, {"ELEVENLABS_MODEL": ""}):
+        session_state = {"_flags": {"tts_provider": "elevenlabs"}}
+        tts = create_tts_service(session_state)
+
+    assert tts.model_name == "eleven_flash_v2_5"
 
 
 def test_cartesia_uses_default_encoding(cartesia_env):
-    """Cartesia uses default pcm_s16le encoding (pipeline handles resampling + mulaw)."""
+    """Cartesia uses pcm_s16le encoding so the serializer owns final telephony framing."""
     from bot import create_tts_service
     from pipecat.services.cartesia.tts import CartesiaTTSService
 
@@ -70,6 +83,7 @@ def test_cartesia_uses_default_encoding(cartesia_env):
     tts = create_tts_service(session_state)
     assert isinstance(tts, CartesiaTTSService)
     assert tts._settings["output_format"]["encoding"] == "pcm_s16le"
+    assert tts._init_sample_rate == 48000
 
 
 def test_cartesia_uses_sonic3_model(cartesia_env):
@@ -90,3 +104,75 @@ def test_cartesia_speed_configured(cartesia_env):
     gen_config = tts._settings.get("generation_config")
     assert gen_config is not None
     assert gen_config.speed == 1.05
+
+
+def test_audio_profile_prefers_cartesia_48k_and_16k_input(cartesia_env):
+    """Cartesia keeps 48kHz audio internally and uses 16kHz for telephony/STT input."""
+    from bot import get_audio_profile
+
+    session_state = {"_flags": {"tts_provider": "cartesia"}}
+    profile = get_audio_profile(session_state)
+
+    assert profile["tts_provider"] == "cartesia"
+    assert profile["audio_in_sample_rate"] == 16000
+    assert profile["audio_out_sample_rate"] == 48000
+
+
+def test_audio_profile_uses_telnyx_native_rate_for_cartesia_phone_calls(cartesia_env):
+    """Telnyx phone calls request native 16k TTS to keep output frames stable."""
+    from bot import get_audio_profile
+
+    with patch.dict(os.environ, {"TELNYX_STREAM_CODEC": "L16", "TELNYX_STREAM_SAMPLE_RATE": "16000"}):
+        session_state = {
+            "_flags": {"tts_provider": "cartesia"},
+            "_transport_type": "telnyx",
+        }
+        profile = get_audio_profile(session_state)
+
+    assert profile["tts_provider"] == "cartesia"
+    assert profile["audio_in_sample_rate"] == 16000
+    assert profile["audio_out_sample_rate"] == 16000
+
+
+def test_cartesia_uses_lower_volume_for_telnyx(cartesia_env):
+    """Telnyx phone output uses a less aggressive TTS level to avoid clipping."""
+    from bot import create_tts_service
+
+    with patch.dict(os.environ, {"TELNYX_STREAM_CODEC": "L16", "TELNYX_STREAM_SAMPLE_RATE": "16000"}):
+        session_state = {
+            "_flags": {"tts_provider": "cartesia"},
+            "_transport_type": "telnyx",
+        }
+        tts = create_tts_service(session_state)
+    gen_config = tts._settings.get("generation_config")
+
+    assert tts._init_sample_rate == 16000
+    assert gen_config.speed == 1.0
+    assert gen_config.volume == 0.9
+
+
+def test_cartesia_uses_16k_for_telnyx_l16(cartesia_env):
+    """Cartesia uses the Telnyx native rate for phone calls."""
+    from bot import create_tts_service
+
+    with patch.dict(os.environ, {"TELNYX_STREAM_CODEC": "L16", "TELNYX_STREAM_SAMPLE_RATE": "16000"}):
+        session_state = {
+            "_flags": {"tts_provider": "cartesia"},
+            "_transport_type": "telnyx",
+        }
+        tts = create_tts_service(session_state)
+
+    assert tts._init_sample_rate == 16000
+
+
+def test_audio_profile_falls_back_to_elevenlabs_when_cartesia_unavailable(cartesia_env):
+    """Missing Cartesia credentials fall back to the ElevenLabs audio profile."""
+    from bot import get_audio_profile
+
+    with patch.dict(os.environ, {"CARTESIA_API_KEY": ""}):
+        session_state = {"_flags": {"tts_provider": "cartesia"}}
+        profile = get_audio_profile(session_state)
+
+    assert profile["tts_provider"] == "elevenlabs"
+    assert profile["audio_in_sample_rate"] == 16000
+    assert profile["audio_out_sample_rate"] == 44100

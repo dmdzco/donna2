@@ -14,6 +14,7 @@ Use this for Donna iOS distribution work in `apps/mobile`.
 3. Treat caregiver/senior-linked app data as PHI. Use fake demo data only for Apple review and TestFlight testing.
 4. If Apple or EAS policy/status is ambiguous, verify against official docs or the live dashboard before giving definitive guidance.
 5. Before starting a new release build, check `git status -sb` and avoid building from unrelated dirty work unless the user explicitly wants those changes included.
+6. Do not submit or upload anything to App Store Connect, TestFlight, or Apple review unless David explicitly asks for that submission in the current conversation. Building with EAS is allowed when requested, but stop before `eas submit`, App Store Connect upload, TestFlight group assignment, or beta review submission until told to proceed.
 
 ## Donna Constants
 
@@ -93,12 +94,13 @@ Use production/store builds for TestFlight:
 
 ```bash
 npx eas build --platform ios --profile production --message "TestFlight build"
-npx eas submit --platform ios --latest
 ```
+
+After the build finishes, report the build ID, build number, commit, and artifact URL. Do not run `npx eas submit`, upload to App Store Connect, add the build to TestFlight groups, or submit beta/App Store review unless David explicitly tells you to do that in the current conversation.
 
 If submitting a specific build, use the build ID from `eas build:list` rather than relying on `--latest`.
 
-Before building, ensure the Apple build number increments. If Apple rejects a build or the user changes code, fix it, increment the build number, build production again, and resubmit.
+Before building, ensure the Apple build number increments. If Apple rejects a build or the user changes code, fix it and increment the build number as needed, but still wait for explicit submission approval before uploading or resubmitting to Apple.
 
 ## App Store Connect/TestFlight Flow
 

@@ -1,5 +1,8 @@
 # Donna on Pipecat: Full Migration Architecture
 
+> Historical migration design. Use `DIRECTORY.md`, `pipecat/docs/ARCHITECTURE.md`, and the runtime code in `pipecat/bot.py` as the current source of truth.
+> Some embedded examples predate the current audio profile, websocket token admission flow, and active Node scheduler ownership.
+
 > Complete mapping of Donna's current codebase to a Pipecat + Pipecat Flows implementation in Python.
 
 ---
@@ -26,7 +29,7 @@ Twilio → TwiML <Stream> → WebSocket
 │  │  ↓                                               │   │
 │  │ UserContextAggregator                            │   │
 │  │  ↓                                               │   │
-│  │ AnthropicLLMService (Claude Sonnet, tools)       │   │
+│  │ AnthropicLLMService (Claude Haiku, tools)        │   │
 │  │  ↓                                               │   │
 │  │ GuidanceStripperProcessor (strip <guidance> tags)│   │
 │  │  ↓                                               │   │
@@ -278,7 +281,7 @@ async def bot(runner_args: RunnerArguments):
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY"),
         voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel
-        model="eleven_turbo_v2_5",
+        model="eleven_flash_v2_5",
         params=ElevenLabsTTSService.InputParams(
             stability=0.4,
             similarity_boost=0.75,
@@ -325,7 +328,7 @@ async def bot(runner_args: RunnerArguments):
         stt,
         quick_observer,         # Regex analysis → injects signals into context
         user_aggregator,        # Collects transcriptions → LLM context
-        llm,                    # Claude Sonnet with tools
+        llm,                    # Claude Haiku with tools
         guidance_stripper,      # Strip <guidance> tags before TTS
         tts,                    # ElevenLabs WebSocket TTS
         transport.output(),     # Audio back to Twilio

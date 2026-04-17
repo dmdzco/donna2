@@ -1,18 +1,17 @@
 """Donna voice pipeline — core bot entry point.
 
 Assembles the full Pipecat pipeline for a single call session:
-  Twilio WebSocket → Deepgram STT → Quick Observer → LLM Context →
+  Telnyx WebSocket → Deepgram STT → Quick Observer → LLM Context →
   Anthropic Claude → Guidance Stripper → Conversation Tracker →
-  ElevenLabs TTS → Twilio output
+  TTS provider → Telnyx output
 
-Called once per incoming WebSocket connection from Twilio.
+Called once per incoming WebSocket connection from Telnyx.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hmac
-import os
 import time
 
 from deepgram import LiveOptions
@@ -27,7 +26,6 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.utils import parse_telephony_websocket
-from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
@@ -38,21 +36,85 @@ from pipecat.transports.websocket.fastapi import (
 )
 from pipecat_flows import FlowManager
 
+from config import get_settings, settings
 from flows.nodes import build_initial_node
 from flows.tools import make_flows_tools
+from lib.telnyx_audio import TelnyxAudioProfileError, resolve_telnyx_audio_profile
 from processors.conversation_director import ConversationDirectorProcessor
 from processors.conversation_tracker import ConversationState, ConversationTrackerProcessor
+from processors.audio_preroll import InitialAudioPrerollProcessor
 from processors.guidance_stripper import GuidanceStripperProcessor
 from processors.metrics_logger import MetricsLoggerProcessor
 from processors.quick_observer import QuickObserverProcessor
 from services.post_call import run_post_call
-
+from serializers.telnyx import DonnaTelnyxFrameSerializer
 
 class WebSocketAuthError(Exception):
-    """Raised when a Twilio media WebSocket cannot be admitted."""
+    """Raised when a telephony media WebSocket cannot be admitted."""
 
 
-HANDSHAKE_TIMEOUT_SECONDS = float(os.getenv("TWILIO_WS_HANDSHAKE_TIMEOUT_SECONDS", "5"))
+HANDSHAKE_TIMEOUT_SECONDS = settings.telephony_ws_handshake_timeout_seconds
+WS_METADATA_LOOKUP_TIMEOUT_SECONDS = 2.0
+WS_METADATA_LOOKUP_POLL_INTERVAL_SECONDS = 0.05
+
+
+def _provider_call_id(call_data: dict, session_state: dict | None = None) -> str:
+    """Return the canonical call identifier for the active telephony provider."""
+    session_state = session_state or {}
+    return (
+        call_data.get("call_id")
+        or call_data.get("call_control_id")
+        or session_state.get("call_sid")
+        or ""
+    )
+
+
+def _provider_ws_token(call_data: dict) -> str:
+    """Extract the one-time WebSocket token from provider-specific metadata."""
+    body = call_data.get("body") or {}
+    query_params = call_data.get("query_params") or {}
+
+    custom_token = ""
+    custom_parameters = body.get("custom_parameters") or call_data.get("custom_parameters") or []
+    if isinstance(custom_parameters, list):
+        for param in custom_parameters:
+            if not isinstance(param, dict):
+                continue
+            if str(param.get("name") or "") not in {"ws_token", "stream_auth_token"}:
+                continue
+            candidate = str(param.get("value") or "")
+            if candidate:
+                custom_token = candidate
+                break
+
+    body_token = body.get("ws_token") or body.get("stream_auth_token") or ""
+    query_token = query_params.get("ws_token") or query_params.get("stream_auth_token") or ""
+    return str(body_token or custom_token or query_token)
+
+
+async def _wait_for_call_metadata(call_sid: str) -> dict | None:
+    from api.routes.call_context import get_call_metadata
+
+    deadline = time.monotonic() + WS_METADATA_LOOKUP_TIMEOUT_SECONDS
+    attempts = 0
+
+    while True:
+        attempts += 1
+        metadata = await get_call_metadata(call_sid)
+        if metadata:
+            if attempts > 1:
+                logger.info(
+                    "[{cs}] WebSocket metadata became available after {attempts} checks",
+                    cs=call_sid,
+                    attempts=attempts,
+                )
+            return metadata
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+
+        await asyncio.sleep(min(WS_METADATA_LOOKUP_POLL_INTERVAL_SECONDS, remaining))
 
 
 async def authenticate_websocket_call(
@@ -61,19 +123,19 @@ async def authenticate_websocket_call(
     *,
     consume_token: bool = True,
 ) -> dict:
-    """Authenticate the Twilio media WebSocket before any AI services start."""
-    call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "")
+    """Authenticate the media WebSocket before any AI services start."""
+    call_sid = _provider_call_id(call_data, session_state)
     if not call_sid:
         raise WebSocketAuthError("missing call_sid")
 
-    from api.routes.voice import get_call_metadata, mark_ws_token_consumed
+    from api.routes.call_context import mark_ws_token_consumed
 
-    metadata = await get_call_metadata(call_sid)
+    metadata = await _wait_for_call_metadata(call_sid)
     if not metadata:
         raise WebSocketAuthError("unknown call_sid")
 
     expected_token = metadata.get("ws_token")
-    provided_token = (call_data.get("body") or {}).get("ws_token", "")
+    provided_token = _provider_ws_token(call_data)
     if not expected_token:
         raise WebSocketAuthError("missing expected token")
     if metadata.get("ws_token_consumed"):
@@ -94,7 +156,7 @@ async def prepare_websocket_call(
     *,
     consume_token: bool = True,
 ) -> dict:
-    """Parse and authenticate the Twilio start frame with a short timeout.
+    """Parse and authenticate the telephony start frame with a short timeout.
 
     This can run before active-call capacity is acquired so stalled or invalid
     WebSockets do not occupy an AI call slot.
@@ -108,7 +170,8 @@ async def prepare_websocket_call(
         raise WebSocketAuthError("handshake timeout") from exc
 
     stream_sid = call_data.get("stream_id", "")
-    call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "unknown")
+    call_data["query_params"] = dict(websocket.query_params)
+    call_sid = _provider_call_id(call_data, session_state) or "unknown"
     session_state["call_sid"] = call_sid
 
     logger.info("[{cs}] Stream connected: {ss} (type={tt})", cs=call_sid, ss=stream_sid, tt=transport_type)
@@ -125,6 +188,63 @@ async def prepare_websocket_call(
     }
 
 
+SUPPORTED_CARTESIA_SAMPLE_RATES = {16000, 22050, 24000, 44100, 48000}
+SUPPORTED_ELEVENLABS_SAMPLE_RATES = {16000, 22050, 24000, 44100}
+TELNYX_WIDEBAND_CODEC = "L16"
+class TelnyxAudioConfigError(Exception):
+    """Raised when Telnyx starts a stream below Donna's required audio profile."""
+
+
+def resolve_tts_provider(session_state: dict) -> str:
+    """Resolve the active TTS provider after applying availability fallbacks."""
+    cfg = get_settings()
+    flags = session_state.get("_flags", {})
+    requested_provider = cfg.tts_provider or flags.get("tts_provider", "elevenlabs")
+
+    if requested_provider == "cartesia":
+        if cfg.cartesia_api_key:
+            return "cartesia"
+        logger.warning("Cartesia requested but CARTESIA_API_KEY is missing; falling back to ElevenLabs")
+
+    return "elevenlabs"
+
+
+def get_audio_profile(session_state: dict) -> dict[str, int | str]:
+    """Pick stable sample rates for the active telephony pipeline."""
+    cfg = get_settings()
+    provider = resolve_tts_provider(session_state)
+    is_telnyx = session_state.get("_transport_type") == "telnyx"
+    telnyx_profile = resolve_telnyx_audio_profile(cfg) if is_telnyx else None
+    audio_in_sample_rate = cfg.telephony_internal_input_sample_rate
+    if telnyx_profile and telnyx_profile.uses_l16_serializer:
+        audio_in_sample_rate = telnyx_profile.sample_rate
+
+    if is_telnyx and telnyx_profile and telnyx_profile.uses_l16_serializer:
+        audio_out_sample_rate = telnyx_profile.sample_rate
+    elif provider == "cartesia":
+        audio_out_sample_rate = cfg.cartesia_output_sample_rate
+        if audio_out_sample_rate not in SUPPORTED_CARTESIA_SAMPLE_RATES:
+            logger.warning(
+                "Unsupported Cartesia sample rate {rate}; using 48000",
+                rate=audio_out_sample_rate,
+            )
+            audio_out_sample_rate = 48000
+    else:
+        audio_out_sample_rate = cfg.elevenlabs_output_sample_rate
+        if audio_out_sample_rate not in SUPPORTED_ELEVENLABS_SAMPLE_RATES:
+            logger.warning(
+                "Unsupported ElevenLabs sample rate {rate}; using 44100",
+                rate=audio_out_sample_rate,
+            )
+            audio_out_sample_rate = 44100
+
+    return {
+        "tts_provider": provider,
+        "audio_in_sample_rate": audio_in_sample_rate,
+        "audio_out_sample_rate": audio_out_sample_rate,
+    }
+
+
 def create_tts_service(session_state: dict):
     """Select TTS provider based on feature flag and language.
 
@@ -132,36 +252,97 @@ def create_tts_service(session_state: dict):
     Falls back to ElevenLabs if Cartesia key is missing or flag is unset.
     When Donna's language is Spanish, uses a Spanish-capable voice.
     """
-    flags = session_state.get("_flags", {})
-    provider = os.getenv("TTS_PROVIDER") or flags.get("tts_provider", "elevenlabs")
+    cfg = get_settings()
+    audio_profile = get_audio_profile(session_state)
+    provider = str(audio_profile["tts_provider"])
+    output_sample_rate = int(audio_profile["audio_out_sample_rate"])
     donna_lang = session_state.get("_donna_language", "en")
 
-    if provider == "cartesia" and os.getenv("CARTESIA_API_KEY"):
+    if provider == "cartesia":
+        is_telnyx = session_state.get("_transport_type") == "telnyx"
         # Cartesia Spanish voice (warm female) or default English
-        voice_id = os.getenv("CARTESIA_VOICE_ID", "1242fb95-7ddd-44ac-8a05-9e8a22a6137d")
+        voice_id = cfg.cartesia_voice_id or "1242fb95-7ddd-44ac-8a05-9e8a22a6137d"
         if donna_lang == "es":
-            voice_id = os.getenv("CARTESIA_VOICE_ID_ES", voice_id)
+            voice_id = getattr(cfg, "cartesia_voice_id_es", None) or voice_id
         logger.info("TTS provider: Cartesia Sonic 3 (lang={lang})", lang=donna_lang)
         return CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY", ""),
+            api_key=cfg.cartesia_api_key,
             voice_id=voice_id,
             model="sonic-3",
+            sample_rate=output_sample_rate,
+            # Keep linear PCM in-process; the telephony serializer owns the final
+            # L16/16 kHz conversion at the provider edge.
+            encoding="pcm_s16le",
             params=CartesiaTTSService.InputParams(
-                generation_config=GenerationConfig(speed=1.05, volume=1.2, emotion="enthusiastic"),
+                generation_config=GenerationConfig(
+                    speed=1.0 if is_telnyx else 1.05,
+                    volume=0.9 if is_telnyx else 1.2,
+                    emotion="enthusiastic",
+                ),
                 language=("es" if donna_lang == "es" else "en"),
             ),
         )
 
     # ElevenLabs: use Spanish voice ID if configured, otherwise default
-    voice_id = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+    voice_id = cfg.elevenlabs_voice_id
     if donna_lang == "es":
-        voice_id = os.getenv("ELEVENLABS_VOICE_ID_ES", voice_id)
-    logger.info("TTS provider: ElevenLabs (lang={lang})", lang=donna_lang)
+        voice_id = getattr(cfg, "elevenlabs_voice_id_es", None) or voice_id
+    logger.info("TTS provider: ElevenLabs {model} (lang={lang})", model=cfg.elevenlabs_model, lang=donna_lang)
     return ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+        api_key=cfg.elevenlabs_api_key,
         voice_id=voice_id,
-        model="eleven_turbo_v2_5",
+        model=cfg.elevenlabs_model,
+        sample_rate=output_sample_rate,
         params=ElevenLabsTTSService.InputParams(speed=0.9),
+    )
+
+
+def _create_telephony_serializer(
+    *,
+    transport_type: str,
+    call_data: dict,
+    stream_sid: str,
+    call_sid: str,
+    cfg,
+):
+    """Create the provider serializer at the only lossy audio boundary."""
+    if transport_type == "telnyx":
+        try:
+            profile = resolve_telnyx_audio_profile(cfg)
+        except TelnyxAudioProfileError as exc:
+            raise TelnyxAudioConfigError(str(exc)) from exc
+
+        observed_encoding = (call_data.get("outbound_encoding") or "").upper()
+        if observed_encoding and observed_encoding != profile.codec:
+            raise TelnyxAudioConfigError(
+                f"Telnyx stream started as {observed_encoding}; "
+                f"Donna Telnyx is configured for {profile.label}"
+            )
+
+        logger.info(
+            "[{cs}] Telnyx serializer codec_in={codec_in} codec_out={codec_out} wire_rate={rate}Hz",
+            cs=call_sid,
+            codec_in=profile.codec,
+            codec_out=profile.codec,
+            rate=profile.sample_rate,
+        )
+        return DonnaTelnyxFrameSerializer(
+            stream_id=stream_sid,
+            call_control_id=call_sid,
+            outbound_encoding=profile.codec,
+            inbound_encoding=profile.codec,
+            api_key=cfg.telnyx_api_key,
+            params=DonnaTelnyxFrameSerializer.InputParams(
+                telnyx_sample_rate=profile.sample_rate,
+                outbound_encoding=profile.codec,
+                inbound_encoding=profile.codec,
+                l16_input_byte_order=profile.l16_input_byte_order,
+                l16_output_byte_order=profile.l16_output_byte_order,
+            ),
+        )
+
+    raise TelnyxAudioConfigError(
+        f"Unsupported telephony transport {transport_type}; Donna voice is configured for Telnyx"
     )
 
 
@@ -208,7 +389,12 @@ async def _load_call_metadata(call_sid: str, session_state: dict) -> dict:
         if not getattr(state, "is_shared", False):
             return {}
 
-        metadata = await state.get(f"call_metadata:{call_sid}") or {}
+        from lib.shared_state_phi import decode_phi_payload
+
+        metadata = decode_phi_payload(
+            await state.get(f"call_metadata:{call_sid}"),
+            label="call metadata",
+        ) or {}
         if isinstance(metadata, dict) and metadata:
             if isinstance(call_meta, dict):
                 call_meta[call_sid] = metadata
@@ -224,7 +410,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     """Run the Donna voice pipeline for a single call.
 
     Args:
-        websocket: Starlette WebSocket from Twilio.
+        websocket: Starlette WebSocket from Telnyx.
         session_state: Pre-populated dict with call context:
             - senior_id: str
             - senior: dict (profile)
@@ -240,9 +426,10 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             - todays_context: str | None
     """
     start_time = time.time()
+    cfg = get_settings()
 
     # -------------------------------------------------------------------------
-    # Parse Twilio WebSocket handshake
+    # Parse telephony WebSocket handshake
     # -------------------------------------------------------------------------
     if prepared_call is None:
         try:
@@ -255,10 +442,11 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     call_data = prepared_call["call_data"]
     metadata = prepared_call["metadata"]
     stream_sid = call_data.get("stream_id", "")
-    call_sid = call_data.get("call_id", "") or session_state.get("call_sid", "unknown")
+    call_sid = _provider_call_id(call_data, session_state) or "unknown"
     session_state["call_sid"] = call_sid
+    session_state["_transport_type"] = transport_type
 
-    # Populate session_state from call_metadata (pre-fetched by /voice/answer)
+    # Populate session_state from call_metadata seeded by the Telnyx route.
     if metadata:
         # Use `or` assignment — setdefault won't overwrite pre-initialized None values
         session_state["senior"] = session_state.get("senior") or metadata.get("senior")
@@ -314,7 +502,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
                     senior_name=senior_data.get("name", ""),
                     timezone=senior_data.get("timezone"),
                     interests=senior_data.get("interests"),
-                    last_call_summary=analysis_data.get("summary"),
+                    last_call_summary=session_state.get("previous_calls_summary") or analysis_data.get("summary"),
                     senior_id=senior_data.get("id"),
                     news_context=session_state.get("news_context"),
                     interest_scores=senior_data.get("interest_scores"),
@@ -355,35 +543,71 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     except Exception as e:
         logger.warning("[{cs}] Flag resolution failed — using defaults: {err}", cs=call_sid, err=str(e))
 
+    audio_profile = get_audio_profile(session_state)
+    audio_in_sample_rate = int(audio_profile["audio_in_sample_rate"])
+    audio_out_sample_rate = int(audio_profile["audio_out_sample_rate"])
+
     logger.info("[{cs}] Starting pipeline senior_id={sid}", cs=call_sid, sid=str(session_state.get("senior_id") or "")[:8])
+    logger.info(
+        "[{cs}] Audio profile provider={provider} in={audio_in}Hz out={audio_out}Hz",
+        cs=call_sid,
+        provider=audio_profile["tts_provider"],
+        audio_in=audio_in_sample_rate,
+        audio_out=audio_out_sample_rate,
+    )
 
     # -------------------------------------------------------------------------
-    # Transport (Twilio ↔ FastAPI WebSocket)
+    # Transport (Telnyx ↔ FastAPI WebSocket)
     # -------------------------------------------------------------------------
     # Onboarding callers are adult caregivers (typical speech pace) — shorter pause.
-    # Senior calls use longer pause tolerance for elderly speech patterns.
+    # Senior fallback telephony calls keep longer pause tolerance for elderly speech patterns.
+    # Telnyx validation uses a more responsive VAD profile while we tune
+    # barge-in and turn latency on the new provider.
     is_onboarding = session_state.get("call_type") == "onboarding"
-    vad_stop_secs = 0.8 if is_onboarding else 1.2
+    if transport_type == "telnyx":
+        vad_stop_secs = 0.8
+        vad_confidence = 0.5
+        vad_min_volume = 0.35
+    else:
+        vad_stop_secs = 0.8 if is_onboarding else 1.2
+        vad_confidence = 0.6
+        vad_min_volume = 0.5
+    logger.info(
+        "[{cs}] VAD profile provider={provider} confidence={confidence} stop_secs={stop_secs} min_volume={min_volume}",
+        cs=call_sid,
+        provider=transport_type,
+        confidence=vad_confidence,
+        stop_secs=vad_stop_secs,
+        min_volume=vad_min_volume,
+    )
+
+    try:
+        serializer = _create_telephony_serializer(
+            transport_type=transport_type,
+            call_data=call_data,
+            stream_sid=stream_sid,
+            call_sid=call_sid,
+            cfg=cfg,
+        )
+    except TelnyxAudioConfigError as exc:
+        logger.error("[{cs}] {err}", cs=call_sid, err=str(exc))
+        return
 
     transport = FastAPIWebsocketTransport(
         websocket=websocket,
         params=FastAPIWebsocketParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            audio_out_10ms_chunks=2 if transport_type == "telnyx" else 4,
             add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(
-                    confidence=0.6,
+                    confidence=vad_confidence,
                     stop_secs=vad_stop_secs,
-                    min_volume=0.5,
+                    min_volume=vad_min_volume,
                 ),
             ),
-            serializer=TwilioFrameSerializer(
-                stream_sid=stream_sid,
-                call_sid=call_sid,
-                account_sid=os.getenv("TWILIO_ACCOUNT_SID"),
-                auth_token=os.getenv("TWILIO_AUTH_TOKEN"),
-            ),
+            serializer=serializer,
         ),
     )
 
@@ -392,7 +616,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     # Env var VOICE_BACKEND=gemini_live overrides GrowthBook flag
     # -------------------------------------------------------------------------
     voice_backend = (
-        os.getenv("VOICE_BACKEND")
+        cfg.voice_backend
         or (session_state.get("_flags") or {}).get("voice_backend", "claude")
     )
     if voice_backend == "gemini_live":
@@ -403,7 +627,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     # -------------------------------------------------------------------------
     # STT / LLM / TTS — swap for mocks in load test mode
     # -------------------------------------------------------------------------
-    load_test = os.getenv("LOAD_TEST_MODE", "false").lower() == "true"
+    load_test = cfg.load_test_mode
 
     if load_test:
         logger.warning("LOAD_TEST_MODE enabled — using mock STT/LLM/TTS")
@@ -418,8 +642,8 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
         tts = MockTTSProcessor()
         # Real LLM needed for create_context_aggregator(); mock replaces it in pipeline
         llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY", "fake-key-load-test"),
-            model="claude-sonnet-4-5-20250929",
+            api_key=cfg.anthropic_api_key or "fake-key-load-test",
+            model=cfg.anthropic_model,
         )
     else:
         # Resolve Donna's conversation language from senior's familyInfo
@@ -437,11 +661,11 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
         session_state["_donna_language"] = _donna_lang
 
         stt = DeepgramSTTService(
-            api_key=os.getenv("DEEPGRAM_API_KEY", ""),
+            api_key=cfg.deepgram_api_key,
             live_options=LiveOptions(
                 model="nova-3-general",
                 language=_stt_language,
-                sample_rate=8000,
+                sample_rate=audio_in_sample_rate,
                 encoding="linear16",
                 channels=1,
                 interim_results=True,
@@ -451,8 +675,8 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
         )
 
         llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-            model="claude-sonnet-4-5-20250929",
+            api_key=cfg.anthropic_api_key,
+            model=cfg.anthropic_model,
             params=AnthropicLLMService.InputParams(
                 enable_prompt_caching=True,
             ),
@@ -477,6 +701,9 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
         track_user=False,
     )
     guidance_stripper = GuidanceStripperProcessor()
+    audio_preroll = InitialAudioPrerollProcessor(
+        preroll_ms=120 if transport_type == "telnyx" else 0
+    )
     metrics_logger = MetricsLoggerProcessor(session_state=session_state)
 
     # Record call start time for Director's phase timing
@@ -512,6 +739,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             guidance_stripper,
             conversation_tracker,
             tts,
+            audio_preroll,
             transport.output(),
             context_aggregator.assistant(),
             metrics_logger,
@@ -524,8 +752,8 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
-            audio_in_sample_rate=8000,
-            audio_out_sample_rate=8000,
+            audio_in_sample_rate=audio_in_sample_rate,
+            audio_out_sample_rate=audio_out_sample_rate,
         ),
     )
 

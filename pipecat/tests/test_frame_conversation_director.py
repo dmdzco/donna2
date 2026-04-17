@@ -164,6 +164,54 @@ class TestDirectorContextInjection:
     """Verify non-guidance context is injected ephemerally and deduplicated."""
 
     @pytest.mark.asyncio
+    async def test_pending_observer_guidance_injected_after_strip(self, session_state, frame_capture):
+        class FakeContext:
+            def __init__(self):
+                self.messages = [
+                    {"role": "system", "content": "base"},
+                    {
+                        "role": "user",
+                        "content": "[EPHEMERAL: Observer guidance — do not read aloud]\nstale",
+                    },
+                ]
+
+            def get_messages(self):
+                return self.messages
+
+            def set_messages(self, messages):
+                self.messages = messages
+
+        fake_context = FakeContext()
+        session_state["_llm_context"] = fake_context
+        session_state["_pending_observer_guidance"] = "[HEALTH] Ask how they are feeling."
+        processor = ConversationDirectorProcessor(session_state=session_state)
+        capture = frame_capture
+
+        with patch("lib.growthbook.is_on", return_value=False):
+            pipeline = Pipeline([processor, capture])
+            task = PipelineTask(pipeline, params=PipelineParams(enable_metrics=False))
+            runner = PipelineRunner(handle_sigint=False)
+
+            async def inject():
+                await task.queue_frame(make_transcription("My back hurts today"))
+                await asyncio.sleep(0.1)
+                await task.queue_frame(EndFrame())
+
+            asyncio.create_task(inject())
+            await asyncio.wait_for(runner.run(task), timeout=5.0)
+
+        guidance_frames = capture.get_frames_of_type(LLMMessagesAppendFrame)
+        assert len(guidance_frames) == 1
+        content = guidance_frames[0].messages[0]["content"]
+        assert "Observer guidance" in content
+        assert "[HEALTH]" in content
+        assert "_pending_observer_guidance" not in session_state
+        assert all(
+            not (m.get("content", "").startswith("[EPHEMERAL") if isinstance(m, dict) else False)
+            for m in fake_context.messages
+        )
+
+    @pytest.mark.asyncio
     async def test_tracking_context_injected_once_per_summary(self, session_state):
         class Tracker:
             def get_summary(self):
@@ -209,6 +257,102 @@ class TestDirectorContextInjection:
         assert len(frames) == 1
         assert isinstance(frames[0], LLMMessagesAppendFrame)
         assert frames[0].messages[0]["content"].startswith("[EPHEMERAL: MEMORY CONTEXT")
+
+    @pytest.mark.asyncio
+    async def test_prefetched_memory_not_reinjected_during_cooldown(self, session_state):
+        from services.prefetch import PrefetchCache
+
+        frames = []
+
+        async def capture_frame(frame, direction=None):
+            frames.append(frame)
+
+        cache = PrefetchCache()
+        cache.put("gardening", [{"id": "memory-1", "content": "Loves growing roses."}])
+        session_state["_prefetch_cache"] = cache
+
+        processor = ConversationDirectorProcessor(session_state=session_state)
+        processor.push_frame = capture_frame
+        processor._turn_count = 1
+        await processor._inject_prefetched_memories("gardening")
+
+        processor._turn_count = 2
+        await processor._inject_prefetched_memories("gardening")
+
+        assert len(frames) == 1
+        assert "Loves growing roses" in frames[0].messages[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_prefetched_memory_reinjects_after_cooldown(self, session_state):
+        from services.prefetch import PrefetchCache
+
+        frames = []
+
+        async def capture_frame(frame, direction=None):
+            frames.append(frame)
+
+        cache = PrefetchCache()
+        cache.put("gardening", [{"id": "memory-1", "content": "Loves growing roses."}])
+        session_state["_prefetch_cache"] = cache
+
+        processor = ConversationDirectorProcessor(session_state=session_state)
+        processor.push_frame = capture_frame
+        processor._turn_count = 1
+        await processor._inject_prefetched_memories("gardening")
+
+        processor._turn_count = 1 + processor.MEMORY_REINJECTION_COOLDOWN_TURNS
+        await processor._inject_prefetched_memories("gardening")
+
+        assert len(frames) == 2
+
+    def test_history_before_current_removes_current_user_turn(self, session_state):
+        session_state["_transcript"] = [
+            {"role": "assistant", "content": "How was your day?"},
+            {"role": "user", "content": "I am going to work out tomorrow."},
+        ]
+        processor = ConversationDirectorProcessor(session_state=session_state)
+
+        history = processor._history_before_current("I am going to work out tomorrow.")
+
+        assert history == [{"role": "assistant", "content": "How was your day?"}]
+
+    @pytest.mark.asyncio
+    async def test_memory_gate_does_not_wait_without_relevant_inflight(self, session_state):
+        from services.prefetch import PrefetchCache
+
+        cache = PrefetchCache()
+        cache.put("gardening", [{"id": "memory-1", "content": "Loves roses."}])
+        session_state["_prefetch_cache"] = cache
+
+        processor = ConversationDirectorProcessor(session_state=session_state)
+
+        with patch("processors.conversation_director.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await processor._inject_prefetched_memories("weather forecast")
+
+        mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_injected_memory_marks_accessed_after_push(self, session_state):
+        from services.prefetch import PrefetchCache
+
+        frames = []
+
+        async def capture_frame(frame, direction=None):
+            frames.append(frame)
+
+        cache = PrefetchCache()
+        cache.put("gardening", [{"id": "memory-1", "content": "Loves growing roses."}])
+        session_state["_prefetch_cache"] = cache
+
+        processor = ConversationDirectorProcessor(session_state=session_state)
+        processor.push_frame = capture_frame
+
+        with patch("services.memory.mark_accessed", new_callable=AsyncMock) as mock_mark:
+            await processor._inject_prefetched_memories("gardening")
+            await asyncio.sleep(0.01)
+
+        assert len(frames) == 1
+        mock_mark.assert_awaited_once_with(["memory-1"])
 
 
 class TestDirectorSpeculativeAnalysis:

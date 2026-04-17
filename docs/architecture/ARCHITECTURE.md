@@ -22,15 +22,15 @@ This is an **explicit architectural decision** — each backend owns a clear dom
 Linear pipeline of Pipecat `FrameProcessor`s. Frames flow top to bottom:
 
 ```
-Twilio Audio ──► FastAPIWebsocketTransport
+Telnyx L16/16k audio ──► FastAPIWebsocketTransport
                         │
-                   Deepgram STT (Nova 3, 8kHz mulaw)
+                   Deepgram STT (Nova 3, internal 16kHz PCM)
                         │ TranscriptionFrame
                         ▼
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1 (0ms): 250+ regex patterns
               │   (BLOCKING)         │  Injects guidance via LLMMessagesAppendFrame
-              │                      │  Strong goodbye → EndFrame
+              │                      │  Strong goodbye → guarded EndFrame
               └─────────┬───────────┘
                         ▼
               ┌─────────────────────┐   ┌─────────────────────────┐
@@ -44,21 +44,37 @@ Twilio Audio ──► FastAPIWebsocketTransport
                         ▼ (no delay)
               Context Aggregator (user) ← builds LLM context from transcriptions
                         ▼
-              Claude Sonnet 4.5 + FlowManager (4-phase state machine)
+              Claude Haiku 4.5 + FlowManager (4-phase state machine)
                         │ TextFrame
                         ▼
               Guidance Stripper (strips <guidance> tags + [BRACKETED] directives)
                         ▼
               Conversation Tracker (topics, questions, advice + stripped transcript)
                         ▼
-              ElevenLabs TTS (eleven_turbo_v2_5)
+              ElevenLabs TTS or Cartesia Sonic 3 (16kHz PCM for Telnyx calls)
                         ▼
-              FastAPIWebsocketTransport ──► Twilio Audio (mulaw 8kHz)
+              FastAPIWebsocketTransport ──► Telnyx L16/16k audio
                         ▼
               Context Aggregator (assistant) ← tracks assistant responses
 ```
 
 **Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. Guidance appears as user-role messages before the next LLM call.
+
+### Runtime Audio Profile
+
+Source of truth: `pipecat/bot.py`, `pipecat/bot_gemini.py`, and the active telephony serializer.
+
+| Segment | Runtime default | Why |
+|---|---:|---|
+| Telnyx wire input | 16kHz L16 PCM | Telnyx media stream profile |
+| Internal STT input | 16kHz PCM | Matches the Telnyx wire profile for STT |
+| Telnyx phone TTS output | 16kHz PCM | Selected TTS provider, matched to the Telnyx wire profile |
+| Cartesia non-phone output | 48kHz `pcm_s16le` | `CARTESIA_OUTPUT_SAMPLE_RATE`; used outside active Telnyx calls |
+| ElevenLabs non-phone output | 44.1kHz PCM | `ELEVENLABS_OUTPUT_SAMPLE_RATE`; used outside active Telnyx calls |
+| Gemini Live internal output | 24kHz PCM | `GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE`; preserved internally before serializer output |
+| Telnyx wire output | 16kHz L16 PCM | Final provider edge handled by `DonnaTelnyxFrameSerializer` |
+
+The guiding rule is: keep PCM throughout the pipeline and match active Telnyx calls to 16kHz before the serializer so output frames stay at a normal 20ms cadence. Do not request `pcm_mulaw` from Cartesia; the Telnyx path expects linear PCM through the serializer boundary.
 
 ---
 
@@ -68,7 +84,7 @@ Twilio Audio ──► FastAPIWebsocketTransport
 - **Latency**: 0ms (blocking, inline)
 - **Method**: 250+ regex patterns across 19 categories (health, goodbye, emotion, cognitive, activity, etc.)
 - **Output**: Injects guidance for the current turn
-- **Goodbye detection**: Strong goodbye → programmatic EndFrame after configured delay (bypasses unreliable LLM tool calls)
+- **Goodbye detection**: Explicit strong goodbye → programmatic EndFrame after the minimum call-age guard and configured delay (bypasses unreliable LLM tool calls)
 
 ### Layer 2: Conversation Director (`processors/conversation_director.py`)
 - **Latency**: non-blocking via `asyncio.create_task`; Groq is the active fast provider
@@ -102,7 +118,7 @@ Retired handlers remain in `pipecat/flows/tools.py` for Gemini/future work, but 
 
 ## Post-Call Processing (`services/post_call.py`)
 
-Runs after Twilio disconnect, parallelized with `asyncio.gather`:
+Runs after the telephony WebSocket disconnects, parallelized with `asyncio.gather`:
 
 ```
 Step 1: Complete conversation (prerequisite) ───────── sequential
@@ -147,16 +163,16 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 |-----------|-----------|---------|
 | Voice Pipeline | Pipecat | v0.0.101+ |
 | Call State Machine | Pipecat Flows | v0.0.22+ |
-| Primary LLM | Anthropic Claude Sonnet 4.5 | claude-sonnet-4-5-20250929 |
+| Primary LLM | Anthropic Claude Haiku 4.5 | claude-haiku-4-5-20251001 |
 | Director LLM (active fast path) | Groq | gpt-oss-20b |
 | Director LLM (regular fallback helper) | Google Gemini Flash | gemini-3-flash-preview |
 | Post-Call Analysis | Google Gemini Flash | gemini-3-flash-preview |
-| STT | Deepgram Nova 3 | 8kHz mulaw |
-| TTS | ElevenLabs by default; Cartesia behind provider flag | eleven_turbo_v2_5 |
+| STT | Deepgram Nova 3 | Telnyx L16/16k reaches STT as 16kHz PCM |
+| TTS | ElevenLabs by default; Cartesia behind provider flag | Telnyx L16 calls use 16kHz PCM from TTS; non-phone paths can use higher internal rates |
 | VAD | Silero | confidence=0.6, stop_secs=1.2 |
 | Embeddings | OpenAI | text-embedding-3-small |
 | News / Web Search | OpenAI GPT-4o-mini + Tavily | OpenAI cached news; Tavily first/OpenAI fallback for in-call web_search |
-| Telephony | Twilio | Media Streams WebSocket |
+| Telephony | Telnyx | Call Control + bidirectional media streams |
 | Database | Neon PostgreSQL | pgvector extension |
 | Server (Python) | FastAPI + uvicorn | v0.115+ |
 | Server (Node.js) | Express | — |
@@ -196,7 +212,7 @@ pipecat/
 │   └── ...                     ← 8+ additional service modules
 ├── api/
 │   ├── routes/                 ← voice.py, calls.py
-│   ├── middleware/             ← auth, api_auth, rate_limit, security, twilio, error_handler
+│   ├── middleware/             ← auth, api_auth, rate_limit, security, error_handler
 │   └── validators/schemas.py   ← Pydantic input validation
 ├── db/client.py                ← asyncpg pool + slow query logging
 ├── lib/

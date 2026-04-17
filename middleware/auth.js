@@ -16,6 +16,10 @@ import jwt from 'jsonwebtoken';
 import { logAudit } from '../services/audit.js';
 import { tokenRevocationService } from '../services/token-revocation.js';
 import { DEFAULT_JWT_SECRET, isProductionEnv, timingSafeEqual } from '../lib/security-config.js';
+import { createLogger } from '../lib/logger.js';
+import { sendError } from '../lib/http-response.js';
+
+const log = createLogger('Auth');
 
 if (isProductionEnv() && (!process.env.JWT_SECRET || process.env.JWT_SECRET === DEFAULT_JWT_SECRET)) {
   throw new Error('JWT_SECRET environment variable is required in production (do not use the default)');
@@ -69,7 +73,10 @@ async function checkTokenRevocation(token, adminId) {
     return { revoked: false };
   } catch (err) {
     // If revoked_tokens table doesn't exist yet (pre-migration), allow through
-    console.warn('[Auth] Token revocation check skipped:', err.message);
+    log.warn('Token revocation check skipped', {
+      errorName: err?.name,
+      errorCode: err?.code,
+    });
     return { revoked: false };
   }
 }
@@ -108,7 +115,7 @@ export async function requireAuth(req, res, next) {
       // Check token revocation before granting access
       const revocation = await checkTokenRevocation(token, decoded.adminId);
       if (revocation.revoked) {
-        return res.status(401).json({ error: revocation.message });
+        return sendError(res, 401, { error: revocation.message });
       }
       req.auth = {
         isCofounder: false,
@@ -134,7 +141,7 @@ export async function requireAuth(req, res, next) {
         userAgent: req.get('user-agent'),
         metadata: { reason: 'no_clerk_session', path: req.path },
       });
-      return res.status(401).json({
+      return sendError(res, 401, {
         error: 'Unauthorized',
         message: 'Authentication required',
       });
@@ -146,7 +153,10 @@ export async function requireAuth(req, res, next) {
       const user = await clerkClient.users.getUser(auth.userId);
       isAdmin = user.publicMetadata?.role === 'admin';
     } catch (err) {
-      console.warn('[Auth] Could not fetch user metadata:', err.message);
+      log.warn('Could not fetch user metadata', {
+        errorName: err?.name,
+        errorCode: err?.code,
+      });
     }
 
     req.auth = {
@@ -158,7 +168,10 @@ export async function requireAuth(req, res, next) {
 
     next();
   } catch (error) {
-    console.error('[Auth] Clerk error:', error.message);
+    log.error('Clerk auth failed', {
+      errorName: error?.name,
+      errorCode: error?.code,
+    });
     logAudit({
       userId: 'anonymous',
       userRole: 'unknown',
@@ -166,9 +179,14 @@ export async function requireAuth(req, res, next) {
       resourceType: 'auth',
       ipAddress: req.ip,
       userAgent: req.get('user-agent'),
-      metadata: { reason: 'clerk_error', error: error.message, path: req.path },
+      metadata: {
+        reason: 'clerk_error',
+        error_name: error?.name,
+        error_code: error?.code,
+        path: req.path,
+      },
     });
-    return res.status(401).json({
+    return sendError(res, 401, {
       error: 'Unauthorized',
       message: 'Invalid or expired session',
     });
@@ -218,6 +236,10 @@ export async function optionalAuth(req, res, next) {
         isAdmin = user.publicMetadata?.role === 'admin';
       } catch (err) {
         // Ignore metadata fetch errors for optional auth
+        log.warn('Could not fetch optional auth metadata', {
+          errorName: err?.name,
+          errorCode: err?.code,
+        });
       }
       req.auth = {
         isCofounder: false,
@@ -226,8 +248,12 @@ export async function optionalAuth(req, res, next) {
         provider: 'clerk',
       };
     }
-  } catch {
+  } catch (error) {
     // Ignore errors for optional auth
+    log.warn('Optional auth skipped after Clerk error', {
+      errorName: error?.name,
+      errorCode: error?.code,
+    });
   }
 
   next();
@@ -239,7 +265,7 @@ export async function optionalAuth(req, res, next) {
 export async function requireAdmin(req, res, next) {
   await requireAuth(req, res, () => {
     if (!req.auth?.isAdmin) {
-      return res.status(403).json({
+      return sendError(res, 403, {
         error: 'Forbidden',
         message: 'Admin access required',
       });

@@ -1,22 +1,25 @@
 import { useState, type FormEvent } from 'react';
-import { login } from '../hooks/useApi';
+import { getEnvironmentConfig, getEnvironmentOptions, login, type ApiEnvironment } from '../hooks/useApi';
 
 interface LoginPageProps {
+  environment: ApiEnvironment;
+  onEnvironmentChange: (environment: ApiEnvironment) => void;
   onLogin: () => void;
 }
 
-export function LoginPage({ onLogin }: LoginPageProps) {
+export function LoginPage({ environment, onEnvironmentChange, onLogin }: LoginPageProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const environmentConfig = getEnvironmentConfig(environment);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setLoading(true);
     try {
-      await login(email, password);
+      await login(email, password, environment);
       onLogin();
     } catch (err) {
       setError((err as Error).message);
@@ -29,7 +32,23 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     <div className="login-page">
       <form className="login-form" onSubmit={handleSubmit}>
         <h1>Donna Observability</h1>
-        <p className="login-subtitle">Sign in to continue</p>
+        <p className="login-subtitle">Sign in to {environmentConfig.label}</p>
+
+        <div className="login-environment" role="group" aria-label="Select data environment">
+          {getEnvironmentOptions().map(option => (
+            <button
+              key={option.key}
+              type="button"
+              className={option.key === environment ? 'active' : ''}
+              onClick={() => {
+                onEnvironmentChange(option.key);
+                setError(null);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
 
         {error && <div className="login-error">{error}</div>}
 

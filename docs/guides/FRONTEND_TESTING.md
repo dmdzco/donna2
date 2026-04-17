@@ -9,6 +9,9 @@ We use [Playwright](https://playwright.dev/) for end-to-end browser testing acro
 ## Quick Start
 
 ```bash
+# Install app-local dependencies once after clone
+npm run install:apps
+
 # Install Playwright browser (first time only)
 npx playwright install chromium
 
@@ -29,6 +32,8 @@ npx playwright test --ui
 # View last test report
 npx playwright show-report
 ```
+
+The root repo and each frontend app keep separate `package-lock.json` files. If `apps/admin-v2`, `apps/consumer`, or `apps/observability` fail to boot under Playwright, run `npm run install:apps` again from the repo root before debugging the tests.
 
 ## Project Structure
 

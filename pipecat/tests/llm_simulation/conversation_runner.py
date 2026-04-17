@@ -66,7 +66,7 @@ class SimulationConfig:
     max_turns: int = 10
     response_timeout: float = 30.0
     overall_timeout: float = 120.0
-    donna_model: str = "claude-sonnet-4-5-20250929"
+    donna_model: str = "claude-haiku-4-5-20251001"
     simulator_model: str = "claude-haiku-4-5-20251001"
     observer_model: str = "claude-haiku-4-5-20251001"
     call_type: str = "check-in"

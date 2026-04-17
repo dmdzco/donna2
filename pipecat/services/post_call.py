@@ -1,4 +1,4 @@
-"""Post-call processing — runs after the Twilio client disconnects.
+"""Post-call processing — runs after the telephony client disconnects.
 
 Orchestrates: conversation completion, call analysis (Gemini Flash),
 memory extraction, daily context save, reminder cleanup, and cache clearing.
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from datetime import datetime, timezone
 
 from loguru import logger
 
@@ -20,6 +21,13 @@ def _transcript_has_content(transcript) -> bool:
     if isinstance(transcript, str):
         return bool(transcript.strip())
     return bool(transcript)
+
+
+def _call_started_at(session_state: dict) -> datetime | None:
+    raw = session_state.get("_call_start_time")
+    if isinstance(raw, (int, float)):
+        return datetime.fromtimestamp(raw, timezone.utc)
+    return None
 
 
 async def _get_post_call_transcript(
@@ -88,6 +96,90 @@ async def _wait_for_reminder_ack_task(session_state: dict, timeout: float = 5.0)
         pass
 
 
+_REMINDER_WORD_RE = re.compile(r"[a-z0-9']+")
+_REMINDER_STOP_WORDS = {
+    "about", "after", "again", "also", "and", "are", "call", "called",
+    "for", "from", "have", "just", "let", "remember", "reminder", "take",
+    "that", "the", "this", "time", "with", "you", "your",
+}
+
+
+def _reminder_keywords(session_state: dict) -> set[str]:
+    texts: list[str] = []
+    delivery = session_state.get("reminder_delivery") or {}
+    reminder = session_state.get("reminder") or {}
+    for source in (delivery, reminder):
+        if isinstance(source, dict):
+            texts.extend(
+                str(source.get(key) or "")
+                for key in ("title", "description", "type", "reminder_type")
+            )
+    if session_state.get("reminder_prompt"):
+        texts.append(str(session_state["reminder_prompt"]))
+
+    words: set[str] = set()
+    for text in texts:
+        words.update(
+            word
+            for word in _REMINDER_WORD_RE.findall(text.lower())
+            if len(word) > 2 and word not in _REMINDER_STOP_WORDS
+        )
+    return words
+
+
+def _assistant_delivered_reminder(text: str, keywords: set[str]) -> bool:
+    if not text:
+        return False
+    lower = text.lower()
+    if not re.search(r"\b(remind|remember|take|appointment|medication|medicine|pill)\b", lower):
+        return False
+    if not keywords:
+        return True
+    words = set(_REMINDER_WORD_RE.findall(lower))
+    overlap = words & keywords
+    return len(overlap) >= min(2, len(keywords))
+
+
+def _infer_reminder_ack_from_transcript(session_state: dict, transcript: list | str) -> dict | None:
+    """Infer a missed tool acknowledgment only from transcript evidence.
+
+    A short "okay" is accepted only after Donna appears to have delivered the
+    reminder. This avoids treating generic greeting acknowledgments as reminder
+    acknowledgments.
+    """
+    if not isinstance(transcript, list):
+        return None
+
+    keywords = _reminder_keywords(session_state)
+    delivered_idx: int | None = None
+    for idx, turn in enumerate(transcript):
+        if not isinstance(turn, dict):
+            continue
+        role = turn.get("role")
+        text = _content_to_text(turn.get("content")).strip()
+        if role == "assistant" and _assistant_delivered_reminder(text, keywords):
+            delivered_idx = idx
+            continue
+        if role == "assistant":
+            delivered_idx = None
+            continue
+        if role != "user" or delivered_idx is None:
+            continue
+
+        try:
+            from processors.quick_observer import quick_analyze
+            response = quick_analyze(text).reminder_response
+        except Exception:
+            response = None
+
+        if response and response.get("confidence", 0) >= 0.75:
+            return {
+                "status": response.get("type") or "acknowledged",
+                "user_response": text[:300],
+            }
+    return None
+
+
 async def run_post_call(
     session_state: dict,
     conversation_tracker,
@@ -104,6 +196,7 @@ async def run_post_call(
     conversation_id = session_state.get("conversation_id")
     senior_id = session_state.get("senior_id")
     senior = session_state.get("senior")
+    call_started_at = _call_started_at(session_state)
 
     logger.info("[{cs}] Running post-call processing", cs=call_sid)
 
@@ -116,6 +209,7 @@ async def run_post_call(
     # Collect full transcript from session, falling back to persisted Neon draft.
     transcript = await _get_post_call_transcript(session_state, conversation_tracker)
     analysis = None
+    post_call_error_steps: list[str] = []
 
     # Step 1: Complete conversation (must run first — prerequisite for all)
     try:
@@ -127,6 +221,7 @@ async def run_post_call(
                 "transcript": transcript,
             })
     except Exception as e:
+        post_call_error_steps.append("complete conversation")
         logger.error("[{cs}] Post-call step 1 (complete conversation) failed: {err}", cs=call_sid, err=str(e))
 
     # Mark caregiver notes only when Donna actually appears to have delivered
@@ -134,6 +229,7 @@ async def run_post_call(
     try:
         await _mark_delivered_caregiver_notes(session_state, transcript)
     except Exception as e:
+        post_call_error_steps.append("caregiver note delivery check")
         logger.error("[{cs}] Post-call caregiver note delivery check failed: {err}", cs=call_sid, err=str(e))
 
     # --- Parallel group: independent steps (2, 3, 5, 6) ---
@@ -142,13 +238,17 @@ async def run_post_call(
         if not (_transcript_has_content(transcript) and senior and is_on("post_call_analysis_enabled", session_state)):
             return None
         from services.call_analysis import analyze_completed_call, save_call_analysis
-        result = await analyze_completed_call(transcript, senior)
+        result = await analyze_completed_call(
+            transcript,
+            senior,
+            call_started_at=call_started_at,
+        )
         if conversation_id and senior_id:
             await save_call_analysis(conversation_id, senior_id, result)
         summary = result.get("summary") if result else None
         if summary and summary != "Analysis unavailable":
             from services.conversations import update_summary
-            await update_summary(call_sid, summary)
+            await update_summary(call_sid, summary, result.get("sentiment"))
             logger.info("[{cs}] Persisted call summary ({n} chars)", cs=call_sid, n=len(summary))
         return result
 
@@ -175,7 +275,13 @@ async def run_post_call(
             )
         else:
             formatted = str(transcript)
-        await extract_from_conversation(senior_id, formatted, conversation_id or "unknown")
+        await extract_from_conversation(
+            senior_id,
+            formatted,
+            conversation_id or "unknown",
+            call_started_at=call_started_at,
+            timezone_name=(senior or {}).get("timezone", "America/New_York"),
+        )
 
     async def _step5_reminder():
         reminder_delivery = session_state.get("reminder_delivery")
@@ -188,12 +294,29 @@ async def run_post_call(
 
         from services.reminder_delivery import (
             get_delivery_status,
+            mark_reminder_acknowledged,
             mark_call_ended_without_acknowledgment,
         )
         await _wait_for_reminder_ack_task(session_state)
         current = await get_delivery_status(delivery_id)
         if current and current.get("status") in ("acknowledged", "confirmed"):
             return
+
+        inferred_ack = _infer_reminder_ack_from_transcript(session_state, transcript)
+        if inferred_ack:
+            row = await mark_reminder_acknowledged(
+                delivery_id,
+                inferred_ack["status"],
+                inferred_ack.get("user_response"),
+            )
+            if row:
+                session_state["_reminder_ack_persisted"] = True
+                logger.info(
+                    "[{cs}] Reminder acknowledgment recovered from transcript evidence",
+                    cs=call_sid,
+                )
+                return
+
         await mark_call_ended_without_acknowledgment(delivery_id)
 
     async def _step6_cache():
@@ -215,6 +338,7 @@ async def run_post_call(
     # Extract analysis result (step 2)
     analysis_result = results[0]
     if isinstance(analysis_result, Exception):
+        post_call_error_steps.append("call analysis")
         logger.error("[{cs}] Post-call step 2 (call analysis) failed: {err}", cs=call_sid, err=str(analysis_result))
     else:
         analysis = analysis_result
@@ -223,6 +347,7 @@ async def run_post_call(
         results,
     )):
         if isinstance(r, Exception) and i > 0:  # step 2 already logged above
+            post_call_error_steps.append(step_name)
             logger.error("[{cs}] Post-call ({step}) failed: {err}", cs=call_sid, step=step_name, err=str(r))
 
     # --- Sequential group: steps that depend on analysis ---
@@ -234,6 +359,7 @@ async def run_post_call(
                 senior_id, call_sid, analysis, duration_seconds
             )
     except Exception as e:
+        post_call_error_steps.append("caregiver notification")
         logger.error("[{cs}] Post-call step 2.5 (caregiver notification) failed: {err}", cs=call_sid, err=str(e))
 
     # 3.5 Discover new interests from the call
@@ -254,10 +380,11 @@ async def run_post_call(
                 )
                 senior["interests"] = updated
                 logger.info(
-                    "[{cs}] Discovered {n} new interests: {new}",
-                    cs=call_sid, n=len(new_interests), new=new_interests,
+                    "[{cs}] Discovered {n} new interests",
+                    cs=call_sid, n=len(new_interests),
                 )
     except Exception as e:
+        post_call_error_steps.append("interest discovery")
         logger.error("[{cs}] Post-call step 3.5 (interest discovery) failed: {err}", cs=call_sid, err=str(e))
 
     # 3.6 Compute and persist interest engagement scores
@@ -270,6 +397,7 @@ async def run_post_call(
                 await update_interest_scores(senior_id, scores)
                 logger.info("[{cs}] Updated interest scores", cs=call_sid)
     except Exception as e:
+        post_call_error_steps.append("interest scores")
         logger.error("[{cs}] Post-call step 3.6 (interest scores) failed: {err}", cs=call_sid, err=str(e))
 
     # 4. Save daily context
@@ -291,6 +419,7 @@ async def run_post_call(
                 },
             )
     except Exception as e:
+        post_call_error_steps.append("daily context")
         logger.error("[{cs}] Post-call step 4 (daily context) failed: {err}", cs=call_sid, err=str(e))
 
     # 7. Rebuild call context snapshot for next call
@@ -298,14 +427,25 @@ async def run_post_call(
         if senior_id:
             from services.call_snapshot import build_snapshot, save_snapshot
             tz = (senior or {}).get("timezone", "America/New_York")
-            snapshot = await build_snapshot(senior_id, tz, analysis)
+            snapshot = await build_snapshot(
+                senior_id,
+                tz,
+                analysis,
+                last_call_started_at=call_started_at,
+            )
             await save_snapshot(senior_id, snapshot)
     except Exception as e:
+        post_call_error_steps.append("call snapshot")
         logger.error("[{cs}] Post-call step 7 (call snapshot) failed: {err}", cs=call_sid, err=str(e))
 
     # 8. Persist call metrics for observability
     try:
-        await _persist_call_metrics(session_state, duration_seconds, conversation_tracker)
+        await _persist_call_metrics(
+            session_state,
+            duration_seconds,
+            conversation_tracker,
+            error_count=len(post_call_error_steps),
+        )
     except Exception as e:
         logger.error("[{cs}] Post-call step 8 (call metrics) failed: {err}", cs=call_sid, err=str(e))
 
@@ -316,11 +456,14 @@ async def _persist_call_metrics(
     session_state: dict,
     duration_seconds: int,
     conversation_tracker,
+    error_count: int = 0,
 ) -> None:
     """Write per-call metrics to call_metrics table for observability."""
     import time
     from db.client import execute
     from lib.circuit_breaker import get_breaker_states
+    from lib.encryption import encrypt_json
+    from services.context_trace import get_context_trace, summarize_stage_latencies
 
     call_sid = session_state.get("call_sid")
     senior_id = session_state.get("senior_id")
@@ -346,25 +489,30 @@ async def _persist_call_metrics(
         latency["tts_ttfb_avg_ms"] = round(sum(tts_vals) / len(tts_vals))
     if turn_vals:
         latency["turn_avg_ms"] = round(sum(turn_vals) / len(turn_vals))
+    stage_breakdown = summarize_stage_latencies(session_state)
+    if stage_breakdown:
+        latency["stage_breakdown"] = stage_breakdown
 
-    token_usage = cm.get("token_usage", {})
+    token_usage = dict(cm.get("token_usage", {}))
     if cm.get("tts_characters"):
         token_usage["tts_characters"] = cm["tts_characters"]
+    if cm.get("llm_invocation_count"):
+        token_usage["llm_invocation_count"] = cm["llm_invocation_count"]
 
     turn_count = cm.get("turn_count", 0)
+    current_turn_sequence = session_state.get("_current_turn_sequence")
+    if isinstance(current_turn_sequence, int) and current_turn_sequence >= 0:
+        turn_count = max(turn_count, current_turn_sequence)
     tools_used = session_state.get("_tools_used", [])
     breaker_states = get_breaker_states()
+    context_trace = get_context_trace(session_state)
+    context_trace_encrypted = encrypt_json(context_trace) if context_trace else None
 
     # Determine end_reason from session state
     end_reason = session_state.get("_end_reason", "unknown")
 
     import json
-    await execute(
-        """INSERT INTO call_metrics
-           (call_sid, senior_id, call_type, duration_seconds, end_reason,
-            turn_count, phase_durations, latency, breaker_states,
-            tools_used, token_usage, error_count)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
+    args = [
         call_sid,
         senior_id,
         call_type,
@@ -376,11 +524,40 @@ async def _persist_call_metrics(
         json.dumps(breaker_states) if breaker_states else None,
         tools_used or None,
         json.dumps(token_usage) if any(token_usage.values()) else None,
-        0,
-    )
+        error_count,
+        context_trace_encrypted,
+    ]
+    try:
+        await execute(
+            """INSERT INTO call_metrics
+               (call_sid, senior_id, call_type, duration_seconds, end_reason,
+                turn_count, phase_durations, latency, breaker_states,
+                tools_used, token_usage, error_count, context_trace_encrypted)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)""",
+            *args,
+        )
+    except Exception as e:
+        if getattr(e, "sqlstate", None) != "42703" and e.__class__.__name__ != "UndefinedColumnError":
+            raise
+        await execute(
+            """INSERT INTO call_metrics
+               (call_sid, senior_id, call_type, duration_seconds, end_reason,
+                turn_count, phase_durations, latency, breaker_states,
+                tools_used, token_usage, error_count)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
+            *args[:-1],
+        )
+        logger.warning(
+            "[{cs}] context_trace_encrypted column missing; call metrics persisted without context trace",
+            cs=call_sid,
+        )
     logger.info(
-        "[{cs}] Call metrics persisted (turns={t}, duration={d}s)",
-        cs=call_sid, t=turn_count, d=duration_seconds,
+        "[{cs}] Call metrics persisted (turns={t}, duration={d}s, errors={e}, context_events={c})",
+        cs=call_sid,
+        t=turn_count,
+        d=duration_seconds,
+        e=error_count,
+        c=(context_trace or {}).get("event_count", 0),
     )
 
 
@@ -552,6 +729,7 @@ async def _run_onboarding_post_call(
     call_sid = session_state.get("call_sid", "unknown")
     conversation_id = session_state.get("conversation_id")
     prospect_id = session_state.get("prospect_id")
+    call_started_at = _call_started_at(session_state)
 
     logger.info("[{cs}] Running onboarding post-call processing", cs=call_sid)
 
@@ -581,6 +759,7 @@ async def _run_onboarding_post_call(
             formatted_transcript,
             conversation_id or "unknown",
             prospect_id=prospect_id,
+            call_started_at=call_started_at,
         )
 
     async def _step3_prospect_update():
@@ -683,9 +862,11 @@ async def _trigger_caregiver_notification(
     import os
     import httpx
 
-    node_url = os.environ.get(
-        "NODE_API_URL", "https://donna-api-production-2450.up.railway.app"
-    )
+    node_url = os.environ.get("NODE_API_URL")
+    if not node_url:
+        logger.warning("NODE_API_URL not set, skipping caregiver notification")
+        return
+
     from config import get_service_api_key
 
     api_key = get_service_api_key("pipecat") or get_service_api_key("notifications") or ""

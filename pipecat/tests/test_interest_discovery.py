@@ -150,6 +150,7 @@ class TestComputeInterestScores:
         rows = [
             {
                 "topics": ["gardening", "cooking"],
+                "analysis_encrypted": None,
                 "engagement_score": 8,
                 "created_at": now - timedelta(days=1),
             },
@@ -169,11 +170,13 @@ class TestComputeInterestScores:
         rows = [
             {
                 "topics": ["gardening"],
+                "analysis_encrypted": None,
                 "engagement_score": 8,
                 "created_at": now - timedelta(days=1),
             },
             {
                 "topics": ["cooking"],
+                "analysis_encrypted": None,
                 "engagement_score": 8,
                 "created_at": now - timedelta(days=28),
             },
@@ -201,6 +204,7 @@ class TestComputeInterestScores:
         rows = [
             {
                 "topics": ["gardening"],
+                "analysis_encrypted": None,
                 "engagement_score": 8,
                 "created_at": now - timedelta(days=1),
             },
@@ -209,6 +213,25 @@ class TestComputeInterestScores:
             scores = await compute_interest_scores("s1", ["gardening", "reading"])
             assert scores["reading"] == 1.0
             assert scores["gardening"] > 1.0
+
+    @pytest.mark.asyncio
+    async def test_reads_topics_from_encrypted_analysis(self):
+        now = datetime.now(timezone.utc)
+        rows = [
+            {
+                "topics": None,
+                "analysis_encrypted": {
+                    "topics_discussed": ["gardening"],
+                    "engagement_score": 9,
+                },
+                "engagement_score": None,
+                "created_at": now - timedelta(days=1),
+            },
+        ]
+        with patch("services.interest_discovery.query_many", new_callable=AsyncMock, return_value=rows), \
+             patch("services.interest_discovery.decrypt_json", return_value=rows[0]["analysis_encrypted"]):
+            scores = await compute_interest_scores("s1", ["gardening", "reading"])
+            assert scores["gardening"] > scores["reading"]
 
 
 class TestUpdateInterestScores:

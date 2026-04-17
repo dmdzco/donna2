@@ -5,6 +5,7 @@ import { validateParams } from '../middleware/validate.js';
 import { seniorIdParamSchema } from '../validators/schemas.js';
 import { getAccessibleSeniorIds, canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
+import { sendError } from '../lib/http-response.js';
 
 const router = Router();
 
@@ -12,7 +13,7 @@ const router = Router();
 router.get('/api/seniors/:id/calls', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
-      return res.status(403).json({ error: 'Access denied to this senior' });
+      return sendError(res, 403, { error: 'Access denied to this senior' });
     }
     logAudit({
       userId: req.auth.userId,
@@ -34,7 +35,7 @@ router.get('/api/seniors/:id/calls', requireAuth, validateParams(seniorIdParamSc
 router.get('/api/seniors/:id/conversations', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
-      return res.status(403).json({ error: 'Access denied to this senior' });
+      return sendError(res, 403, { error: 'Access denied to this senior' });
     }
     logAudit({
       userId: req.auth.userId,

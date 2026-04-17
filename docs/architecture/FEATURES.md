@@ -29,7 +29,7 @@
 ## Conversation
 
 ### Natural Dialogue
-- Claude Sonnet 4.5 powers the conversation (streaming responses)
+- Claude Haiku 4.5 powers the conversation (streaming responses)
 - Full in-call context retention (APPEND strategy, no truncation)
 - Warm, grandchild-like tone tuned for elderly users
 - Barge-in support via Silero VAD (interrupt detection)
@@ -183,8 +183,8 @@ Runs automatically after every call disconnect:
 
 ### Security
 - JWT admin authentication + cofounder API keys
-- API key authentication (DONNA_API_KEY)
-- Twilio webhook signature verification
+- Labeled service API key authentication (`DONNA_API_KEYS`; legacy `DONNA_API_KEY` only outside production)
+- Telnyx webhook signature verification plus single-use `ws_token` validation for media WebSockets
 - Rate limiting (slowapi)
 - Security headers (HSTS, X-Frame-Options)
 - Pydantic input validation
@@ -235,8 +235,12 @@ Starts Director analysis before the user finishes speaking:
 - Reduces per-turn token count while keeping news contextually relevant
 
 ### Location & Date Context for Director
-- Senior's city/state and today's date passed in every Director turn template
-- Improves guidance and memory query specificity
+- Senior's city/state and local current date passed in every Director turn template
+- Senior-facing system prompt includes the senior's local current date and time at call start
+- Recent call summaries and transcript snippets include local prior-call labels such as "Earlier today at 3:30 PM (about 30 minutes ago)"
+- Post-call memory extraction receives the call date/time and resolves relative phrases like "tomorrow" into anchored future plans
+- Greeting and analysis followups avoid completion-style questions for future plans until the referenced date/time has arrived
+- Improves guidance, memory query specificity, and same-day temporal grounding
 
 ### Director Provider Chain
 - **Groq** (`gpt-oss-20b`) is the primary fast provider
@@ -246,7 +250,7 @@ Starts Director analysis before the user finishes speaking:
 - Trimmed system instruction: 429 → 144 tokens
 
 ### Anthropic Prompt Caching
-- Enabled on Claude Sonnet 4.5 for the voice LLM
+- Enabled on Claude Haiku 4.5 for the voice LLM
 - System prompt and senior context cached across turns within a call
 - Reduces per-turn input token costs
 

@@ -81,6 +81,19 @@ class TestSeniorContext:
         ctx = _build_senior_context(state)
         assert "Yesterday" in ctx
 
+    def test_includes_temporal_grounding_guard(self):
+        state = _make_session_state(
+            last_call_analysis={
+                "call_time_label": "Earlier today at 3:00 PM (about 30 minutes ago)",
+                "follow_up_suggestions": ["Ask about the workout planned for tomorrow."],
+            }
+        )
+        ctx = _build_senior_context(state)
+        assert "Current time:" in ctx
+        assert "do not ask whether it already happened yet" in ctx
+        assert "Earlier today at 3:00 PM" in ctx
+        assert "Timing guard" in ctx
+
     def test_handles_no_senior(self):
         state = _make_session_state(senior=None)
         ctx = _build_senior_context(state)
@@ -91,11 +104,21 @@ class TestSeniorContext:
         ctx = _build_senior_context(state)
         assert "arthritis" in ctx
 
-    def test_news_in_system_prompt(self):
-        """News is pre-cached daily and included in system prompt."""
+    def test_news_availability_in_system_prompt(self):
+        """Full news is injected ephemerally when Director recommends it."""
         state = _make_session_state(news_context="Here are some recent news items about gardening...")
         ctx = _build_senior_context(state)
-        assert "recent news" in ctx
+        assert "Fresh interest-based news is available" in ctx
+        assert "Here are some recent news items about gardening" not in ctx
+
+    def test_includes_recent_turns(self):
+        state = _make_session_state(
+            recent_turns="Earlier today at 3:00 PM - SENIOR: I will work out tomorrow."
+        )
+        ctx = _build_senior_context(state)
+        assert "Recent turn excerpts" in ctx
+        assert "I will work out tomorrow" in ctx
+        assert "Respect any dates or time labels exactly" in ctx
 
 
 

@@ -1,9 +1,7 @@
 """Reminder scheduler service.
 
-Port of services/scheduler.js — finds due reminders, triggers outbound calls,
-and runs the polling loop. Uses asyncio for polling instead of setInterval.
-
-Delivery record CRUD lives in services/reminder_delivery.py.
+Node is the authoritative scheduler. This opt-in Pipecat scheduler uses the
+same Telnyx outbound path if explicitly enabled.
 """
 
 from __future__ import annotations
@@ -13,29 +11,15 @@ import os
 import re
 from datetime import datetime, timezone, timedelta
 from loguru import logger
-from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from db import query_one, query_many, execute
 from lib.sanitize import mask_phone
-from services.reminder_delivery import mark_delivered, format_reminder_prompt
-
-# Lazy-loaded Twilio client
-_twilio_client = None
+from lib.phi import decrypt_reminder_phi, decrypt_senior_phi
+from services.reminder_delivery import mark_delivered
 
 # Pre-fetched context maps (shared state — same semantics as Node.js Maps)
 pending_reminder_calls: dict[str, dict] = {}
 prefetched_context_by_phone: dict[str, dict] = {}
 REMINDER_CONTEXT_TTL_SECONDS = 30 * 60
-
-
-def _get_twilio_client():
-    global _twilio_client
-    if _twilio_client is None:
-        sid = os.environ.get("TWILIO_ACCOUNT_SID")
-        token = os.environ.get("TWILIO_AUTH_TOKEN")
-        if sid and token:
-            from twilio.rest import Client
-            _twilio_client = Client(sid, token)
-    return _twilio_client
 
 
 def _normalize_phone(phone: str) -> str:
@@ -69,13 +53,18 @@ async def _delete_shared_reminder_context(call_sid: str) -> None:
 
 
 async def store_reminder_context(call_sid: str, context: dict) -> None:
-    """Store reminder call context locally and in shared state when configured."""
+    """Store reminder call context locally and encrypted in shared state."""
     pending_reminder_calls[call_sid] = context
     try:
         from lib.redis_client import get_shared_state
+        from lib.shared_state_phi import encode_phi_payload
         state = get_shared_state()
         if getattr(state, "is_shared", False):
-            await state.set(_reminder_context_key(call_sid), context, ttl=REMINDER_CONTEXT_TTL_SECONDS)
+            await state.set(
+                _reminder_context_key(call_sid),
+                encode_phi_payload(context),
+                ttl=REMINDER_CONTEXT_TTL_SECONDS,
+            )
     except Exception as exc:
         logger.warning("[{cs}] Shared reminder context write failed: {err}", cs=call_sid, err=str(exc))
 
@@ -113,11 +102,17 @@ async def get_due_reminders() -> list[dict]:
     # Non-recurring reminders due now
     non_recurring = await query_many(
         """SELECT r.id AS reminder_id, s.id AS senior_id,
-                  r.type, r.title, r.description, r.scheduled_time,
+                  r.type, r.title, r.title_encrypted,
+                  r.description, r.description_encrypted, r.scheduled_time,
                   r.is_recurring, r.cron_expression, r.is_active AS r_active,
                   r.last_delivered_at,
                   s.name, s.phone, s.timezone, s.interests,
-                  s.family_info, s.medical_notes, s.is_active AS s_active
+                  s.family_info, s.family_info_encrypted,
+                  s.medical_notes, s.medical_notes_encrypted,
+                  s.preferred_call_times, s.preferred_call_times_encrypted,
+                  s.additional_info, s.additional_info_encrypted,
+                  s.call_context_snapshot, s.call_context_snapshot_encrypted,
+                  s.is_active AS s_active
            FROM reminders r
            INNER JOIN seniors s ON r.senior_id = s.id
            WHERE r.is_active = true
@@ -130,11 +125,17 @@ async def get_due_reminders() -> list[dict]:
     # Recurring reminders (all active — filter by time-of-day in Python)
     recurring_all = await query_many(
         """SELECT r.id AS reminder_id, s.id AS senior_id,
-                  r.type, r.title, r.description, r.scheduled_time,
+                  r.type, r.title, r.title_encrypted,
+                  r.description, r.description_encrypted, r.scheduled_time,
                   r.is_recurring, r.cron_expression, r.is_active AS r_active,
                   r.last_delivered_at,
                   s.name, s.phone, s.timezone, s.interests,
-                  s.family_info, s.medical_notes, s.is_active AS s_active
+                  s.family_info, s.family_info_encrypted,
+                  s.medical_notes, s.medical_notes_encrypted,
+                  s.preferred_call_times, s.preferred_call_times_encrypted,
+                  s.additional_info, s.additional_info_encrypted,
+                  s.call_context_snapshot, s.call_context_snapshot_encrypted,
+                  s.is_active AS s_active
            FROM reminders r
            INNER JOIN seniors s ON r.senior_id = s.id
            WHERE r.is_active = true
@@ -221,11 +222,17 @@ async def get_due_reminders() -> list[dict]:
         """SELECT rd.id AS delivery_id, rd.scheduled_for, rd.delivered_at,
                   rd.status AS delivery_status, rd.attempt_count, rd.call_sid,
                   r.id AS reminder_id, s.id AS senior_id,
-                  r.type, r.title, r.description, r.scheduled_time,
+                  r.type, r.title, r.title_encrypted,
+                  r.description, r.description_encrypted, r.scheduled_time,
                   r.is_recurring, r.cron_expression, r.is_active AS r_active,
                   r.last_delivered_at,
                   s.name, s.phone, s.timezone, s.interests,
-                  s.family_info, s.medical_notes, s.is_active AS s_active
+                  s.family_info, s.family_info_encrypted,
+                  s.medical_notes, s.medical_notes_encrypted,
+                  s.preferred_call_times, s.preferred_call_times_encrypted,
+                  s.additional_info, s.additional_info_encrypted,
+                  s.call_context_snapshot, s.call_context_snapshot_encrypted,
+                  s.is_active AS s_active
            FROM reminder_deliveries rd
            INNER JOIN reminders r ON rd.reminder_id = r.id
            INNER JOIN seniors s ON r.senior_id = s.id
@@ -253,77 +260,25 @@ async def trigger_reminder_call(
     scheduled_for: datetime | None = None,
     existing_delivery: dict | None = None,
 ) -> dict | None:
-    """Trigger an outbound call for a reminder. Pre-fetches context first."""
-    client = _get_twilio_client()
-    if not client:
-        logger.error("Twilio not configured")
-        return None
+    """Trigger an outbound Telnyx call for a reminder."""
 
     try:
-        logger.info("Pre-fetching context for senior_id={sid}", sid=str(senior.get("id", ""))[:8])
-
-        from services.memory import build_context
-        memory_context = await build_context(senior["id"], None, senior)
-        reminder_prompt = format_reminder_prompt(reminder)
-
-        logger.info("Context ready, triggering call (ctx_len={n})", n=len(memory_context or ""))
-
-        @retry(
-            stop=stop_after_attempt(3),
-            wait=wait_exponential(multiplier=1, min=1, max=4),
-            before_sleep=before_sleep_log(logger, "WARNING"),
-            reraise=True,
-        )
-        def _create_call():
-            return client.calls.create(
-                to=senior["phone"],
-                from_=os.environ["TWILIO_PHONE_NUMBER"],
-                url=f"{base_url}/voice/answer",
-                status_callback=f"{base_url}/voice/status",
-                status_callback_event=["initiated", "ringing", "answered", "completed"],
-            )
-
-        call = await asyncio.get_event_loop().run_in_executor(None, _create_call)
-
         target_scheduled_for = scheduled_for or get_scheduled_for_time(reminder) or datetime.now(timezone.utc)
 
-        # Create or update delivery record
-        if existing_delivery:
-            delivery = await query_one(
-                """UPDATE reminder_deliveries SET
-                     delivered_at = NOW(), call_sid = $1,
-                     attempt_count = $2, status = 'delivered'
-                   WHERE id = $3 RETURNING *""",
-                call.sid,
-                existing_delivery.get("attempt_count", 0) + 1,
-                existing_delivery["id"],
-            )
-            logger.info("Updated delivery {did} attempt={a}", did=delivery["id"], a=delivery["attempt_count"])
-        else:
-            delivery = await query_one(
-                """INSERT INTO reminder_deliveries
-                   (reminder_id, scheduled_for, delivered_at, call_sid, status, attempt_count)
-                   VALUES ($1, $2, NOW(), $3, 'delivered', 1)
-                   RETURNING *""",
-                reminder["id"],
-                target_scheduled_for,
-                call.sid,
-            )
-            logger.info("Created delivery {did}", did=delivery["id"])
+        from api.routes.telnyx import TelnyxOutboundCallRequest, create_telnyx_outbound_call
 
-        reminder_context = {
-            "reminder": reminder,
-            "senior": senior,
-            "memory_context": memory_context,
-            "reminder_prompt": reminder_prompt,
-            "triggered_at": datetime.now(timezone.utc),
-            "delivery": delivery,
-            "scheduled_for": target_scheduled_for,
-        }
-        await store_reminder_context(call.sid, reminder_context)
+        call = await create_telnyx_outbound_call(
+            TelnyxOutboundCallRequest(
+                seniorId=str(senior["id"]),
+                callType="reminder",
+                reminderId=str(reminder["id"]),
+                scheduledFor=target_scheduled_for,
+                existingDeliveryId=str(existing_delivery["id"]) if existing_delivery else None,
+            )
+        )
 
-        logger.info("Call initiated callSid={cs}", cs=call.sid)
-        return {"sid": call.sid, "delivery": delivery}
+        logger.info("Telnyx call initiated callSid={cs}", cs=call["callSid"])
+        return {"sid": call["callSid"]}
 
     except Exception as e:
         logger.error("Failed to initiate call: {err}", err=str(e))
@@ -393,7 +348,12 @@ async def get_reminder_context_async(call_sid: str) -> dict | None:
         if not getattr(state, "is_shared", False):
             return None
 
-        context = await state.get(_reminder_context_key(call_sid))
+        from lib.shared_state_phi import decode_phi_payload
+
+        context = decode_phi_payload(
+            await state.get(_reminder_context_key(call_sid)),
+            label="reminder context",
+        )
         if isinstance(context, dict) and context:
             pending_reminder_calls[call_sid] = context
             logger.info("[{cs}] Loaded reminder context from shared state", cs=call_sid)
@@ -446,32 +406,42 @@ def cleanup_stale_contexts(max_age_minutes: int = 30) -> int:
 
 def _extract_reminder(row: dict) -> dict:
     """Extract reminder fields from a joined row."""
-    return {
+    return decrypt_reminder_phi({
         "id": row.get("reminder_id") or row.get("id"),
         "senior_id": row.get("senior_id"),
         "type": row.get("type"),
         "title": row.get("title"),
+        "title_encrypted": row.get("title_encrypted"),
         "description": row.get("description"),
+        "description_encrypted": row.get("description_encrypted"),
         "scheduled_time": row.get("scheduled_time"),
         "is_recurring": row.get("is_recurring"),
         "cron_expression": row.get("cron_expression"),
         "is_active": row.get("r_active") if "r_active" in row else row.get("is_active"),
         "last_delivered_at": row.get("last_delivered_at"),
-    }
+    })
 
 
 def _extract_senior(row: dict) -> dict:
     """Extract senior fields from a joined row."""
-    return {
+    return decrypt_senior_phi({
         "id": row.get("senior_id"),
         "name": row.get("name"),
         "phone": row.get("phone"),
         "timezone": row.get("timezone"),
         "interests": row.get("interests"),
         "family_info": row.get("family_info"),
+        "family_info_encrypted": row.get("family_info_encrypted"),
         "medical_notes": row.get("medical_notes"),
+        "medical_notes_encrypted": row.get("medical_notes_encrypted"),
+        "preferred_call_times": row.get("preferred_call_times"),
+        "preferred_call_times_encrypted": row.get("preferred_call_times_encrypted"),
+        "additional_info": row.get("additional_info"),
+        "additional_info_encrypted": row.get("additional_info_encrypted"),
+        "call_context_snapshot": row.get("call_context_snapshot"),
+        "call_context_snapshot_encrypted": row.get("call_context_snapshot_encrypted"),
         "is_active": row.get("s_active") if "s_active" in row else row.get("is_active"),
-    }
+    })
 
 
 def _extract_delivery(row: dict) -> dict:
@@ -531,7 +501,7 @@ async def start_scheduler(base_url: str, interval_seconds: int = 60) -> None:
 
     logger.info("Starting scheduler (interval={i}s)", i=interval_seconds)
 
-    _trigger_sem = asyncio.Semaphore(10)  # Limit concurrent Twilio API calls
+    _trigger_sem = asyncio.Semaphore(10)  # Limit concurrent Telnyx call requests
 
     async def check_reminders():
         try:

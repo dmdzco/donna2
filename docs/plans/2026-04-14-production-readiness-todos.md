@@ -80,33 +80,39 @@ Relevant files:
 
 ### 2. Make PHI storage encrypted-only by default
 
-- [ ] Inventory every PHI-bearing column in `db/schema.js`.
-- [ ] Stop writing plaintext PHI where encrypted companion columns exist.
-- [ ] Backfill existing plaintext PHI into encrypted columns.
-- [ ] Change read paths to prefer encrypted fields and treat plaintext as legacy-only fallback.
+- [x] Inventory every PHI-bearing column in `db/schema.js`; senior name/phone/timezone/location/interests remain documented operational PII for lookup/display.
+- [x] Stop writing plaintext PHI where encrypted companion columns exist for conversations, memories, call analyses, senior profile PHI, reminders, daily context, notifications, waitlist signups, prospects, and caregiver notes.
+- [ ] Backfill existing plaintext PHI into encrypted columns with `node scripts/backfill-encrypted-phi.js --write`, then clear legacy plaintext with `--write --null-plaintext` after verification.
+- [x] Change read paths to prefer encrypted fields and treat plaintext as legacy-only fallback for conversations, memories, exports, weekly reports, call analyses, senior profiles, reminders, daily context, notifications, prospects, and caregiver notes.
 - [ ] Decide which fields require searchable/indexed plaintext substitutes, and implement minimized derived values instead of raw PHI.
-- [ ] Add tests proving new writes do not populate plaintext PHI fields.
-- [ ] Add a production startup guard that refuses PHI writes if `FIELD_ENCRYPTION_KEY` is missing or invalid.
+- [x] Add tests proving new write payloads do not populate plaintext PHI fields. Node covers encryption helpers used by write paths; Pipecat targeted reminder/daily-context/scheduler/call-snapshot route tests pass.
+- [x] Add a production startup guard that refuses PHI writes if `FIELD_ENCRYPTION_KEY` is missing or invalid.
 
 Known plaintext-risk areas:
 
-- [ ] `conversations.summary`
-- [ ] `conversations.concerns`
-- [ ] `call_analyses.summary`
-- [ ] `call_analyses.topics`
-- [ ] `call_analyses.concerns`
-- [ ] `call_analyses.positive_observations`
-- [ ] `call_analyses.follow_up_suggestions`
-- [ ] `call_analyses.call_quality`
-- [ ] `memories.content`
-- [ ] `reminders.title`
-- [ ] `reminders.description`
-- [ ] `seniors.medical_notes`
-- [ ] `seniors.family_info`
-- [ ] `seniors.additional_info`
-- [ ] `daily_call_context` summary/topic/advice/key moment fields
-- [ ] `notifications.content`
-- [ ] `notifications.metadata`
+- [x] `conversations.summary`
+- [x] `conversations.concerns`
+- [x] `call_analyses.summary`
+- [x] `call_analyses.topics`
+- [x] `call_analyses.concerns`
+- [x] `call_analyses.positive_observations`
+- [x] `call_analyses.follow_up_suggestions`
+- [x] `call_analyses.call_quality`
+- [x] `memories.content`
+- [x] `reminders.title`
+- [x] `reminders.description`
+- [x] `reminder_deliveries.user_response`
+- [x] `seniors.medical_notes`
+- [x] `seniors.family_info`
+- [x] `seniors.preferred_call_times`
+- [x] `seniors.additional_info`
+- [x] `seniors.call_context_snapshot`
+- [x] `daily_call_context` summary/topic/advice/key moment fields
+- [x] `notifications.content`
+- [x] `notifications.metadata`
+- [x] `waitlist` signup payload
+- [x] `prospects` learned caller/loved-one context
+- [x] `caregiver_notes.content`
 
 Acceptance criteria:
 
@@ -128,6 +134,9 @@ Relevant files:
 - `routes/reminders.js`
 - `routes/notifications.js`
 - `services/seniors.js`
+- `lib/phi.js`
+- `pipecat/lib/phi.py`
+- `scripts/backfill-encrypted-phi.js`
 - `pipecat/services/seniors.py`
 
 ### 3. Move all outbound call context handoff to shared state
@@ -136,15 +145,15 @@ Relevant files:
 - [ ] Store manual outbound prefetch context in Redis or Postgres keyed by `callSid` if we want to preserve Node's precomputed context instead of rehydrating in Pipecat.
 - [x] Store Node-scheduled reminder context in shared state/DB paths Pipecat can read. Redis reminder context and DB `call_sid` fallback are present.
 - [x] Make Pipecat hydrate generic outbound calls with senior context, memory context, caregiver notes, settings, greeting, recent turns, and daily context when a senior is known.
-- [ ] Add retry/backoff in Pipecat `/voice/answer` for just-created reminder delivery rows to avoid a race between Twilio answer and DB delivery persistence.
-- [ ] Add remaining tests for manual outbound, Node-scheduled reminder race, Pipecat-scheduled reminder, and missing-context fallback. This branch added coverage for inactive senior handling and the affected WebSocket/reminder/post-call paths.
+- [x] Add retry/backoff in Pipecat `/voice/answer` for just-created reminder delivery rows to avoid a race between Twilio answer and DB delivery persistence. Node/Pipecat reminder call URLs now include `call_type=reminder`, and Pipecat waits briefly for the delivery row before falling back.
+- [ ] Add remaining tests for manual outbound, Pipecat-scheduled reminder, and missing-context fallback. This branch added coverage for inactive senior handling, tagged Node-scheduled reminder race, and the affected WebSocket/reminder/post-call paths.
 
 Acceptance criteria:
 
 - Any Pipecat instance can answer known manual/welfare outbound calls and hydrate intended context from the database, even when Node and Pipecat run on different instances.
 - Manual admin/caregiver calls are not downgraded to empty generic outbound calls when Node and Pipecat run on different instances.
 - Reminder calls do not depend on same-process memory.
-- Still open: retry/backoff for a just-created reminder delivery row race, and optional shared manual prefetch if we want to avoid Pipecat duplicate context-building work.
+- Still open: optional shared manual prefetch if we want to avoid Pipecat duplicate context-building work.
 
 Relevant files:
 
@@ -158,18 +167,19 @@ Relevant files:
 
 ### 4. Align retention implementation with the retention policy
 
-- [ ] Make one service the authoritative retention runner, likely Node scheduler.
-- [ ] Disable or guard the Pipecat retention loop unless it is intentionally the owner.
-- [ ] Change retention from whole-row deletion to policy-specific PHI nulling where metadata must be retained.
+- [x] Make one service the authoritative retention runner: Node scheduler owns retention by default.
+- [x] Disable or guard the Pipecat retention loop unless it is intentionally the owner. `PIPECAT_RETENTION_ENABLED=true` is now required to start it.
+- [x] Change conversation retention from whole-row deletion to policy-specific PHI nulling before later metadata deletion.
 - [ ] Add legal hold support.
 - [ ] Add dry-run retention reports.
 - [ ] Add deletion/retention audit logs with counts, table names, time window, and actor/job ID.
 - [ ] Cover currently missed PHI areas:
   - [ ] reminders
-  - [ ] notifications
+  - [x] notifications
   - [ ] senior profile PHI
   - [ ] caregiver notes
-  - [ ] waitlist/prospect data
+  - [x] waitlist signups
+  - [ ] prospect data
   - [ ] dev/staging data branches
 - [ ] Add tests for Node and Python parity where both services can read affected tables.
 
@@ -191,9 +201,10 @@ Relevant files:
 ### 5. Make audit logging comprehensive and reliable
 
 - [ ] Define audit events required for every PHI create/read/update/delete/export action.
-- [ ] Add audit logging to routes that return or mutate PHI but currently rely on route-level behavior or have no explicit audit trail.
-- [ ] Add audit events for observability transcript reads and export routes.
-- [ ] Make audit failures visible through logs/metrics/alerts instead of silently disappearing.
+- [x] Add audit logging to newly identified admin PHI reads: observability transcript/timeline/turn/observer/metrics reads, call analyses, and daily context.
+- [x] Add audit events for observability transcript reads and export routes.
+- [x] Make audit failures visible for high-risk exports by awaiting audit writes before returning export bundles.
+- [ ] Make non-export audit failures visible through metrics/alerts instead of logs only.
 - [ ] Add tests proving key admin, caregiver, Pipecat, export, notification, reminder, and post-call flows emit audit records.
 - [ ] Consider append-only/tamper-evident audit behavior for production.
 
@@ -216,21 +227,21 @@ Relevant files:
 
 ### 6. Sanitize errors and logs before production
 
-- [ ] Replace route-level `error.message` responses with safe client errors.
-- [ ] Stop logging raw error objects in sensitive routes.
-- [ ] Expand structured logger sanitization beyond exact keys like `phone` and `name`.
+- [x] Replace shared route-level `error.message` responses with safe client errors.
+- [x] Stop logging raw error objects in the highest-risk sensitive routes reviewed here.
+- [x] Expand structured logger sanitization beyond exact keys like `phone` and `name`.
 - [ ] Sanitize common leak keys:
-  - [ ] `to`
-  - [ ] `from`
-  - [ ] `targetPhone`
+  - [x] `to`
+  - [x] `from`
+  - [x] `targetPhone`
   - [ ] `body`
   - [ ] `query`
-  - [ ] `transcript`
-  - [ ] `summary`
-  - [ ] `reminder`
-  - [ ] `medicalNotes`
-  - [ ] `memory`
-  - [ ] `prompt`
+  - [x] `transcript`
+  - [x] `summary`
+  - [x] `reminder`
+  - [x] `medicalNotes`
+  - [x] `memory`
+  - [x] `prompt`
 - [ ] Remove or gate raw `console.*` usage in backend services.
 - [ ] Add log redaction tests for Node and Pipecat.
 - [ ] Validate Sentry configuration and scrubbers with production-like error events.
@@ -376,7 +387,7 @@ Acceptance criteria:
 
 ### 12. Data rights workflows
 
-- [ ] Verify export includes encrypted-only data after the PHI migration.
+- [ ] Verify export includes encrypted-only data after the PHI migration. Node and Pipecat export code now decrypts encrypted senior PHI, reminders, daily context, conversations, memories, and call analyses; run against a migrated database before closing.
 - [ ] Verify hard delete covers Node and Pipecat-created records.
 - [ ] Verify delete/export routes are audited.
 - [ ] Verify third-party deletion obligations are documented per BAA.

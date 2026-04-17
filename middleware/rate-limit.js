@@ -6,6 +6,7 @@
  */
 
 import rateLimit from 'express-rate-limit';
+import { withRequestId } from '../lib/http-response.js';
 
 /**
  * Standard error response for rate limiting
@@ -15,6 +16,7 @@ const rateLimitHandler = (req, res) => {
     error: 'Too many requests',
     message: 'Please slow down and try again later',
     retryAfter: res.getHeader('Retry-After'),
+    ...withRequestId(req),
   });
 };
 
@@ -80,7 +82,7 @@ export const authLimiter = rateLimit({
 
 /**
  * Webhook rate limit - generous but bounded - 500 per minute.
- * Twilio sends many rapid webhook requests during calls.
+ * Telephony providers can send many rapid webhook requests during calls.
  */
 export const webhookLimiter = rateLimit({
   windowMs: 60 * 1000,

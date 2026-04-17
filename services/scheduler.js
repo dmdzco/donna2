@@ -1,11 +1,10 @@
 import { db } from '../db/client.js';
 import { reminders, seniors, reminderDeliveries, conversations, notificationPreferences, notifications, caregivers } from '../db/schema.js';
-import { eq, and, lte, isNull, or, sql, ne, lt, gte, desc } from 'drizzle-orm';
-import twilio from 'twilio';
-import { memoryService } from './memory.js';
+import { eq, and, lte, isNull, or, sql, ne, lt, gte, gt, desc } from 'drizzle-orm';
 import { contextCacheService } from './context-cache.js';
 import { runDailyPurgeIfNeeded } from './data-retention.js';
 import { createLogger } from '../lib/logger.js';
+import { decryptReminderPhi, decryptSeniorPhi, encryptReminderDeliveryPhi } from '../lib/phi.js';
 import { resolveFlags, getValue } from '../lib/growthbook.js';
 import {
   DEFAULT_TIMEZONE,
@@ -14,36 +13,19 @@ import {
   resolveTimezoneFromProfile,
   zonedWallTimeToUtcDate,
 } from '../lib/timezone.js';
+import { initiateTelnyxOutboundCall, prewarmTelnyxOutboundContext } from './telnyx.js';
 
 const log = createLogger('Scheduler');
 
-// Initialize Twilio client lazily
-let twilioClient = null;
-const getTwilioClient = () => {
-  if (!twilioClient && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-    twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  }
-  return twilioClient;
-};
-
-// Store pre-fetched context for outbound calls (callSid -> { reminder, senior, memoryContext, reminderPrompt })
-export const pendingReminderCalls = new Map();
-
-// Store pre-fetched context by phone number (for manual API calls)
-export const prefetchedContextByPhone = new Map();
-
-// Normalize phone to last 10 digits (matches seniors.js)
-const normalizePhone = (phone) => phone.replace(/\D/g, '').slice(-10);
-
-// Retry Twilio calls.create() with exponential backoff (3 attempts, 1s → 2s → 4s)
-async function retryTwilioCall(client, params, maxAttempts = 3) {
+// Retry Telnyx outbound requests with exponential backoff (3 attempts, 1s -> 2s -> 4s).
+async function retryTelnyxCall(params, maxAttempts = 3) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await client.calls.create(params);
+      return await initiateTelnyxOutboundCall(params);
     } catch (err) {
       if (attempt === maxAttempts) throw err;
       const delay = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
-      log.warn('Twilio call retry', { attempt, maxAttempts, delay_ms: delay, error: err.message, to: params.to });
+      log.warn('Telnyx call retry', { attempt, maxAttempts, delay_ms: delay, error: err.message });
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -52,6 +34,81 @@ async function retryTwilioCall(client, params, maxAttempts = 3) {
 // Welfare check tracking — prevents calling the same senior twice per day
 const welfareCalledToday = new Set();
 let lastWelfareClearDate = new Date().toISOString().slice(0, 10);
+
+const REMINDER_PREWARM_TARGET_LEAD_MS = 2 * 60 * 1000;
+const REMINDER_PREWARM_LOOKAHEAD_MS = REMINDER_PREWARM_TARGET_LEAD_MS + 60 * 1000;
+const REMINDER_PREWARM_TTL_MS = 10 * 60 * 1000;
+const REMINDER_PREWARM_MAX_CONCURRENCY = 5;
+const REMINDER_PREWARM_SCHEDULE_TOLERANCE_MS = 60 * 1000;
+const reminderPrewarmCache = new Map();
+
+function coerceDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function reminderPrewarmKey(reminderId, scheduledFor) {
+  const scheduledAt = coerceDate(scheduledFor);
+  if (!reminderId || !scheduledAt) return null;
+  return `${reminderId}:${scheduledAt.toISOString()}`;
+}
+
+function cleanupReminderPrewarmCache(nowMs = Date.now()) {
+  let removed = 0;
+  for (const [key, context] of reminderPrewarmCache.entries()) {
+    const expiresAt = coerceDate(context?.expiresAt);
+    const warmedAt = coerceDate(context?.warmedAt);
+    const ttlExpired = warmedAt ? nowMs - warmedAt.getTime() > REMINDER_PREWARM_TTL_MS : true;
+    if (!expiresAt || expiresAt.getTime() <= nowMs || ttlExpired) {
+      reminderPrewarmCache.delete(key);
+      removed++;
+    }
+  }
+  return removed;
+}
+
+function datesWithinTolerance(a, b, toleranceMs = REMINDER_PREWARM_SCHEDULE_TOLERANCE_MS) {
+  const left = coerceDate(a);
+  const right = coerceDate(b);
+  if (!left || !right) return false;
+  return Math.abs(left.getTime() - right.getTime()) <= toleranceMs;
+}
+
+function isReminderPrewarmUsable(spec, prewarmedContext, now = new Date()) {
+  if (!prewarmedContext || prewarmedContext.callType !== 'reminder') {
+    return false;
+  }
+  if (!prewarmedContext.hydratedContext) {
+    return false;
+  }
+  if (prewarmedContext.seniorId !== spec?.senior?.id) {
+    return false;
+  }
+  if (prewarmedContext.reminderId !== spec?.reminder?.id) {
+    return false;
+  }
+  if (!datesWithinTolerance(prewarmedContext.scheduledFor, spec?.scheduledFor)) {
+    return false;
+  }
+  const expiresAt = coerceDate(prewarmedContext.expiresAt);
+  return Boolean(expiresAt && expiresAt.getTime() > now.getTime());
+}
+
+async function runWithConcurrency(items, limit, worker) {
+  let cursor = 0;
+
+  async function runNext() {
+    while (cursor < items.length) {
+      const current = items[cursor];
+      cursor += 1;
+      await worker(current);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => runNext());
+  await Promise.all(workers);
+}
 
 /**
  * Check if a senior's local time is within the acceptable call window.
@@ -139,6 +196,186 @@ export const schedulerService = {
     return getScheduledForTimeInTimezone(reminder, senior, now);
   },
 
+  clearReminderPrewarmCache() {
+    reminderPrewarmCache.clear();
+  },
+
+  getReminderPrewarmStats() {
+    cleanupReminderPrewarmCache();
+    return { total: reminderPrewarmCache.size };
+  },
+
+  getReminderPrewarm(spec, now = new Date()) {
+    cleanupReminderPrewarmCache(now.getTime());
+    const key = reminderPrewarmKey(spec?.reminder?.id, spec?.scheduledFor);
+    if (!key) return null;
+
+    const prewarmedContext = reminderPrewarmCache.get(key);
+    if (!isReminderPrewarmUsable(spec, prewarmedContext, now)) {
+      if (prewarmedContext) reminderPrewarmCache.delete(key);
+      return null;
+    }
+    return prewarmedContext;
+  },
+
+  async _findReminderDeliveryByStatuses(reminderId, scheduledFor, statuses) {
+    const rows = await db.select()
+      .from(reminderDeliveries)
+      .where(and(
+        eq(reminderDeliveries.reminderId, reminderId),
+        sql`${reminderDeliveries.scheduledFor} BETWEEN ${new Date(scheduledFor.getTime() - 5 * 60 * 1000)} AND ${new Date(scheduledFor.getTime() + 5 * 60 * 1000)}`,
+        or(...statuses.map(status => eq(reminderDeliveries.status, status)))
+      ))
+      .limit(1);
+    return rows[0] || null;
+  },
+
+  async getReminderPrewarmCandidates(now = new Date(), lookaheadMs = REMINDER_PREWARM_LOOKAHEAD_MS) {
+    cleanupReminderPrewarmCache(now.getTime());
+
+    const dueCutoff = new Date(now.getTime() + 60 * 1000);
+    const horizon = new Date(now.getTime() + lookaheadMs);
+
+    const nonRecurring = (await db.select({
+      reminder: reminders,
+      senior: seniors
+    })
+      .from(reminders)
+      .innerJoin(seniors, eq(reminders.seniorId, seniors.id))
+      .where(and(
+        eq(reminders.isActive, true),
+        eq(reminders.isRecurring, false),
+        gt(reminders.scheduledTime, dueCutoff),
+        lte(reminders.scheduledTime, horizon),
+        eq(seniors.isActive, true)
+      ))).map(({ reminder, senior }) => ({
+        type: 'reminder',
+        reminder: decryptReminderPhi(reminder),
+        senior: decryptSeniorPhi(senior),
+      }));
+
+    const recurring = (await db.select({
+      reminder: reminders,
+      senior: seniors
+    })
+      .from(reminders)
+      .innerJoin(seniors, eq(reminders.seniorId, seniors.id))
+      .where(and(
+        eq(reminders.isActive, true),
+        eq(reminders.isRecurring, true),
+        eq(seniors.isActive, true)
+      ))).map(({ reminder, senior }) => ({
+        type: 'reminder',
+        reminder: decryptReminderPhi(reminder),
+        senior: decryptSeniorPhi(senior),
+      }));
+
+    const recurringSoon = recurring
+      .map(candidate => ({
+        ...candidate,
+        scheduledFor: this.getScheduledForTime(candidate.reminder, candidate.senior, now),
+      }))
+      .filter(candidate => {
+        const scheduledAt = coerceDate(candidate.scheduledFor);
+        return Boolean(
+          scheduledAt &&
+          scheduledAt.getTime() > dueCutoff.getTime() &&
+          scheduledAt.getTime() <= horizon.getTime()
+        );
+      });
+
+    const candidates = [];
+    for (const candidate of [...nonRecurring, ...recurringSoon]) {
+      const scheduledFor = candidate.scheduledFor || this.getScheduledForTime(candidate.reminder, candidate.senior, now);
+      if (!scheduledFor) continue;
+
+      const spec = { ...candidate, scheduledFor };
+      if (this.getReminderPrewarm(spec, now)) continue;
+
+      const completedDelivery = await this._findReminderDeliveryByStatuses(
+        candidate.reminder.id,
+        scheduledFor,
+        ['acknowledged', 'confirmed', 'max_attempts'],
+      );
+      if (completedDelivery) continue;
+
+      const pendingDelivery = await this._findReminderDeliveryByStatuses(
+        candidate.reminder.id,
+        scheduledFor,
+        ['delivered', 'retry_pending'],
+      );
+      if (pendingDelivery) continue;
+
+      candidates.push(spec);
+    }
+
+    return candidates;
+  },
+
+  async prewarmReminderCalls(specs, baseUrl) {
+    cleanupReminderPrewarmCache();
+
+    const reminderSpecs = specs.filter(spec =>
+      spec?.type === 'reminder' &&
+      spec?.reminder?.id &&
+      spec?.senior?.id &&
+      coerceDate(spec?.scheduledFor)
+    );
+    if (reminderSpecs.length === 0) {
+      return { attempted: 0, warmed: 0, cacheHits: 0, failed: 0 };
+    }
+
+    let warmed = 0;
+    let cacheHits = 0;
+    let failed = 0;
+
+    await runWithConcurrency(reminderSpecs, REMINDER_PREWARM_MAX_CONCURRENCY, async (spec) => {
+      if (this.getReminderPrewarm(spec)) {
+        cacheHits++;
+        return;
+      }
+
+      try {
+        const response = await prewarmTelnyxOutboundContext({
+          seniorId: spec.senior.id,
+          callType: 'reminder',
+          reminderId: spec.reminder.id,
+          scheduledFor: coerceDate(spec.scheduledFor)?.toISOString(),
+          baseUrl,
+        });
+        const prewarmedContext = response?.prewarmedContext;
+        if (!isReminderPrewarmUsable(spec, prewarmedContext)) {
+          failed++;
+          return;
+        }
+
+        const key = reminderPrewarmKey(spec.reminder.id, spec.scheduledFor);
+        if (key) {
+          reminderPrewarmCache.set(key, prewarmedContext);
+        }
+        warmed++;
+      } catch (error) {
+        failed++;
+        log.warn('Reminder prewarm failed', {
+          seniorId: spec.senior.id,
+          reminderId: spec.reminder.id,
+          error: error.message,
+        });
+      }
+    });
+
+    if (warmed > 0 || failed > 0) {
+      log.info('Reminder prewarm sweep', {
+        attempted: reminderSpecs.length,
+        warmed,
+        cacheHits,
+        failed,
+      });
+    }
+
+    return { attempted: reminderSpecs.length, warmed, cacheHits, failed };
+  },
+
   /**
    * Find reminders that are due now
    * - scheduledTime is in the past or within next minute
@@ -151,7 +388,7 @@ export const schedulerService = {
     const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
 
     // Find non-recurring reminders due now
-    const nonRecurring = await db.select({
+    const nonRecurring = (await db.select({
       reminder: reminders,
       senior: seniors
     })
@@ -162,10 +399,13 @@ export const schedulerService = {
         eq(reminders.isRecurring, false),
         lte(reminders.scheduledTime, oneMinuteFromNow),
         eq(seniors.isActive, true)
-      ));
+      ))).map(({ reminder, senior }) => ({
+        reminder: decryptReminderPhi(reminder),
+        senior: decryptSeniorPhi(senior),
+      }));
 
     // Find recurring reminders where scheduled time-of-day matches now
-    const recurring = await db.select({
+    const recurring = (await db.select({
       reminder: reminders,
       senior: seniors
     })
@@ -175,7 +415,10 @@ export const schedulerService = {
         eq(reminders.isActive, true),
         eq(reminders.isRecurring, true),
         eq(seniors.isActive, true)
-      ));
+      ))).map(({ reminder, senior }) => ({
+        reminder: decryptReminderPhi(reminder),
+        senior: decryptSeniorPhi(senior),
+      }));
 
     // Filter recurring to those whose time-of-day matches now (within 5 min window)
     const recurringDue = recurring.filter(r => isRecurringReminderDueNow(r.reminder, r.senior, now));
@@ -188,41 +431,22 @@ export const schedulerService = {
       const scheduledFor = this.getScheduledForTime(candidate.reminder, candidate.senior, now);
       if (!scheduledFor) continue;
 
-      // Check if there's already an acknowledged/confirmed delivery for this instance
-      const existingDelivery = await db.select()
-        .from(reminderDeliveries)
-        .where(and(
-          eq(reminderDeliveries.reminderId, candidate.reminder.id),
-          // Match the scheduled_for time within a 10-minute window
-          sql`${reminderDeliveries.scheduledFor} BETWEEN ${new Date(scheduledFor.getTime() - 5 * 60 * 1000)} AND ${new Date(scheduledFor.getTime() + 5 * 60 * 1000)}`,
-          // Has been acknowledged, confirmed, or hit max attempts
-          or(
-            eq(reminderDeliveries.status, 'acknowledged'),
-            eq(reminderDeliveries.status, 'confirmed'),
-            eq(reminderDeliveries.status, 'max_attempts')
-          )
-        ))
-        .limit(1);
+      const existingDelivery = await this._findReminderDeliveryByStatuses(
+        candidate.reminder.id,
+        scheduledFor,
+        ['acknowledged', 'confirmed', 'max_attempts'],
+      );
+      if (existingDelivery) continue;
 
-      if (existingDelivery.length === 0) {
-        // Check if there's a delivered/retry_pending delivery we should skip (first attempt already made)
-        const pendingDelivery = await db.select()
-          .from(reminderDeliveries)
-          .where(and(
-            eq(reminderDeliveries.reminderId, candidate.reminder.id),
-            sql`${reminderDeliveries.scheduledFor} BETWEEN ${new Date(scheduledFor.getTime() - 5 * 60 * 1000)} AND ${new Date(scheduledFor.getTime() + 5 * 60 * 1000)}`,
-            or(
-              eq(reminderDeliveries.status, 'delivered'),
-              eq(reminderDeliveries.status, 'retry_pending')
-            )
-          ))
-          .limit(1);
+      const pendingDelivery = await this._findReminderDeliveryByStatuses(
+        candidate.reminder.id,
+        scheduledFor,
+        ['delivered', 'retry_pending'],
+      );
+      if (pendingDelivery) continue;
 
-        if (pendingDelivery.length === 0) {
-          // No delivery yet for this instance - it's due
-          dueReminders.push({ ...candidate, scheduledFor });
-        }
-      }
+      // No delivery yet for this instance - it's due
+      dueReminders.push({ ...candidate, scheduledFor });
     }
 
     // Also find retry_pending deliveries that are ready for retry (>30 min since last attempt)
@@ -244,8 +468,8 @@ export const schedulerService = {
     // Add retries to due reminders with their delivery record
     for (const retry of retriesReady) {
       dueReminders.push({
-        reminder: retry.reminder,
-        senior: retry.senior,
+        reminder: decryptReminderPhi(retry.reminder),
+        senior: decryptSeniorPhi(retry.senior),
         scheduledFor: retry.delivery.scheduledFor,
         existingDelivery: retry.delivery // Include the delivery record for update
       });
@@ -293,10 +517,11 @@ export const schedulerService = {
   /**
    * Unified outbound call trigger for both reminder and welfare calls.
    * Gates ALL calls through isInCallWindow(). Handles context prefetch,
-   * Twilio call creation, and type-specific bookkeeping.
+   * Telnyx call creation, and type-specific bookkeeping.
    */
   async triggerOutboundCall(spec, baseUrl) {
     const { type, senior } = spec;
+    cleanupReminderPrewarmCache();
 
     // Gate ALL outbound calls through the timezone call window.
     // Reminder calls with an explicit caregiver-set time are allowed as early as 5 AM.
@@ -307,17 +532,11 @@ export const schedulerService = {
       return null;
     }
 
-    const client = getTwilioClient();
-    if (!client) {
-      log.error('Twilio not configured');
-      return null;
-    }
-
     try {
       if (type === 'reminder') {
-        return await this._triggerReminderPath(spec, baseUrl, client);
+        return await this._triggerReminderPath(spec, baseUrl);
       } else {
-        return await this._triggerWelfarePath(spec, baseUrl, client);
+        return await this._triggerWelfarePath(spec, baseUrl);
       }
     } catch (error) {
       log.error('Failed to initiate call', { type, name: senior.name, error: error.message });
@@ -326,157 +545,52 @@ export const schedulerService = {
   },
 
   /**
-   * Reminder call path: build memory context, create Twilio call, create delivery record,
-   * store in pendingReminderCalls for /voice/answer pickup.
+   * Reminder call path: create a Telnyx call through Pipecat.
+   * Pipecat writes the delivery row and seeds call metadata before the stream starts.
    */
-  async _triggerReminderPath(spec, baseUrl, client) {
+  async _triggerReminderPath(spec, baseUrl) {
     const { senior, reminder, scheduledFor, existingDelivery } = spec;
 
-    log.info('Pre-fetching reminder context', { name: senior.name });
-
-    // PRE-FETCH: Build memory context (includes news) BEFORE the call
-    const memoryContext = await memoryService.buildContext(senior.id, null, senior);
-    const reminderPrompt = this.formatReminderPrompt(reminder);
-
-    log.info('Context ready, triggering reminder call', { contextLen: memoryContext?.length || 0 });
-
-    const call = await retryTwilioCall(client, {
-      to: senior.phone,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      url: `${baseUrl}/voice/answer`,
-      statusCallback: `${baseUrl}/voice/status`,
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-    });
-
-    // Calculate scheduledFor if not provided
     const targetScheduledFor = scheduledFor || this.getScheduledForTime(reminder, senior) || new Date();
+    const reminderSpec = { ...spec, scheduledFor: targetScheduledFor };
+    const prewarmedContext = this.getReminderPrewarm(reminderSpec);
+    log.info('Triggering Telnyx reminder call', { seniorId: senior.id, reminderId: reminder.id });
 
-    // Create or update delivery record
-    let delivery;
-    if (existingDelivery) {
-      // Retry - update existing delivery
-      [delivery] = await db.update(reminderDeliveries)
-        .set({
-          deliveredAt: new Date(),
-          callSid: call.sid,
-          attemptCount: existingDelivery.attemptCount + 1,
-          status: 'delivered'
-        })
-        .where(eq(reminderDeliveries.id, existingDelivery.id))
-        .returning();
-      log.info('Updated delivery record', { deliveryId: delivery.id, attempt: delivery.attemptCount });
-    } else {
-      // First attempt - create new delivery record
-      [delivery] = await db.insert(reminderDeliveries).values({
-        reminderId: reminder.id,
-        scheduledFor: targetScheduledFor,
-        deliveredAt: new Date(),
-        callSid: call.sid,
-        status: 'delivered',
-        attemptCount: 1
-      }).returning();
-      log.info('Created delivery record', { deliveryId: delivery.id });
-    }
-
-    // Store pre-fetched context for this call (ready when /voice/answer is hit)
-    pendingReminderCalls.set(call.sid, {
-      reminder,
-      senior,
-      memoryContext,  // PRE-FETCHED
-      reminderPrompt, // PRE-FORMATTED
-      triggeredAt: new Date(),
-      delivery,       // Include delivery record for acknowledgment tracking
-      scheduledFor: targetScheduledFor,
-      _createdAt: Date.now(),
+    const call = await retryTelnyxCall({
+      seniorId: senior.id,
+      callType: 'reminder',
+      reminderId: reminder.id,
+      scheduledFor: targetScheduledFor.toISOString(),
+      existingDeliveryId: existingDelivery?.id,
+      ...(prewarmedContext ? { prewarmedContext } : {}),
+      baseUrl,
     });
 
-    log.info('Reminder call initiated', { callSid: call.sid, name: senior.name });
-    return call;
+    if (prewarmedContext) {
+      const key = reminderPrewarmKey(reminder.id, targetScheduledFor);
+      if (key) reminderPrewarmCache.delete(key);
+    }
+    log.info('Reminder call initiated', { callSid: call.callSid, seniorId: senior.id });
+    return { sid: call.callSid, callSid: call.callSid, callControlId: call.callControlId };
   },
 
   /**
-   * Welfare call path: prefetch context (cache-aware), create Twilio call,
-   * store in prefetchedContextByPhone for /voice/answer pickup.
+   * Welfare call path: create a Telnyx call through Pipecat.
+   * Pipecat hydrates context on the voice service side.
    */
-  async _triggerWelfarePath(spec, baseUrl, client) {
+  async _triggerWelfarePath(spec, baseUrl) {
     const { senior } = spec;
 
-    log.info('Welfare check: pre-fetching context', { name: senior.name, seniorId: senior.id });
+    log.info('Triggering Telnyx welfare call', { seniorId: senior.id });
 
-    await this.prefetchForPhone(senior.phone, senior);
-
-    const call = await retryTwilioCall(client, {
-      to: senior.phone,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      url: `${baseUrl}/voice/answer`,
-      statusCallback: `${baseUrl}/voice/status`,
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+    const call = await retryTelnyxCall({
+      seniorId: senior.id,
+      callType: 'check-in',
+      baseUrl,
     });
 
-    log.info('Welfare check call initiated', { callSid: call.sid, name: senior.name });
-    return call;
-  },
-
-  /**
-   * Pre-fetch context for a manual outbound call (before Twilio connects)
-   * Uses cache if available, otherwise builds fresh context
-   */
-  async prefetchForPhone(phoneNumber, senior) {
-    log.info('Pre-fetching context for manual call', { name: senior?.name, phone: phoneNumber });
-
-    let memoryContext = null;
-    let preGeneratedGreeting = null;
-
-    if (senior) {
-      // Check cache first
-      const cached = contextCacheService.getCache(senior.id);
-
-      if (cached) {
-        // Use cached context
-        memoryContext = cached.memoryContext;
-        preGeneratedGreeting = cached.greeting;
-        log.info('Using cached context', { name: senior.name });
-      } else {
-        // Build fresh context
-        memoryContext = await memoryService.buildContext(senior.id, null, senior);
-        preGeneratedGreeting = await this.generateGreeting(senior, memoryContext);
-      }
-    }
-
-    // Normalize phone for consistent lookup
-    const normalized = normalizePhone(phoneNumber);
-    prefetchedContextByPhone.set(normalized, {
-      senior,
-      memoryContext,
-      preGeneratedGreeting,
-      fetchedAt: new Date(),
-      _createdAt: Date.now(),
-    });
-
-    log.info('Pre-fetch complete', { phone: normalized, greetingReady: !!preGeneratedGreeting });
-    return { senior, memoryContext, preGeneratedGreeting };
-  },
-
-  /**
-   * Generate a template greeting for pre-fetch.
-   * Personalized greetings are now handled by Pipecat's greeting service.
-   */
-  async generateGreeting(senior, memoryContext) {
-    const firstName = senior.name?.split(' ')[0];
-    return `Hello ${firstName}! It's Donna calling to check in. How are you doing today?`;
-  },
-
-  /**
-   * Get pre-fetched context for a phone number (for manual API calls)
-   */
-  getPrefetchedContext(phoneNumber) {
-    // Normalize phone for consistent lookup
-    const normalized = normalizePhone(phoneNumber);
-    const context = prefetchedContextByPhone.get(normalized);
-    if (context) {
-      prefetchedContextByPhone.delete(normalized); // One-time use
-    }
-    return context;
+    log.info('Welfare check call initiated', { callSid: call.callSid, seniorId: senior.id });
+    return { sid: call.callSid, callSid: call.callSid, callControlId: call.callControlId };
   },
 
   /**
@@ -508,11 +622,11 @@ export const schedulerService = {
 
     try {
       const [updated] = await db.update(reminderDeliveries)
-        .set({
+        .set(encryptReminderDeliveryPhi({
           status,
           acknowledgedAt: new Date(),
           userResponse
-        })
+        }))
         .where(eq(reminderDeliveries.id, deliveryId))
         .returning();
 
@@ -566,10 +680,11 @@ export const schedulerService = {
             .where(eq(reminders.id, delivery.reminderId))
             .limit(1);
           if (reminder) {
+            const decryptedReminder = decryptReminderPhi(reminder);
             const { notificationService } = await import('./notifications.js');
-            await notificationService.onReminderMissed(reminder.seniorId, {
-              reminderTitle: reminder.title,
-              reminderType: reminder.type,
+            await notificationService.onReminderMissed(decryptedReminder.seniorId, {
+              reminderTitle: decryptedReminder.title,
+              reminderType: decryptedReminder.type,
               attemptCount: delivery.attemptCount,
             });
           }
@@ -583,39 +698,6 @@ export const schedulerService = {
   },
 
   /**
-   * Get reminder context for a call (if it was triggered by a reminder)
-   */
-  getReminderContext(callSid) {
-    return pendingReminderCalls.get(callSid);
-  },
-
-  /**
-   * Clear reminder context after call ends
-   */
-  clearReminderContext(callSid) {
-    pendingReminderCalls.delete(callSid);
-  },
-
-  /**
-   * Format reminder for injection into system prompt
-   */
-  formatReminderPrompt(reminder) {
-    let prompt = `\n\nIMPORTANT REMINDER TO DELIVER:`;
-    prompt += `\nYou are calling to remind them about: "${reminder.title}"`;
-    if (reminder.description) {
-      prompt += `\nDetails: ${reminder.description}`;
-    }
-    if (reminder.type === 'medication') {
-      prompt += `\nThis is a medication reminder - be gentle but clear about the importance of taking their medication.`;
-    } else if (reminder.type === 'appointment') {
-      prompt += `\nThis is an appointment reminder - make sure they know the time and any preparation needed.`;
-    }
-    prompt += `\n\nDeliver this reminder naturally in the conversation - don't sound robotic or alarming.`;
-    prompt += `\nStart with a warm greeting, then mention the reminder.`;
-    return prompt;
-  },
-
-  /**
    * Find active seniors who haven't had a completed conversation in 2+ days.
    * These seniors need a welfare check call.
    */
@@ -623,7 +705,20 @@ export const schedulerService = {
     const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
 
     const results = await db.execute(sql`
-      SELECT s.* FROM seniors s
+      SELECT s.id, s.name, s.phone, s.timezone, s.interests,
+             s.family_info AS "familyInfo",
+             s.family_info_encrypted AS "familyInfoEncrypted",
+             s.medical_notes AS "medicalNotes",
+             s.medical_notes_encrypted AS "medicalNotesEncrypted",
+             s.preferred_call_times AS "preferredCallTimes",
+             s.preferred_call_times_encrypted AS "preferredCallTimesEncrypted",
+             s.is_active AS "isActive",
+             s.city, s.state, s.zip_code AS "zipCode",
+             s.additional_info AS "additionalInfo",
+             s.additional_info_encrypted AS "additionalInfoEncrypted",
+             s.call_context_snapshot AS "callContextSnapshot",
+             s.call_context_snapshot_encrypted AS "callContextSnapshotEncrypted"
+      FROM seniors s
       WHERE s.is_active = true
       AND NOT EXISTS (
         SELECT 1 FROM conversations c
@@ -632,7 +727,7 @@ export const schedulerService = {
         AND c.started_at > ${twoDaysAgo}
       )
     `);
-    return results.rows;
+    return (results.rows || []).map(decryptSeniorPhi);
   }
 };
 
@@ -676,9 +771,10 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
       }
 
       // Fetch both sources in parallel
-      const [dueReminders, welfareSeniors] = await Promise.all([
+      const [dueReminders, welfareSeniors, reminderPrewarmCandidates] = await Promise.all([
         schedulerService.getDueReminders(),
-        schedulerService.getSeniorsNeedingWelfareCheck()
+        schedulerService.getSeniorsNeedingWelfareCheck(),
+        schedulerService.getReminderPrewarmCandidates(),
       ]);
 
       // Merge and deduplicate into a single call plan
@@ -689,6 +785,13 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
         const welfareCount = callPlan.filter(s => s.type === 'welfare').length;
         log.info('Unified call plan', { total: callPlan.length, reminders: reminderCount, welfare: welfareCount });
       }
+
+      const prewarmPromise = reminderPrewarmCandidates.length > 0
+        ? schedulerService.prewarmReminderCalls(reminderPrewarmCandidates, baseUrl).catch(error => {
+            log.warn('Reminder prewarm sweep failed', { error: error.message });
+            return null;
+          })
+        : null;
 
       // Resolve flags once per scheduler cycle
       const flags = await resolveFlags({ source: 'scheduler' });
@@ -726,6 +829,10 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
 
       const results = await Promise.allSettled(callPlan.map(triggerOne));
 
+      if (prewarmPromise) {
+        await prewarmPromise;
+      }
+
       if (succeeded > 0) {
         log.info('Unified check complete', { succeeded, failed, planned: callPlan.length });
       }
@@ -740,7 +847,6 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
           attempted,
           succeeded,
           failed,
-          pending_contexts: pendingReminderCalls.size,
         });
       }
     }
@@ -780,26 +886,6 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
     log.error('Initial pre-fetch error', { error: err.message });
     try { import('@sentry/node').then(Sentry => Sentry.captureException(err)); } catch {}
   });
-
-  // Cleanup stale pending contexts every 5 minutes (TTL: 30 minutes)
-  const PENDING_TTL_MS = 30 * 60 * 1000;
-  setInterval(() => {
-    const now = Date.now();
-    let cleaned = 0;
-    for (const [key, value] of pendingReminderCalls.entries()) {
-      if (value._createdAt && now - value._createdAt > PENDING_TTL_MS) {
-        pendingReminderCalls.delete(key);
-        cleaned++;
-      }
-    }
-    for (const [key, value] of prefetchedContextByPhone.entries()) {
-      if (value._createdAt && now - value._createdAt > PENDING_TTL_MS) {
-        prefetchedContextByPhone.delete(key);
-        cleaned++;
-      }
-    }
-    if (cleaned > 0) log.info('Cleaned stale pending contexts', { cleaned });
-  }, 5 * 60 * 1000);
 
   log.info('Context pre-caching enabled (hourly check for 5 AM local time)');
   log.info('Unified scheduler ready (reminders + welfare every 60s)');

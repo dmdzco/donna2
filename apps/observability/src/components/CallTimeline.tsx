@@ -48,6 +48,7 @@ interface TimelineEventItemProps {
 function TimelineEventItem({ event, startTime }: TimelineEventItemProps) {
   const eventConfig = getEventConfig(event.type);
   const offset = getTimeOffset(startTime, event.timestamp);
+  const estimated = Boolean(event.data?.estimatedTimestamp);
 
   return (
     <div className={`timeline-event ${eventConfig.className}`}>
@@ -57,7 +58,7 @@ function TimelineEventItem({ event, startTime }: TimelineEventItemProps) {
       <div className="event-content">
         <div className="event-header">
           <span className="event-type">{eventConfig.label}</span>
-          <span className="event-time">{offset}</span>
+          <span className="event-time">{offset}{estimated ? ' est' : ''}</span>
         </div>
         <div className="event-body">
           {renderEventContent(event)}
@@ -71,6 +72,7 @@ function getEventConfig(type: string) {
   const configs: Record<string, { label: string; icon: string; color: string; className: string }> = {
     'call.initiated': { label: 'Call Started', icon: '📞', color: '#3b82f6', className: 'event-call' },
     'call.connected': { label: 'Connected', icon: '✅', color: '#22c55e', className: 'event-call' },
+    'call.lifecycle': { label: 'Call Setup', icon: '⏱', color: '#0f766e', className: 'event-latency' },
     'call.ended': { label: 'Call Ended', icon: '📴', color: '#6b7280', className: 'event-call' },
     'turn.transcribed': { label: 'Senior', icon: '👤', color: '#8b5cf6', className: 'event-turn-senior' },
     'turn.response': { label: 'Donna', icon: '🤖', color: '#06b6d4', className: 'event-turn-donna' },
@@ -78,7 +80,11 @@ function getEventConfig(type: string) {
     'reminder.delivered': { label: 'Reminder', icon: '🔔', color: '#ec4899', className: 'event-reminder' },
     'error.occurred': { label: 'Error', icon: '⚠️', color: '#ef4444', className: 'event-error' },
   };
-  return configs[type] || { label: type, icon: '•', color: '#666', className: 'event-unknown' };
+  if (configs[type]) return configs[type];
+  if (type.startsWith('latency.')) {
+    return { label: formatLatencyType(type), icon: '⏱', color: '#f97316', className: 'event-latency' };
+  }
+  return { label: type, icon: '•', color: '#666', className: 'event-unknown' };
 }
 
 function renderEventContent(event: TimelineEvent) {
@@ -121,6 +127,18 @@ function renderEventContent(event: TimelineEvent) {
         </div>
       );
 
+    case 'call.connected':
+    case 'call.lifecycle':
+      return (
+        <div className="call-info">
+          <span>{String(data.label || 'Connection update')}</span>
+          {data.latencyMs !== undefined && data.latencyMs !== null && (
+            <span>{formatMilliseconds(Number(data.latencyMs))}</span>
+          )}
+          {data.stage != null ? <span>{String(data.stage)}</span> : null}
+        </div>
+      );
+
     case 'call.ended':
       return (
         <div className="call-info">
@@ -132,6 +150,20 @@ function renderEventContent(event: TimelineEvent) {
       );
 
     default:
+      if (event.type.startsWith('latency.')) {
+        return (
+          <div className="call-info">
+            <span>{String(data.label || event.type)}</span>
+            {data.latencyMs !== undefined && data.latencyMs !== null && (
+              <span>{formatMilliseconds(Number(data.latencyMs))}</span>
+            )}
+            {data.turnSequence !== undefined && data.turnSequence !== null && (
+              <span>Turn {String(data.turnSequence)}</span>
+            )}
+            {data.stage != null ? <span>{String(data.stage)}</span> : null}
+          </div>
+        );
+      }
       return (
         <pre className="event-data">{JSON.stringify(data, null, 2)}</pre>
       );
@@ -162,4 +194,17 @@ function formatSeconds(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function formatMilliseconds(ms: number): string {
+  if (!Number.isFinite(ms)) return '--';
+  return `${Math.round(ms)}ms`;
+}
+
+function formatLatencyType(type: string): string {
+  return type
+    .replace(/^latency\./, '')
+    .split('.')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }

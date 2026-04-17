@@ -45,6 +45,7 @@ from services.director_llm import (
     get_default_direction,
     warmup_fast_providers,
 )
+from services.context_trace import record_context_event, record_latency_event
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +177,7 @@ class ConversationDirectorProcessor(FrameProcessor):
     CONTINUOUS_SPECULATIVE_REFIRE_MIN = 60   # subsequent fires need 60+ total chars
     CONTINUOUS_SPECULATIVE_REFIRE_WINDOW = 25 # 25 new chars needed to re-fire
     CONTINUOUS_SPECULATIVE_INTERVAL = 0.5    # min seconds between fires
+    MEMORY_REINJECTION_COOLDOWN_TURNS = 4
 
     def __init__(self, session_state: dict, **kwargs):
         super().__init__(**kwargs)
@@ -204,6 +206,8 @@ class ConversationDirectorProcessor(FrameProcessor):
         # Continuous speculative state (fires while user is still speaking)
         self._last_continuous_speculative_time: float = 0.0
         self._last_continuous_speculative_text: str = ""
+        self._turn_first_interim_time: float | None = None
+        self._turn_last_interim_time: float | None = None
 
         # Query Director tasks (separate from guidance speculative tasks)
         self._prefetch_tasks: list[asyncio.Task] = []
@@ -243,10 +247,13 @@ class ConversationDirectorProcessor(FrameProcessor):
         # --- Final TranscriptionFrame (after VAD 1.2s silence) ---
         if isinstance(frame, TranscriptionFrame):
             self._turn_count += 1
+            self._session_state["_current_turn_sequence"] = self._turn_count
             self._session_state["_last_user_speech_time"] = time.time()
+            self._record_transcription_timing()
 
             # Strip previous turn's ephemeral context (guidance, memories, web results)
             self._strip_ephemeral_messages()
+            await self._inject_observer_guidance()
 
             # Feature flag: skip Director analysis when disabled
             from lib.growthbook import is_on
@@ -326,9 +333,14 @@ class ConversationDirectorProcessor(FrameProcessor):
         # --- Interim TranscriptionFrame (while user is still speaking) ---
         if isinstance(frame, InterimTranscriptionFrame):
             text = frame.text or ""
+            now = time.time()
 
             # Update latest interim for speculative analysis
             self._latest_interim_text = text
+            if text:
+                if self._turn_first_interim_time is None:
+                    self._turn_first_interim_time = now
+                self._turn_last_interim_time = now
 
             # Cancel silence timer (user is still speaking)
             self._cancel_silence_timer()
@@ -366,6 +378,39 @@ class ConversationDirectorProcessor(FrameProcessor):
         # All other frames — pass through immediately
         await self.push_frame(frame, direction)
 
+    def _record_transcription_timing(self) -> None:
+        now = time.time()
+        turn_sequence = self._turn_count
+
+        if self._turn_first_interim_time is not None:
+            record_latency_event(
+                self._session_state,
+                stage="transcription.window",
+                source="stt_timing",
+                action="measured",
+                label="First interim to final transcript",
+                provider="deepgram",
+                latency_ms=(now - self._turn_first_interim_time) * 1000,
+                turn_sequence=turn_sequence,
+                metadata={"approximation": "first_interim_to_final"},
+            )
+
+        if self._turn_last_interim_time is not None:
+            record_latency_event(
+                self._session_state,
+                stage="transcription.finalize_gap",
+                source="stt_timing",
+                action="measured",
+                label="Last interim to final transcript",
+                provider="deepgram",
+                latency_ms=(now - self._turn_last_interim_time) * 1000,
+                turn_sequence=turn_sequence,
+                metadata={"approximation": "last_interim_to_final"},
+            )
+
+        self._turn_first_interim_time = None
+        self._turn_last_interim_time = None
+
     # ------------------------------------------------------------------
     # Speculative pre-processing
     # ------------------------------------------------------------------
@@ -398,7 +443,7 @@ class ConversationDirectorProcessor(FrameProcessor):
             )
             self._speculative_attempts += 1
 
-            transcript = self._session_state.get("_transcript") or []
+            transcript = self._history_before_current(interim_text)
             task = asyncio.create_task(
                 self._run_speculative_analysis(interim_text, transcript)
             )
@@ -442,7 +487,7 @@ class ConversationDirectorProcessor(FrameProcessor):
         self._last_continuous_speculative_time = now
         self._last_continuous_speculative_text = text
 
-        transcript = self._session_state.get("_transcript") or []
+        transcript = self._history_before_current(text)
         task = asyncio.create_task(
             self._run_query_analysis(text, transcript)
         )
@@ -455,11 +500,27 @@ class ConversationDirectorProcessor(FrameProcessor):
         Fast (~200ms). Feeds memory prefetch.
         Does NOT produce guidance — cannot be harvested for same-turn injection.
         """
+        start = time.time()
+        turn_sequence = self._turn_count + 1
         try:
             result = await analyze_queries(
                 user_message,
                 self._session_state,
                 conversation_history=transcript,
+            )
+            record_latency_event(
+                self._session_state,
+                stage="director.query",
+                source="director_query",
+                action="measured",
+                label="Director query analysis",
+                provider="director_llm",
+                latency_ms=(time.time() - start) * 1000,
+                turn_sequence=turn_sequence,
+                metadata={
+                    "result": bool(result),
+                    "query_count": len((result or {}).get("memory_queries") or []),
+                },
             )
             if result:
                 direction_like = {"prefetch": result}
@@ -468,6 +529,17 @@ class ConversationDirectorProcessor(FrameProcessor):
         except asyncio.CancelledError:
             return None
         except Exception as e:
+            record_latency_event(
+                self._session_state,
+                stage="director.query",
+                source="director_query",
+                action="failed",
+                label="Director query analysis",
+                provider="director_llm",
+                latency_ms=(time.time() - start) * 1000,
+                turn_sequence=turn_sequence,
+                metadata={"error": str(e)[:200]},
+            )
             logger.debug("[Director] Query analysis error: {err}", err=str(e))
             return None
 
@@ -476,18 +548,30 @@ class ConversationDirectorProcessor(FrameProcessor):
         if self._fallback_analysis_task and not self._fallback_analysis_task.done():
             return
 
-        transcript = self._session_state.get("_transcript") or []
+        transcript = self._history_before_current(user_message)
         self._fallback_analysis_task = asyncio.create_task(
             self._run_fallback_analysis(user_message, transcript)
         )
 
     async def _run_fallback_analysis(self, user_message: str, transcript: list[dict]):
         """Run full Director analysis outside the critical path for next-turn guidance."""
+        start = time.time()
         try:
             result = await analyze_turn(
                 user_message,
                 self._session_state,
                 conversation_history=transcript,
+            )
+            record_latency_event(
+                self._session_state,
+                stage="director.fallback",
+                source="director_guidance",
+                action="measured",
+                label="Director fallback analysis",
+                provider="director_llm",
+                latency_ms=(time.time() - start) * 1000,
+                turn_sequence=self._turn_count,
+                metadata={"result": bool(result)},
             )
             if result:
                 if self._wrapup_forced:
@@ -500,21 +584,56 @@ class ConversationDirectorProcessor(FrameProcessor):
         except asyncio.CancelledError:
             return None
         except Exception as e:
+            record_latency_event(
+                self._session_state,
+                stage="director.fallback",
+                source="director_guidance",
+                action="failed",
+                label="Director fallback analysis",
+                provider="director_llm",
+                latency_ms=(time.time() - start) * 1000,
+                turn_sequence=self._turn_count,
+                metadata={"error": str(e)[:200]},
+            )
             logger.debug("[Director] Fallback analysis error: {err}", err=str(e))
             return None
 
     async def _run_speculative_analysis(self, user_message: str, transcript: list[dict]):
         """Run full guidance analysis. Result retrieved via _harvest_speculative()."""
+        start = time.time()
+        turn_sequence = self._turn_count + 1
         try:
             result = await analyze_turn_speculative(
                 user_message,
                 self._session_state,
                 conversation_history=transcript,
             )
+            record_latency_event(
+                self._session_state,
+                stage="director.speculative",
+                source="director_guidance",
+                action="measured",
+                label="Director speculative analysis",
+                provider="director_llm",
+                latency_ms=(time.time() - start) * 1000,
+                turn_sequence=turn_sequence,
+                metadata={"result": bool(result)},
+            )
             return result
         except asyncio.CancelledError:
             return None
         except Exception as e:
+            record_latency_event(
+                self._session_state,
+                stage="director.speculative",
+                source="director_guidance",
+                action="failed",
+                label="Director speculative analysis",
+                provider="director_llm",
+                latency_ms=(time.time() - start) * 1000,
+                turn_sequence=turn_sequence,
+                metadata={"error": str(e)[:200]},
+            )
             logger.debug("[Director] Speculative analysis error: {err}", err=str(e))
             return None
 
@@ -571,6 +690,41 @@ class ConversationDirectorProcessor(FrameProcessor):
         intersection = len(words_i & words_f)
         union = len(words_i | words_f)
         return (intersection / union) >= threshold
+
+    @staticmethod
+    def _message_content_text(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " ".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and isinstance(block.get("text"), str)
+            )
+        return str(content)
+
+    def _history_before_current(self, user_text: str) -> list[dict]:
+        """Return transcript history without duplicating the current user turn.
+
+        The tracker sits before the Director, so final TranscriptionFrames are
+        already appended to session_state["_transcript"] when the Director asks
+        Groq/Gemini to analyze "Current message from senior". Passing the raw
+        transcript makes that same message appear twice.
+        """
+        transcript = list(self._session_state.get("_transcript") or [])
+        if not transcript:
+            return transcript
+
+        last = transcript[-1]
+        if not isinstance(last, dict) or last.get("role") != "user":
+            return transcript
+
+        last_text = self._message_content_text(last.get("content"))
+        if self._text_matches(last_text, user_text, threshold=0.8):
+            return transcript[:-1]
+        return transcript
 
     def _strip_ephemeral_messages(self):
         """Remove previous turn's ephemeral injections from LLM context.
@@ -650,8 +804,31 @@ class ConversationDirectorProcessor(FrameProcessor):
             if news_ctx:
                 guidance_text += f"\n\n{news_ctx}"
                 self._session_state["_news_injected"] = True
+                record_context_event(
+                    self._session_state,
+                    source="news_context",
+                    action="injected",
+                    label="Director news context",
+                    content=news_ctx,
+                    provider="context_cache",
+                    item_count=sum(1 for line in str(news_ctx).splitlines() if line.strip().startswith("-")) or None,
+                    metadata={"trigger": "director_should_mention_news"},
+                )
                 logger.info("[Director] News content injected into context")
 
+        record_context_event(
+            self._session_state,
+            source="director_guidance",
+            action="injected",
+            label="Director guidance",
+            content=guidance_text,
+            provider="conversation_director",
+            metadata={
+                "call_phase": (result.get("analysis") or {}).get("call_phase"),
+                "pacing_note": (result.get("direction") or {}).get("pacing_note"),
+                "has_token_recommendation": bool(token_rec),
+            },
+        )
         await self.push_frame(
             LLMMessagesAppendFrame(
                 messages=[
@@ -659,6 +836,33 @@ class ConversationDirectorProcessor(FrameProcessor):
                         "role": "user",
                         "content": (
                             "[EPHEMERAL: Director guidance — do not read aloud]\n"
+                            + guidance_text
+                        ),
+                    }
+                ],
+                run_llm=False,
+            )
+        )
+
+    async def _inject_observer_guidance(self):
+        """Re-inject current-turn Quick Observer guidance after stripping.
+
+        Quick Observer runs before the Director and its guidance reaches the
+        context aggregator before the final transcription. The Director strips
+        stale ephemeral messages at the start of each turn, so the observer also
+        leaves the current guidance in session_state for a same-turn reinjection.
+        """
+        guidance_text = self._session_state.pop("_pending_observer_guidance", None)
+        if not guidance_text:
+            return
+
+        await self.push_frame(
+            LLMMessagesAppendFrame(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            "[EPHEMERAL: Observer guidance — do not read aloud]\n"
                             + guidance_text
                         ),
                     }
@@ -688,27 +892,87 @@ class ConversationDirectorProcessor(FrameProcessor):
 
         cached = cache.get(user_text, threshold=0.3)
 
-        # Brief gate: wait for in-flight prefetch (500ms max)
-        # Prefetch starts on interims while user speaks, so cache is usually
-        # already populated (0ms). The gate catches late-arriving prefetches
-        # and still saves ~4.3s vs a full tool call round-trip.
-        if not cached:
+        # Brief gate: wait only when a relevant prefetch is actually in flight.
+        # If the cache exists but has no relevant entry and nothing relevant is
+        # running, skipping the wait preserves the non-blocking Director path.
+        if not cached and cache.has_relevant_inflight(user_text, threshold=0.3):
+            gate_start = time.time()
             for _ in range(10):  # 10 * 50ms = 500ms
                 await asyncio.sleep(0.05)
                 cached = cache.get(user_text, threshold=0.3)
                 if cached:
                     logger.info("[Director] Memory gate hit after wait")
                     break
+                if not cache.has_relevant_inflight(user_text, threshold=0.3):
+                    break
+            gate_elapsed_ms = round((time.time() - gate_start) * 1000)
+            if gate_elapsed_ms > 0:
+                record_latency_event(
+                    self._session_state,
+                    stage="memory_gate.wait",
+                    source="memory_gate",
+                    action="measured",
+                    label="Memory gate wait",
+                    provider="prefetch_cache",
+                    latency_ms=gate_elapsed_ms,
+                    turn_sequence=self._turn_count,
+                    metadata={"cache_hit_after_wait": bool(cached)},
+                )
 
         if not cached:
             return
 
-        # Format memories for injection
-        memory_lines = [r["content"] for r in cached if r.get("content")]
+        # Format memories for injection, suppressing recent repeats.
+        memory_lines: list[str] = []
+        injected_ids: list[str] = []
+        injected_turns = self._session_state.setdefault("_injected_memory_turns", {})
+        current_turn = self._turn_count
+        explicit_memory_request = bool(
+            re.search(r"\b(remember|last time|what did I tell you|do you know)\b", user_text, re.I)
+        )
+
+        senior = self._session_state.get("senior") or {}
+        timezone_name = senior.get("timezone") or "America/New_York"
+        try:
+            from services.memory import format_memory_for_context
+        except Exception:
+            format_memory_for_context = None
+
+        for result in cached:
+            content = (
+                format_memory_for_context(result, timezone_name)
+                if format_memory_for_context
+                else result.get("content")
+            )
+            if not content:
+                continue
+            memory_key = str(result.get("id") or content)
+            last_turn = injected_turns.get(memory_key)
+            if (
+                last_turn is not None
+                and not explicit_memory_request
+                and current_turn - int(last_turn) < self.MEMORY_REINJECTION_COOLDOWN_TURNS
+            ):
+                continue
+            memory_lines.append(content)
+            if result.get("id"):
+                injected_ids.append(result["id"])
+            injected_turns[memory_key] = current_turn
+
         if not memory_lines:
             return
 
         memory_text = "\n".join(f"- {line}" for line in memory_lines)
+        record_context_event(
+            self._session_state,
+            source="memory_context",
+            action="injected",
+            label="Prefetched memories injected",
+            content=memory_text,
+            provider="prefetch_cache",
+            item_count=len(memory_lines),
+            metadata={"cache_hit": True, "query_chars": len(user_text or "")},
+        )
         logger.info(
             "[Director] Proactive memory injection: {n} memories",
             n=len(memory_lines),
@@ -731,6 +995,15 @@ class ConversationDirectorProcessor(FrameProcessor):
                 run_llm=False,
             )
         )
+        if injected_ids:
+            asyncio.create_task(self._mark_injected_memories_accessed(injected_ids))
+
+    async def _mark_injected_memories_accessed(self, memory_ids: list[str]) -> None:
+        try:
+            from services.memory import mark_accessed
+            await mark_accessed(memory_ids)
+        except Exception as e:
+            logger.debug("[Director] Failed to mark injected memories accessed: {err}", err=str(e))
 
     async def _inject_tracking_context(self):
         """Inject compact tracking summary so the LLM avoids repetition mid-call."""
@@ -744,6 +1017,14 @@ class ConversationDirectorProcessor(FrameProcessor):
 
         self._last_tracking_summary = summary
         self._session_state["conversation_tracking"] = summary
+        record_context_event(
+            self._session_state,
+            source="conversation_tracking",
+            action="injected",
+            label="Conversation tracking summary",
+            content=summary,
+            provider="conversation_tracker",
+        )
         await self.push_frame(
             LLMMessagesAppendFrame(
                 messages=[
@@ -766,6 +1047,8 @@ class ConversationDirectorProcessor(FrameProcessor):
 
     async def _run_prefetch(self, text: str, source: str = "final"):
         """Speculatively prefetch memories based on user speech (non-blocking)."""
+        start = time.time()
+        turn_sequence = self._turn_count + (1 if source == "interim" else 0)
         try:
             from services.prefetch import PrefetchCache, extract_prefetch_queries, run_prefetch
 
@@ -785,6 +1068,29 @@ class ConversationDirectorProcessor(FrameProcessor):
                 return
 
             count = await run_prefetch(senior_id, queries, cache)
+            record_latency_event(
+                self._session_state,
+                stage=f"prefetch.{source}",
+                source="memory_prefetch",
+                action="measured",
+                label=f"Memory prefetch from {source} transcript",
+                provider="prefetch",
+                latency_ms=(time.time() - start) * 1000,
+                turn_sequence=turn_sequence,
+                metadata={"source": source, "query_count": len(queries), "result_count": count},
+                content="\n".join(queries),
+            )
+            if count > 0:
+                record_context_event(
+                    self._session_state,
+                    source="memory_prefetch",
+                    action="prefetched",
+                    label=f"Memory prefetch from {source} transcript",
+                    content="\n".join(queries),
+                    provider="prefetch",
+                    item_count=count,
+                    metadata={"source": source, "query_count": len(queries)},
+                )
             if count > 0:
                 logger.info(
                     "[Prefetch] {n} queries cached from {src} transcription",
@@ -793,10 +1099,23 @@ class ConversationDirectorProcessor(FrameProcessor):
             else:
                 logger.debug("[Prefetch] 0 results")
         except Exception as e:
+            record_latency_event(
+                self._session_state,
+                stage=f"prefetch.{source}",
+                source="memory_prefetch",
+                action="failed",
+                label=f"Memory prefetch from {source} transcript",
+                provider="prefetch",
+                latency_ms=(time.time() - start) * 1000,
+                turn_sequence=turn_sequence,
+                metadata={"source": source, "error": str(e)[:200]},
+            )
             logger.warning("[Prefetch] Error: {err}", err=str(e))
 
     async def _run_director_prefetch(self, direction: dict):
         """Second-wave prefetch using Director's analysis output (memory only)."""
+        start = time.time()
+        turn_sequence = self._session_state.get("_current_turn_sequence") or (self._turn_count + 1)
         try:
             from services.prefetch import (
                 PrefetchCache,
@@ -815,13 +1134,46 @@ class ConversationDirectorProcessor(FrameProcessor):
                 return
 
             count = await run_prefetch(senior_id, queries, cache)
+            record_latency_event(
+                self._session_state,
+                stage="prefetch.director",
+                source="memory_prefetch",
+                action="measured",
+                label="Director memory prefetch",
+                provider="director_llm",
+                latency_ms=(time.time() - start) * 1000,
+                turn_sequence=turn_sequence,
+                metadata={"query_count": len(queries), "result_count": count},
+                content="\n".join(queries),
+            )
             if count:
+                record_context_event(
+                    self._session_state,
+                    source="memory_prefetch",
+                    action="prefetched",
+                    label="Director memory prefetch",
+                    content="\n".join(queries),
+                    provider="director_llm",
+                    item_count=count,
+                    metadata={"query_count": len(queries)},
+                )
                 logger.info(
                     "[Prefetch] Director 2nd wave: {m} memory cached",
                     m=count,
                 )
 
         except Exception as e:
+            record_latency_event(
+                self._session_state,
+                stage="prefetch.director",
+                source="memory_prefetch",
+                action="failed",
+                label="Director memory prefetch",
+                provider="director_llm",
+                latency_ms=(time.time() - start) * 1000,
+                turn_sequence=turn_sequence,
+                metadata={"error": str(e)[:200]},
+            )
             logger.warning("[Prefetch] Director prefetch error: {err}", err=str(e))
 
     # ------------------------------------------------------------------

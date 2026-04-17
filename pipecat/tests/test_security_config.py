@@ -35,11 +35,15 @@ def test_service_api_keys_allow_legacy_outside_production(monkeypatch):
 
 def test_validate_production_config_requires_security_secrets(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("TELEPHONY_PROVIDER", "telnyx")
     for key in [
         "JWT_SECRET",
         "DONNA_API_KEYS",
         "FIELD_ENCRYPTION_KEY",
-        "TWILIO_AUTH_TOKEN",
+        "TELNYX_API_KEY",
+        "TELNYX_PUBLIC_KEY",
+        "TELNYX_PHONE_NUMBER",
+        "TELNYX_CONNECTION_ID",
         "PIPECAT_PUBLIC_URL",
     ]:
         monkeypatch.delenv(key, raising=False)
@@ -49,19 +53,46 @@ def test_validate_production_config_requires_security_secrets(monkeypatch):
     assert any("JWT_SECRET" in err for err in errors)
     assert any("DONNA_API_KEYS" in err for err in errors)
     assert any("FIELD_ENCRYPTION_KEY" in err for err in errors)
-    assert any("TWILIO_AUTH_TOKEN" in err for err in errors)
+    assert any("TELNYX_API_KEY" in err for err in errors)
+    assert any("TELNYX_PUBLIC_KEY" in err for err in errors)
+    assert any("TELNYX_PHONE_NUMBER" in err for err in errors)
+    assert any("TELNYX_CONNECTION_ID" in err for err in errors)
     assert any("PIPECAT_PUBLIC_URL" in err for err in errors)
 
 
 def test_validate_production_config_accepts_required_values(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("TELEPHONY_PROVIDER", "telnyx")
     monkeypatch.setenv("JWT_SECRET", "not-the-default-secret")
     monkeypatch.setenv("DONNA_API_KEYS", "pipecat:service-key")
     monkeypatch.setenv("FIELD_ENCRYPTION_KEY", _field_key())
-    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "twilio-token")
+    monkeypatch.setenv("TELNYX_API_KEY", "telnyx-token")
+    monkeypatch.setenv("TELNYX_PUBLIC_KEY", "telnyx-public-key")
+    monkeypatch.setenv("TELNYX_PHONE_NUMBER", "+15551234567")
+    monkeypatch.setenv("TELNYX_CONNECTION_ID", "telnyx-connection")
     monkeypatch.setenv("PIPECAT_PUBLIC_URL", "https://pipecat.example.com")
 
     assert validate_production_config() == []
+
+
+def test_validate_production_config_rejects_narrowband_telnyx(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("TELEPHONY_PROVIDER", "telnyx")
+    monkeypatch.setenv("JWT_SECRET", "not-the-default-secret")
+    monkeypatch.setenv("DONNA_API_KEYS", "pipecat:service-key")
+    monkeypatch.setenv("FIELD_ENCRYPTION_KEY", _field_key())
+    monkeypatch.setenv("TELNYX_API_KEY", "telnyx-token")
+    monkeypatch.setenv("TELNYX_PUBLIC_KEY", "telnyx-public-key")
+    monkeypatch.setenv("TELNYX_PHONE_NUMBER", "+15551234567")
+    monkeypatch.setenv("TELNYX_CONNECTION_ID", "telnyx-connection")
+    monkeypatch.setenv("TELNYX_STREAM_CODEC", "PCMU")
+    monkeypatch.setenv("TELNYX_STREAM_SAMPLE_RATE", "8000")
+    monkeypatch.setenv("PIPECAT_PUBLIC_URL", "https://pipecat.example.com")
+
+    errors = validate_production_config()
+
+    assert any("TELNYX_STREAM_CODEC" in err for err in errors)
+    assert any("TELNYX_STREAM_SAMPLE_RATE" in err for err in errors)
 
 
 def test_field_encryption_key_accepts_unpadded_base64url():

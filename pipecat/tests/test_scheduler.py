@@ -1,8 +1,9 @@
 """Tests for services/scheduler.py — reminder scheduling + outbound calls."""
 
+import base64
 import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch, AsyncMock
 
 from services.scheduler import (
     REMINDER_CONTEXT_TTL_SECONDS,
@@ -41,6 +42,15 @@ class FakeSharedState:
     async def delete(self, key):
         self.deleted.append(key)
         self.data.pop(key, None)
+
+
+def enable_test_encryption(monkeypatch):
+    from lib import encryption
+
+    key = base64.urlsafe_b64encode(b"r" * 32).decode().rstrip("=")
+    monkeypatch.setenv("FIELD_ENCRYPTION_KEY", key)
+    monkeypatch.setattr(encryption, "_KEY", None)
+    monkeypatch.setattr(encryption, "_aes", None)
 
 
 class TestGetScheduledForTime:
@@ -95,6 +105,7 @@ class TestInMemoryOps:
 
     @pytest.mark.asyncio
     async def test_get_reminder_context_async_loads_shared_state(self):
+        """Legacy raw dict reminder contexts remain readable during rollout."""
         state = FakeSharedState()
         state.data["reminder_ctx:CA-redis"] = {"reminder": {"id": "shared"}}
         with patch("lib.redis_client.get_shared_state", return_value=state):
@@ -103,13 +114,39 @@ class TestInMemoryOps:
         assert pending_reminder_calls["CA-redis"] == result
 
     @pytest.mark.asyncio
-    async def test_store_reminder_context_writes_local_and_shared_state(self):
+    async def test_get_reminder_context_async_decrypts_shared_state(self, monkeypatch):
+        from lib.encryption import decrypt_json
+        from lib.shared_state_phi import encode_phi_payload
+
+        enable_test_encryption(monkeypatch)
+        state = FakeSharedState()
+        encrypted = encode_phi_payload({"reminder": {"id": "shared-encrypted"}})
+        assert isinstance(encrypted, str) and encrypted.startswith("enc:")
+        assert decrypt_json(encrypted)["reminder"]["id"] == "shared-encrypted"
+        state.data["reminder_ctx:CA-redis"] = encrypted
+
+        with patch("lib.redis_client.get_shared_state", return_value=state):
+            result = await get_reminder_context_async("CA-redis")
+
+        assert result["reminder"]["id"] == "shared-encrypted"
+        assert pending_reminder_calls["CA-redis"] == result
+
+    @pytest.mark.asyncio
+    async def test_store_reminder_context_writes_local_and_encrypted_shared_state(self, monkeypatch):
+        from lib.encryption import decrypt_json
+
+        enable_test_encryption(monkeypatch)
         state = FakeSharedState()
         context = {"reminder": {"id": "r1"}, "triggered_at": datetime.now(timezone.utc)}
         with patch("lib.redis_client.get_shared_state", return_value=state):
             await store_reminder_context("CA-123", context)
         assert pending_reminder_calls["CA-123"] == context
-        assert state.data["reminder_ctx:CA-123"] == context
+        encrypted = state.data["reminder_ctx:CA-123"]
+        assert isinstance(encrypted, str)
+        assert encrypted.startswith("enc:")
+        decoded = decrypt_json(encrypted)
+        assert decoded["reminder"]["id"] == "r1"
+        assert isinstance(decoded["triggered_at"], str)
         assert state.ttls["reminder_ctx:CA-123"] == REMINDER_CONTEXT_TTL_SECONDS
 
     def test_clear_reminder_context(self):
@@ -181,52 +218,27 @@ class TestExtractHelpers:
 
 
 class TestTriggerReminderCall:
-    @pytest.fixture(autouse=True)
-    def clear_maps(self):
-        pending_reminder_calls.clear()
-        yield
-        pending_reminder_calls.clear()
-
     @pytest.mark.asyncio
-    async def test_returns_none_without_twilio(self):
-        with patch("services.scheduler._get_twilio_client", return_value=None):
+    async def test_creates_telnyx_call(self):
+        mock_create = AsyncMock(return_value={"callSid": "v2:call-control"})
+        with patch("api.routes.telnyx.create_telnyx_outbound_call", mock_create):
             from services.scheduler import trigger_reminder_call
-            result = await trigger_reminder_call({"id": "r1"}, {"id": "s1", "name": "Test", "phone": "+15551234567"}, "https://example.com")
-            assert result is None
 
-    @pytest.mark.asyncio
-    async def test_creates_call_and_delivery(self):
-        mock_call = MagicMock()
-        mock_call.sid = "CA-new-123"
-        mock_client = MagicMock()
-        mock_client.calls.create.return_value = mock_call
-        mock_delivery = {"id": "d-new", "attempt_count": 1}
-        state = FakeSharedState()
-
-        with patch("services.scheduler._get_twilio_client", return_value=mock_client), \
-             patch("services.memory.build_context", new_callable=AsyncMock, return_value="Memory context"), \
-             patch("services.scheduler.query_one", new_callable=AsyncMock, return_value=mock_delivery), \
-             patch("lib.redis_client.get_shared_state", return_value=state), \
-             patch.dict("os.environ", {"TWILIO_PHONE_NUMBER": "+10000000000"}):
-            from services.scheduler import trigger_reminder_call
             result = await trigger_reminder_call(
                 {"id": "r1", "title": "Take pills"},
                 {"id": "s1", "name": "Test", "phone": "+15551234567"},
                 "https://example.com",
             )
-            assert result is not None
-            assert result["sid"] == "CA-new-123"
-            assert "CA-new-123" in pending_reminder_calls
-            assert state.data["reminder_ctx:CA-new-123"]["memory_context"] == "Memory context"
-            assert state.ttls["reminder_ctx:CA-new-123"] == REMINDER_CONTEXT_TTL_SECONDS
+
+        assert result == {"sid": "v2:call-control"}
+        body = mock_create.await_args.args[0]
+        assert body.senior_id == "s1"
+        assert body.call_type == "reminder"
+        assert body.reminder_id == "r1"
 
     @pytest.mark.asyncio
     async def test_handles_exception(self):
-        mock_client = MagicMock()
-        mock_client.calls.create.side_effect = Exception("Twilio error")
-        with patch("services.scheduler._get_twilio_client", return_value=mock_client), \
-             patch("services.memory.build_context", new_callable=AsyncMock, return_value="ctx"), \
-             patch.dict("os.environ", {"TWILIO_PHONE_NUMBER": "+10000000000"}):
+        with patch("api.routes.telnyx.create_telnyx_outbound_call", new_callable=AsyncMock, side_effect=Exception("Telnyx error")):
             from services.scheduler import trigger_reminder_call
             result = await trigger_reminder_call({"id": "r1"}, {"id": "s1", "name": "Test", "phone": "+15551234567"}, "https://example.com")
             assert result is None

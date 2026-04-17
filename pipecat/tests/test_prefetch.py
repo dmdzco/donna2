@@ -140,6 +140,16 @@ class TestPrefetchCache:
         assert cache.get("") is None
         assert cache.get("   ") is None
 
+    def test_inflight_relevance_tracking(self):
+        cache = PrefetchCache()
+        cache.mark_inflight("grandson Jake baseball")
+
+        assert cache.has_relevant_inflight("Jake played baseball", threshold=0.3)
+        assert not cache.has_relevant_inflight("weather forecast", threshold=0.3)
+
+        cache.clear_inflight("grandson Jake baseball")
+        assert not cache.has_relevant_inflight("Jake played baseball", threshold=0.3)
+
 
 # ===========================================================================
 # extract_prefetch_queries
@@ -243,6 +253,7 @@ class TestRunPrefetch:
 
         assert count == 1
         assert cache.get("gardening") is not None
+        mock_search.assert_awaited_once_with("senior-1", "gardening", limit=3, track_access=False)
 
     @pytest.mark.asyncio
     async def test_dedup_skips_cached_queries(self):
@@ -304,6 +315,17 @@ class TestRunPrefetch:
 
         assert count == 0
         assert cache.get("obscure topic") is None
+
+    @pytest.mark.asyncio
+    async def test_dedup_skips_relevant_inflight_query(self):
+        cache = PrefetchCache()
+        cache.mark_inflight("grandson Jake baseball game")
+
+        with patch("services.memory.search", new_callable=AsyncMock) as mock_search:
+            count = await run_prefetch("senior-1", ["Jake baseball game"], cache)
+
+        assert count == 0
+        mock_search.assert_not_called()
 
 
 # ===========================================================================

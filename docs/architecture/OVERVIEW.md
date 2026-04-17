@@ -46,8 +46,8 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 │          │                                                                   │
 │          ▼                                                                   │
 │   ┌──────────────────────────────────────────────────────────┐              │
-│   │              Twilio Media Streams                         │              │
-│   │         /voice/answer → <Stream url="/ws">                │              │
+│   │              Telnyx Voice API                              │              │
+│   │         /telnyx/events + media fork → /ws                  │              │
 │   └────────────────────┬─────────────────────────────────────┘              │
 │                        │ WebSocket                                           │
 │                        ▼                                                     │
@@ -55,7 +55,7 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 │   │                    Pipecat Pipeline (bot.py)                         │   │
 │   ├─────────────────────────────────────────────────────────────────────┤   │
 │   │                                                                      │   │
-│   │   Audio In → Deepgram STT (Nova 3, 8kHz)                             │   │
+│   │   Audio In → Deepgram STT (Nova 3, internal 16kHz PCM)                │   │
 │   │                     │ TranscriptionFrame                             │   │
 │   │                     ▼                                                │   │
 │   │         ┌───────────────────────┐                                    │   │
@@ -79,7 +79,7 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (user) ← builds LLM context              │   │
 │   │                     ▼                                                │   │
-│   │         Claude Sonnet 4.5 + FlowManager (2 active tools)            │   │
+│   │         Claude Haiku 4.5 + FlowManager (2 active tools)             │   │
 │   │         (conditional reminder → main → winding_down → closing)      │   │
 │   │                     │ TextFrame                                      │   │
 │   │                     ▼                                                │   │
@@ -87,7 +87,7 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 │   │                     ▼                                                │   │
 │   │         Conversation Tracker (topics + stripped transcript)          │   │
 │   │                     ▼                                                │   │
-│   │         ElevenLabs TTS → Audio Out → Twilio (mulaw 8kHz)            │   │
+│   │         TTS 16kHz PCM → Audio Out → Telnyx (16kHz L16)               │   │
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (assistant) ← tracks responses            │   │
 │   │                                                                      │   │
@@ -191,11 +191,6 @@ The Director runs **non-blocking** via `asyncio.create_task()`. The active specu
     "priority_action": "main thing to do",
     "specific_instruction": "actionable guidance"
   },
-  "model_recommendation": {
-    "use_sonnet": false,
-    "max_tokens": 150,
-    "reason": "why this token count"
-  },
   "prefetch": {
     "memory_queries": ["gardening", "grandson Jake"]
   }
@@ -212,7 +207,7 @@ Quick Observer pattern categories:
 | **Emotion** | 25+ patterns with valence/intensity | Emotional tone detection |
 | **Family** | 25+ relationship patterns including pets | Context enrichment |
 | **Safety** | Scams, strangers, emergencies | Safety concern flags |
-| **Goodbye** | Strong goodbye detection (bye, gotta go, take care) | Schedules programmatic EndFrame after goodbye audio |
+| **Goodbye** | Explicit strong goodbye detection ("goodbye", "I gotta go", "talk to you later") | Schedules programmatic EndFrame only after the minimum call-age guard and goodbye audio delay |
 | **Factual/Curiosity** | Question patterns ("what year", "how tall") | Direct-answer guidance |
 | **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 
@@ -237,13 +232,13 @@ Quick Observer pattern categories:
 | **Framework** | Pipecat v0.0.101+ | FrameProcessor pipeline |
 | **Flows** | pipecat-ai-flows v0.0.22+ | 4-phase call state machine |
 | **Hosting** | Railway | Docker (python:3.12-slim), port 7860 |
-| **Phone** | Twilio Media Streams | WebSocket audio (mulaw 8kHz) |
-| **Voice LLM** | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | AnthropicLLMService (prompt caching enabled) |
+| **Phone** | Telnyx Voice API media streaming | WebSocket wire audio is 16kHz L16 |
+| **Voice LLM** | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Groq (`gpt-oss-20b`) | Active fast provider for query/speculative guidance |
 | **Director Fallback Helper** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Regular non-speculative fallback in `director_llm.py` |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
-| **STT** | Deepgram Nova 3 (`nova-3-general`) | Real-time, interim results, 8kHz |
-| **TTS** | ElevenLabs (`eleven_turbo_v2_5`) by default; Cartesia behind provider flag | Streaming voice synthesis |
+| **STT** | Deepgram Nova 3 (`nova-3-general`) | Real-time, interim results, 16kHz linear PCM |
+| **TTS** | ElevenLabs (`eleven_flash_v2_5`) by default; Cartesia behind provider flag | Telnyx calls use native 16kHz PCM from TTS; non-phone paths can use higher internal rates |
 | **VAD** | Silero | confidence=0.6, stop_secs=1.2, min_volume=0.5 |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
@@ -291,8 +286,8 @@ pipecat/
 │   ├── caregivers.py                ← Caregiver relationships
 │   └── news.py                      ← Cached news + live web_search provider fallback
 ├── api/
-│   ├── routes/                      ← voice.py, calls.py
-│   └── middleware/                   ← auth, api_auth, rate_limit, security, twilio
+│   ├── routes/                      ← telnyx.py, call_context.py, calls.py
+│   └── middleware/                   ← auth, api_auth, rate_limit, security
 ├── db/client.py                     ← asyncpg pool + query helpers
 ├── tests/                           ← 61 test files + helpers/mocks/scenarios
 ├── pyproject.toml                   ← Python 3.12, dependencies

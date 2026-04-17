@@ -1,25 +1,83 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Call, Timeline, Turn, ObserverSummary, Continuity, MetricsData } from '../types';
+import type {
+  Call,
+  Timeline,
+  Turn,
+  ObserverSummary,
+  Continuity,
+  MetricsData,
+  ContextTraceData,
+  ContextLatency,
+} from '../types';
 
-const API_ROOT = import.meta.env.VITE_API_URL || '';
-const API_BASE = `${API_ROOT}/api/observability`;
+export type ApiEnvironment = 'dev' | 'prod';
 
-const TOKEN_KEY = 'donna_obs_token';
+const ENVIRONMENT_KEY = 'donna_obs_environment';
+const TOKEN_KEY_PREFIX = 'donna_obs_token';
 
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+const ENVIRONMENT_CONFIG: Record<ApiEnvironment, { label: string; apiRoot: string }> = {
+  dev: {
+    label: 'Dev',
+    apiRoot:
+      import.meta.env.VITE_API_URL_DEV ||
+      (import.meta.env.DEV ? '/dev-api' : 'https://donna-api-dev.up.railway.app'),
+  },
+  prod: {
+    label: 'Prod',
+    apiRoot:
+      import.meta.env.VITE_API_URL_PROD ||
+      import.meta.env.VITE_API_URL ||
+      (import.meta.env.DEV ? '/prod-api' : 'https://donna-api-production-2450.up.railway.app'),
+  },
+};
+
+export function getEnvironmentOptions() {
+  return Object.entries(ENVIRONMENT_CONFIG).map(([key, config]) => ({
+    key: key as ApiEnvironment,
+    label: config.label,
+    apiRoot: config.apiRoot,
+  }));
 }
 
-export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
+export function getEnvironment(): ApiEnvironment {
+  const stored = localStorage.getItem(ENVIRONMENT_KEY);
+  return stored === 'prod' || stored === 'dev' ? stored : 'dev';
 }
 
-export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
+export function setEnvironment(environment: ApiEnvironment): void {
+  localStorage.setItem(ENVIRONMENT_KEY, environment);
 }
 
-export async function login(email: string, password: string): Promise<string> {
-  const response = await fetch(`${API_ROOT}/api/admin/login`, {
+export function getEnvironmentConfig(environment = getEnvironment()) {
+  return ENVIRONMENT_CONFIG[environment];
+}
+
+function getApiRoot(environment = getEnvironment()): string {
+  return ENVIRONMENT_CONFIG[environment].apiRoot.replace(/\/$/, '');
+}
+
+function getObservabilityUrl(path: string): string {
+  return `${getApiRoot()}/api/observability${path}`;
+}
+
+function getTokenKey(environment = getEnvironment()): string {
+  return `${TOKEN_KEY_PREFIX}_${environment}`;
+}
+
+export function getToken(environment = getEnvironment()): string | null {
+  return localStorage.getItem(getTokenKey(environment));
+}
+
+export function setToken(token: string, environment = getEnvironment()): void {
+  localStorage.setItem(getTokenKey(environment), token);
+}
+
+export function clearToken(environment = getEnvironment()): void {
+  localStorage.removeItem(getTokenKey(environment));
+}
+
+export async function login(email: string, password: string, environment = getEnvironment()): Promise<string> {
+  const response = await fetch(`${getApiRoot(environment)}/api/admin/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -29,19 +87,20 @@ export async function login(email: string, password: string): Promise<string> {
     throw new Error(data.error || 'Login failed');
   }
   const data = await response.json();
-  setToken(data.token);
+  setToken(data.token, environment);
   return data.token;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const token = getToken();
+  const environment = getEnvironment();
+  const token = getToken(environment);
   const headers: Record<string, string> = {};
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
   const response = await fetch(url, { headers });
   if (response.status === 401 || response.status === 403) {
-    clearToken();
+    clearToken(environment);
     window.location.reload();
     throw new Error('AUTH_EXPIRED');
   }
@@ -58,7 +117,7 @@ export function useActiveCalls() {
 
   const refresh = useCallback(async () => {
     try {
-      const data = await fetchJson<{ activeCalls: Call[] }>(`${API_BASE}/active`);
+      const data = await fetchJson<{ activeCalls: Call[] }>(getObservabilityUrl('/active'));
       setActiveCalls(data.activeCalls);
       setError(null);
     } catch (err) {
@@ -86,7 +145,7 @@ export function useCalls(limit = 50) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await fetchJson<{ calls: Call[] }>(`${API_BASE}/calls?limit=${limit}`);
+      const data = await fetchJson<{ calls: Call[] }>(getObservabilityUrl(`/calls?limit=${limit}`));
       setCalls(data.calls);
       setError(null);
     } catch (err) {
@@ -116,7 +175,7 @@ export function useCallTimeline(callId: string | undefined) {
     }
 
     setLoading(true);
-    fetchJson<Timeline>(`${API_BASE}/calls/${callId}/timeline`)
+    fetchJson<Timeline>(getObservabilityUrl(`/calls/${callId}/timeline`))
       .then((data) => {
         setTimeline(data);
         setError(null);
@@ -141,7 +200,7 @@ export function useCallTurns(callId: string | undefined) {
     }
 
     setLoading(true);
-    fetchJson<{ turns: Turn[] }>(`${API_BASE}/calls/${callId}/turns`)
+    fetchJson<{ turns: Turn[] }>(getObservabilityUrl(`/calls/${callId}/turns`))
       .then((data) => {
         setTurns(data.turns);
         setError(null);
@@ -166,7 +225,7 @@ export function useObserverSignals(callId: string | undefined) {
     }
 
     setLoading(true);
-    fetchJson<ObserverSummary>(`${API_BASE}/calls/${callId}/observer`)
+    fetchJson<ObserverSummary>(getObservabilityUrl(`/calls/${callId}/observer`))
       .then((result) => {
         setData(result);
         setError(null);
@@ -191,7 +250,7 @@ export function useContinuity(seniorId: string | undefined) {
     }
 
     setLoading(true);
-    fetchJson<Continuity>(`${API_BASE}/continuity/${seniorId}`)
+    fetchJson<Continuity>(getObservabilityUrl(`/continuity/${seniorId}`))
       .then((data) => {
         setContinuity(data);
         setError(null);
@@ -215,7 +274,7 @@ export interface InfraMetric {
   end_reason: string | null;
   turn_count: number;
   phase_durations: Record<string, number> | null;
-  latency: Record<string, number> | null;
+  latency: ContextLatency | null;
   breaker_states: Record<string, string> | null;
   tools_used: string[] | null;
   token_usage: Record<string, number> | null;
@@ -251,7 +310,7 @@ export function useInfraMetrics(hours = 24) {
     setLoading(true);
     try {
       const data = await fetchJson<{ metrics: InfraMetric[] }>(
-        `${API_BASE}/metrics/calls?hours=${hours}&limit=100`
+        getObservabilityUrl(`/metrics/calls?hours=${hours}&limit=100`)
       );
       setMetrics(data.metrics);
       setError(null);
@@ -278,7 +337,7 @@ export function useMetricsSummary(hours = 24) {
       const data = await fetchJson<{
         summary: MetricsSummary;
         end_reasons: Array<{ end_reason: string; count: number }>;
-      }>(`${API_BASE}/metrics/summary?hours=${hours}`);
+      }>(getObservabilityUrl(`/metrics/summary?hours=${hours}`));
       setSummary(data.summary);
       setEndReasons(data.end_reasons);
       setError(null);
@@ -302,7 +361,7 @@ export function useLatencyTrends(hours = 24) {
     setLoading(true);
     try {
       const result = await fetchJson<{ latency: LatencyPoint[] }>(
-        `${API_BASE}/metrics/latency?hours=${hours}`
+        getObservabilityUrl(`/metrics/latency?hours=${hours}`)
       );
       setData(result.latency);
       setError(null);
@@ -334,7 +393,32 @@ export function useCallMetrics(callId: string | undefined) {
     }
 
     setLoading(true);
-    fetchJson<MetricsData>(`${API_BASE}/calls/${callId}/metrics`)
+    fetchJson<MetricsData>(getObservabilityUrl(`/calls/${callId}/metrics`))
+      .then((result) => {
+        setData(result);
+        setError(null);
+      })
+      .catch((err) => setError((err as Error).message))
+      .finally(() => setLoading(false));
+  }, [callId]);
+
+  return { data, loading, error };
+}
+
+export function useCallContextTrace(callId: string | undefined) {
+  const [data, setData] = useState<ContextTraceData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!callId) {
+      setData(null);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    fetchJson<ContextTraceData>(getObservabilityUrl(`/calls/${callId}/context`))
       .then((result) => {
         setData(result);
         setError(null);

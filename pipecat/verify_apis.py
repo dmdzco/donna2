@@ -11,10 +11,10 @@ except ImportError as e:
 
 # Serializer
 try:
-    from pipecat.serializers.twilio import TwilioFrameSerializer
-    checks.append(("TwilioFrameSerializer", "OK"))
+    from serializers.telnyx import DonnaTelnyxFrameSerializer
+    checks.append(("DonnaTelnyxFrameSerializer", "OK"))
 except ImportError as e:
-    checks.append(("TwilioFrameSerializer", f"FAIL: {e}"))
+    checks.append(("DonnaTelnyxFrameSerializer", f"FAIL: {e}"))
 
 # Services
 try:

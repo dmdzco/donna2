@@ -1,4 +1,5 @@
 import { isProductionEnv, matchServiceApiKey, parseServiceApiKeys } from '../lib/security-config.js';
+import { sendError } from '../lib/http-response.js';
 
 /**
  * API key authentication middleware.
@@ -30,7 +31,7 @@ export function requireApiKey(req, res, next) {
   // If no API key configured, skip auth outside production only.
   if (configuredKeys.size === 0) {
     if (isProductionEnv()) {
-      return res.status(503).json({ error: 'Service API key auth is not configured' });
+      return sendError(res, 503, { error: 'Service API key auth is not configured' });
     }
     return next();
   }
@@ -42,13 +43,13 @@ export function requireApiKey(req, res, next) {
 
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Authorization required' });
+    return sendError(res, 401, { error: 'Authorization required' });
   }
 
   const token = authHeader.slice(7);
   const keyLabel = matchServiceApiKey(token);
   if (!keyLabel) {
-    return res.status(403).json({ error: 'Invalid API key' });
+    return sendError(res, 403, { error: 'Invalid API key' });
   }
 
   req.serviceApiKeyLabel = keyLabel;

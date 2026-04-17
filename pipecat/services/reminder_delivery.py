@@ -10,8 +10,14 @@ tools.py) from the polling loop and call triggering (used by main.py).
 
 from __future__ import annotations
 
+import asyncio
+import time
+from datetime import datetime
+
 from loguru import logger
 from db import query_one, execute
+from lib.encryption import encrypt
+from lib.phi import decrypt_reminder_phi
 
 
 async def mark_delivered(reminder_id: str) -> None:
@@ -38,10 +44,11 @@ async def mark_reminder_acknowledged(
     try:
         row = await query_one(
             """UPDATE reminder_deliveries SET
-                 status = $1, acknowledged_at = NOW(), user_response = $2
+                 status = $1, acknowledged_at = NOW(),
+                 user_response = NULL, user_response_encrypted = $2
                WHERE id = $3 RETURNING *""",
             status,
-            user_response,
+            encrypt(user_response),
             delivery_id,
         )
         logger.info("Delivery {did} marked {s}", did=delivery_id, s=status)
@@ -95,11 +102,9 @@ async def mark_call_ended_without_acknowledgment(delivery_id: str) -> None:
 
 
 async def get_reminder_by_call_sid(call_sid: str) -> dict | None:
-    """Look up an active reminder delivery by Twilio call_sid.
+    """Look up an active reminder delivery by provider call id.
 
-    Used when Pipecat receives an outbound call from the Node.js scheduler.
-    The scheduler writes call_sid to reminder_deliveries, so Pipecat can
-    detect reminder calls without cross-process shared state.
+    Kept for archived Twilio compatibility and direct database recovery.
 
     Returns dict with reminder + delivery info, or None if not a reminder call.
     """
@@ -109,7 +114,8 @@ async def get_reminder_by_call_sid(call_sid: str) -> dict | None:
     row = await query_one(
         """SELECT rd.id AS delivery_id, rd.reminder_id, rd.scheduled_for,
                   rd.status AS delivery_status, rd.attempt_count,
-                  r.title, r.description, r.type AS reminder_type
+                  r.title, r.title_encrypted, r.description,
+                  r.description_encrypted, r.type AS reminder_type
            FROM reminder_deliveries rd
            JOIN reminders r ON rd.reminder_id = r.id
            WHERE rd.call_sid = $1
@@ -117,8 +123,111 @@ async def get_reminder_by_call_sid(call_sid: str) -> dict | None:
         call_sid,
     )
     if row:
+        row = decrypt_reminder_phi(row)
         logger.info("Found reminder for call {cs}", cs=call_sid)
     return row
+
+
+async def get_reminder_by_id(reminder_id: str) -> dict | None:
+    """Fetch reminder details for a scheduled call."""
+    if not reminder_id:
+        return None
+
+    row = await query_one(
+        """SELECT r.id AS reminder_id, r.senior_id,
+                  r.title, r.title_encrypted, r.description,
+                  r.description_encrypted, r.type AS reminder_type
+           FROM reminders r
+           WHERE r.id = $1
+           LIMIT 1""",
+        reminder_id,
+    )
+    return decrypt_reminder_phi(row) if row else None
+
+
+async def create_or_update_delivery_for_call(
+    *,
+    reminder_id: str,
+    scheduled_for: datetime,
+    call_sid: str,
+    existing_delivery_id: str | None = None,
+) -> dict:
+    """Create or update a reminder delivery row for a call."""
+    if existing_delivery_id:
+        delivery = await query_one(
+            """UPDATE reminder_deliveries SET
+                 delivered_at = NOW(),
+                 call_sid = $1,
+                 attempt_count = COALESCE(attempt_count, 0) + 1,
+                 status = 'delivered'
+               WHERE id = $2
+               RETURNING *""",
+            call_sid,
+            existing_delivery_id,
+        )
+        if not delivery:
+            raise ValueError("Existing reminder delivery not found")
+        logger.info("Updated delivery {did} for call", did=delivery["id"])
+        return delivery
+
+    delivery = await query_one(
+        """INSERT INTO reminder_deliveries
+           (reminder_id, scheduled_for, delivered_at, call_sid, status, attempt_count)
+           VALUES ($1, $2, NOW(), $3, 'delivered', 1)
+           RETURNING *""",
+        reminder_id,
+        scheduled_for,
+        call_sid,
+    )
+    if not delivery:
+        raise ValueError("Reminder delivery was not created")
+    logger.info("Created delivery {did} for call", did=delivery["id"])
+    return delivery
+
+
+async def wait_for_reminder_by_call_sid(
+    call_sid: str,
+    *,
+    timeout_seconds: float = 2.0,
+    initial_delay_seconds: float = 0.1,
+    max_delay_seconds: float = 0.5,
+) -> dict | None:
+    """Look up a reminder delivery, waiting briefly for scheduler DB writes.
+
+    Older webhook paths could reach Pipecat before the scheduler committed the
+    reminder_deliveries row containing call_sid. Waiting here keeps those calls
+    on the reminder path instead of falling through to a generic call.
+    """
+    if not call_sid:
+        return None
+
+    deadline = time.monotonic() + timeout_seconds
+    delay = initial_delay_seconds
+    attempts = 0
+
+    while True:
+        attempts += 1
+        row = await get_reminder_by_call_sid(call_sid)
+        if row:
+            if attempts > 1:
+                logger.info(
+                    "Found reminder for call {cs} after {attempts} attempts",
+                    cs=call_sid,
+                    attempts=attempts,
+                )
+            return row
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            logger.warning(
+                "Reminder delivery not found for call {cs} after {attempts} attempts",
+                cs=call_sid,
+                attempts=attempts,
+            )
+            return None
+
+        await asyncio.sleep(min(delay, remaining))
+        delay = min(delay * 2, max_delay_seconds)
 
 
 def format_reminder_prompt(reminder: dict) -> str:

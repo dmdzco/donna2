@@ -123,6 +123,14 @@ def register_gemini_tools(llm, session_state: dict, task_ref: list) -> None:
     # Register end_call — triggers EndFrame to terminate the pipeline
     async def handle_end_call(params: FunctionCallParams):
         logger.info("Gemini tool: end_call triggered")
+        from services.context_trace import record_context_event
+        record_context_event(
+            session_state,
+            source="end_call",
+            action="called",
+            label="Gemini end_call tool",
+            provider="gemini_live",
+        )
         session_state["_end_reason"] = "gemini_end_call_tool"
         await params.result_callback("Call ended.")
         await params.llm._tool_result(params.tool_call_id, params.function_name, {"value": "Call ended."})

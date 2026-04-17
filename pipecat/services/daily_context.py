@@ -6,11 +6,12 @@ so subsequent calls on the same day don't repeat topics/reminders/advice.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from loguru import logger
 from db import query_one, query_many
+from lib.phi import decrypt_daily_context_phi, encrypt_daily_context_payload
+from services.time_context import format_call_time_label
 
 
 def _get_start_of_day(tz_name: str = "America/New_York") -> datetime:
@@ -37,20 +38,16 @@ async def save_call_context(senior_id: str, call_sid: str, data: dict) -> dict |
         row = await query_one(
             """INSERT INTO daily_call_context
                (senior_id, call_date, call_sid, topics_discussed, reminders_delivered,
-                advice_given, key_moments, summary)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                advice_given, key_moments, summary, context_encrypted)
+               VALUES ($1, $2, $3, NULL, NULL, NULL, NULL, NULL, $4)
                RETURNING *""",
             senior_id,
             call_date,
             call_sid,
-            data.get("topics_discussed", []),
-            data.get("reminders_delivered", []),
-            data.get("advice_given", []),
-            json.dumps(data.get("key_moments", [])),
-            data.get("summary"),
+            encrypt_daily_context_payload(data),
         )
         logger.info("Saved call context for senior {sid}, call {cs}", sid=str(senior_id)[:8], cs=call_sid)
-        return row
+        return decrypt_daily_context_phi(row)
     except Exception as e:
         logger.error("Error saving call context: {err}", err=str(e))
         return None
@@ -87,7 +84,8 @@ async def get_todays_context(
         key_moments: list = []
         summaries: list[str] = []
 
-        for row in rows:
+        for raw in rows:
+            row = decrypt_daily_context_phi(raw) or raw
             for t in (row.get("topics_discussed") or []):
                 topics.add(t)
             for r in (row.get("reminders_delivered") or []):
@@ -101,7 +99,11 @@ async def get_todays_context(
                 else:
                     key_moments.append(km)
             if row.get("summary"):
-                summaries.append(row["summary"])
+                label = format_call_time_label(
+                    row.get("created_at") or row.get("call_date"),
+                    tz_name,
+                )
+                summaries.append(f"{label}: {row['summary']}")
 
         return {
             "topicsDiscussed": list(topics),
@@ -156,6 +158,8 @@ def format_todays_context(todays_context: dict | None) -> str | None:
 
     lines.append(
         "\nDo NOT repeat reminders or advice from earlier today. "
-        'Reference them naturally: "This morning I mentioned...", "Earlier I reminded you about..."'
+        'Use the time labels. If a prior call was earlier today and they planned something for tomorrow, '
+        "do not ask as if it already happened. "
+        'Reference completed same-day items naturally: "This morning I mentioned...", "Earlier I reminded you about..."'
     )
     return "\n".join(lines)

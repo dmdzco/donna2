@@ -5,7 +5,7 @@ Read `DIRECTORY.md` before writing code. It is the navigation map for active vs.
 ## Core Architecture
 
 - Donna has two active backends.
-- `pipecat/` owns the real-time voice pipeline, Twilio WebSocket path, call behavior, post-call processing, and Python API routes.
+- `pipecat/` owns the real-time voice pipeline, Telnyx WebSocket path, call behavior, post-call processing, and Python API routes.
 - Repo-root Node/Express owns the frontend-facing `/api/*` routes, admin/consumer APIs, and the active scheduler.
 - Frontends do not call Pipecat directly. `apps/admin-v2`, `apps/consumer`, `apps/mobile`, and `apps/observability` should be treated as Node API clients.
 - Do not confuse `services/*.js` with `pipecat/services/*.py`. They are separate implementations over the same database.
@@ -49,7 +49,7 @@ Read `DIRECTORY.md` before writing code. It is the navigation map for active vs.
    - compliance: `docs/compliance/`
    - Pipecat debugging/latency lessons: `pipecat/docs/LEARNINGS.md`
 4. Validate at the smallest useful level first.
-5. Use Railway dev deploys only when the bug depends on live Twilio, live audio, or environment wiring.
+5. Use Railway dev deploys only when the bug depends on live Telnyx, live audio, or environment wiring.
 
 ## Validation
 
@@ -72,7 +72,8 @@ Read `DIRECTORY.md` before writing code. It is the navigation map for active vs.
 - Change Director behavior: `pipecat/processors/conversation_director.py`, `pipecat/services/director_llm.py`
 - Change post-call behavior: `pipecat/services/post_call.py`
 - Change semantic memory or prefetch: `pipecat/services/memory.py`, `pipecat/services/prefetch.py`
-- Change call setup or Twilio answer path: `pipecat/api/routes/voice.py`, `routes/voice.js`
+- Change Telnyx webhook/outbound path: `pipecat/api/routes/telnyx.py`, `pipecat/api/routes/call_context.py`
+- Change frontend/manual call initiation: `routes/calls.js` (Node asks Pipecat to create a Telnyx call)
 - Change frontend APIs: `routes/*.js`, `middleware/*.js`, `validators/schemas.js`
 - Change admin UI: `apps/admin-v2/src/`
 - Change caregiver web UI: `apps/consumer/src/`

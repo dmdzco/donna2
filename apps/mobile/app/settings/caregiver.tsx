@@ -58,7 +58,10 @@ export default function CaregiverProfileScreen() {
         { text: "OK", onPress: () => router.back() },
       ]);
     } catch {
-      Alert.alert("Error", "Failed to update profile. Please try again.");
+      Alert.alert(
+        "Couldn't Save",
+        "We couldn't save your profile. Your changes are still here. Check your connection and try again.",
+      );
     } finally {
       setSaving(false);
     }

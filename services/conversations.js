@@ -31,6 +31,7 @@ async function addSummaryFallbacks(rows) {
   return rows.map(row => {
     const analysis = analyses.get(row.id) || null;
     const summary = decryptSummary(row) || analysis?.summary || null;
+    const sentiment = row.sentiment || analysis?.sentiment || null;
 
     return {
       id: row.id,
@@ -41,7 +42,7 @@ async function addSummaryFallbacks(rows) {
       durationSeconds: row.durationSeconds,
       status: row.status,
       summary,
-      sentiment: row.sentiment,
+      sentiment,
     };
   });
 }
@@ -109,13 +110,13 @@ export const conversationService = {
         endedAt: new Date(),
         durationSeconds: data.durationSeconds,
         status: data.status || 'completed',
-        summary: data.summary,
+        summary: null,
         summaryEncrypted: encrypt(data.summary),
         transcriptEncrypted: encryptJson(data.transcript),
         transcriptTextEncrypted: encrypt(formatTranscriptText(data.transcript)),
         callMetrics: data.callMetrics,
         sentiment: data.sentiment,
-        concerns: data.concerns,
+        concerns: null,
       })
       .where(eq(conversations.callSid, callSid))
       .returning();
@@ -175,10 +176,13 @@ export const conversationService = {
   },
 
   // Update conversation summary (called after post-call analysis)
-  async updateSummary(callSid, summary) {
+  async updateSummary(callSid, summary, sentiment = undefined) {
     try {
+      const update = { summary: null, summaryEncrypted: encrypt(summary) };
+      if (sentiment !== undefined) update.sentiment = sentiment;
+
       const [conversation] = await db.update(conversations)
-        .set({ summary, summaryEncrypted: encrypt(summary) })
+        .set(update)
         .where(eq(conversations.callSid, callSid))
         .returning();
 
@@ -205,7 +209,7 @@ export const conversationService = {
       eq(conversations.seniorId, seniorId),
       eq(conversations.status, 'completed'),
       sql`(summary IS NOT NULL OR summary_encrypted IS NOT NULL)`,
-      sql`(summary != '' OR summary_encrypted IS NOT NULL)`
+      sql`(COALESCE(summary, '') != '' OR summary_encrypted IS NOT NULL)`
     ))
     .orderBy(desc(conversations.startedAt))
     .limit(limit);

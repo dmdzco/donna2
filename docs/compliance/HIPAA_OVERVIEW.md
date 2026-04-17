@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| Last Updated | April 4, 2026 |
+| Last Updated | April 16, 2026 |
 | Owner | TBD |
 | Review Cadence | Quarterly |
 | Related Docs | [BAA Tracker](BAA_TRACKER.md), [Breach Notification](BREACH_NOTIFICATION.md), [Data Retention](DATA_RETENTION_POLICY.md), [Vendor Security](VENDOR_SECURITY_EVALUATION.md) |
@@ -36,8 +36,8 @@ Donna is an AI companion that makes phone calls to elderly individuals. During t
 - **Delivers medication reminders** -- directly handling prescription and dosage information
 - **Conducts daily check-ins** -- conversations where seniors discuss health conditions, symptoms, doctor visits, and medical concerns
 - **Stores health-related memories** -- semantic memory system retains facts about a senior's medications, health conditions, medical appointments, and related details
-- **Generates call analyses** -- post-call AI analysis evaluates engagement, detects concerns (including health concerns), and generates caregiver notifications
-- **Sends caregiver notifications** -- mood summaries and concern alerts that may reference health status
+- **Generates call analyses** -- post-call AI analysis evaluates engagement, detects concerns (including health concerns), and generates caregiver-facing summaries
+- **Sends caregiver notifications** -- email/in-app mood summaries and concern alerts that may reference health status. SMS is inactive for now.
 
 Even though Donna is not a healthcare provider, the nature of the data it processes -- medication information, health discussions, medical concerns linked to identifiable individuals (name + phone number) -- constitutes PHI under HIPAA.
 
@@ -84,7 +84,7 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | Medical notes | `seniors.medical_notes` | Yes | High |
 | Memories about health conditions | `memories` table | Yes | High |
 | Call analyses mentioning health concerns | `call_analyses.concerns` | Yes | High |
-| Caregiver mood/concern notifications | `notifications.content` | Yes | Medium |
+| Caregiver mood/concern notifications | `notifications.content_encrypted`, `metadata_encrypted`; legacy `notifications.content` fallback | Yes | Medium |
 | Daily call context (topics discussed) | `daily_call_context` | Yes (if health topics) | Medium |
 | Call summaries | `conversations.summary_encrypted`; legacy `conversations.summary` read fallback | Yes (if health topics) | Medium |
 | Sentiment/engagement scores | `call_analyses` | Low risk alone | Low |
@@ -103,14 +103,14 @@ PHI is any individually identifiable health information. In Donna's system, the 
 |-----------|--------|---------|
 | Access controls (authentication) | Implemented | 3-tier auth: API key, JWT, Clerk session |
 | Access controls (authorization) | Partial | Admin vs. caregiver roles exist, but no granular per-senior access control for admin users |
-| Encryption in transit | Implemented | TLS everywhere: Railway (HTTPS), Neon (SSL), Twilio (TLS), all API calls over HTTPS |
-| Encryption at rest | Partial | Neon PostgreSQL encrypts at rest (AES-256); application-level encryption is implemented for new conversation transcript and summary writes, with remaining PHI fields still in migration scope |
+| Encryption in transit | Implemented | TLS everywhere: Railway (HTTPS), Neon (SSL), Telnyx webhook/media paths, Resend email API, and all AI/vendor API calls over HTTPS/WSS where applicable |
+| Encryption at rest | Partial | Neon PostgreSQL encrypts at rest (AES-256); application-level encryption is implemented for new PHI writes across conversations, memories, analyses, senior profile PHI, reminders, daily context, notifications, waitlist/prospect context, and caregiver notes. Legacy plaintext backfill/nulling must still be run per environment. |
 | Audit logging | Minimal | Sentry captures errors with request IDs; no dedicated HIPAA audit log (who accessed what PHI, when) |
 | PII sanitization in logs | Implemented | `sanitize.py` masks phone numbers and names in application logs |
 | Input validation | Implemented | Pydantic schemas on all Pipecat API inputs; Zod schemas on Node.js API inputs |
 | Rate limiting | Implemented | 5-tier rate limiting on all API endpoints |
 | Security headers | Implemented | HSTS, X-Frame-Options, CSP-adjacent headers |
-| Twilio webhook validation | Implemented | X-Twilio-Signature verification on all `/voice/*` endpoints |
+| Telnyx webhook validation | Implemented | Ed25519 Telnyx signature verification on `/telnyx/events`, plus single-use `ws_token` validation for Telnyx media WebSocket startup |
 | Error handling (no data leakage) | Implemented | Global error handler strips internal details from API responses |
 | Environment isolation | Implemented | dev/staging/production with separate databases and phone numbers |
 | Sentry PII controls | Implemented | `send_default_pii=False` configured |
@@ -120,7 +120,7 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | Safeguard | Status | Priority | Effort |
 |-----------|--------|----------|--------|
 | Business Associate Agreements (BAAs) | **Not signed with any vendor** | CRITICAL | Medium (sales outreach) |
-| Complete application-level encryption of PHI | Partial | HIGH | Medium (remaining: `medical_notes`, `memories.content`, reminders, daily context, notifications, caregiver notes) |
+| Complete application-level encryption of PHI | Partial | HIGH | Low/Medium (new writes are covered; run SQL migration plus encrypted backfill/nulling in every deployed database, then test exports and calls) |
 | HIPAA audit trail | Not implemented | HIGH | Medium (dedicated audit log table: who, what, when, from where) |
 | Data retention / automated purge | Not implemented | HIGH | Medium (see [Data Retention Policy](DATA_RETENTION_POLICY.md)) |
 | Formal risk assessment | Not performed | HIGH | Medium (documented risk analysis per 45 CFR 164.308(a)(1)) |
@@ -144,12 +144,12 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | Unique user identification | Partial | Admin JWT has `adminId`; Clerk has `userId`. No individual audit per API call. |
 | Emergency access procedure | Not implemented | No documented procedure for emergency PHI access. |
 | Automatic logoff | Partial | JWT tokens expire (configurable). No forced session termination. |
-| Encryption and decryption | Partial | TLS in transit. Neon AES-256 at rest. New conversation transcripts and summaries use app-level field encryption; several other PHI fields remain plaintext pending migration. |
+| Encryption and decryption | Partial | TLS in transit. Neon AES-256 at rest. New PHI writes use app-level field encryption for the main PHI tables; legacy plaintext rows remain until the per-environment migration/backfill/nulling runbook is completed. |
 
-**Gap: complete application-level encryption.** New conversation transcript and summary writes use encrypted companion columns, and reads prefer encrypted data with plaintext fallbacks for legacy rows. Several remaining PHI fields, including `medical_notes`, `memories.content`, reminders, daily context, notifications, and caregiver notes, should be encrypted at the application level so that database-level access (e.g., a compromised Neon credential) does not expose plaintext PHI.
+**Gap: complete application-level encryption rollout.** The code now writes encrypted companion columns for high-risk PHI fields and reads prefer encrypted data with plaintext fallbacks for legacy rows. The remaining rollout work is operational: apply the migration, run the encrypted backfill, verify application behavior, and then clear legacy plaintext columns in every deployed database.
 
 **Remediation:**
-1. Complete AES-256-GCM field-level encryption for remaining PHI fields, starting with `seniors.medical_notes`, `memories.content`, reminders, daily context, notifications, caregiver notes, and remaining call analysis fields.
+1. Apply `db/migrations/002_encrypt_remaining_phi.sql` or `pipecat/db/migrations/009_encrypt_remaining_phi.sql`, then run `node scripts/backfill-encrypted-phi.js --write` followed by `--write --null-plaintext` after verification.
 2. Store encryption keys in a secrets manager (e.g., AWS KMS, HashiCorp Vault), NOT in environment variables alongside database credentials.
 3. Implement key rotation procedures.
 
@@ -204,7 +204,7 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | (a)(6) Security incident procedures | Not documented | See [Breach Notification Runbook](BREACH_NOTIFICATION.md) |
 | (a)(7) Contingency plan | Not documented | Disaster recovery, emergency mode, data backup procedures |
 | (a)(8) Evaluation | Not performed | Annual security evaluation |
-| (b)(1) Business associate contracts | **Not signed** | See [BAA Tracker](BAA_TRACKER.md) -- 13+ vendors need evaluation |
+| (b)(1) Business associate contracts | **Not signed** | See [BAA Tracker](BAA_TRACKER.md) -- 16+ vendors need evaluation |
 
 ---
 
@@ -257,7 +257,7 @@ A formal risk assessment per 45 CFR 164.308(a)(1)(ii)(A) has not yet been conduc
 
 ### Phase 1: Foundation (Weeks 1-4) -- CRITICAL
 
-1. **Sign BAAs with tier-1 vendors** (Twilio, Anthropic, Neon, Deepgram, Google, OpenAI, Sentry) -- these all offer BAAs on enterprise/business plans.
+1. **Sign BAAs with tier-1 vendors** (Telnyx, Anthropic, Neon, Deepgram, Google, OpenAI, Sentry) -- these all offer or advertise BAA paths on enterprise/business plans. Keep Twilio out of active PHI flows while SMS remains disabled.
 2. **Designate a HIPAA Security Officer** (can be a co-founder initially).
 3. **Document breach notification procedures** -- see [Breach Notification](BREACH_NOTIFICATION.md).
 4. **Verify HIPAA audit logging coverage** across Node and Pipecat routes (`audit_logs` table exists; confirm every PHI access path writes an audit event).
@@ -265,7 +265,7 @@ A formal risk assessment per 45 CFR 164.308(a)(1)(ii)(A) has not yet been conduc
 
 ### Phase 2: Data Protection (Weeks 5-8) -- HIGH
 
-6. **Complete field-level encryption** for PHI columns (conversation transcripts/summaries now use encrypted companion columns; remaining scope includes `medical_notes`, `memories.content`, reminders, daily context, notifications, caregiver notes, and remaining analysis fields).
+6. **Complete field-level encryption rollout** for PHI columns by running the migration/backfill/nulling sequence in every environment and verifying encrypted export/read behavior.
 7. **Implement data retention policies** with automated purge jobs -- see [Data Retention](DATA_RETENTION_POLICY.md).
 8. **Evaluate and replace non-compliant vendors** (Groq, Cartesia, Tavily; Cerebras is legacy/not active in current Director code) -- see [Vendor Security](VENDOR_SECURITY_EVALUATION.md).
 9. **Restrict developer access to production data** -- synthetic data for dev/staging environments.

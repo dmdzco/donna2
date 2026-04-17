@@ -13,7 +13,7 @@ const getOpenAI = () => {
 const newsCache = new Map();
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
-const getCacheKey = (interests) => interests.sort().join('|').toLowerCase();
+const getCacheKey = (interests) => [...interests].sort().join('|').toLowerCase();
 
 export const newsService = {
   /**
@@ -44,12 +44,13 @@ export const newsService = {
     try {
       console.log(`[News] Fetching news for interests: ${interests.join(', ')}`);
 
-      const interestList = interests.slice(0, 3).join(', ');
+      const interestList = interests.slice(0, 5).join(', ');
+      const storyCount = Math.max(2, Math.min(limit, 10));
 
       const response = await client.responses.create({
         model: 'gpt-4o-mini',
         tools: [{ type: 'web_search_preview' }],
-        input: `Find 2-3 brief, positive news stories from today about: ${interestList}.
+        input: `Find ${storyCount} brief, positive news stories from today about: ${interestList}.
                 These are for an elderly person, so:
                 - Choose uplifting or interesting stories (avoid distressing news)
                 - Keep each summary to 1-2 sentences

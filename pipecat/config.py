@@ -6,7 +6,7 @@ Lazy-loaded on first access; reads from environment at that time.
 Usage:
     from config import settings
     print(settings.anthropic_api_key)
-    print(settings.twilio_phone_number)
+    print(settings.telnyx_phone_number)
 """
 
 import os
@@ -25,6 +25,7 @@ class Settings:
     # ---- Server ----
     port: int = 7860
     environment: str = ""
+    log_level: str = ""
     base_url: str = ""
     pipecat_public_url: str = ""
     admin_url: str = ""
@@ -35,16 +36,33 @@ class Settings:
     db_pool_min: int = 5
     db_pool_max: int = 50
 
-    # ---- Twilio ----
+    # ---- Archived Twilio voice settings ----
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""
+
+    # ---- Telephony Provider ----
+    telephony_provider: str = "telnyx"
+
+    # ---- Telnyx ----
+    telnyx_api_key: str = ""
+    telnyx_public_key: str = ""
+    telnyx_phone_number: str = ""
+    telnyx_connection_id: str = ""
+    telnyx_stream_codec: str = "L16"
+    telnyx_stream_sample_rate: int = 16000
+    telnyx_stream_track: str = "inbound_track"
+    telnyx_bidirectional_target_legs: str = "both"
+    telnyx_l16_input_byte_order: str = "little"
+    telnyx_l16_output_byte_order: str = "little"
+    telnyx_webhook_tolerance_seconds: int = 300
 
     # ---- AI Services ----
     anthropic_api_key: str = ""
     deepgram_api_key: str = ""
     elevenlabs_api_key: str = ""
-    elevenlabs_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
+    elevenlabs_voice_id: str = "jixzNFANovqRhzplvmwR"
+    elevenlabs_model: str = "eleven_flash_v2_5"
     cartesia_api_key: str = ""
     cartesia_voice_id: str = "f786b574-daa5-4673-aa0c-cbe3e8534c02"
     google_api_key: str = ""
@@ -53,12 +71,18 @@ class Settings:
     cerebras_api_key: str = ""
     groq_api_key: str = ""
 
+    # ---- Audio ----
+    telephony_internal_input_sample_rate: int = 16000
+    elevenlabs_output_sample_rate: int = 44100
+    cartesia_output_sample_rate: int = 48000
+    gemini_internal_output_sample_rate: int = 24000
+
     # ---- Model Selection ----
     fast_observer_model: str = "gemini-3-flash-preview"
     cerebras_director_model: str = "gpt-oss-120b"
     groq_director_model: str = "openai/gpt-oss-20b"
     call_analysis_model: str = "gemini-3-flash-preview"
-    anthropic_model: str = "claude-sonnet-4-5-20250929"
+    anthropic_model: str = "claude-haiku-4-5-20251001"
 
     # ---- Auth ----
     jwt_secret: str = "donna-admin-secret-change-me"
@@ -89,14 +113,21 @@ class Settings:
 
     # ---- Feature Flags ----
     scheduler_enabled: bool = False
+    pipecat_retention_enabled: bool = False
+    voice_backend: str = ""
+    tts_provider: str = ""
+    telephony_ws_handshake_timeout_seconds: float = 5.0
 
     # ---- Data Retention (HIPAA) ----
     retention_conversations_days: int = 365
+    retention_conversation_metadata_days: int = 1095
     retention_memories_days: int = 730
     retention_call_analyses_days: int = 365
     retention_daily_context_days: int = 90
     retention_call_metrics_days: int = 180
     retention_reminder_deliveries_days: int = 90
+    retention_notifications_days: int = 180
+    retention_waitlist_days: int = 365
     retention_audit_logs_days: int = 2190
 
     @property
@@ -173,8 +204,25 @@ def validate_production_config() -> list[str]:
         errors.append("DONNA_API_KEYS must contain at least one labeled key")
     if not is_valid_field_encryption_key(field_key):
         errors.append("FIELD_ENCRYPTION_KEY must decode to 32 bytes")
-    if not os.getenv("TWILIO_AUTH_TOKEN", ""):
-        errors.append("TWILIO_AUTH_TOKEN is required")
+    telephony_provider = os.getenv("TELEPHONY_PROVIDER", "telnyx").lower()
+    if telephony_provider != "telnyx":
+        errors.append("TELEPHONY_PROVIDER must be telnyx for voice calls")
+    if os.getenv("TELNYX_STREAM_CODEC", "L16").upper() != "L16":
+        errors.append("TELNYX_STREAM_CODEC must be L16")
+    try:
+        telnyx_sample_rate = int(os.getenv("TELNYX_STREAM_SAMPLE_RATE", "16000"))
+    except ValueError:
+        telnyx_sample_rate = 0
+    if telnyx_sample_rate != 16000:
+        errors.append("TELNYX_STREAM_SAMPLE_RATE must be 16000")
+    if not os.getenv("TELNYX_API_KEY", ""):
+        errors.append("TELNYX_API_KEY is required")
+    if not os.getenv("TELNYX_PUBLIC_KEY", ""):
+        errors.append("TELNYX_PUBLIC_KEY is required")
+    if not os.getenv("TELNYX_PHONE_NUMBER", ""):
+        errors.append("TELNYX_PHONE_NUMBER is required")
+    if not os.getenv("TELNYX_CONNECTION_ID", ""):
+        errors.append("TELNYX_CONNECTION_ID is required")
     if not public_url or not public_url.startswith("https://"):
         errors.append("PIPECAT_PUBLIC_URL must be an https:// URL")
     if _truthy(os.getenv("PIPECAT_REQUIRE_REDIS")) and not os.getenv("REDIS_URL", ""):
@@ -198,10 +246,17 @@ def _load_settings() -> Settings:
     def _env(key: str, default: str = "") -> str:
         return os.environ.get(key, default)
 
+    def _env_int(key: str, default: int) -> int:
+        try:
+            return int(_env(key, str(default)))
+        except ValueError:
+            return default
+
     return Settings(
         # Server
         port=int(_env("PORT", "7860")),
         environment=_env("ENVIRONMENT"),
+        log_level=_env("LOG_LEVEL", "INFO" if is_production_environment() else "DEBUG"),
         base_url=_env("BASE_URL"),
         pipecat_public_url=_env("PIPECAT_PUBLIC_URL"),
         admin_url=_env("ADMIN_URL"),
@@ -210,15 +265,30 @@ def _load_settings() -> Settings:
         database_url=_env("DATABASE_URL"),
         db_pool_min=int(_env("DB_POOL_MIN", "5")),
         db_pool_max=int(_env("DB_POOL_MAX", "50")),
-        # Twilio
+        # Archived Twilio voice settings
         twilio_account_sid=_env("TWILIO_ACCOUNT_SID"),
         twilio_auth_token=_env("TWILIO_AUTH_TOKEN"),
         twilio_phone_number=_env("TWILIO_PHONE_NUMBER"),
+        # Telephony Provider
+        telephony_provider=_env("TELEPHONY_PROVIDER", "telnyx").lower(),
+        # Telnyx
+        telnyx_api_key=_env("TELNYX_API_KEY"),
+        telnyx_public_key=_env("TELNYX_PUBLIC_KEY"),
+        telnyx_phone_number=_env("TELNYX_PHONE_NUMBER"),
+        telnyx_connection_id=_env("TELNYX_CONNECTION_ID"),
+        telnyx_stream_codec=_env("TELNYX_STREAM_CODEC", "L16").upper(),
+        telnyx_stream_sample_rate=_env_int("TELNYX_STREAM_SAMPLE_RATE", 16000),
+        telnyx_stream_track=_env("TELNYX_STREAM_TRACK", "inbound_track"),
+        telnyx_bidirectional_target_legs=_env("TELNYX_BIDIRECTIONAL_TARGET_LEGS", "both"),
+        telnyx_l16_input_byte_order=_env("TELNYX_L16_INPUT_BYTE_ORDER", "little").lower(),
+        telnyx_l16_output_byte_order=_env("TELNYX_L16_OUTPUT_BYTE_ORDER", "little").lower(),
+        telnyx_webhook_tolerance_seconds=_env_int("TELNYX_WEBHOOK_TOLERANCE_SECONDS", 300),
         # AI Services
         anthropic_api_key=_env("ANTHROPIC_API_KEY"),
         deepgram_api_key=_env("DEEPGRAM_API_KEY"),
         elevenlabs_api_key=_env("ELEVENLABS_API_KEY"),
-        elevenlabs_voice_id=_env("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
+        elevenlabs_voice_id=_env("ELEVENLABS_VOICE_ID", "jixzNFANovqRhzplvmwR"),
+        elevenlabs_model=_env("ELEVENLABS_MODEL") or "eleven_flash_v2_5",
         cartesia_api_key=_env("CARTESIA_API_KEY"),
         cartesia_voice_id=_env("CARTESIA_VOICE_ID", "f786b574-daa5-4673-aa0c-cbe3e8534c02"),
         google_api_key=_env("GOOGLE_API_KEY"),
@@ -226,12 +296,17 @@ def _load_settings() -> Settings:
         tavily_api_key=_env("TAVILY_API_KEY"),
         cerebras_api_key=_env("CEREBRAS_API_KEY"),
         groq_api_key=_env("GROQ_API_KEY"),
+        # Audio
+        telephony_internal_input_sample_rate=_env_int("TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE", 16000),
+        elevenlabs_output_sample_rate=_env_int("ELEVENLABS_OUTPUT_SAMPLE_RATE", 44100),
+        cartesia_output_sample_rate=_env_int("CARTESIA_OUTPUT_SAMPLE_RATE", 48000),
+        gemini_internal_output_sample_rate=_env_int("GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE", 24000),
         # Model Selection
         fast_observer_model=_env("FAST_OBSERVER_MODEL", "gemini-3-flash-preview"),
         cerebras_director_model=_env("CEREBRAS_DIRECTOR_MODEL", "gpt-oss-120b"),
         groq_director_model=_env("GROQ_DIRECTOR_MODEL", "openai/gpt-oss-20b"),
         call_analysis_model=_env("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview"),
-        anthropic_model=_env("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"),
+        anthropic_model=_env("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
         # Auth
         jwt_secret=_env("JWT_SECRET", "donna-admin-secret-change-me"),
         jwt_secret_previous=_env("JWT_SECRET_PREVIOUS"),
@@ -256,16 +331,31 @@ def _load_settings() -> Settings:
         field_encryption_key=_env("FIELD_ENCRYPTION_KEY"),
         # Feature Flags
         scheduler_enabled=_env("SCHEDULER_ENABLED", "false").lower() == "true",
+        pipecat_retention_enabled=_truthy(_env("PIPECAT_RETENTION_ENABLED")),
+        voice_backend=_env("VOICE_BACKEND"),
+        tts_provider=_env("TTS_PROVIDER"),
+        telephony_ws_handshake_timeout_seconds=float(
+            _env("TELEPHONY_WS_HANDSHAKE_TIMEOUT_SECONDS", _env("TWILIO_WS_HANDSHAKE_TIMEOUT_SECONDS", "5"))
+        ),
         # Data Retention (HIPAA)
         retention_conversations_days=int(_env("RETENTION_CONVERSATIONS_DAYS", "365")),
+        retention_conversation_metadata_days=int(_env("RETENTION_CONVERSATION_METADATA_DAYS", "1095")),
         retention_memories_days=int(_env("RETENTION_MEMORIES_DAYS", "730")),
         retention_call_analyses_days=int(_env("RETENTION_CALL_ANALYSES_DAYS", "365")),
         retention_daily_context_days=int(_env("RETENTION_DAILY_CONTEXT_DAYS", "90")),
         retention_call_metrics_days=int(_env("RETENTION_CALL_METRICS_DAYS", "180")),
         retention_reminder_deliveries_days=int(_env("RETENTION_REMINDER_DELIVERIES_DAYS", "90")),
+        retention_notifications_days=int(_env("RETENTION_NOTIFICATIONS_DAYS", "180")),
+        retention_waitlist_days=int(_env("RETENTION_WAITLIST_DAYS", "365")),
         retention_audit_logs_days=int(_env("RETENTION_AUDIT_LOGS_DAYS", "2190")),
     )
 
 
 # Module-level accessor — import this
 settings = _load_settings()
+
+
+def get_settings() -> Settings:
+    """Return a fresh settings snapshot for code paths that rely on env overrides."""
+    _load_settings.cache_clear()
+    return _load_settings()

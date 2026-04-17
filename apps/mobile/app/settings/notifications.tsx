@@ -94,7 +94,10 @@ export default function NotificationPreferencesScreen() {
         { text: "OK", onPress: () => router.back() },
       ]);
     } catch {
-      Alert.alert("Error", "Failed to update preferences. Please try again.");
+      Alert.alert(
+        "Couldn't Save",
+        "We couldn't save your notification preferences. Your choices are still here. Check your connection and try again.",
+      );
     }
   };
 

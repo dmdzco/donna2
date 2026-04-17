@@ -21,6 +21,8 @@ import { COLORS } from "@/src/constants/theme";
 import { Modal } from "@/src/components/ui/Modal";
 import { Button } from "@/src/components/ui/Button";
 import { api, getErrorMessage } from "@/src/lib/api";
+import { useStableIdempotencyKey } from "@/src/hooks/useStableIdempotencyKey";
+import { clearOnboardingDraft } from "@/src/stores/onboarding";
 
 type SettingsRow = {
   icon: React.ReactNode;
@@ -75,6 +77,7 @@ export default function SettingsScreen() {
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const deleteAccountIdempotency = useStableIdempotencyKey("account-delete");
 
   const PROFILE_ROWS: SettingsRow[] = [
     {
@@ -132,6 +135,7 @@ export default function SettingsScreen() {
     }
 
     try {
+      await clearOnboardingDraft();
       await SecureStore.deleteItemAsync("__clerk_client_jwt");
     } catch {}
 
@@ -165,7 +169,10 @@ export default function SettingsScreen() {
         throw new Error(t("settings.signInAgain"));
       }
 
-      const result = await api.account.delete(token);
+      const result = await api.account.delete(token, {
+        idempotencyKey: deleteAccountIdempotency.getKey({ action: "delete-account" }),
+      });
+      deleteAccountIdempotency.reset();
       const message =
         result.message ?? t("settings.accountDeletedMessage");
 
@@ -177,7 +184,11 @@ export default function SettingsScreen() {
       setShowDeleteAccountModal(false);
       Alert.alert(
         t("settings.deleteAccountFailed"),
-        getErrorMessage(error, t("settings.deleteAccountFailedMessage"))
+        getErrorMessage(
+          error,
+          t("settings.deleteAccountFailedMessage"),
+          "delete",
+        )
       );
     }
   };

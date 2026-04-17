@@ -50,18 +50,23 @@ export interface CallAnalysis {
   conversationId: string;
   seniorId: string;
   summary?: string;
+  sentiment?: string;
+  mood?: string;
   topics?: string[];
   engagementScore?: number;
   concerns?: Array<string | Record<string, unknown>>;
   positiveObservations?: string[];
   followUpSuggestions?: string[];
+  caregiverSms?: string | null;
+  caregiverTakeaways?: string[];
+  recommendedCaregiverAction?: string | null;
   callQuality?: Record<string, unknown> | string | null;
 }
 
 /**
  * Matches the notification_preferences table in the backend.
  * Fields correspond to: callCompleted, concernDetected, reminderMissed,
- * weeklySummary, smsEnabled, emailEnabled, quietHours*, timezone,
+ * weeklySummary, smsEnabled (legacy inactive), emailEnabled, quietHours*, timezone,
  * weeklyReport*.
  */
 export interface NotificationPreferences {
@@ -70,7 +75,7 @@ export interface NotificationPreferences {
   concernDetected?: boolean;
   reminderMissed?: boolean;
   weeklySummary?: boolean;
-  smsEnabled?: boolean;
+  smsEnabled?: boolean; // Legacy compatibility only; SMS notifications are inactive.
   emailEnabled?: boolean;
   quietHoursStart?: string | null;
   quietHoursEnd?: string | null;

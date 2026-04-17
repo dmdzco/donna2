@@ -11,6 +11,7 @@ from datetime import datetime, timezone, timedelta
 from loguru import logger
 from db import query_one, query_many, execute
 from lib.encryption import encrypt, decrypt, encrypt_json, decrypt_json
+from services.time_context import format_call_time_label
 
 
 async def create(senior_id: str | None, call_sid: str, prospect_id: str | None = None) -> dict:
@@ -49,21 +50,19 @@ async def complete(call_sid: str, data: dict) -> dict | None:
              ended_at = NOW(),
              duration_seconds = $1,
              status = $2,
-             summary = $3,
-             call_metrics = $4,
-             sentiment = $5,
-             concerns = $6,
-             summary_encrypted = $7,
-             transcript_encrypted = $8,
-             transcript_text_encrypted = $9
-           WHERE call_sid = $10
+             summary = NULL,
+             call_metrics = $3,
+             sentiment = $4,
+             concerns = NULL,
+             summary_encrypted = $5,
+             transcript_encrypted = $6,
+             transcript_text_encrypted = $7
+           WHERE call_sid = $8
            RETURNING *""",
         data.get("duration_seconds"),
         data.get("status", "completed"),
-        summary_raw,
         json.dumps(data["call_metrics"]) if data.get("call_metrics") else None,
         data.get("sentiment"),
-        data.get("concerns"),
         encrypt(summary_raw),
         encrypt_json(transcript) if transcript else None,
         encrypt(transcript_text),
@@ -207,7 +206,7 @@ async def get_transcript_by_call_sid(call_sid: str):
 
 
 async def get_by_call_sid(call_sid: str) -> dict | None:
-    """Get a conversation by its Twilio call SID."""
+    """Get a conversation by provider call id."""
     return await query_one(
         """SELECT id, senior_id, call_sid, started_at, ended_at,
                   duration_seconds, status, summary, sentiment, concerns
@@ -227,16 +226,20 @@ async def get_for_senior(senior_id: str, limit: int = 10) -> list[dict]:
     )
 
 
-async def update_summary(call_sid: str, summary: str) -> dict | None:
-    """Update conversation summary (called after post-call analysis)."""
+async def update_summary(
+    call_sid: str, summary: str, sentiment: str | None = None
+) -> dict | None:
+    """Update conversation summary and optional sentiment after post-call analysis."""
     try:
         row = await query_one(
             """UPDATE conversations
-               SET summary = $1, summary_encrypted = $2
+               SET summary = NULL,
+                   summary_encrypted = $1,
+                   sentiment = COALESCE($2, sentiment)
                WHERE call_sid = $3
                RETURNING *""",
-            summary,
             encrypt(summary),
+            sentiment,
             call_sid,
         )
         if row:
@@ -247,7 +250,11 @@ async def update_summary(call_sid: str, summary: str) -> dict | None:
         return None
 
 
-async def get_recent_summaries(senior_id: str, limit: int = 3) -> str | None:
+async def get_recent_summaries(
+    senior_id: str,
+    limit: int = 3,
+    timezone_name: str = "America/New_York",
+) -> str | None:
     """Get recent call summaries formatted as a context string."""
     rows = await query_many(
         """SELECT summary, summary_encrypted, started_at, duration_seconds
@@ -255,7 +262,7 @@ async def get_recent_summaries(senior_id: str, limit: int = 3) -> str | None:
            WHERE senior_id = $1
              AND status = 'completed'
              AND (summary IS NOT NULL OR summary_encrypted IS NOT NULL)
-             AND (summary != '' OR summary_encrypted IS NOT NULL)
+             AND (COALESCE(summary, '') != '' OR summary_encrypted IS NOT NULL)
            ORDER BY started_at DESC
            LIMIT $2""",
         senior_id,
@@ -264,20 +271,11 @@ async def get_recent_summaries(senior_id: str, limit: int = 3) -> str | None:
     if not rows:
         return None
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(timezone.utc)
     lines = []
     for row in rows:
         started_at = row["started_at"]
-        if started_at.tzinfo is not None:
-            started_at = started_at.replace(tzinfo=None)
-        delta = now - started_at
-        days_ago = delta.days
-        if days_ago == 0:
-            time_ago = "Earlier today"
-        elif days_ago == 1:
-            time_ago = "Yesterday"
-        else:
-            time_ago = f"{days_ago} days ago"
+        time_ago = format_call_time_label(started_at, timezone_name, now=now)
         duration = f"({round(row['duration_seconds'] / 60)} min)" if row.get("duration_seconds") else ""
         summary = decrypt(row.get("summary_encrypted")) if row.get("summary_encrypted") else row.get("summary")
         if summary and summary != "[encrypted]":
@@ -286,7 +284,13 @@ async def get_recent_summaries(senior_id: str, limit: int = 3) -> str | None:
     return "\n".join(lines) if lines else None
 
 
-async def get_recent_turns(senior_id: str, max_calls: int = 3, turns_per_call: int = 7, max_turns: int = 20) -> str | None:
+async def get_recent_turns(
+    senior_id: str,
+    max_calls: int = 3,
+    turns_per_call: int = 7,
+    max_turns: int = 20,
+    timezone_name: str = "America/New_York",
+) -> str | None:
     """Get recent turns from previous calls as formatted text for system prompt.
 
     Pulls the last `max_calls` completed calls with transcripts, takes the last
@@ -307,7 +311,7 @@ async def get_recent_turns(senior_id: str, max_calls: int = 3, turns_per_call: i
     if not rows:
         return None
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(timezone.utc)
     sections: list[str] = []
     total_turns = 0
 
@@ -326,18 +330,8 @@ async def get_recent_turns(senior_id: str, max_calls: int = 3, turns_per_call: i
             # Take last N turns from this call
             recent = transcript[-turns_per_call:]
 
-            # Time label
             started_at = row["started_at"]
-            if started_at.tzinfo is not None:
-                started_at = started_at.replace(tzinfo=None)
-            delta = now - started_at
-            days_ago = delta.days
-            if days_ago == 0:
-                time_label = "Earlier today"
-            elif days_ago == 1:
-                time_label = "Yesterday"
-            else:
-                time_label = f"{days_ago} days ago"
+            time_label = format_call_time_label(started_at, timezone_name, now=now)
 
             duration = row.get("duration_seconds")
             dur_str = f" ({math.ceil(duration / 60)} min)" if duration else ""

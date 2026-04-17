@@ -942,7 +942,7 @@ export default function Dashboard() {
                       concernDetected: notifPrefs?.concernDetected ?? true,
                       reminderMissed: notifPrefs?.reminderMissed ?? true,
                       weeklySummary: notifPrefs?.weeklySummary ?? true,
-                      smsEnabled: notifPrefs?.smsEnabled ?? true,
+                      smsEnabled: false,
                       emailEnabled: notifPrefs?.emailEnabled ?? true,
                       quietHoursStart: notifPrefs?.quietHoursStart ?? null,
                       quietHoursEnd: notifPrefs?.quietHoursEnd ?? null,
@@ -1013,15 +1013,6 @@ export default function Dashboard() {
               <div className="notif-section">
                 <h4 className="notif-section-title">Channels</h4>
                 <div className="notif-toggle-list">
-                  <label className="toggle-row">
-                    <span className="toggle-label">SMS notifications</span>
-                    <div
-                      className={`toggle-switch ${(isEditingNotifs ? editedNotifPrefs.smsEnabled : notifPrefs?.smsEnabled ?? true) ? 'active' : ''}`}
-                      onClick={() => isEditingNotifs && setEditedNotifPrefs({ ...editedNotifPrefs, smsEnabled: !editedNotifPrefs.smsEnabled })}
-                    >
-                      <div className="toggle-slider" />
-                    </div>
-                  </label>
                   <label className="toggle-row">
                     <span className="toggle-label">Email notifications</span>
                     <div

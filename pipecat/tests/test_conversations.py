@@ -52,10 +52,12 @@ class TestComplete:
             await complete("CA-1", {"transcript": transcript})
             args = mock_q.call_args[0]
             sql = args[0]
-            assert "transcript_encrypted = $8" in sql
-            assert "transcript_text_encrypted = $9" in sql
+            assert "summary = NULL" in sql
+            assert "concerns = NULL" in sql
+            assert "transcript_encrypted = $6" in sql
+            assert "transcript_text_encrypted = $7" in sql
             assert "transcript = $" not in sql
-            assert json.loads(args[8]) == transcript
+            assert json.loads(args[6]) == transcript
 
     @pytest.mark.asyncio
     async def test_writes_encrypted_text_transcript(self):
@@ -67,7 +69,7 @@ class TestComplete:
             ]
             await complete("CA-1", {"transcript": transcript})
             args = mock_q.call_args[0]
-            assert args[9] == "Senior: hello\nDonna: Hi there"
+            assert args[7] == "Senior: hello\nDonna: Hi there"
 
 
 class TestTranscriptPersistence:
@@ -162,6 +164,18 @@ class TestUpdateSummary:
             from services.conversations import update_summary
             result = await update_summary("CA-1", "Good call")
             assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_updates_summary_and_sentiment(self):
+        with patch("services.conversations.query_one", new_callable=AsyncMock, return_value={"id": "c1"}) as mock_q:
+            from services.conversations import update_summary
+            await update_summary("CA-1", "Good call", "positive")
+            args = mock_q.call_args[0]
+            sql = args[0]
+            assert "summary_encrypted = $1" in sql
+            assert "sentiment = COALESCE($2, sentiment)" in sql
+            assert args[2] == "positive"
+            assert args[3] == "CA-1"
 
     @pytest.mark.asyncio
     async def test_returns_none_on_error(self):

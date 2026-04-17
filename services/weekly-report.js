@@ -2,6 +2,7 @@ import { db } from '../db/client.js';
 import { callAnalyses, conversations, reminderDeliveries, reminders, seniors } from '../db/schema.js';
 import { eq, and, gte, lte, sql } from 'drizzle-orm';
 import { createLogger } from '../lib/logger.js';
+import { normalizeCallAnalysis } from './call-analyses.js';
 
 const log = createLogger('WeeklyReport');
 
@@ -19,13 +20,14 @@ export const weeklyReportService = {
     const seniorName = senior?.name || 'Your loved one';
 
     // 2. Query call analyses for the week
-    const analyses = await db.select()
+    const analysisRows = await db.select()
       .from(callAnalyses)
       .where(and(
         eq(callAnalyses.seniorId, seniorId),
         gte(callAnalyses.createdAt, startDate),
         lte(callAnalyses.createdAt, endDate),
       ));
+    const analyses = analysisRows.map(normalizeCallAnalysis).filter(Boolean);
 
     // 3. Query conversations for call count + total duration
     const calls = await db.select({

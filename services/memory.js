@@ -119,7 +119,7 @@ export const memoryService = {
     const [memory] = await db.insert(memories).values({
       seniorId,
       type,
-      content,
+      content: '[encrypted]',
       contentEncrypted: encrypt(content),
       source,
       importance,
@@ -128,7 +128,7 @@ export const memoryService = {
     }).returning();
 
     log.info('Stored', { seniorRef: String(seniorId).slice(0, 8), type, contentLength: content.length });
-    return memory;
+    return decryptMemoryRows([memory])[0];
   },
 
   // Semantic search - find memories similar to query

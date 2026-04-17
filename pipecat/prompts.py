@@ -34,6 +34,17 @@ CRISIS RESPONSE: If someone expresses thoughts of self-harm, suicide, or wanting
 
 
 # ---------------------------------------------------------------------------
+# Language instructions
+# ---------------------------------------------------------------------------
+
+SPANISH_LANGUAGE_INSTRUCTION = (
+    "\nLANGUAGE: You MUST speak entirely in Spanish for this call. "
+    "The caregiver has configured Donna to speak Spanish with this person. "
+    "All greetings, conversation, reminders, and goodbyes must be in Spanish. "
+    "Use warm, natural Latin American Spanish. Do NOT mix in English words or phrases."
+)
+
+# ---------------------------------------------------------------------------
 # Greeting instructions (prepended to initial phase task)
 # ---------------------------------------------------------------------------
 

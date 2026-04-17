@@ -126,29 +126,40 @@ async def prepare_websocket_call(
 
 
 def create_tts_service(session_state: dict):
-    """Select TTS provider based on feature flag.
+    """Select TTS provider based on feature flag and language.
 
     Uses session_state["_flags"]["tts_provider"] to pick Cartesia or ElevenLabs.
     Falls back to ElevenLabs if Cartesia key is missing or flag is unset.
+    When Donna's language is Spanish, uses a Spanish-capable voice.
     """
     flags = session_state.get("_flags", {})
     provider = os.getenv("TTS_PROVIDER") or flags.get("tts_provider", "elevenlabs")
+    donna_lang = session_state.get("_donna_language", "en")
 
     if provider == "cartesia" and os.getenv("CARTESIA_API_KEY"):
-        logger.info("TTS provider: Cartesia Sonic 3")
+        # Cartesia Spanish voice (warm female) or default English
+        voice_id = os.getenv("CARTESIA_VOICE_ID", "1242fb95-7ddd-44ac-8a05-9e8a22a6137d")
+        if donna_lang == "es":
+            voice_id = os.getenv("CARTESIA_VOICE_ID_ES", voice_id)
+        logger.info("TTS provider: Cartesia Sonic 3 (lang={lang})", lang=donna_lang)
         return CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY", ""),
-            voice_id=os.getenv("CARTESIA_VOICE_ID", "1242fb95-7ddd-44ac-8a05-9e8a22a6137d"),
+            voice_id=voice_id,
             model="sonic-3",
             params=CartesiaTTSService.InputParams(
                 generation_config=GenerationConfig(speed=1.05, volume=1.2, emotion="enthusiastic"),
+                language=("es" if donna_lang == "es" else "en"),
             ),
         )
 
-    logger.info("TTS provider: ElevenLabs")
+    # ElevenLabs: use Spanish voice ID if configured, otherwise default
+    voice_id = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+    if donna_lang == "es":
+        voice_id = os.getenv("ELEVENLABS_VOICE_ID_ES", voice_id)
+    logger.info("TTS provider: ElevenLabs (lang={lang})", lang=donna_lang)
     return ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
+        voice_id=voice_id,
         model="eleven_turbo_v2_5",
         params=ElevenLabsTTSService.InputParams(speed=0.9),
     )
@@ -411,11 +422,25 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             model="claude-sonnet-4-5-20250929",
         )
     else:
+        # Resolve Donna's conversation language from senior's familyInfo
+        _senior = session_state.get("senior") or {}
+        _family_info = _senior.get("family_info") or _senior.get("familyInfo") or {}
+        if isinstance(_family_info, str):
+            import json as _json
+            try:
+                _family_info = _json.loads(_family_info)
+            except Exception:
+                _family_info = {}
+        _donna_lang = _family_info.get("donnaLanguage", "en")
+        _stt_language = "es" if _donna_lang == "es" else "en"
+        # Store resolved language for TTS selection
+        session_state["_donna_language"] = _donna_lang
+
         stt = DeepgramSTTService(
             api_key=os.getenv("DEEPGRAM_API_KEY", ""),
             live_options=LiveOptions(
                 model="nova-3-general",
-                language="en",
+                language=_stt_language,
                 sample_rate=8000,
                 encoding="linear16",
                 channels=1,

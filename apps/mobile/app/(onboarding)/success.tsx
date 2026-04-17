@@ -191,6 +191,7 @@ export default function SuccessScreen() {
         relation: store.relationship,
         interests: selectedInterestIds,
         familyInfo: {
+          donnaLanguage: store.donnaLanguage || "en",
           interestDetails:
             Object.keys(interestDetails).length > 0
               ? interestDetails

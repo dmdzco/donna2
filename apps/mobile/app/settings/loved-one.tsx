@@ -37,6 +37,7 @@ export default function LovedOneProfileScreen() {
   const [expandedInterest, setExpandedInterest] = useState<string | null>(null);
   const [additionalTopics, setAdditionalTopics] = useState("");
   const [topicsToAvoid, setTopicsToAvoid] = useState("");
+  const [donnaLanguage, setDonnaLanguage] = useState<"en" | "es">("en");
 
   // Pre-fill form when senior data loads
   useEffect(() => {
@@ -53,6 +54,7 @@ export default function LovedOneProfileScreen() {
       );
       setAdditionalTopics(senior.additionalInfo ?? "");
       setTopicsToAvoid((family?.topicsToAvoid as string) ?? "");
+      setDonnaLanguage((family?.donnaLanguage as "en" | "es") ?? "en");
     }
   }, [senior]);
 
@@ -81,6 +83,7 @@ export default function LovedOneProfileScreen() {
         familyInfo: {
           interestDetails,
           topicsToAvoid: topicsToAvoid.trim(),
+          donnaLanguage,
         } as unknown as Record<string, string>,
       });
       router.replace("/(tabs)/settings");
@@ -126,7 +129,7 @@ export default function LovedOneProfileScreen() {
         {/* Scrollable Form */}
         <ScrollView
           className="flex-1 px-6"
-          contentContainerStyle={{ paddingBottom: 120 }}
+          contentContainerStyle={{ paddingBottom: 200 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -290,6 +293,61 @@ export default function LovedOneProfileScreen() {
               numberOfLines={3}
               style={{ minHeight: 80, textAlignVertical: "top" }}
             />
+          </View>
+
+          {/* Donna Language */}
+          <View className="mt-8">
+            <Text className="text-[13px] font-medium text-muted uppercase tracking-wider mb-3">
+              Donna's Language
+            </Text>
+            <Text className="text-[14px] text-muted mb-3">
+              What language should Donna speak in when calling{" "}
+              {name || "your loved one"}?
+            </Text>
+            <View className="flex-row gap-2">
+              <Pressable
+                onPress={() => setDonnaLanguage("en")}
+                className={`flex-1 flex-row items-center justify-center py-3 rounded-xl border-2 ${
+                  donnaLanguage === "en"
+                    ? "border-sage bg-sage/5"
+                    : "border-charcoal/10 bg-white"
+                }`}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: donnaLanguage === "en" }}
+                accessibilityLabel="English"
+                style={{ minHeight: 48 }}
+              >
+                <Text className="text-[16px] mr-2">{"\ud83c\uddfa\ud83c\uddf8"}</Text>
+                <Text
+                  className={`text-[15px] font-medium ${
+                    donnaLanguage === "en" ? "text-sage" : "text-charcoal"
+                  }`}
+                >
+                  English
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setDonnaLanguage("es")}
+                className={`flex-1 flex-row items-center justify-center py-3 rounded-xl border-2 ${
+                  donnaLanguage === "es"
+                    ? "border-sage bg-sage/5"
+                    : "border-charcoal/10 bg-white"
+                }`}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: donnaLanguage === "es" }}
+                accessibilityLabel="Spanish"
+                style={{ minHeight: 48 }}
+              >
+                <Text className="text-[16px] mr-2">{"\ud83c\uddf2\ud83c\uddfd"}</Text>
+                <Text
+                  className={`text-[15px] font-medium ${
+                    donnaLanguage === "es" ? "text-sage" : "text-charcoal"
+                  }`}
+                >
+                  Spanish
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </ScrollView>
 

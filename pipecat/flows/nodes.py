@@ -103,6 +103,19 @@ def _build_senior_context(session_state: dict) -> str:
     location_note = f" They live in {location}." if location else ""
     parts.append(f"You are speaking with {first_name}.{location_note}")
 
+    # Donna's conversation language (set by caregiver)
+    family_info = senior.get("family_info") or senior.get("familyInfo") or {}
+    if isinstance(family_info, str):
+        import json as _json
+        try:
+            family_info = _json.loads(family_info)
+        except Exception:
+            family_info = {}
+    donna_language = family_info.get("donnaLanguage", "en")
+    if donna_language == "es":
+        from prompts import SPANISH_LANGUAGE_INSTRUCTION
+        parts.append(SPANISH_LANGUAGE_INSTRUCTION)
+
     interests = senior.get("interests") or []
     if interests:
         parts.append(f"They enjoy: {', '.join(interests)}.")

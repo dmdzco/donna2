@@ -96,7 +96,7 @@ export default function Step4Screen() {
         >
           {/* Progress */}
           <View className="mt-4 mb-4">
-            <ProgressBar current={4} total={5} />
+            <ProgressBar current={5} total={6} />
           </View>
 
           {/* Back */}

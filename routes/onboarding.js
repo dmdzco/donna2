@@ -45,6 +45,7 @@ router.post('/api/onboarding', requireAuth, writeLimiter, validateBody(onboardin
       // Store interest details and other consumer data in familyInfo
       familyInfo: {
         relation,
+        donnaLanguage: clientFamilyInfo?.donnaLanguage || 'en',
         interestDetails: clientFamilyInfo?.interestDetails || {},
       },
       // Store call schedule and topics to avoid in preferredCallTimes

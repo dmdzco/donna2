@@ -1,4 +1,5 @@
 import "../global.css";
+import "@/src/i18n";
 import { useEffect } from "react";
 import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";
@@ -52,17 +53,17 @@ function AuthGuard() {
       if (!profileLoading && profileError) {
         const needsOnboarding = profileErrorObj instanceof ApiError && profileErrorObj.needsOnboarding;
         if (needsOnboarding) {
-          router.replace("/(onboarding)/step1" as any);
+          router.replace("/(onboarding)/language" as any);
         } else {
           router.replace("/(tabs)");
         }
       } else if (!profileLoading && !hasCompletedOnboarding) {
-        router.replace("/(onboarding)/step1" as any);
+        router.replace("/(onboarding)/language" as any);
       } else if (hasCompletedOnboarding) {
         router.replace("/(tabs)");
       }
     } else if (isSignedIn && inTabsGroup && !profileLoading && !profileError && !hasCompletedOnboarding) {
-      router.replace("/(onboarding)/step1" as any);
+      router.replace("/(onboarding)/language" as any);
     }
   }, [isLoaded, isSignedIn, pathname, segments, profile, profileLoading, profileError, profileErrorObj]);
 

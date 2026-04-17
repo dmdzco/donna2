@@ -15,6 +15,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Button } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/src/lib/api";
 import {
   useOnboardingStore,
@@ -144,6 +145,7 @@ function ConfettiCircle({
 export default function SuccessScreen() {
   const router = useRouter();
   const { getToken } = useAuth();
+  const queryClient = useQueryClient();
   const store = useOnboardingStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -209,6 +211,7 @@ export default function SuccessScreen() {
 
       await api.onboarding.complete(payload, token!);
 
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
       store.reset();
       router.replace("/(tabs)");
     } catch (err: unknown) {

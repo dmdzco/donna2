@@ -53,17 +53,17 @@ function AuthGuard() {
       if (!profileLoading && profileError) {
         const needsOnboarding = profileErrorObj instanceof ApiError && profileErrorObj.needsOnboarding;
         if (needsOnboarding) {
-          router.replace("/(onboarding)/language" as any);
+          router.replace("/(onboarding)/step1" as any);
         } else {
           router.replace("/(tabs)");
         }
       } else if (!profileLoading && !hasCompletedOnboarding) {
-        router.replace("/(onboarding)/language" as any);
+        router.replace("/(onboarding)/step1" as any);
       } else if (hasCompletedOnboarding) {
         router.replace("/(tabs)");
       }
     } else if (isSignedIn && inTabsGroup && !profileLoading && !profileError && !hasCompletedOnboarding) {
-      router.replace("/(onboarding)/language" as any);
+      router.replace("/(onboarding)/step1" as any);
     }
   }, [isLoaded, isSignedIn, pathname, segments, profile, profileLoading, profileError, profileErrorObj]);
 

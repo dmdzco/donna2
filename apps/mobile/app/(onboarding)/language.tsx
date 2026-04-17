@@ -22,7 +22,7 @@ export default function LanguageScreen() {
       <View className="flex-1 px-6">
         {/* Progress */}
         <View className="mt-4 mb-4">
-          <ProgressBar current={1} total={6} />
+          <ProgressBar current={3} total={6} />
         </View>
 
         {/* Back */}
@@ -82,7 +82,7 @@ export default function LanguageScreen() {
       <View className="bg-cream border-t border-charcoal/10 px-6 pt-4 pb-8">
         <Button
           title={t("common.next")}
-          onPress={() => router.push("/(onboarding)/step1")}
+          onPress={() => router.push("/(onboarding)/step3")}
         />
       </View>
     </SafeAreaView>

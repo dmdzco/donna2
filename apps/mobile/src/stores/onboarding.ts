@@ -1,12 +1,4 @@
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
-import * as SecureStore from "expo-secure-store";
-
-const secureStorage = {
-  getItem: (name: string) => SecureStore.getItemAsync(name),
-  setItem: (name: string, value: string) => SecureStore.setItemAsync(name, value),
-  removeItem: (name: string) => SecureStore.deleteItemAsync(name),
-};
 
 export interface OnboardingCall {
   title: string;
@@ -94,74 +86,68 @@ const INITIAL_STATE = {
 };
 
 export const useOnboardingStore = create<OnboardingState>()(
-  persist(
-    (set) => ({
-      ...INITIAL_STATE,
+  (set) => ({
+    ...INITIAL_STATE,
 
-      setField: (field, value) => set({ [field]: value }),
+    setField: (field, value) => set({ [field]: value }),
 
-      addReminder: () =>
-        set((s) => ({
-          reminders: [...s.reminders, { title: "", description: "" }],
-        })),
+    addReminder: () =>
+      set((s) => ({
+        reminders: [...s.reminders, { title: "", description: "" }],
+      })),
 
-      removeReminder: (index) =>
-        set((s) => ({
-          reminders: s.reminders.filter((_, i) => i !== index),
-        })),
+    removeReminder: (index) =>
+      set((s) => ({
+        reminders: s.reminders.filter((_, i) => i !== index),
+      })),
 
-      updateReminder: (index, field, value) =>
-        set((s) => ({
-          reminders: s.reminders.map((r, i) =>
-            i === index ? { ...r, [field]: value } : r,
-          ),
-        })),
+    updateReminder: (index, field, value) =>
+      set((s) => ({
+        reminders: s.reminders.map((r, i) =>
+          i === index ? { ...r, [field]: value } : r,
+        ),
+      })),
 
-      addCall: () =>
-        set((s) => ({
-          calls: [...s.calls, { ...DEFAULT_CALL }],
-        })),
+    addCall: () =>
+      set((s) => ({
+        calls: [...s.calls, { ...DEFAULT_CALL }],
+      })),
 
-      removeCall: (index) =>
-        set((s) => ({
-          calls: s.calls.filter((_, i) => i !== index),
-        })),
+    removeCall: (index) =>
+      set((s) => ({
+        calls: s.calls.filter((_, i) => i !== index),
+      })),
 
-      updateCall: (index, field, value) =>
-        set((s) => ({
-          calls: s.calls.map((c, i) =>
-            i === index ? { ...c, [field]: value } : c,
-          ),
-        })),
+    updateCall: (index, field, value) =>
+      set((s) => ({
+        calls: s.calls.map((c, i) =>
+          i === index ? { ...c, [field]: value } : c,
+        ),
+      })),
 
-      toggleInterest: (id) =>
-        set((s) => {
-          const next = { ...s.selectedInterests };
-          if (id in next) {
-            delete next[id];
-          } else {
-            next[id] = "";
-          }
-          return { selectedInterests: next };
-        }),
-
-      updateInterestDetail: (id, value) =>
-        set((s) => ({
-          selectedInterests: { ...s.selectedInterests, [id]: value },
-        })),
-
-      removeInterest: (id) =>
-        set((s) => {
-          const next = { ...s.selectedInterests };
+    toggleInterest: (id) =>
+      set((s) => {
+        const next = { ...s.selectedInterests };
+        if (id in next) {
           delete next[id];
-          return { selectedInterests: next };
-        }),
+        } else {
+          next[id] = "";
+        }
+        return { selectedInterests: next };
+      }),
 
-      reset: () => set(INITIAL_STATE),
-    }),
-    {
-      name: "donna-onboarding",
-      storage: createJSONStorage(() => secureStorage),
-    }
-  )
+    updateInterestDetail: (id, value) =>
+      set((s) => ({
+        selectedInterests: { ...s.selectedInterests, [id]: value },
+      })),
+
+    removeInterest: (id) =>
+      set((s) => {
+        const next = { ...s.selectedInterests };
+        delete next[id];
+        return { selectedInterests: next };
+      }),
+
+    reset: () => set(INITIAL_STATE),
+  })
 );

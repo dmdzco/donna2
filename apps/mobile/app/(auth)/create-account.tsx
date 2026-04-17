@@ -84,10 +84,10 @@ export default function CreateAccountScreen() {
       if (profile.seniors?.length > 0) {
         router.replace("/(tabs)");
       } else {
-        router.replace("/(onboarding)/language");
+        router.replace("/(onboarding)/step1");
       }
     } catch {
-      router.replace("/(onboarding)/language" as any);
+      router.replace("/(onboarding)/step1" as any);
     }
   }
 

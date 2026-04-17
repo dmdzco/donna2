@@ -52,7 +52,7 @@ export default function Step1Screen() {
         >
           {/* Progress */}
           <View className="mt-4 mb-4">
-            <ProgressBar current={2} total={6} />
+            <ProgressBar current={1} total={6} />
           </View>
 
           {/* Back */}

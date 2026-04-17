@@ -44,7 +44,7 @@ export default function Step2Screen() {
 
   function handleNext() {
     if (validate()) {
-      router.push("/(onboarding)/step3");
+      router.push("/(onboarding)/language");
     }
   }
 
@@ -61,7 +61,7 @@ export default function Step2Screen() {
         >
           {/* Progress */}
           <View className="mt-4 mb-4">
-            <ProgressBar current={3} total={6} />
+            <ProgressBar current={2} total={6} />
           </View>
 
           {/* Back */}

@@ -24,7 +24,7 @@ export default function TabLayout() {
 
   useEffect(() => {
     if (profile && (!profile.seniors || profile.seniors.length === 0)) {
-      router.replace("/(onboarding)/language");
+      router.replace("/(onboarding)/step1");
     }
   }, [profile]);
 

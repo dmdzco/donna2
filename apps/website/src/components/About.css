@@ -1,0 +1,139 @@
+.about {
+  padding: var(--section-padding);
+  background: var(--color-white);
+}
+
+.about__header {
+  margin-bottom: 48px;
+}
+
+.about__inner {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 64px;
+  align-items: start;
+}
+
+.about__text {
+  font-size: 1.05rem;
+  color: #555;
+  line-height: 1.8;
+  margin-bottom: 20px;
+}
+
+.about__story-highlight {
+  background: var(--color-cream);
+  border-left: 3px solid var(--color-sage);
+  border-radius: 0 var(--border-radius-sm) var(--border-radius-sm) 0;
+  padding: 18px 22px;
+  margin: 24px 0;
+}
+
+.about__story-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-sage);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.about__story-highlight p {
+  font-size: 0.95rem;
+  color: #555;
+  line-height: 1.7;
+}
+
+.about__trust {
+  display: flex;
+  gap: 16px;
+  margin-top: 28px;
+  flex-wrap: wrap;
+}
+
+.about__linkedin {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: #0077B5;
+  color: var(--color-white);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.about__linkedin:hover {
+  background: #005f93;
+  transform: translateY(-1px);
+}
+
+.about__guarantee {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: var(--color-cream);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--color-sage);
+}
+
+/* Two-photo layout */
+.about__photos {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.about__photo-card {
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+}
+
+.about__photo-card--offset {
+  margin-left: 32px;
+}
+
+.about__photo-card img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.about__photo-caption {
+  font-size: 0.78rem;
+  color: #888;
+  text-align: center;
+  padding: 10px 12px 12px;
+  background: #fff;
+}
+
+@media (max-width: 768px) {
+  .about__inner {
+    grid-template-columns: 1fr;
+  }
+
+  .about__photos {
+    order: -1;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .about__photo-card {
+    min-width: 240px;
+  }
+
+  .about__photo-card--offset {
+    margin-left: 0;
+    margin-top: 0;
+  }
+
+  .about__trust {
+    justify-content: flex-start;
+  }
+}

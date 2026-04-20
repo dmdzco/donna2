@@ -70,7 +70,7 @@ export function TimePickerField({
             value={pickerValue}
             mode="time"
             display={Platform.OS === "ios" ? "spinner" : "default"}
-            minuteInterval={15}
+            minuteInterval={1}
             onChange={handlePickerChange}
           />
           {Platform.OS === "ios" ? (

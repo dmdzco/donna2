@@ -906,6 +906,9 @@ async def _prepare_reminder_context(
         raise HTTPException(status_code=404, detail="Reminder not found")
 
     scheduled_for = body.scheduled_for or datetime.now(timezone.utc)
+    # DB column is TIMESTAMP (naive) — strip tzinfo to avoid asyncpg error
+    if scheduled_for.tzinfo is not None:
+        scheduled_for = scheduled_for.replace(tzinfo=None)
     delivery = await create_or_update_delivery_for_call(
         reminder_id=body.reminder_id,
         scheduled_for=scheduled_for,

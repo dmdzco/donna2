@@ -6,6 +6,10 @@ const errorReportingSource = fs.readFileSync(
   path.resolve('apps/mobile/src/lib/errorReporting.ts'),
   'utf-8',
 );
+const runtimeConfigSource = fs.readFileSync(
+  path.resolve('apps/mobile/src/lib/runtimeConfig.ts'),
+  'utf-8',
+);
 const layoutSource = fs.readFileSync(
   path.resolve('apps/mobile/app/_layout.tsx'),
   'utf-8',
@@ -21,7 +25,8 @@ const metroSource = fs.readFileSync(
 
 describe('mobile error reporting privacy', () => {
   it('initializes Sentry only when a public DSN is configured', () => {
-    expect(errorReportingSource).toContain('EXPO_PUBLIC_SENTRY_DSN');
+    expect(errorReportingSource).toContain('getSentryDsn()');
+    expect(runtimeConfigSource).toContain('EXPO_PUBLIC_SENTRY_DSN');
     expect(errorReportingSource).toContain('if (isEnabled)');
     expect(layoutSource).toContain('withErrorReporting(RootLayout)');
   });

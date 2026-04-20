@@ -6,18 +6,9 @@ import type {
   NotificationPreferences,
   OnboardingInput,
 } from "@/src/types";
+import { getApiUrl } from "@/src/lib/runtimeConfig";
 
-function getRequiredApiUrl(): string {
-  const apiUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
-  if (!apiUrl) {
-    throw new Error(
-      "EXPO_PUBLIC_API_URL is required for the mobile app. Set it in apps/mobile/.env or the EAS environment.",
-    );
-  }
-  return apiUrl.replace(/\/+$/, "");
-}
-
-const API_URL = getRequiredApiUrl();
+const API_URL = getApiUrl();
 
 type WriteOptions = { idempotencyKey?: string };
 type FetchOptions = RequestInit & { token?: string } & WriteOptions;

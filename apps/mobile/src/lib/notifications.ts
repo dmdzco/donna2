@@ -1,7 +1,7 @@
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
-import Constants from "expo-constants";
 import { Platform } from "react-native";
+import { getEasProjectId } from "@/src/lib/runtimeConfig";
 
 // Configure notification display — set globally so it catches
 // notifications even when the app is backgrounded/foregrounded.
@@ -34,7 +34,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
     return null;
   }
 
-  const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+  const projectId = getEasProjectId();
   if (!projectId) {
     console.log("No EAS project ID found");
     return null;

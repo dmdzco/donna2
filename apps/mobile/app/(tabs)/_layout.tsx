@@ -1,30 +1,19 @@
 import { useEffect } from "react";
 import { Tabs, useRouter } from "expo-router";
-import { useAuth } from "@clerk/clerk-expo";
-import { useQuery } from "@tanstack/react-query";
 import { Home, Calendar, Bell, Settings } from "lucide-react-native";
 import { View } from "react-native";
 import { COLORS } from "@/src/constants/theme";
-import { api } from "@/src/lib/api";
+import { useProfile } from "@/src/hooks/useProfile";
 
 export default function TabLayout() {
-  const { getToken, isSignedIn } = useAuth();
   const router = useRouter();
-
-  const { data: profile } = useQuery({
-    queryKey: ["profile"],
-    queryFn: async () => {
-      const token = await getToken();
-      return api.caregivers.me(token!);
-    },
-    enabled: !!isSignedIn,
-  });
+  const { data: profile } = useProfile();
 
   useEffect(() => {
     if (profile && (!profile.seniors || profile.seniors.length === 0)) {
       router.replace("/(onboarding)/step1");
     }
-  }, [profile]);
+  }, [profile, router]);
 
   return (
     <Tabs

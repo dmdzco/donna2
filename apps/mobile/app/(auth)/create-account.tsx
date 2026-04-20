@@ -16,8 +16,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Button } from "@/src/components/ui/Button";
 import { Input } from "@/src/components/ui/Input";
 import { COLORS } from "@/src/constants/theme";
-import { api } from "@/src/lib/api";
+import { api, getErrorMessage } from "@/src/lib/api";
 import { getClerkErrorMessage, getClerkFieldErrors } from "@/src/lib/clerkErrors";
+import { resolvePostAuthRoute } from "@/src/lib/profileSession";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -79,16 +80,37 @@ export default function CreateAccountScreen() {
 
   async function navigateAfterAuth() {
     const token = await getToken();
-    try {
-      const profile = await api.caregivers.me(token!);
-      if (profile.seniors?.length > 0) {
-        router.replace("/(tabs)");
-      } else {
-        router.replace("/(onboarding)/step1");
-      }
-    } catch {
-      router.replace("/(onboarding)/step1" as any);
+    if (!token) {
+      Alert.alert("Sign Up Complete", "Please sign in again to continue.");
+      return;
     }
+
+    try {
+      const nextRoute = resolvePostAuthRoute({
+        profile: await api.caregivers.me(token),
+      });
+      if (nextRoute) {
+        router.replace(nextRoute as any);
+        return;
+      }
+    } catch (error) {
+      const nextRoute = resolvePostAuthRoute({ error });
+      if (nextRoute) {
+        router.replace(nextRoute as any);
+        return;
+      }
+      Alert.alert(
+        "Sign Up Complete",
+        getErrorMessage(
+          error,
+          "We created your account, but couldn't load your Donna profile right now. Please try again in a moment.",
+          "auth",
+        ),
+      );
+      return;
+    }
+
+    router.replace("/(onboarding)/step1" as any);
   }
 
   function resetVerificationState() {

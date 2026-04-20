@@ -140,9 +140,6 @@ export default function DashboardScreen() {
   const seniorFirstName = seniorName.split(" ")[0];
   const seniorTimezone = useMemo(() => resolveSeniorTimezone(senior), [senior]);
 
-  console.log("[dashboard] senior:", JSON.stringify({ id: senior?.id, name: senior?.name, phone: senior?.phone }));
-  console.log("[dashboard] user:", JSON.stringify({ firstName: user?.firstName }));
-
   // Resolve schedule: try the schedule endpoint, fall back to senior.preferredCallTimes
   // Handles both legacy shape { days, time } and new ScheduleItem[] from schedule tab
   const resolvedSchedule = useMemo((): { days?: string[]; time?: string } | null => {
@@ -332,6 +329,7 @@ export default function DashboardScreen() {
         onPress={handleOpenCallModal}
         accessibilityRole="button"
         accessibilityLabel={`Call ${seniorFirstName} now`}
+        testID="instant-call-open"
       >
         <Phone size={24} color={COLORS.white} />
       </Pressable>
@@ -364,10 +362,15 @@ export default function DashboardScreen() {
               disabled={initiateCall.isPending}
               icon={<Phone size={18} color={COLORS.white} />}
               className="bg-accent-pink"
+              testID="instant-call-submit"
             />
           </View>
           {initiateCall.isError && (
-            <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
+            <Text
+              className="text-[13px] text-center mt-3"
+              style={{ color: COLORS.destructive }}
+              testID="instant-call-error"
+            >
               {getErrorMessage(
                 initiateCall.error,
                 "Donna couldn't start the call. Please try again in a moment. If this is urgent, call your loved one directly.",

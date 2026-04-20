@@ -2,9 +2,9 @@ import "../global.css";
 import { useEffect } from "react";
 import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";
+import { useQueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useProfile } from "@/src/hooks/useProfile";
-import { ApiError } from "@/src/lib/api";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { getErrorMessage } from "@/src/lib/api";
 import { tokenCache } from "@/src/lib/auth";
 import {
   registerForPushNotifications,
@@ -19,25 +19,33 @@ import {
 } from "@expo-google-fonts/playfair-display";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { COLORS } from "@/src/constants/theme";
+import { Button } from "@/src/components/ui";
 import { ErrorBoundary } from "@/src/components/ErrorBoundary";
 import { NetworkProvider } from "@/src/providers/NetworkProvider";
 import { queryClient } from "@/src/lib/queryClient";
 import { withErrorReporting } from "@/src/lib/errorReporting";
+import {
+  getProfileQueryKey,
+  hasCompletedOnboarding,
+  resolvePostAuthRoute,
+} from "@/src/lib/profileSession";
+import { getClerkPublishableKey } from "@/src/lib/runtimeConfig";
 
 SplashScreen.preventAutoHideAsync();
 
-const CLERK_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
+const CLERK_KEY = getClerkPublishableKey();
 
 function AuthGuard() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
   const { data: profile, isLoading: profileLoading, isError: profileError, error: profileErrorObj } = useProfile();
   const segments = useSegments();
   const pathname = usePathname();
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -46,27 +54,27 @@ function AuthGuard() {
     const inTabsGroup = firstSegment === "(tabs)";
     const inAuthGroup = firstSegment === "(auth)";
     const isLanding = pathname === "/";
-    const hasCompletedOnboarding = (profile?.seniors?.length ?? 0) > 0;
+    const nextRoute = resolvePostAuthRoute({
+      profile,
+      error: profileError ? profileErrorObj : undefined,
+    });
 
     if (!isSignedIn && inTabsGroup) {
       router.replace("/");
     } else if (isSignedIn && (isLanding || inAuthGroup)) {
-      if (!profileLoading && profileError) {
-        const needsOnboarding = profileErrorObj instanceof ApiError && profileErrorObj.needsOnboarding;
-        if (needsOnboarding) {
-          router.replace("/(onboarding)/step1" as any);
-        } else {
-          router.replace("/(tabs)");
-        }
-      } else if (!profileLoading && !hasCompletedOnboarding) {
-        router.replace("/(onboarding)/step1" as any);
-      } else if (hasCompletedOnboarding) {
-        router.replace("/(tabs)");
+      if (!profileLoading && nextRoute) {
+        router.replace(nextRoute as any);
       }
-    } else if (isSignedIn && inTabsGroup && !profileLoading && !profileError && !hasCompletedOnboarding) {
+    } else if (
+      isSignedIn &&
+      inTabsGroup &&
+      !profileLoading &&
+      !profileError &&
+      !hasCompletedOnboarding(profile)
+    ) {
       router.replace("/(onboarding)/step1" as any);
     }
-  }, [isLoaded, isSignedIn, pathname, segments, profile, profileLoading, profileError, profileErrorObj]);
+  }, [isLoaded, isSignedIn, pathname, segments, profile, profileLoading, profileError, profileErrorObj, router]);
 
   // Register for push notifications once the user is signed in
   useEffect(() => {
@@ -92,6 +100,20 @@ function AuthGuard() {
     return () => subscription.remove();
   }, [isSignedIn]);
 
+  const firstSegment = segments?.[0];
+  const inAuthBootstrap = pathname === "/" || firstSegment === "(auth)";
+  const bootstrapRoute = resolvePostAuthRoute({
+    profile,
+    error: profileError ? profileErrorObj : undefined,
+  });
+  const showBootstrapError =
+    isLoaded &&
+    isSignedIn &&
+    inAuthBootstrap &&
+    !profileLoading &&
+    profileError &&
+    !bootstrapRoute;
+
   if (!isLoaded) {
     return (
       <View
@@ -103,6 +125,58 @@ function AuthGuard() {
         }}
       >
         <ActivityIndicator size="large" color={COLORS.sage} />
+      </View>
+    );
+  }
+
+  if (showBootstrapError) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          paddingHorizontal: 24,
+          backgroundColor: COLORS.cream,
+        }}
+      >
+        <View style={{ width: "100%", maxWidth: 360 }}>
+          <Text
+            style={{
+              fontSize: 28,
+              lineHeight: 34,
+              fontWeight: "600",
+              color: COLORS.charcoal,
+              textAlign: "center",
+            }}
+          >
+            We couldn't load your Donna profile
+          </Text>
+          <Text
+            style={{
+              marginTop: 12,
+              fontSize: 15,
+              lineHeight: 22,
+              color: COLORS.muted,
+              textAlign: "center",
+            }}
+          >
+            {getErrorMessage(
+              profileErrorObj,
+              "Please try again in a moment.",
+              "auth",
+            )}
+          </Text>
+          <Button
+            title="Try Again"
+            className="mt-6"
+            onPress={() => {
+              void queryClient.invalidateQueries({
+                queryKey: getProfileQueryKey(userId),
+              });
+            }}
+          />
+        </View>
       </View>
     );
   }

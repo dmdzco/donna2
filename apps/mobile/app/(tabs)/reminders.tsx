@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Edit2, Trash2, Plus, Bell } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { COLORS } from "@/src/constants/theme";
 import { getErrorMessage } from "@/src/lib/api";
 import {
@@ -55,15 +56,16 @@ const EMPTY_FORM: ReminderFormData = {
 
 // --- Helpers ---
 
-function getScheduleLabel(reminder: Reminder, timezone: string): string {
-  if (!reminder.scheduledTime) return "Not scheduled";
+function getScheduleLabel(reminder: Reminder, timezone: string, t: (key: string, opts?: Record<string, unknown>) => string): string {
+  if (!reminder.scheduledTime) return t("reminders.notScheduled");
   const timeStr = getReminderTimeLabel(reminder, timezone);
-  return reminder.isRecurring ? `Daily · ${timeStr}` : timeStr;
+  return reminder.isRecurring ? t("reminders.dailyAt", { time: timeStr }) : timeStr;
 }
 
 // --- Component ---
 
 export default function RemindersScreen() {
+  const { t } = useTranslation();
   const { senior, seniorId, isLoading: seniorLoading } = useCurrentSenior();
   const {
     data: reminders,
@@ -87,8 +89,8 @@ export default function RemindersScreen() {
   );
   const seniorTimezone = useMemo(() => resolveSeniorTimezone(senior), [senior]);
   const timeHelperText = senior?.name
-    ? `${seniorFirstName}'s local time`
-    : "Senior's local time";
+    ? t("reminders.localTime", { name: seniorFirstName })
+    : t("reminders.seniorLocalTime");
 
   const activeReminders = useMemo(
     () => (reminders ?? []).filter((r) => r.isActive),
@@ -220,10 +222,10 @@ export default function RemindersScreen() {
       {/* Header */}
       <View className="px-6 pt-4 pb-2">
         <Text className="text-[28px] font-semibold text-charcoal">
-          Reminders
+          {t("reminders.title")}
         </Text>
         <Text className="text-[15px] text-muted mt-1">
-          Manage what Donna reminds {seniorFirstName} about
+          {t("reminders.subtitle", { name: seniorFirstName })}
         </Text>
       </View>
 
@@ -249,7 +251,7 @@ export default function RemindersScreen() {
             <View className="mt-4">
               {/* Add New Reminder Button */}
               <Button
-                title="Add New Reminder"
+                title={t("reminders.addNew")}
                 onPress={openAddModal}
                 icon={<Plus size={18} color={COLORS.white} />}
                 className="mb-4"
@@ -263,8 +265,7 @@ export default function RemindersScreen() {
             >
               <Bell size={32} color={COLORS.muted} />
               <Text className="text-muted text-[15px] mt-3 text-center">
-                No reminders yet.{"\n"}Add a reminder for Donna to mention during
-                calls with {seniorFirstName}.
+                {t("reminders.noReminders", { name: seniorFirstName })}
               </Text>
             </View>
           }
@@ -283,14 +284,14 @@ export default function RemindersScreen() {
       <Modal
         visible={formModalVisible}
         onClose={closeFormModal}
-        title={editingReminder ? "Edit Reminder" : "Add Reminder"}
+        title={editingReminder ? t("reminders.editReminder") : t("reminders.addReminder")}
         variant="bottom-sheet"
       >
         <View className="pb-6">
           <View className="mb-4">
             <Input
-              label="Title"
-              placeholder="e.g. Take blood pressure medicine"
+              label={t("reminders.titleLabel")}
+              placeholder={t("reminders.titlePlaceholder")}
               value={form.title}
               onChangeText={(text) =>
                 setForm((prev) => ({ ...prev, title: text }))
@@ -301,11 +302,11 @@ export default function RemindersScreen() {
 
           <View className="mb-4">
             <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-              Description
+              {t("reminders.description")}
             </Text>
             <TextInput
               className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 text-[15px] text-charcoal"
-              placeholder="Details Donna should know about this reminder"
+              placeholder={t("reminders.descriptionPlaceholder")}
               placeholderTextColor={COLORS.muted}
               multiline
               textAlignVertical="top"
@@ -314,17 +315,17 @@ export default function RemindersScreen() {
               onChangeText={(text) =>
                 setForm((prev) => ({ ...prev, description: text }))
               }
-              accessibilityLabel="Description"
+              accessibilityLabel={t("reminders.description")}
             />
           </View>
 
           <View className="mb-5">
             <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-              FAQs (optional)
+              {t("reminders.faqs")}
             </Text>
             <TextInput
               className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 text-[15px] text-charcoal"
-              placeholder="Common questions and answers about this reminder"
+              placeholder={t("reminders.faqsPlaceholder")}
               placeholderTextColor={COLORS.muted}
               multiline
               textAlignVertical="top"
@@ -333,7 +334,7 @@ export default function RemindersScreen() {
               onChangeText={(text) =>
                 setForm((prev) => ({ ...prev, faqs: text }))
               }
-              accessibilityLabel="Frequently asked questions"
+              accessibilityLabel={t("reminders.faqs")}
             />
           </View>
 
@@ -362,7 +363,7 @@ export default function RemindersScreen() {
           {/* Recurring toggle */}
           <View className="mb-5">
             <Text className="text-[13px] font-medium text-muted mb-2 uppercase tracking-wider">
-              Frequency
+              {t("reminders.frequency")}
             </Text>
             <View className="flex-row gap-2">
               <Pressable
@@ -372,10 +373,10 @@ export default function RemindersScreen() {
                 }`}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: form.isRecurring }}
-                accessibilityLabel="Daily"
+                accessibilityLabel={t("reminders.daily")}
               >
                 <Text className={`text-[13px] font-medium ${form.isRecurring ? "text-white" : "text-charcoal"}`}>
-                  Daily
+                  {t("reminders.daily")}
                 </Text>
               </Pressable>
               <Pressable
@@ -385,10 +386,10 @@ export default function RemindersScreen() {
                 }`}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: !form.isRecurring }}
-                accessibilityLabel="One-time"
+                accessibilityLabel={t("reminders.oneTime")}
               >
                 <Text className={`text-[13px] font-medium ${!form.isRecurring ? "text-white" : "text-charcoal"}`}>
-                  One-Time
+                  {t("reminders.oneTime")}
                 </Text>
               </Pressable>
             </View>
@@ -397,13 +398,12 @@ export default function RemindersScreen() {
           {/* Tip box */}
           <View className="bg-beige rounded-2xl p-4 mb-5">
             <Text className="text-muted text-[13px] leading-5">
-              Donna will weave this reminder naturally into the conversation --
-              no robotic announcements.
+              {t("reminders.tip")}
             </Text>
           </View>
 
           <Button
-            title={editingReminder ? "Save Changes" : "Add Reminder"}
+            title={editingReminder ? t("common.save") : t("reminders.addReminder")}
             onPress={handleSave}
             disabled={!canSave}
             loading={isSaving}
@@ -413,7 +413,7 @@ export default function RemindersScreen() {
             <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
               {getErrorMessage(
                 createReminder.error ?? updateReminder.error,
-                "We couldn't save this reminder. Your changes are still here. Please try again.",
+                t("common.unexpectedError"),
                 "save",
               )}
             </Text>
@@ -425,17 +425,16 @@ export default function RemindersScreen() {
       <Modal
         visible={deleteModalVisible}
         onClose={closeDeleteModal}
-        title="Delete Reminder"
+        title={t("reminders.deleteTitle")}
         variant="centered"
       >
         <Text className="text-muted text-[15px] mb-5 leading-5">
-          This will permanently remove "{deletingReminder?.title}" and it will
-          no longer be mentioned during calls with {seniorFirstName}.
+          {t("reminders.deleteMessage", { title: deletingReminder?.title, name: seniorFirstName })}
         </Text>
 
         <View className="gap-3">
           <Button
-            title="Delete Reminder"
+            title={t("reminders.deleteButton")}
             onPress={handleDelete}
             variant="destructive"
             loading={deleteReminder.isPending}
@@ -443,7 +442,7 @@ export default function RemindersScreen() {
             className="bg-accent-pink"
           />
           <Button
-            title="Cancel"
+            title={t("common.cancel")}
             onPress={closeDeleteModal}
             variant="secondary"
             disabled={deleteReminder.isPending}
@@ -454,7 +453,7 @@ export default function RemindersScreen() {
           <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
             {getErrorMessage(
               deleteReminder.error,
-              "We couldn't delete this reminder. Please try again.",
+              t("reminders.failedToDelete"),
               "delete",
             )}
           </Text>
@@ -477,9 +476,10 @@ function ReminderCard({
   onEdit: (r: Reminder) => void;
   onDelete: (r: Reminder) => void;
 }) {
+  const { t } = useTranslation();
   const scheduleLabel = useMemo(
-    () => getScheduleLabel(reminder, timezone),
-    [reminder, timezone],
+    () => getScheduleLabel(reminder, timezone, t),
+    [reminder, timezone, t],
   );
 
   return (

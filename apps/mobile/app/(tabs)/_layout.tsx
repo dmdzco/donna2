@@ -4,12 +4,14 @@ import { useAuth } from "@clerk/clerk-expo";
 import { useQuery } from "@tanstack/react-query";
 import { Home, Calendar, Bell, Settings } from "lucide-react-native";
 import { View } from "react-native";
+import { useTranslation } from "react-i18next";
 import { COLORS } from "@/src/constants/theme";
 import { api } from "@/src/lib/api";
 
 export default function TabLayout() {
   const { getToken, isSignedIn } = useAuth();
   const router = useRouter();
+  const { t } = useTranslation();
 
   const { data: profile } = useQuery({
     queryKey: ["profile"],
@@ -49,7 +51,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Dashboard",
+          title: t("tabs.dashboard"),
           tabBarIcon: ({ color, focused }) => (
             <View
               style={
@@ -70,7 +72,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="schedule"
         options={{
-          title: "Schedule",
+          title: t("tabs.schedule"),
           tabBarIcon: ({ color, focused }) => (
             <View
               style={
@@ -91,7 +93,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="reminders"
         options={{
-          title: "Reminders",
+          title: t("tabs.reminders"),
           tabBarIcon: ({ color, focused }) => (
             <View
               style={
@@ -112,7 +114,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="settings"
         options={{
-          title: "Settings",
+          title: t("tabs.settings"),
           tabBarIcon: ({ color, focused }) => (
             <View
               style={

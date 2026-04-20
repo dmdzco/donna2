@@ -1,9 +1,11 @@
 import { Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNetInfo } from "@react-native-community/netinfo";
+import { useTranslation } from "react-i18next";
 import { COLORS } from "@/src/constants/theme";
 
 export function OfflineBanner() {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const netInfo = useNetInfo();
   const isOffline =
@@ -36,7 +38,7 @@ export function OfflineBanner() {
           textAlign: "center",
         }}
       >
-        You're offline. Showing saved information when available.
+        {t("common.offlineMessage")}
       </Text>
     </View>
   );

@@ -285,6 +285,7 @@ export const onboardingSchema = z.object({
   // Family info from frontend
   familyInfo: z.object({
     relation: z.string().optional(),
+    donnaLanguage: z.enum(['en', 'es']).optional(),
     interestDetails: z.record(z.string()).optional(),
   }).optional(),
 });

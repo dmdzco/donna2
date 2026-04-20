@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { caregivers, reminders, seniors } from '../db/schema.js';
 import { seniorService } from '../services/seniors.js';
@@ -51,6 +52,7 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
       // Store interest details and other consumer data in familyInfo
       familyInfo: {
         relation,
+        donnaLanguage: clientFamilyInfo?.donnaLanguage || 'en',
         interestDetails: clientFamilyInfo?.interestDetails || {},
       },
       // Store call schedule and topics to avoid in preferredCallTimes
@@ -107,6 +109,8 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
       reminders: createdReminders,
     });
   } catch (error) {
+    console.error('Onboarding failed:', error);
+
     // If phone already exists, find and reuse the existing senior + link caregiver
     const pgCode = error.code || error.cause?.code;
     const pgConstraint = error.constraint || error.cause?.constraint;
@@ -121,6 +125,7 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
           return res.json({ senior: existing, reminders: [] });
         }
       } catch (linkErr) {
+        console.error('Onboarding duplicate phone fallback failed:', linkErr);
         return routeError(res, linkErr, 'POST /api/onboarding duplicate fallback');
       }
       return sendError(res, 409, { error: 'This phone number is already registered for another senior' });

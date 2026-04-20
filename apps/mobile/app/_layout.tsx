@@ -1,4 +1,5 @@
 import "../global.css";
+import "@/src/i18n";
 import { useEffect } from "react";
 import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";

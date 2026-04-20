@@ -14,7 +14,9 @@ import {
   ChevronRight,
   LogOut,
   Trash2,
+  Languages,
 } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { COLORS } from "@/src/constants/theme";
 import { Modal } from "@/src/components/ui/Modal";
 import { Button } from "@/src/components/ui/Button";
@@ -29,40 +31,6 @@ type SettingsRow = {
   subtitle: string;
   route: string;
 };
-
-const PROFILE_ROWS: SettingsRow[] = [
-  {
-    icon: <Heart size={18} color={COLORS.accentPink} />,
-    iconBg: "bg-pink-100",
-    title: "Loved One Profile",
-    subtitle: "Name, interests, and preferences",
-    route: "/settings/loved-one",
-  },
-  {
-    icon: <User size={18} color={COLORS.sage} />,
-    iconBg: "bg-sage/10",
-    title: "Caregiver Profile",
-    subtitle: "Your account information",
-    route: "/settings/caregiver",
-  },
-];
-
-const PREFERENCE_ROWS: SettingsRow[] = [
-  {
-    icon: <Bell size={18} color={COLORS.sage} />,
-    iconBg: "bg-sage/10",
-    title: "Notification Preferences",
-    subtitle: "Manage alerts and summaries",
-    route: "/settings/notifications",
-  },
-  {
-    icon: <HelpCircle size={18} color={COLORS.sage} />,
-    iconBg: "bg-sage/10",
-    title: "Help Center",
-    subtitle: "FAQ, feedback, and support",
-    route: "/settings/help",
-  },
-];
 
 function SettingsRowItem({
   row,
@@ -104,11 +72,53 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { signOut, getToken } = useAuth();
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const [showSignOutModal, setShowSignOutModal] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const deleteAccountIdempotency = useStableIdempotencyKey("account-delete");
+
+  const PROFILE_ROWS: SettingsRow[] = [
+    {
+      icon: <Heart size={18} color={COLORS.accentPink} />,
+      iconBg: "bg-pink-100",
+      title: t("settings.lovedOneProfile"),
+      subtitle: t("settings.lovedOneProfileDesc"),
+      route: "/settings/loved-one",
+    },
+    {
+      icon: <User size={18} color={COLORS.sage} />,
+      iconBg: "bg-sage/10",
+      title: t("settings.caregiverProfile"),
+      subtitle: t("settings.caregiverProfileDesc"),
+      route: "/settings/caregiver",
+    },
+  ];
+
+  const PREFERENCE_ROWS: SettingsRow[] = [
+    {
+      icon: <Languages size={18} color={COLORS.sage} />,
+      iconBg: "bg-sage/10",
+      title: t("settings.language"),
+      subtitle: t("settings.languageDesc"),
+      route: "/settings/language",
+    },
+    {
+      icon: <Bell size={18} color={COLORS.sage} />,
+      iconBg: "bg-sage/10",
+      title: t("settings.notifications"),
+      subtitle: t("settings.notificationsDesc"),
+      route: "/settings/notifications",
+    },
+    {
+      icon: <HelpCircle size={18} color={COLORS.sage} />,
+      iconBg: "bg-sage/10",
+      title: t("settings.helpCenter"),
+      subtitle: t("settings.helpCenterDesc"),
+      route: "/settings/help",
+    },
+  ];
 
   const clearLocalSession = async () => {
     queryClient.clear();
@@ -156,7 +166,7 @@ export default function SettingsScreen() {
     try {
       const token = await getToken();
       if (!token) {
-        throw new Error("Please sign in again before deleting your account.");
+        throw new Error(t("settings.signInAgain"));
       }
 
       const result = await api.account.delete(token, {
@@ -164,20 +174,19 @@ export default function SettingsScreen() {
       });
       deleteAccountIdempotency.reset();
       const message =
-        result.message ??
-        "Your Donna account and eligible Donna data have been deleted.";
+        result.message ?? t("settings.accountDeletedMessage");
 
-      Alert.alert("Account Deleted", message, [
-        { text: "OK", onPress: () => void clearLocalSession() },
+      Alert.alert(t("settings.accountDeleted"), message, [
+        { text: t("common.ok"), onPress: () => void clearLocalSession() },
       ]);
     } catch (error) {
       setDeletingAccount(false);
       setShowDeleteAccountModal(false);
       Alert.alert(
-        "Delete Account Failed",
+        t("settings.deleteAccountFailed"),
         getErrorMessage(
           error,
-          "We couldn't delete your account right now. Please try again or contact support.",
+          t("settings.deleteAccountFailedMessage"),
           "delete",
         )
       );
@@ -190,17 +199,17 @@ export default function SettingsScreen() {
         {/* Header */}
         <View className="pt-4 pb-6">
           <Text className="text-[28px] font-semibold text-charcoal">
-            Settings
+            {t("settings.title")}
           </Text>
           <Text className="text-[15px] text-muted mt-1">
-            Manage your account and preferences
+            {t("settings.subtitle")}
           </Text>
         </View>
 
         {/* Profiles Section */}
         <View className="mb-6">
           <Text className="text-[13px] font-medium text-muted uppercase tracking-wider mb-2">
-            Profiles
+            {t("settings.profiles")}
           </Text>
           <View className="bg-white rounded-2xl border border-charcoal/10 px-4">
             {PROFILE_ROWS.map((row, index) => (
@@ -217,7 +226,7 @@ export default function SettingsScreen() {
         {/* Preferences Section */}
         <View className="mb-6">
           <Text className="text-[13px] font-medium text-muted uppercase tracking-wider mb-2">
-            Preferences
+            {t("settings.preferences")}
           </Text>
           <View className="bg-white rounded-2xl border border-charcoal/10 px-4">
             {PREFERENCE_ROWS.map((row, index) => (
@@ -234,21 +243,21 @@ export default function SettingsScreen() {
         {/* Account Section */}
         <View className="mb-6">
           <Text className="text-[13px] font-medium text-muted uppercase tracking-wider mb-2">
-            Account
+            {t("settings.account")}
           </Text>
           <View className="bg-white rounded-2xl border border-charcoal/10 px-4">
             <Pressable
               onPress={() => setShowSignOutModal(true)}
               className="flex-row items-center py-3.5 px-1"
               accessibilityRole="button"
-              accessibilityLabel="Sign Out"
+              accessibilityLabel={t("settings.signOut")}
               style={{ minHeight: 48 }}
             >
               <View className="w-10 h-10 rounded-full items-center justify-center bg-red-50">
                 <LogOut size={18} color={COLORS.destructive} />
               </View>
               <Text className="text-[15px] font-medium ml-3" style={{ color: COLORS.destructive }}>
-                Sign Out
+                {t("settings.signOut")}
               </Text>
             </Pressable>
             <View className="h-px bg-charcoal/5 ml-14" />
@@ -256,14 +265,14 @@ export default function SettingsScreen() {
               onPress={() => setShowDeleteAccountModal(true)}
               className="flex-row items-center py-3.5 px-1"
               accessibilityRole="button"
-              accessibilityLabel="Delete Account"
+              accessibilityLabel={t("settings.deleteAccount")}
               style={{ minHeight: 48 }}
             >
               <View className="w-10 h-10 rounded-full items-center justify-center bg-red-50">
                 <Trash2 size={18} color={COLORS.destructive} />
               </View>
               <Text className="text-[15px] font-medium ml-3" style={{ color: COLORS.destructive }}>
-                Delete Account
+                {t("settings.deleteAccount")}
               </Text>
             </Pressable>
           </View>
@@ -271,7 +280,7 @@ export default function SettingsScreen() {
 
         {/* App Version */}
         <Text className="text-[13px] text-muted text-center mb-8">
-          Donna v1.0.0
+          {t("settings.appVersion")}
         </Text>
       </ScrollView>
 
@@ -279,23 +288,22 @@ export default function SettingsScreen() {
       <Modal
         visible={showSignOutModal}
         onClose={() => setShowSignOutModal(false)}
-        title="Sign Out"
+        title={t("settings.signOut")}
         variant="centered"
       >
         <Text className="text-[15px] text-muted mb-6">
-          Are you sure you want to sign out? You'll need to sign in again to
-          access your account.
+          {t("settings.signOutMessage")}
         </Text>
         <View className="gap-3">
           <Button
-            title="Sign Out"
+            title={t("settings.signOut")}
             variant="destructive"
             onPress={handleSignOut}
             loading={signingOut}
             testID="sign-out-confirm"
           />
           <Button
-            title="Cancel"
+            title={t("common.cancel")}
             variant="secondary"
             onPress={() => setShowSignOutModal(false)}
           />
@@ -306,24 +314,22 @@ export default function SettingsScreen() {
       <Modal
         visible={showDeleteAccountModal}
         onClose={() => setShowDeleteAccountModal(false)}
-        title="Delete Account"
+        title={t("settings.deleteAccount")}
         variant="centered"
       >
         <Text className="text-[15px] text-muted mb-6">
-          This deletes your Donna account. If you are the only caregiver for a
-          loved one, Donna will also delete their profile, reminders, and call
-          history. This cannot be undone.
+          {t("settings.deleteAccountMessage")}
         </Text>
         <View className="gap-3">
           <Button
-            title="Delete Account"
+            title={t("settings.deleteAccount")}
             variant="destructive"
             onPress={handleDeleteAccount}
             loading={deletingAccount}
             testID="delete-account-confirm"
           />
           <Button
-            title="Cancel"
+            title={t("common.cancel")}
             variant="secondary"
             onPress={() => setShowDeleteAccountModal(false)}
           />

@@ -12,6 +12,8 @@ export interface OnboardingCall {
 }
 
 interface OnboardingState {
+  // Donna language (for calls with senior)
+  donnaLanguage: "en" | "es";
   // Caregiver
   firstName: string;
   lastName: string;
@@ -69,6 +71,7 @@ const DEFAULT_CALL: OnboardingCall = {
 const ONBOARDING_DRAFT_KEY = "donna-onboarding-draft-v1";
 
 const INITIAL_STATE = {
+  donnaLanguage: "en" as "en" | "es",
   firstName: "",
   lastName: "",
   email: "",
@@ -87,6 +90,7 @@ const INITIAL_STATE = {
 };
 
 const draftFields = (state: OnboardingState) => ({
+  donnaLanguage: state.donnaLanguage,
   firstName: state.firstName,
   lastName: state.lastName,
   email: state.email,

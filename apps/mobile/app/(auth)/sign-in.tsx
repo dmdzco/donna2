@@ -13,6 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button } from "@/src/components/ui/Button";
 import { Input } from "@/src/components/ui/Input";
@@ -49,41 +50,41 @@ const RESET_PASSWORD_CODE_STRATEGIES = new Set([
   "reset_password_phone_code",
 ]);
 
-function getFactorLabel(factor: AuthFactor): string {
+function getFactorLabel(factor: AuthFactor, t: (key: string, opts?: any) => string): string {
   switch (factor.strategy) {
     case "email_code":
       return factor.safeIdentifier
-        ? `Email code to ${factor.safeIdentifier}`
-        : "Email code";
+        ? t("auth.factorLabels.emailCode", { identifier: factor.safeIdentifier })
+        : t("auth.factorLabels.emailCodeGeneric");
     case "phone_code":
       return factor.safeIdentifier
-        ? `Text code to ${factor.safeIdentifier}`
-        : "Text message code";
+        ? t("auth.factorLabels.phoneCode", { identifier: factor.safeIdentifier })
+        : t("auth.factorLabels.phoneCodeGeneric");
     case "totp":
-      return "Authenticator app code";
+      return t("auth.factorLabels.totp");
     case "backup_code":
-      return "Backup code";
+      return t("auth.factorLabels.backupCode");
     case "reset_password_email_code":
       return factor.safeIdentifier
-        ? `Password reset code to ${factor.safeIdentifier}`
-        : "Password reset email code";
+        ? t("auth.factorLabels.resetEmailCode", { identifier: factor.safeIdentifier })
+        : t("auth.factorLabels.resetEmailCodeGeneric");
     case "reset_password_phone_code":
       return factor.safeIdentifier
-        ? `Password reset code to ${factor.safeIdentifier}`
-        : "Password reset phone code";
+        ? t("auth.factorLabels.resetPhoneCode", { identifier: factor.safeIdentifier })
+        : t("auth.factorLabels.resetPhoneCodeGeneric");
     default:
-      return "Verification code";
+      return t("auth.factorLabels.generic");
   }
 }
 
-function getCodeInputLabel(factor: AuthFactor): string {
+function getCodeInputLabel(factor: AuthFactor, t: (key: string) => string): string {
   switch (factor.strategy) {
     case "backup_code":
-      return "Backup Code";
+      return t("auth.codeInputLabels.backupCode");
     case "totp":
-      return "Authenticator Code";
+      return t("auth.codeInputLabels.totp");
     default:
-      return "Verification Code";
+      return t("auth.codeInputLabels.default");
   }
 }
 
@@ -101,6 +102,7 @@ function canResendFactorCode(factor: AuthFactor): boolean {
 }
 
 export default function SignInScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
   const { signIn, setActive, isLoaded } = useSignIn();
   const { getToken } = useAuth();
@@ -251,7 +253,7 @@ export default function SignInScreen() {
       }
     } catch (err: unknown) {
       setVerificationError(
-        getClerkErrorMessage(err, "Could not prepare that verification method")
+        getClerkErrorMessage(err, t("auth.couldNotPrepare"))
       );
     } finally {
       setLoading(false);
@@ -298,8 +300,8 @@ export default function SignInScreen() {
   async function handleSignIn() {
     const nextErrors: { email?: string; password?: string } = {};
 
-    if (!email.trim()) nextErrors.email = "Email is required";
-    if (!password) nextErrors.password = "Password is required";
+    if (!email.trim()) nextErrors.email = t("auth.emailRequired");
+    if (!password) nextErrors.password = t("auth.passwordRequired");
 
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
@@ -328,8 +330,8 @@ export default function SignInScreen() {
         }));
       } else {
         Alert.alert(
-          "Sign In Failed",
-          getClerkErrorMessage(err, "Could not sign in")
+          t("auth.signInFailed"),
+          getClerkErrorMessage(err, t("auth.couldNotSignIn"))
         );
       }
     } finally {
@@ -340,8 +342,8 @@ export default function SignInScreen() {
   async function handleForgotPassword() {
     if (!email.trim()) {
       Alert.alert(
-        "Enter your email",
-        "Please enter your email address first, then tap Forgot Password."
+        t("auth.enterEmailFirst"),
+        t("auth.enterEmailFirstDescription")
       );
       return;
     }
@@ -380,8 +382,8 @@ export default function SignInScreen() {
       setAuthStep({ type: "forgot_password_code", factor });
     } catch (err: unknown) {
       Alert.alert(
-        "Password Reset Failed",
-        getClerkErrorMessage(err, "Could not send a password reset code")
+        t("auth.passwordResetFailed"),
+        getClerkErrorMessage(err, t("auth.couldNotSendReset"))
       );
     } finally {
       setLoading(false);
@@ -393,7 +395,7 @@ export default function SignInScreen() {
 
     const normalizedCode = verificationCode.replace(/\s+/g, "");
     if (!normalizedCode) {
-      setVerificationError("Verification code is required");
+      setVerificationError(t("auth.verificationRequired"));
       return;
     }
 
@@ -409,7 +411,7 @@ export default function SignInScreen() {
       await handleSignInResult(result);
     } catch (err: unknown) {
       setVerificationError(
-        getClerkErrorMessage(err, "Could not verify that code")
+        getClerkErrorMessage(err, t("auth.couldNotVerify"))
       );
     } finally {
       setLoading(false);
@@ -420,17 +422,17 @@ export default function SignInScreen() {
     if (!isLoaded) return;
 
     if (!newPassword) {
-      setResetPasswordError("New password is required");
+      setResetPasswordError(t("auth.passwordRequired"));
       return;
     }
 
     if (newPassword.length < 8) {
-      setResetPasswordError("Password must be at least 8 characters");
+      setResetPasswordError(t("auth.passwordTooShort", { count: 8 }));
       return;
     }
 
     if (newPassword !== confirmNewPassword) {
-      setResetPasswordError("Passwords do not match");
+      setResetPasswordError(t("auth.passwordsDoNotMatch"));
       return;
     }
 
@@ -446,7 +448,7 @@ export default function SignInScreen() {
       await handleSignInResult(result);
     } catch (err: unknown) {
       setResetPasswordError(
-        getClerkErrorMessage(err, "Could not update your password")
+        getClerkErrorMessage(err, t("auth.couldNotUpdatePassword"))
       );
     } finally {
       setLoading(false);
@@ -458,7 +460,7 @@ export default function SignInScreen() {
 
     const normalizedCode = verificationCode.replace(/\s+/g, "");
     if (!normalizedCode) {
-      setVerificationError("Verification code is required");
+      setVerificationError(t("auth.verificationRequired"));
       return;
     }
 
@@ -474,7 +476,7 @@ export default function SignInScreen() {
       await handleSignInResult(result);
     } catch (err: unknown) {
       setVerificationError(
-        getClerkErrorMessage(err, "Could not verify that code")
+        getClerkErrorMessage(err, t("auth.couldNotVerify"))
       );
     } finally {
       setLoading(false);
@@ -504,7 +506,7 @@ export default function SignInScreen() {
       }
     } catch (err: unknown) {
       setVerificationError(
-        getClerkErrorMessage(err, "Could not resend the verification code")
+        getClerkErrorMessage(err, t("auth.couldNotResend"))
       );
     } finally {
       setLoading(false);
@@ -526,7 +528,7 @@ export default function SignInScreen() {
       }
     } catch (err: unknown) {
       Alert.alert(
-        "OAuth Error",
+        t("auth.oauthError"),
         getClerkErrorMessage(err, `${provider} sign in failed`)
       );
     } finally {
@@ -537,30 +539,30 @@ export default function SignInScreen() {
   const title = (() => {
     switch (authStep.type) {
       case "credentials":
-        return "Welcome Back";
+        return t("auth.welcomeBack");
       case "forgot_password_code":
-        return "Check Your Email";
+        return t("auth.checkYourEmail");
       case "forgot_password_new_password":
-        return "Set a New Password";
+        return t("auth.setNewPassword");
       case "choose_second_factor":
-        return "Choose Verification Method";
+        return t("auth.chooseSecondFactor");
       case "second_factor_code":
-        return getFactorLabel(authStep.factor);
+        return getFactorLabel(authStep.factor, t);
     }
   })();
 
   const subtitle = (() => {
     switch (authStep.type) {
       case "credentials":
-        return "Sign in to your Donna account";
+        return t("auth.signInSubtitle");
       case "forgot_password_code":
-        return `Enter the code we sent for ${getFactorLabel(authStep.factor).toLowerCase()}.`;
+        return `${t("auth.verifyEmailDescription", { email: getFactorLabel(authStep.factor, t).toLowerCase() })}.`;
       case "forgot_password_new_password":
-        return "Choose a new password for your account.";
+        return t("auth.setNewPasswordSubtitle");
       case "choose_second_factor":
-        return "Your account requires a second verification step.";
+        return t("auth.secondFactorRequired");
       case "second_factor_code":
-        return "Enter the verification code to finish signing in.";
+        return t("auth.secondFactorSubtitle");
     }
   })();
 
@@ -579,10 +581,10 @@ export default function SignInScreen() {
             onPress={handleBack}
             className="mt-2 mb-6 min-h-[48px] justify-center self-start"
             accessibilityRole="button"
-            accessibilityLabel="Go back"
+            accessibilityLabel={t("auth.goBack")}
           >
             <Text className="text-sage text-[16px] font-medium">
-              {"<"} Back
+              {"<"} {t("common.back")}
             </Text>
           </Pressable>
 
@@ -595,8 +597,8 @@ export default function SignInScreen() {
             <>
               <View className="mb-4">
                 <Input
-                  label="Email Address"
-                  placeholder="your@email.com"
+                  label={t("auth.email")}
+                  placeholder={t("auth.emailPlaceholder")}
                   value={email}
                   onChangeText={(value) => {
                     setEmail(value);
@@ -619,7 +621,7 @@ export default function SignInScreen() {
               <View className="mb-2">
                 <Input
                   ref={passwordRef}
-                  label="Password"
+                  label={t("auth.password")}
                   placeholder="••••••••"
                   value={password}
                   onChangeText={(value) => {
@@ -645,15 +647,15 @@ export default function SignInScreen() {
                 onPress={handleForgotPassword}
                 className="self-end mb-6 min-h-[48px] justify-center"
                 accessibilityRole="link"
-                accessibilityLabel="Forgot password"
+                accessibilityLabel={t("auth.forgotPassword")}
               >
                 <Text className="text-sage text-[14px] font-medium">
-                  Forgot password?
+                  {t("auth.forgotPassword")}
                 </Text>
               </Pressable>
 
               <Button
-                title="Sign In"
+                title={t("auth.signIn")}
                 onPress={handleSignIn}
                 loading={loading}
                 disabled={loading || oauthLoading !== null}
@@ -663,13 +665,13 @@ export default function SignInScreen() {
 
               <View className="flex-row items-center mb-6">
                 <View className="flex-1 h-[1px] bg-charcoal/10" />
-                <Text className="mx-3 text-muted text-[13px]">or</Text>
+                <Text className="mx-3 text-muted text-[13px]">{t("auth.or")}</Text>
                 <View className="flex-1 h-[1px] bg-charcoal/10" />
               </View>
 
               <View className="gap-3 mb-8">
                 <Button
-                  title="Continue with Apple"
+                  title={t("auth.continueWithApple")}
                   onPress={() => handleOAuth("apple")}
                   variant="secondary"
                   loading={oauthLoading === "apple"}
@@ -683,7 +685,7 @@ export default function SignInScreen() {
                   }
                 />
                 <Button
-                  title="Continue with Google"
+                  title={t("auth.continueWithGoogle")}
                   onPress={() => handleOAuth("google")}
                   variant="secondary"
                   loading={oauthLoading === "google"}
@@ -700,16 +702,16 @@ export default function SignInScreen() {
 
               <View className="flex-row justify-center mb-8">
                 <Text className="text-muted text-[15px]">
-                  Don't have an account?{" "}
+                  {t("auth.noAccount")}{" "}
                 </Text>
                 <Pressable
                   onPress={() => router.replace("/(auth)/create-account")}
                   className="min-h-[48px] justify-center"
                   accessibilityRole="link"
-                  accessibilityLabel="Sign Up"
+                  accessibilityLabel={t("auth.signUp")}
                 >
                   <Text className="text-sage text-[15px] font-semibold">
-                    Sign Up
+                    {t("auth.signUp")}
                   </Text>
                 </Pressable>
               </View>
@@ -721,7 +723,7 @@ export default function SignInScreen() {
               {authStep.factors.map((factor) => (
                 <Button
                   key={`${factor.strategy}-${factor.emailAddressId || factor.phoneNumberId || factor.safeIdentifier || "default"}`}
-                  title={getFactorLabel(factor)}
+                  title={getFactorLabel(factor, t)}
                   onPress={() => prepareSecondFactorCode(factor)}
                   variant="secondary"
                   disabled={loading}
@@ -735,10 +737,10 @@ export default function SignInScreen() {
             <>
               <View className="mb-4">
                 <Input
-                  label={getCodeInputLabel(authStep.factor)}
+                  label={getCodeInputLabel(authStep.factor, t)}
                   placeholder={
                     authStep.factor.strategy === "backup_code"
-                      ? "Enter backup code"
+                      ? t("auth.factorLabels.backupCode")
                       : "123456"
                   }
                   value={verificationCode}
@@ -773,8 +775,8 @@ export default function SignInScreen() {
               <Button
                 title={
                   authStep.type === "forgot_password_code"
-                    ? "Verify Code"
-                    : "Continue"
+                    ? t("auth.verifyCode")
+                    : t("common.continue")
                 }
                 onPress={
                   authStep.type === "forgot_password_code"
@@ -789,7 +791,7 @@ export default function SignInScreen() {
 
               {canResendFactorCode(authStep.factor) && (
                 <Button
-                  title="Resend Code"
+                  title={t("auth.resendCode")}
                   onPress={handleResendCurrentCode}
                   variant="secondary"
                   disabled={loading}
@@ -803,7 +805,7 @@ export default function SignInScreen() {
             <>
               <View className="mb-4">
                 <Input
-                  label="New Password"
+                  label={t("auth.newPassword")}
                   placeholder="••••••••"
                   value={newPassword}
                   onChangeText={(value) => {
@@ -822,7 +824,7 @@ export default function SignInScreen() {
 
               <View className="mb-4">
                 <Input
-                  label="Confirm New Password"
+                  label={t("auth.confirmNewPassword")}
                   placeholder="••••••••"
                   value={confirmNewPassword}
                   onChangeText={(value) => {
@@ -839,7 +841,7 @@ export default function SignInScreen() {
               </View>
 
               <Button
-                title="Update Password"
+                title={t("auth.updatePassword")}
                 onPress={handleResetPasswordSubmit}
                 loading={loading}
                 disabled={loading}

@@ -17,14 +17,16 @@ import {
   X,
   Lightbulb,
 } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { Button, Input, Modal, ProgressBar } from "@/src/components/ui";
 import { COLORS, TIME_OPTIONS } from "@/src/constants/theme";
 import { useOnboardingStore, type OnboardingCall } from "@/src/stores/onboarding";
 
-const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
 export default function Step5Screen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { calls, reminders, addCall, removeCall, updateCall } =
     useOnboardingStore();
 
@@ -55,7 +57,7 @@ export default function Step5Screen() {
     const nextErrors: Record<number, string> = {};
     calls.forEach((call, index) => {
       if (call.frequency === "recurring" && call.selectedDays.length === 0) {
-        nextErrors[index] = "Choose at least one day for this recurring call.";
+        nextErrors[index] = t("onboarding.step5.daysError");
       }
     });
 
@@ -85,7 +87,7 @@ export default function Step5Screen() {
         >
           {/* Progress */}
           <View className="mt-4 mb-4">
-            <ProgressBar current={5} total={5} />
+            <ProgressBar current={6} total={6} />
           </View>
 
           {/* Back */}
@@ -93,20 +95,20 @@ export default function Step5Screen() {
             onPress={() => router.back()}
             className="flex-row items-center mb-6 min-h-[48px] self-start"
             accessibilityRole="button"
-            accessibilityLabel="Go back"
+            accessibilityLabel={t("common.back")}
           >
             <ArrowLeft size={18} color={COLORS.sage} />
             <Text className="text-sage text-[16px] font-medium ml-1">
-              Back
+              {t("common.back")}
             </Text>
           </Pressable>
 
           {/* Header */}
           <Text className="text-[28px] font-semibold text-charcoal mb-2">
-            Schedule Donna
+            {t("onboarding.step5.title")}
           </Text>
           <Text className="text-[15px] text-muted mb-6">
-            Set up when Donna should call your loved one
+            {t("onboarding.step5.subtitle")}
           </Text>
 
           {/* Call cards */}
@@ -119,14 +121,14 @@ export default function Step5Screen() {
                 {/* Card header */}
                 <View className="flex-row items-center justify-between mb-4">
                   <Text className="text-[16px] font-semibold text-charcoal">
-                    Call {index + 1}
+                    {t("onboarding.step5.callN", { n: index + 1 })}
                   </Text>
                   {calls.length > 1 && (
                     <Pressable
                       onPress={() => setDeleteIndex(index)}
                       className="min-w-[48px] min-h-[48px] items-center justify-center"
                       accessibilityRole="button"
-                      accessibilityLabel={`Delete call ${index + 1}`}
+                      accessibilityLabel={`${t("common.delete")} ${t("onboarding.step5.callN", { n: index + 1 })}`}
                     >
                       <X size={18} color={COLORS.muted} />
                     </Pressable>
@@ -136,8 +138,8 @@ export default function Step5Screen() {
                 {/* Title */}
                 <View className="mb-4">
                   <Input
-                    label="Call Title"
-                    placeholder="e.g., Daily Call, Morning Check-in"
+                    label={t("onboarding.step5.callTitle")}
+                    placeholder={t("schedule.callTitlePlaceholder")}
                     value={call.title}
                     onChangeText={(v) => updateCall(index, "title", v)}
                     testID={`input-call-title-${index}`}
@@ -147,16 +149,16 @@ export default function Step5Screen() {
                 {/* Frequency */}
                 <View className="mb-4">
                   <Text className="text-[13px] font-medium text-muted mb-2 uppercase tracking-wider">
-                    Frequency
+                    {t("onboarding.step5.frequency")}
                   </Text>
                   <View className="flex-row gap-2">
                     {(
                       [
-                        { key: "daily", label: "Daily" },
-                        { key: "recurring", label: "Recurring" },
-                        { key: "one-time", label: "One-Time" },
+                        { key: "daily", labelKey: "onboarding.step5.daily" },
+                        { key: "recurring", labelKey: "onboarding.step5.recurring" },
+                        { key: "one-time", labelKey: "onboarding.step5.oneTime" },
                       ] as const
-                    ).map(({ key, label }) => (
+                    ).map(({ key, labelKey }) => (
                       <Pressable
                         key={key}
                         onPress={() => {
@@ -176,7 +178,7 @@ export default function Step5Screen() {
                         }`}
                         accessibilityRole="radio"
                         accessibilityState={{ selected: call.frequency === key }}
-                        accessibilityLabel={label}
+                        accessibilityLabel={t(labelKey)}
                       >
                         <Text
                           className={`text-[13px] font-medium ${
@@ -185,7 +187,7 @@ export default function Step5Screen() {
                               : "text-charcoal"
                           }`}
                         >
-                          {label}
+                          {t(labelKey)}
                         </Text>
                       </Pressable>
                     ))}
@@ -196,12 +198,12 @@ export default function Step5Screen() {
                 {call.frequency === "recurring" && (
                   <View className="mb-4">
                     <Text className="text-[13px] font-medium text-muted mb-2 uppercase tracking-wider">
-                      Select Days
+                      {t("onboarding.step5.selectDays")}
                     </Text>
                     <View className="flex-row gap-1.5">
-                      {DAY_LABELS.map((day, dayIndex) => (
+                      {DAY_KEYS.map((dayKey, dayIndex) => (
                         <Pressable
-                          key={day}
+                          key={dayKey}
                           onPress={() => {
                             toggleDay(index, dayIndex);
                             if (scheduleErrors[index]) {
@@ -221,7 +223,7 @@ export default function Step5Screen() {
                           accessibilityState={{
                             checked: call.selectedDays.includes(dayIndex),
                           }}
-                          accessibilityLabel={day}
+                          accessibilityLabel={t(`days.${dayKey}`)}
                         >
                           <Text
                             className={`text-[12px] font-medium ${
@@ -230,7 +232,7 @@ export default function Step5Screen() {
                                 : "text-muted"
                             }`}
                           >
-                            {day}
+                            {t(`days.${dayKey}`)}
                           </Text>
                         </Pressable>
                       ))}
@@ -247,7 +249,7 @@ export default function Step5Screen() {
                 {call.frequency === "one-time" && (
                   <View className="mb-4">
                     <Input
-                      label="Date"
+                      label={t("schedule.date")}
                       placeholder="MM/DD/YYYY"
                       value={call.selectedDate}
                       onChangeText={(v) =>
@@ -261,7 +263,7 @@ export default function Step5Screen() {
                 {/* Time picker */}
                 <View className="mb-4">
                   <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-                    Time
+                    {t("onboarding.step5.time")}
                   </Text>
                   <Pressable
                     onPress={() =>
@@ -269,7 +271,7 @@ export default function Step5Screen() {
                     }
                     className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
                     accessibilityRole="button"
-                    accessibilityLabel="Select call time"
+                    accessibilityLabel={t("onboarding.step5.selectTime")}
                   >
                     <Text className="text-[15px] text-charcoal">
                       {call.callTime}
@@ -282,7 +284,7 @@ export default function Step5Screen() {
                 {reminders.some((r) => r.title.trim()) && (
                   <View>
                     <Text className="text-[13px] font-medium text-muted mb-2 uppercase tracking-wider">
-                      Include Reminders
+                      {t("onboarding.step5.includeReminders")}
                     </Text>
                     <View className="gap-2">
                       {reminders.map((reminder, rIndex) => {
@@ -324,7 +326,7 @@ export default function Step5Screen() {
 
           {/* Add another call */}
           <Button
-            title="Add Another Call"
+            title={t("onboarding.step5.addAnotherCall")}
             onPress={addCall}
             variant="secondary"
             icon={<Plus size={18} color={COLORS.charcoal} />}
@@ -335,14 +337,14 @@ export default function Step5Screen() {
           <View className="bg-beige rounded-2xl p-4 flex-row items-start gap-3 mb-4">
             <Lightbulb size={20} color={COLORS.sage} />
             <Text className="text-[14px] text-muted flex-1 leading-5">
-              You can always adjust the schedule later from the Schedule tab.
+              {t("onboarding.step5.tip")}
             </Text>
           </View>
         </ScrollView>
 
         {/* Fixed bottom button */}
         <View className="absolute bottom-0 left-0 right-0 bg-cream border-t border-charcoal/10 px-6 pt-4 pb-8">
-          <Button title="Create Profile" onPress={handleCreateProfile} />
+          <Button title={t("onboarding.step5.createProfile")} onPress={handleCreateProfile} />
         </View>
       </KeyboardAvoidingView>
 
@@ -350,7 +352,7 @@ export default function Step5Screen() {
       <Modal
         visible={activePicker?.type === "time"}
         onClose={() => setActivePicker(null)}
-        title="Select Time"
+        title={t("onboarding.step5.selectTime")}
       >
         <View className="gap-0.5 pb-4">
           {TIME_OPTIONS.map((time) => (
@@ -378,20 +380,20 @@ export default function Step5Screen() {
       <Modal
         visible={deleteIndex !== null}
         onClose={() => setDeleteIndex(null)}
-        title="Delete Call"
+        title={t("onboarding.step5.deleteTitle")}
         variant="centered"
       >
         <Text className="text-[15px] text-muted mb-6">
-          Are you sure you want to delete this scheduled call?
+          {t("onboarding.step5.deleteMessage")}
         </Text>
         <View className="gap-3">
           <Button
-            title="Delete"
+            title={t("common.delete")}
             onPress={confirmDelete}
             variant="destructive"
           />
           <Button
-            title="Cancel"
+            title={t("common.cancel")}
             onPress={() => setDeleteIndex(null)}
             variant="ghost"
           />

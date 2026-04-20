@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { COLORS } from "@/src/constants/theme";
 import { INTERESTS } from "@/src/constants/interests";
 import { Input } from "@/src/components/ui/Input";
@@ -25,6 +26,7 @@ function sanitizePhoneInput(value: string): string {
 
 export default function LovedOneProfileScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { seniorId } = useCurrentSenior();
   const { data: senior, isLoading } = useSenior(seniorId);
   const updateSenior = useUpdateSenior(seniorId);
@@ -41,6 +43,7 @@ export default function LovedOneProfileScreen() {
   const [expandedInterest, setExpandedInterest] = useState<string | null>(null);
   const [additionalTopics, setAdditionalTopics] = useState("");
   const [topicsToAvoid, setTopicsToAvoid] = useState("");
+  const [donnaLanguage, setDonnaLanguage] = useState<"en" | "es">("en");
 
   // Pre-fill form when senior data loads
   useEffect(() => {
@@ -57,6 +60,7 @@ export default function LovedOneProfileScreen() {
       );
       setAdditionalTopics(senior.additionalInfo ?? "");
       setTopicsToAvoid((family?.topicsToAvoid as string) ?? "");
+      setDonnaLanguage((family?.donnaLanguage as "en" | "es") ?? "en");
     }
   }, [senior]);
 
@@ -85,15 +89,16 @@ export default function LovedOneProfileScreen() {
         familyInfo: {
           interestDetails,
           topicsToAvoid: topicsToAvoid.trim(),
+          donnaLanguage,
         } as unknown as Record<string, string>,
       });
       router.replace("/(tabs)/settings");
     } catch (error) {
       Alert.alert(
-        "Couldn't Save",
+        t("lovedOneProfile.couldntSave"),
         getErrorMessage(
           error,
-          "We couldn't save this profile. Your changes are still here. Please try again.",
+          t("lovedOneProfile.couldntSaveMessage"),
           "save",
         ),
       );
@@ -103,7 +108,7 @@ export default function LovedOneProfileScreen() {
   if (isLoading) {
     return (
       <SafeAreaView className="flex-1 bg-cream items-center justify-center">
-        <Text className="text-muted">Loading...</Text>
+        <Text className="text-muted">{t("common.loading")}</Text>
       </SafeAreaView>
     );
   }
@@ -120,38 +125,38 @@ export default function LovedOneProfileScreen() {
             onPress={() => router.back()}
             className="flex-row items-center gap-2"
             accessibilityRole="button"
-            accessibilityLabel="Go back"
+            accessibilityLabel={t("common.back")}
             style={{ minHeight: 48 }}
           >
             <ArrowLeft size={20} color={COLORS.charcoal} />
-            <Text className="text-[15px] text-charcoal">Back</Text>
+            <Text className="text-[15px] text-charcoal">{t("common.back")}</Text>
           </Pressable>
           <Text className="text-[28px] font-semibold text-charcoal mt-4">
-            Loved One Profile
+            {t("lovedOneProfile.title")}
           </Text>
         </View>
 
         {/* Scrollable Form */}
         <ScrollView
           className="flex-1 px-6"
-          contentContainerStyle={{ paddingBottom: 120 }}
+          contentContainerStyle={{ paddingBottom: 200 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
           {/* Basic Info */}
           <View className="gap-4 mt-4">
             <Input
-              label="Name"
+              label={t("lovedOneProfile.name")}
               value={name}
               onChangeText={setName}
-              placeholder="Their full name"
+              placeholder={t("lovedOneProfile.namePlaceholder")}
               testID="loved-one-name-input"
             />
             <Input
-              label="Phone Number"
+              label={t("lovedOneProfile.phone")}
               value={phone}
               onChangeText={(value) => setPhone(sanitizePhoneInput(value))}
-              placeholder="+1 (555) 000-0000"
+              placeholder={t("lovedOneProfile.phonePlaceholder")}
               keyboardType="phone-pad"
               maxLength={20}
               testID="loved-one-phone-input"
@@ -159,19 +164,19 @@ export default function LovedOneProfileScreen() {
             <View className="flex-row gap-3">
               <View className="flex-1">
                 <Input
-                  label="City"
+                  label={t("lovedOneProfile.city")}
                   value={city}
                   onChangeText={setCity}
-                  placeholder="City"
+                  placeholder={t("lovedOneProfile.cityPlaceholder")}
                   testID="loved-one-city-input"
                 />
               </View>
               <View className="w-20">
                 <Input
-                  label="State"
+                  label={t("lovedOneProfile.state")}
                   value={state}
                   onChangeText={setState}
-                  placeholder="TX"
+                  placeholder={t("lovedOneProfile.statePlaceholder")}
                   maxLength={2}
                   autoCapitalize="characters"
                   testID="loved-one-state-input"
@@ -179,10 +184,10 @@ export default function LovedOneProfileScreen() {
               </View>
               <View className="w-24">
                 <Input
-                  label="ZIP"
+                  label={t("lovedOneProfile.zip")}
                   value={zipCode}
                   onChangeText={setZipCode}
-                  placeholder="75001"
+                  placeholder={t("lovedOneProfile.zipPlaceholder")}
                   keyboardType="number-pad"
                   maxLength={5}
                   testID="loved-one-zip-input"
@@ -194,7 +199,7 @@ export default function LovedOneProfileScreen() {
           {/* Interests Accordion */}
           <View className="mt-8">
             <Text className="text-[13px] font-medium text-muted uppercase tracking-wider mb-3">
-              Interests
+              {t("lovedOneProfile.interests")}
             </Text>
             <View className="bg-white rounded-2xl border border-charcoal/10 overflow-hidden">
               {INTERESTS.map((interest, index) => {
@@ -213,7 +218,7 @@ export default function LovedOneProfileScreen() {
                       }}
                       className="flex-row items-center px-4 py-3.5"
                       accessibilityRole="button"
-                      accessibilityLabel={`${interest.label}${isSelected ? ", selected" : ""}`}
+                      accessibilityLabel={`${t(`interests.${interest.id}.label`)}${isSelected ? ", selected" : ""}`}
                       style={{ minHeight: 48 }}
                     >
                       <View
@@ -232,7 +237,7 @@ export default function LovedOneProfileScreen() {
                             : "text-muted"
                         }`}
                       >
-                        {interest.label}
+                        {t(`interests.${interest.id}.label`)}
                       </Text>
                       {isExpanded ? (
                         <ChevronUp size={18} color={COLORS.muted} />
@@ -245,11 +250,11 @@ export default function LovedOneProfileScreen() {
                     {isExpanded && (
                       <View className="px-4 pb-3.5">
                         <Text className="text-[13px] text-muted mb-2">
-                          {interest.question}
+                          {t(`interests.${interest.id}.question`)}
                         </Text>
                         <TextInput
                           className="bg-beige px-4 py-3 rounded-xl text-[15px] text-charcoal border border-charcoal/5"
-                          placeholder={interest.placeholder}
+                          placeholder={t(`interests.${interest.id}.placeholder`)}
                           placeholderTextColor={COLORS.muted}
                           value={interestDetails[interest.id] ?? ""}
                           onChangeText={(text) =>
@@ -278,10 +283,10 @@ export default function LovedOneProfileScreen() {
           {/* Additional Topics */}
           <View className="mt-6">
             <Input
-              label="Additional Topics"
+              label={t("lovedOneProfile.additionalTopics")}
               value={additionalTopics}
               onChangeText={setAdditionalTopics}
-              placeholder="Other things they enjoy talking about..."
+              placeholder={t("lovedOneProfile.additionalTopicsPlaceholder")}
               multiline
               numberOfLines={3}
               style={{ minHeight: 80, textAlignVertical: "top" }}
@@ -291,21 +296,75 @@ export default function LovedOneProfileScreen() {
           {/* Topics to Avoid */}
           <View className="mt-4">
             <Input
-              label="Topics to Avoid"
+              label={t("lovedOneProfile.topicsToAvoid")}
               value={topicsToAvoid}
               onChangeText={setTopicsToAvoid}
-              placeholder="Sensitive topics Donna should steer away from..."
+              placeholder={t("lovedOneProfile.topicsToAvoidPlaceholder")}
               multiline
               numberOfLines={3}
               style={{ minHeight: 80, textAlignVertical: "top" }}
             />
+          </View>
+
+          {/* Donna Language */}
+          <View className="mt-8">
+            <Text className="text-[13px] font-medium text-muted uppercase tracking-wider mb-3">
+              {t("lovedOneProfile.donnaLanguage")}
+            </Text>
+            <Text className="text-[14px] text-muted mb-3">
+              {t("lovedOneProfile.donnaLanguageSubtitle", { name: name || t("settings.lovedOneProfile").toLowerCase() })}
+            </Text>
+            <View className="flex-row gap-2">
+              <Pressable
+                onPress={() => setDonnaLanguage("en")}
+                className={`flex-1 flex-row items-center justify-center py-3 rounded-xl border-2 ${
+                  donnaLanguage === "en"
+                    ? "border-sage bg-sage/5"
+                    : "border-charcoal/10 bg-white"
+                }`}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: donnaLanguage === "en" }}
+                accessibilityLabel={t("lovedOneProfile.english")}
+                style={{ minHeight: 48 }}
+              >
+                <Text className="text-[16px] mr-2">{"\ud83c\uddfa\ud83c\uddf8"}</Text>
+                <Text
+                  className={`text-[15px] font-medium ${
+                    donnaLanguage === "en" ? "text-sage" : "text-charcoal"
+                  }`}
+                >
+                  {t("lovedOneProfile.english")}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setDonnaLanguage("es")}
+                className={`flex-1 flex-row items-center justify-center py-3 rounded-xl border-2 ${
+                  donnaLanguage === "es"
+                    ? "border-sage bg-sage/5"
+                    : "border-charcoal/10 bg-white"
+                }`}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: donnaLanguage === "es" }}
+                accessibilityLabel={t("lovedOneProfile.spanish")}
+                style={{ minHeight: 48 }}
+              >
+                <Text className="text-[16px] mr-2">{"\ud83c\uddf2\ud83c\uddfd"}</Text>
+                <Text
+                  className={`text-[15px] font-medium ${
+                    donnaLanguage === "es" ? "text-sage" : "text-charcoal"
+                  }`}
+                >
+                  {t("lovedOneProfile.spanish")}
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </ScrollView>
 
         {/* Fixed Save Button */}
         <View className="absolute bottom-0 left-0 right-0 bg-cream border-t border-charcoal/5 px-6 py-4 pb-8">
           <Button
-            title="Save Changes"
+            title={t("common.save")}
             onPress={handleSave}
             loading={updateSenior.isPending}
           />

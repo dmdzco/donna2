@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { ArrowLeft, ChevronDown, Check } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { Button, Input, Modal, ProgressBar } from "@/src/components/ui";
 import { COLORS, RELATIONSHIP_OPTIONS } from "@/src/constants/theme";
 import { useOnboardingStore } from "@/src/stores/onboarding";
@@ -20,6 +21,7 @@ function sanitizePhoneInput(value: string): string {
 
 export default function Step2Screen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const {
     lovedOneName,
     lovedOnePhone,
@@ -35,20 +37,20 @@ export default function Step2Screen() {
 
   function validate(): boolean {
     const next: Record<string, string> = {};
-    if (!lovedOneName.trim()) next.lovedOneName = "Name is required";
-    if (!lovedOnePhone.trim()) next.lovedOnePhone = "Phone number is required";
-    if (!relationship) next.relationship = "Please select a relationship";
+    if (!lovedOneName.trim()) next.lovedOneName = t("onboarding.step2.nameRequired");
+    if (!lovedOnePhone.trim()) next.lovedOnePhone = t("onboarding.step2.phoneRequired");
+    if (!relationship) next.relationship = t("onboarding.step2.relationshipRequired");
     if (state.trim() && state.trim().length !== 2)
-      next.state = "Use 2-letter code";
+      next.state = t("onboarding.step2.stateFormat");
     if (zipcode.trim() && zipcode.trim().length !== 5)
-      next.zipcode = "Use 5-digit zip";
+      next.zipcode = t("onboarding.step2.zipFormat");
     setErrors(next);
     return Object.keys(next).length === 0;
   }
 
   function handleNext() {
     if (validate()) {
-      router.push("/(onboarding)/step3");
+      router.push("/(onboarding)/language");
     }
   }
 
@@ -65,7 +67,7 @@ export default function Step2Screen() {
         >
           {/* Progress */}
           <View className="mt-4 mb-4">
-            <ProgressBar current={2} total={5} />
+            <ProgressBar current={2} total={6} />
           </View>
 
           {/* Back */}
@@ -73,26 +75,26 @@ export default function Step2Screen() {
             onPress={() => router.back()}
             className="flex-row items-center mb-6 min-h-[48px] self-start"
             accessibilityRole="button"
-            accessibilityLabel="Go back"
+            accessibilityLabel={t("common.back")}
           >
             <ArrowLeft size={18} color={COLORS.sage} />
             <Text className="text-sage text-[16px] font-medium ml-1">
-              Back
+              {t("common.back")}
             </Text>
           </Pressable>
 
           {/* Header */}
           <Text className="text-[28px] font-semibold text-charcoal mb-2">
-            About Your Loved One
+            {t("onboarding.step2.title")}
           </Text>
           <Text className="text-[15px] text-muted mb-8">
-            Tell us about the person Donna will be calling
+            {t("onboarding.step2.subtitle")}
           </Text>
 
           {/* Form */}
           <View className="gap-4">
             <Input
-              label="Their Name"
+              label={t("onboarding.step2.name")}
               placeholder="Margaret"
               value={lovedOneName}
               onChangeText={(v) => setField("lovedOneName", v)}
@@ -103,7 +105,7 @@ export default function Step2Screen() {
             />
 
             <Input
-              label="Their Phone Number"
+              label={t("onboarding.step2.phone")}
               placeholder="(555) 987-6543"
               value={lovedOnePhone}
               onChangeText={(v) =>
@@ -119,7 +121,7 @@ export default function Step2Screen() {
             {/* Relationship Picker */}
             <View className="w-full">
               <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-                Your Relationship
+                {t("onboarding.step2.relationship")}
               </Text>
               <Pressable
                 onPress={() => setShowRelationshipPicker(true)}
@@ -127,12 +129,12 @@ export default function Step2Screen() {
                   errors.relationship ? "border-red-500" : "border-charcoal/10"
                 }`}
                 accessibilityRole="button"
-                accessibilityLabel="Select relationship"
+                accessibilityLabel={t("onboarding.step2.selectRelationship")}
               >
                 <Text
                   className={`text-[15px] ${relationship ? "text-charcoal" : "text-muted"}`}
                 >
-                  {relationship || "Select relationship"}
+                  {relationship ? t(`relationships.${relationship}`) : t("onboarding.step2.selectRelationship")}
                 </Text>
                 <ChevronDown size={18} color={COLORS.muted} />
               </Pressable>
@@ -144,7 +146,7 @@ export default function Step2Screen() {
             </View>
 
             <Input
-              label="City"
+              label={t("onboarding.step2.city")}
               placeholder="Dallas"
               value={city}
               onChangeText={(v) => setField("city", v)}
@@ -157,7 +159,7 @@ export default function Step2Screen() {
             <View className="flex-row gap-3">
               <View className="flex-1">
                 <Input
-                  label="State"
+                  label={t("onboarding.step2.state")}
                   placeholder="TX"
                   value={state}
                   onChangeText={(v) =>
@@ -172,7 +174,7 @@ export default function Step2Screen() {
               </View>
               <View className="flex-1">
                 <Input
-                  label="Zip Code"
+                  label={t("onboarding.step2.zipCode")}
                   placeholder="75201"
                   value={zipcode}
                   onChangeText={(v) =>
@@ -191,7 +193,7 @@ export default function Step2Screen() {
 
         {/* Fixed bottom button */}
         <View className="absolute bottom-0 left-0 right-0 bg-cream border-t border-charcoal/10 px-6 pt-4 pb-8">
-          <Button title="Next" onPress={handleNext} />
+          <Button title={t("common.next")} onPress={handleNext} />
         </View>
       </KeyboardAvoidingView>
 
@@ -199,7 +201,7 @@ export default function Step2Screen() {
       <Modal
         visible={showRelationshipPicker}
         onClose={() => setShowRelationshipPicker(false)}
-        title="Select Relationship"
+        title={t("onboarding.step2.selectRelationship")}
       >
         <View className="gap-1 pb-4">
           {RELATIONSHIP_OPTIONS.map((option) => (
@@ -211,9 +213,9 @@ export default function Step2Screen() {
               }}
               className="flex-row items-center justify-between py-3.5 px-2 rounded-xl active:bg-beige"
               accessibilityRole="button"
-              accessibilityLabel={option}
+              accessibilityLabel={t(`relationships.${option}`)}
             >
-              <Text className="text-[16px] text-charcoal">{option}</Text>
+              <Text className="text-[16px] text-charcoal">{t(`relationships.${option}`)}</Text>
               {relationship === option && (
                 <Check size={18} color={COLORS.sage} />
               )}

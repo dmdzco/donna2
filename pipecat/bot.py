@@ -246,22 +246,28 @@ def get_audio_profile(session_state: dict) -> dict[str, int | str]:
 
 
 def create_tts_service(session_state: dict):
-    """Select TTS provider based on feature flag.
+    """Select TTS provider based on feature flag and language.
 
     Uses session_state["_flags"]["tts_provider"] to pick Cartesia or ElevenLabs.
     Falls back to ElevenLabs if Cartesia key is missing or flag is unset.
+    When Donna's language is Spanish, uses a Spanish-capable voice.
     """
     cfg = get_settings()
     audio_profile = get_audio_profile(session_state)
     provider = str(audio_profile["tts_provider"])
     output_sample_rate = int(audio_profile["audio_out_sample_rate"])
+    donna_lang = session_state.get("_donna_language", "en")
 
     if provider == "cartesia":
         is_telnyx = session_state.get("_transport_type") == "telnyx"
-        logger.info("TTS provider: Cartesia Sonic 3")
+        # Cartesia Spanish voice (warm female) or default English
+        voice_id = cfg.cartesia_voice_id or "1242fb95-7ddd-44ac-8a05-9e8a22a6137d"
+        if donna_lang == "es":
+            voice_id = getattr(cfg, "cartesia_voice_id_es", None) or voice_id
+        logger.info("TTS provider: Cartesia Sonic 3 (lang={lang})", lang=donna_lang)
         return CartesiaTTSService(
             api_key=cfg.cartesia_api_key,
-            voice_id=cfg.cartesia_voice_id or "1242fb95-7ddd-44ac-8a05-9e8a22a6137d",
+            voice_id=voice_id,
             model="sonic-3",
             sample_rate=output_sample_rate,
             # Keep linear PCM in-process; the telephony serializer owns the final
@@ -273,13 +279,18 @@ def create_tts_service(session_state: dict):
                     volume=0.9 if is_telnyx else 1.2,
                     emotion="enthusiastic",
                 ),
+                language=("es" if donna_lang == "es" else "en"),
             ),
         )
 
-    logger.info("TTS provider: ElevenLabs {model}", model=cfg.elevenlabs_model)
+    # ElevenLabs: use Spanish voice ID if configured, otherwise default
+    voice_id = cfg.elevenlabs_voice_id
+    if donna_lang == "es":
+        voice_id = getattr(cfg, "elevenlabs_voice_id_es", None) or voice_id
+    logger.info("TTS provider: ElevenLabs {model} (lang={lang})", model=cfg.elevenlabs_model, lang=donna_lang)
     return ElevenLabsTTSService(
         api_key=cfg.elevenlabs_api_key,
-        voice_id=cfg.elevenlabs_voice_id,
+        voice_id=voice_id,
         model=cfg.elevenlabs_model,
         sample_rate=output_sample_rate,
         params=ElevenLabsTTSService.InputParams(speed=0.9),
@@ -635,11 +646,25 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             model=cfg.anthropic_model,
         )
     else:
+        # Resolve Donna's conversation language from senior's familyInfo
+        _senior = session_state.get("senior") or {}
+        _family_info = _senior.get("family_info") or _senior.get("familyInfo") or {}
+        if isinstance(_family_info, str):
+            import json as _json
+            try:
+                _family_info = _json.loads(_family_info)
+            except Exception:
+                _family_info = {}
+        _donna_lang = _family_info.get("donnaLanguage", "en")
+        _stt_language = "es" if _donna_lang == "es" else "en"
+        # Store resolved language for TTS selection
+        session_state["_donna_language"] = _donna_lang
+
         stt = DeepgramSTTService(
             api_key=cfg.deepgram_api_key,
             live_options=LiveOptions(
                 model="nova-3-general",
-                language="en",
+                language=_stt_language,
                 sample_rate=audio_in_sample_rate,
                 encoding="linear16",
                 channels=1,

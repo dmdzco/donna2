@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react-native";
+import { ArrowLeft, ChevronDown, ChevronUp, Dumbbell, Landmark, Music, Film, Vote, Feather, Globe, PawPrint, BookOpen, Flower2, Plane, ChefHat } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { COLORS } from "@/src/constants/theme";
 import { INTERESTS } from "@/src/constants/interests";
@@ -19,6 +19,10 @@ import { Input } from "@/src/components/ui/Input";
 import { Button } from "@/src/components/ui/Button";
 import { useCurrentSenior, useSenior, useUpdateSenior } from "@/src/hooks";
 import { getErrorMessage } from "@/src/lib/api";
+
+const ICON_MAP: Record<string, React.ComponentType<{ size?: number; color?: string }>> = {
+  Dumbbell, Landmark, Music, Film, Vote, Feather, Globe, PawPrint, BookOpen, Flower2, Plane, ChefHat,
+};
 
 function sanitizePhoneInput(value: string): string {
   return value.replace(/[^\d+\-\s()]/g, "").slice(0, 20);
@@ -201,14 +205,26 @@ export default function LovedOneProfileScreen() {
             <Text className="text-[13px] font-medium text-muted uppercase tracking-wider mb-3">
               {t("lovedOneProfile.interests")}
             </Text>
-            <View className="bg-white rounded-2xl border border-charcoal/10 overflow-hidden">
-              {INTERESTS.map((interest, index) => {
+            <View className="gap-2">
+              {INTERESTS.map((interest) => {
                 const isSelected = selectedInterests.includes(interest.id);
                 const isExpanded = expandedInterest === interest.id;
-                const showSeparator = index < INTERESTS.length - 1;
+                const IconComponent = ICON_MAP[interest.icon];
 
                 return (
-                  <View key={interest.id}>
+                  <View
+                    key={interest.id}
+                    className="rounded-2xl overflow-hidden"
+                    style={
+                      isSelected
+                        ? { backgroundColor: COLORS.sageDark }
+                        : {
+                            backgroundColor: "#fff",
+                            borderWidth: 1,
+                            borderColor: "rgba(55,55,55,0.1)",
+                          }
+                    }
+                  >
                     <Pressable
                       onPress={() => {
                         if (!isSelected) {
@@ -216,46 +232,68 @@ export default function LovedOneProfileScreen() {
                         }
                         toggleExpanded(interest.id);
                       }}
-                      className="flex-row items-center px-4 py-3.5"
+                      className="flex-row items-center px-4 py-4"
                       accessibilityRole="button"
                       accessibilityLabel={`${t(`interests.${interest.id}.label`)}${isSelected ? ", selected" : ""}`}
-                      style={{ minHeight: 48 }}
+                      style={{ minHeight: 52 }}
                     >
-                      <View
-                        className={`w-8 h-8 rounded-full items-center justify-center mr-3 ${
-                          isSelected ? "bg-sage/10" : "bg-gray-100"
-                        }`}
-                      >
-                        <Text className="text-[14px]">
-                          {isSelected ? "✓" : ""}
-                        </Text>
-                      </View>
+                      {IconComponent && (
+                        <IconComponent
+                          size={18}
+                          color={isSelected ? COLORS.cream : COLORS.muted}
+                        />
+                      )}
                       <Text
-                        className={`flex-1 text-[15px] ${
-                          isSelected
-                            ? "text-charcoal font-medium"
-                            : "text-muted"
+                        className={`flex-1 text-[16px] font-medium ml-3 ${
+                          isSelected ? "text-cream" : "text-charcoal"
                         }`}
                       >
                         {t(`interests.${interest.id}.label`)}
                       </Text>
                       {isExpanded ? (
-                        <ChevronUp size={18} color={COLORS.muted} />
+                        <ChevronUp
+                          size={18}
+                          color={isSelected ? COLORS.cream : COLORS.muted}
+                        />
                       ) : (
-                        <ChevronDown size={18} color={COLORS.muted} />
+                        <ChevronDown
+                          size={18}
+                          color={isSelected ? COLORS.cream : COLORS.muted}
+                        />
                       )}
                     </Pressable>
 
                     {/* Expanded Detail Input */}
                     {isExpanded && (
-                      <View className="px-4 pb-3.5">
-                        <Text className="text-[13px] text-muted mb-2">
+                      <View className="px-4 pb-4">
+                        <Text
+                          className={`text-[13px] mb-2 ${
+                            isSelected ? "text-cream/80" : "text-muted"
+                          }`}
+                        >
                           {t(`interests.${interest.id}.question`)}
                         </Text>
                         <TextInput
-                          className="bg-beige px-4 py-3 rounded-xl text-[15px] text-charcoal border border-charcoal/5"
+                          className="px-4 py-3 rounded-xl text-[15px]"
+                          style={
+                            isSelected
+                              ? {
+                                  backgroundColor: "rgba(253,252,248,0.15)",
+                                  color: COLORS.cream,
+                                  borderWidth: 1,
+                                  borderColor: "rgba(253,252,248,0.2)",
+                                }
+                              : {
+                                  backgroundColor: COLORS.beige,
+                                  color: COLORS.charcoal,
+                                  borderWidth: 1,
+                                  borderColor: "rgba(55,55,55,0.05)",
+                                }
+                          }
                           placeholder={t(`interests.${interest.id}.placeholder`)}
-                          placeholderTextColor={COLORS.muted}
+                          placeholderTextColor={
+                            isSelected ? "rgba(253,252,248,0.5)" : COLORS.muted
+                          }
                           value={interestDetails[interest.id] ?? ""}
                           onChangeText={(text) =>
                             setInterestDetails((prev) => ({
@@ -270,10 +308,44 @@ export default function LovedOneProfileScreen() {
                           }}
                           multiline
                         />
+                        {/* Remove / Done buttons */}
+                        <View className="flex-row gap-2 mt-3">
+                          <Pressable
+                            onPress={() => {
+                              toggleInterest(interest.id);
+                              setExpandedInterest(null);
+                              setInterestDetails((prev) => {
+                                const next = { ...prev };
+                                delete next[interest.id];
+                                return next;
+                              });
+                            }}
+                            className="flex-1 py-2.5 rounded-xl items-center"
+                            style={{
+                              backgroundColor: "rgba(253,252,248,0.15)",
+                              borderWidth: 1,
+                              borderColor: "rgba(253,252,248,0.2)",
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel={t("common.delete")}
+                          >
+                            <Text className="text-cream text-[14px] font-medium">
+                              {t("common.delete")}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => setExpandedInterest(null)}
+                            className="flex-1 py-2.5 rounded-xl items-center bg-white"
+                            accessibilityRole="button"
+                            accessibilityLabel={t("common.done")}
+                          >
+                            <Text className="text-charcoal text-[14px] font-medium">
+                              {t("common.done")}
+                            </Text>
+                          </Pressable>
+                        </View>
                       </View>
                     )}
-
-                    {showSeparator && <View className="h-px bg-charcoal/5 ml-16" />}
                   </View>
                 );
               })}

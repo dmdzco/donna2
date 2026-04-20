@@ -47,6 +47,7 @@ export default function LovedOneProfileScreen() {
   const [expandedInterest, setExpandedInterest] = useState<string | null>(null);
   const [additionalTopics, setAdditionalTopics] = useState("");
   const [medicalNotes, setMedicalNotes] = useState("");
+  const [dateOfBirth, setDateOfBirth] = useState("");
   const [topicsToAvoid, setTopicsToAvoid] = useState("");
   const [donnaLanguage, setDonnaLanguage] = useState<"en" | "es">("en");
 
@@ -65,6 +66,7 @@ export default function LovedOneProfileScreen() {
       );
       setAdditionalTopics(senior.additionalInfo ?? "");
       setMedicalNotes(senior.medicalNotes ?? "");
+      setDateOfBirth((family?.dateOfBirth as string) ?? "");
       setTopicsToAvoid((family?.topicsToAvoid as string) ?? "");
       setDonnaLanguage((family?.donnaLanguage as "en" | "es") ?? "en");
     }
@@ -96,6 +98,7 @@ export default function LovedOneProfileScreen() {
         familyInfo: {
           interestDetails,
           topicsToAvoid: topicsToAvoid.trim(),
+          dateOfBirth: dateOfBirth.trim() || undefined,
           donnaLanguage,
         } as unknown as Record<string, string>,
       });
@@ -167,6 +170,15 @@ export default function LovedOneProfileScreen() {
               keyboardType="phone-pad"
               maxLength={20}
               testID="loved-one-phone-input"
+            />
+            <Input
+              label={t("lovedOneProfile.dateOfBirth")}
+              value={dateOfBirth}
+              onChangeText={setDateOfBirth}
+              placeholder={t("lovedOneProfile.dateOfBirthPlaceholder")}
+              keyboardType="number-pad"
+              maxLength={10}
+              testID="loved-one-dob-input"
             />
             <View className="flex-row gap-3">
               <View className="flex-1">

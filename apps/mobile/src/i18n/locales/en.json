@@ -307,6 +307,8 @@
     "namePlaceholder": "Their full name",
     "phone": "Phone Number",
     "phonePlaceholder": "+1 (555) 000-0000",
+    "dateOfBirth": "Date of Birth",
+    "dateOfBirthPlaceholder": "MM/DD/YYYY",
     "city": "City",
     "state": "State",
     "zip": "ZIP",

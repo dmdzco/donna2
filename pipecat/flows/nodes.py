@@ -182,6 +182,28 @@ def _build_senior_context(session_state: dict) -> str:
         from prompts import SPANISH_LANGUAGE_INSTRUCTION
         parts.append(SPANISH_LANGUAGE_INSTRUCTION)
 
+    # Date of birth → age + birthday awareness
+    dob_str = family_info.get("dateOfBirth") or ""
+    if dob_str:
+        try:
+            from datetime import date as _date
+            parts_dob = dob_str.split("/")
+            if len(parts_dob) == 3:
+                dob = _date(int(parts_dob[2]), int(parts_dob[0]), int(parts_dob[1]))
+                today = local_now.date()
+                age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+                birthday_month_day = dob.strftime("%B %d")
+                days_until = ((dob.replace(year=today.year) - today).days) % 365
+                if days_until == 0:
+                    bday_note = "Today is their birthday!"
+                elif days_until <= 7:
+                    bday_note = f"Their birthday is coming up in {days_until} days ({birthday_month_day})."
+                else:
+                    bday_note = f"Their birthday is {birthday_month_day}."
+                parts.append(f"They are {age} years old. {bday_note}")
+        except (ValueError, IndexError):
+            pass
+
     interests = senior.get("interests") or []
     if interests:
         interests_text = f"They enjoy: {', '.join(interests)}."

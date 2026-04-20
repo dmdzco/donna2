@@ -196,7 +196,7 @@ export default function ScheduleScreen() {
   const [deleteConfirmIndex, setDeleteConfirmIndex] = useState<number | null>(null);
 
   // Edit form state
-  const [formTitle, setFormTitle] = useState(t("schedule.dailyCall"));
+  const [formTitle, setFormTitle] = useState("Daily Call");
   const [formFrequency, setFormFrequency] = useState<Frequency>("daily");
   const [formDays, setFormDays] = useState<number[]>([]);
   const [formDate, setFormDate] = useState("");
@@ -314,7 +314,7 @@ export default function ScheduleScreen() {
   const openAddModal = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setEditingIndex(null);
-    setFormTitle(t("schedule.dailyCall"));
+    setFormTitle("Daily Call");
     setFormFrequency("daily");
     setFormDays([]);
     setFormDate(format(selectedDate, "MM/dd/yyyy"));
@@ -322,7 +322,7 @@ export default function ScheduleScreen() {
     setFormNotes("");
     setFormReminderIds([]);
     setModalVisible(true);
-  }, [selectedDate, t]);
+  }, [selectedDate]);
 
   const openEditModal = useCallback(
     (globalIndex: number) => {
@@ -331,7 +331,7 @@ export default function ScheduleScreen() {
       if (!item) return;
 
       setEditingIndex(globalIndex);
-      setFormTitle(item.title || t("schedule.dailyCall"));
+      setFormTitle(item.title || "Daily Call");
       setFormFrequency(item.frequency || "daily");
       setFormDays(item.recurringDays ?? []);
       setFormDate(item.date ? format(new Date(item.date), "MM/dd/yyyy") : "");
@@ -963,7 +963,7 @@ function ScheduleCallCard({
 }) {
   const { t } = useTranslation();
   const { schedule, isPast, conversation } = data;
-  const displayTitle = schedule.title === "Daily Call" ? t("schedule.dailyCall") : schedule.title;
+  const displayTitle = schedule.title;
   const statusKey = conversation ? getCallStatusKey(conversation) : null;
   const isAnswered = statusKey === "answered";
 

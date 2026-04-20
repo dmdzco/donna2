@@ -262,8 +262,8 @@ def create_tts_service(session_state: dict):
         is_telnyx = session_state.get("_transport_type") == "telnyx"
         # Cartesia Spanish voice (warm female) or default English
         voice_id = cfg.cartesia_voice_id or "1242fb95-7ddd-44ac-8a05-9e8a22a6137d"
-        if donna_lang == "es":
-            voice_id = getattr(cfg, "cartesia_voice_id_es", None) or voice_id
+        if donna_lang == "es" and cfg.cartesia_voice_id_es:
+            voice_id = cfg.cartesia_voice_id_es
         logger.info("TTS provider: Cartesia Sonic 3 (lang={lang})", lang=donna_lang)
         return CartesiaTTSService(
             api_key=cfg.cartesia_api_key,
@@ -285,8 +285,8 @@ def create_tts_service(session_state: dict):
 
     # ElevenLabs: use Spanish voice ID if configured, otherwise default
     voice_id = cfg.elevenlabs_voice_id
-    if donna_lang == "es":
-        voice_id = getattr(cfg, "elevenlabs_voice_id_es", None) or voice_id
+    if donna_lang == "es" and cfg.elevenlabs_voice_id_es:
+        voice_id = cfg.elevenlabs_voice_id_es
     logger.info("TTS provider: ElevenLabs {model} (lang={lang})", model=cfg.elevenlabs_model, lang=donna_lang)
     return ElevenLabsTTSService(
         api_key=cfg.elevenlabs_api_key,

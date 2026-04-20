@@ -46,6 +46,7 @@ export default function LovedOneProfileScreen() {
   >({});
   const [expandedInterest, setExpandedInterest] = useState<string | null>(null);
   const [additionalTopics, setAdditionalTopics] = useState("");
+  const [medicalNotes, setMedicalNotes] = useState("");
   const [topicsToAvoid, setTopicsToAvoid] = useState("");
   const [donnaLanguage, setDonnaLanguage] = useState<"en" | "es">("en");
 
@@ -63,6 +64,7 @@ export default function LovedOneProfileScreen() {
         (family?.interestDetails as Record<string, string>) ?? {}
       );
       setAdditionalTopics(senior.additionalInfo ?? "");
+      setMedicalNotes(senior.medicalNotes ?? "");
       setTopicsToAvoid((family?.topicsToAvoid as string) ?? "");
       setDonnaLanguage((family?.donnaLanguage as "en" | "es") ?? "en");
     }
@@ -90,6 +92,7 @@ export default function LovedOneProfileScreen() {
         zipCode: zipCode.trim() || undefined,
         interests: selectedInterests,
         additionalInfo: additionalTopics.trim() || undefined,
+        medicalNotes: medicalNotes.trim() || undefined,
         familyInfo: {
           interestDetails,
           topicsToAvoid: topicsToAvoid.trim(),
@@ -372,6 +375,19 @@ export default function LovedOneProfileScreen() {
               value={topicsToAvoid}
               onChangeText={setTopicsToAvoid}
               placeholder={t("lovedOneProfile.topicsToAvoidPlaceholder")}
+              multiline
+              numberOfLines={3}
+              style={{ minHeight: 80, textAlignVertical: "top" }}
+            />
+          </View>
+
+          {/* Health/Context Notes */}
+          <View className="mt-4">
+            <Input
+              label={t("lovedOneProfile.healthNotes")}
+              value={medicalNotes}
+              onChangeText={setMedicalNotes}
+              placeholder={t("lovedOneProfile.healthNotesPlaceholder")}
               multiline
               numberOfLines={3}
               style={{ minHeight: 80, textAlignVertical: "top" }}

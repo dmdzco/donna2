@@ -8,6 +8,7 @@ export interface Senior {
   zipCode?: string;
   interests?: string[];
   additionalInfo?: string;
+  medicalNotes?: string;
   familyInfo?: Record<string, unknown>;
   preferredCallTimes?: Record<string, unknown>;
   isActive: boolean;

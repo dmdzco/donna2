@@ -315,6 +315,8 @@
     "additionalTopicsPlaceholder": "Other things they enjoy talking about...",
     "topicsToAvoid": "Topics to Avoid",
     "topicsToAvoidPlaceholder": "Sensitive topics Donna should steer away from...",
+    "healthNotes": "Health & Context Notes",
+    "healthNotesPlaceholder": "Health conditions, age, important context Donna should know...",
     "editNameHint": "Edit name in Loved One Profile",
     "failedToUpdate": "Failed to update profile. Please try again.",
     "cityPlaceholder": "City",

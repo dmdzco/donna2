@@ -214,6 +214,20 @@ async def analyze_completed_call(
         )
         or "Unknown"
     )
+    # Determine output language from senior's configured donnaLanguage
+    family_info = (senior_context or {}).get("family_info") or {}
+    if isinstance(family_info, str):
+        try:
+            family_info = json.loads(family_info)
+        except (json.JSONDecodeError, TypeError):
+            family_info = {}
+    donna_language = family_info.get("donnaLanguage", "en")
+    language_instruction = (
+        "\n\nIMPORTANT: Write ALL text fields (summary, caregiver_sms, caregiver_takeaways, recommended_caregiver_action, follow_up_suggestions, mood, positive_observations, concern descriptions) in Spanish."
+        if donna_language == "es"
+        else ""
+    )
+
     turn_content = (
         ANALYSIS_TURN_TEMPLATE
         .replace("{{SENIOR_NAME}}", (senior_context or {}).get("name") or "Unknown")
@@ -224,7 +238,7 @@ async def analyze_completed_call(
             ", ".join((senior_context or {}).get("family") or []) or "Unknown",
         )
         .replace("{{TRANSCRIPT}}", _format_transcript(transcript) or "")
-    )
+    ) + language_instruction
 
     try:
         # Use google-genai for Gemini (async to avoid blocking event loop)

@@ -2,6 +2,7 @@ import { Component, ErrorInfo, ReactNode } from "react";
 import { View, Text, Pressable } from "react-native";
 import { COLORS } from "@/src/constants/theme";
 import { captureBoundaryException } from "@/src/lib/errorReporting";
+import i18n from "@/src/i18n";
 
 type Props = { children: ReactNode; fallback?: ReactNode };
 type State = { hasError: boolean; error?: Error };
@@ -23,11 +24,10 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.cream, padding: 24 }}>
           <Text style={{ fontSize: 20, fontWeight: "600", color: COLORS.charcoal, marginBottom: 8 }}>
-            Something went wrong
+            {i18n.t("common.somethingWentWrong")}
           </Text>
           <Text style={{ fontSize: 15, color: COLORS.muted, textAlign: "center", marginBottom: 24 }}>
-            Donna ran into a problem. Please try again. If it keeps happening,
-            close and reopen the app.
+            {i18n.t("common.unexpectedError")}
           </Text>
           <Pressable
             onPress={() => this.setState({ hasError: false, error: undefined })}
@@ -41,9 +41,9 @@ export class ErrorBoundary extends Component<Props, State> {
               justifyContent: "center",
             }}
             accessibilityRole="button"
-            accessibilityLabel="Try again"
+            accessibilityLabel={i18n.t("common.tryAgain")}
           >
-            <Text style={{ color: "white", fontSize: 15, fontWeight: "500" }}>Try Again</Text>
+            <Text style={{ color: "white", fontSize: 15, fontWeight: "500" }}>{i18n.t("common.tryAgain")}</Text>
           </Pressable>
         </View>
       );

@@ -11,12 +11,14 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { ArrowLeft, Plus, X, Lightbulb } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { Button, Input, Modal, ProgressBar } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
 import { useOnboardingStore } from "@/src/stores/onboarding";
 
 export default function Step3Screen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { reminders, addReminder, removeReminder, updateReminder } =
     useOnboardingStore();
 
@@ -54,21 +56,20 @@ export default function Step3Screen() {
             onPress={() => router.back()}
             className="flex-row items-center mb-6 min-h-[48px] self-start"
             accessibilityRole="button"
-            accessibilityLabel="Go back"
+            accessibilityLabel={t("common.back")}
           >
             <ArrowLeft size={18} color={COLORS.sage} />
             <Text className="text-sage text-[16px] font-medium ml-1">
-              Back
+              {t("common.back")}
             </Text>
           </Pressable>
 
           {/* Header */}
           <Text className="text-[28px] font-semibold text-charcoal mb-2">
-            Reminders
+            {t("onboarding.step3.title")}
           </Text>
           <Text className="text-[15px] text-muted mb-6">
-            Add things you'd like Donna to remind your loved one about during
-            calls
+            {t("onboarding.step3.subtitle")}
           </Text>
 
           {/* Reminder cards */}
@@ -80,14 +81,14 @@ export default function Step3Screen() {
               >
                 <View className="flex-row items-center justify-between mb-3">
                   <Text className="text-[15px] font-medium text-charcoal">
-                    Reminder {index + 1}
+                    {t("onboarding.step3.reminderN", { n: index + 1 })}
                   </Text>
                   {reminders.length > 1 && (
                     <Pressable
                       onPress={() => setDeleteIndex(index)}
                       className="min-w-[48px] min-h-[48px] items-center justify-center"
                       accessibilityRole="button"
-                      accessibilityLabel={`Delete reminder ${index + 1}`}
+                      accessibilityLabel={`${t("common.delete")} ${t("onboarding.step3.reminderN", { n: index + 1 })}`}
                     >
                       <X size={18} color={COLORS.muted} />
                     </Pressable>
@@ -96,8 +97,8 @@ export default function Step3Screen() {
 
                 <View className="gap-3">
                   <Input
-                    label="Title"
-                    placeholder="e.g., Take morning medication"
+                    label={t("onboarding.step3.titleLabel")}
+                    placeholder={t("onboarding.step3.titlePlaceholder")}
                     value={reminder.title}
                     onChangeText={(v) => updateReminder(index, "title", v)}
                     testID={`input-reminder-title-${index}`}
@@ -105,11 +106,11 @@ export default function Step3Screen() {
 
                   <View className="w-full">
                     <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-                      Description
+                      {t("onboarding.step3.description")}
                     </Text>
                     <TextInput
                       className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 text-[15px] text-charcoal min-h-[80px]"
-                      placeholder="e.g., Take the blue pill with breakfast. It's on the kitchen counter."
+                      placeholder={t("onboarding.step3.descriptionPlaceholder")}
                       placeholderTextColor={COLORS.muted}
                       value={reminder.description}
                       onChangeText={(v) =>
@@ -126,7 +127,7 @@ export default function Step3Screen() {
 
           {/* Add another */}
           <Button
-            title="Add Another Reminder"
+            title={t("onboarding.step3.addAnother")}
             onPress={addReminder}
             variant="secondary"
             icon={<Plus size={18} color={COLORS.charcoal} />}
@@ -137,15 +138,14 @@ export default function Step3Screen() {
           <View className="bg-beige rounded-2xl p-4 flex-row items-start gap-3">
             <Lightbulb size={20} color={COLORS.sage} />
             <Text className="text-[14px] text-muted flex-1 leading-5">
-              The more detailed you make the reminders, the better! Donna will
-              weave them naturally into the conversation.
+              {t("onboarding.step3.tip")}
             </Text>
           </View>
         </ScrollView>
 
         {/* Fixed bottom button */}
         <View className="absolute bottom-0 left-0 right-0 bg-cream border-t border-charcoal/10 px-6 pt-4 pb-8">
-          <Button title="Continue" onPress={handleContinue} />
+          <Button title={t("common.next")} onPress={handleContinue} />
         </View>
       </KeyboardAvoidingView>
 
@@ -153,21 +153,20 @@ export default function Step3Screen() {
       <Modal
         visible={deleteIndex !== null}
         onClose={() => setDeleteIndex(null)}
-        title="Delete Reminder"
+        title={t("onboarding.step3.deleteTitle")}
         variant="centered"
       >
         <Text className="text-[15px] text-muted mb-6">
-          Are you sure you want to delete this reminder? This action cannot be
-          undone.
+          {t("onboarding.step3.deleteMessage")}
         </Text>
         <View className="gap-3">
           <Button
-            title="Delete"
+            title={t("common.delete")}
             onPress={confirmDelete}
             variant="destructive"
           />
           <Button
-            title="Cancel"
+            title={t("common.cancel")}
             onPress={() => setDeleteIndex(null)}
             variant="ghost"
           />

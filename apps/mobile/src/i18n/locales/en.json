@@ -14,7 +14,8 @@
     "ok": "OK",
     "tryAgain": "Try Again",
     "somethingWentWrong": "Something went wrong",
-    "unexpectedError": "An unexpected error occurred"
+    "unexpectedError": "An unexpected error occurred",
+    "offlineMessage": "You're offline. Showing saved information when available."
   },
   "landing": {
     "tagline": "A helpful assistant for your parents.\nA game-changing caregiving tool for you.",
@@ -65,7 +66,41 @@
       "backupCode": "Backup Code",
       "totp": "Authenticator Code",
       "default": "Verification Code"
-    }
+    },
+    "welcomeBack": "Welcome Back",
+    "signInSubtitle": "Sign in to your Donna account",
+    "createAccountSubtitle": "Set up your Donna account to get started",
+    "checkYourEmail": "Check Your Email",
+    "setNewPassword": "Set a New Password",
+    "setNewPasswordSubtitle": "Choose a new password for your account.",
+    "secondFactorRequired": "Your account requires a second verification step.",
+    "secondFactorSubtitle": "Enter the verification code to finish signing in.",
+    "confirmNewPassword": "Confirm New Password",
+    "updatePassword": "Update Password",
+    "verifyCode": "Verify Code",
+    "editEmailAddress": "Edit email address",
+    "codeSentDescription": "We sent a fresh verification code to {{email}}.",
+    "passwordMinLength": "Use at least {{count}} characters with a mix of letters and numbers.",
+    "or": "or",
+    "goBack": "Go back",
+    "signUp": "Sign Up",
+    "signInFailed": "Sign In Failed",
+    "oauthError": "OAuth Error",
+    "signUpFailed": "Sign Up Failed",
+    "couldNotSignIn": "Could not sign in",
+    "couldNotCreateAccount": "Could not create account",
+    "couldNotVerify": "Could not verify that code",
+    "couldNotResend": "Could not resend the verification code",
+    "enterEmailFirst": "Enter your email",
+    "enterEmailFirstDescription": "Please enter your email address first, then tap Forgot Password.",
+    "passwordResetFailed": "Password Reset Failed",
+    "couldNotSendReset": "Could not send a password reset code",
+    "couldNotPrepare": "Could not prepare that verification method",
+    "couldNotUpdatePassword": "Could not update your password",
+    "passwordsDoNotMatch": "Passwords do not match",
+    "passwordTooShort": "Password must be at least {{count}} characters",
+    "verificationRequired": "Verification code is required",
+    "verificationIncomplete": "Verification is not complete yet. Try again."
   },
   "onboarding": {
     "language": {
@@ -155,6 +190,7 @@
   },
   "dashboard": {
     "greeting": "Hello, {{name}}",
+    "greetingNoName": "Hello there",
     "subtitle": "Here's what's happening with {{name}}",
     "nextCall": "NEXT CALL",
     "noCallsScheduled": "No calls scheduled",
@@ -173,9 +209,14 @@
     "unknownDate": "Unknown date",
     "answered": "Answered",
     "missed": "Missed",
-    "noSummary": "No summary available"
+    "noSummary": "No summary available",
+    "defaultGreetingName": "there",
+    "yourLovedOne": "your loved one"
   },
   "schedule": {
+    "dailyCall": "Daily Call",
+    "dayLetters": ["S", "M", "T", "W", "T", "F", "S"],
+    "dayLabels": ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
     "noCallsForDay": "No calls scheduled\nfor this day",
     "tapToAdd": "Tap + to add a call for {{name}}",
     "addCall": "Add Call",
@@ -275,7 +316,16 @@
     "topicsToAvoid": "Topics to Avoid",
     "topicsToAvoidPlaceholder": "Sensitive topics Donna should steer away from...",
     "editNameHint": "Edit name in Loved One Profile",
-    "failedToUpdate": "Failed to update profile. Please try again."
+    "failedToUpdate": "Failed to update profile. Please try again.",
+    "cityPlaceholder": "City",
+    "statePlaceholder": "TX",
+    "zipPlaceholder": "75001",
+    "donnaLanguage": "Donna's Language",
+    "donnaLanguageSubtitle": "What language should Donna speak in when calling {{name}}?",
+    "english": "English",
+    "spanish": "Spanish",
+    "couldntSave": "Couldn't Save",
+    "couldntSaveMessage": "We couldn't save this profile. Your changes are still here. Please try again."
   },
   "caregiverProfile": {
     "title": "Caregiver Profile",
@@ -289,7 +339,13 @@
     "changePassword": "Change Password",
     "changePasswordMessage": "Use Forgot password from the sign-in screen to reset your password. This profile screen should not trigger a verification code flow on its own.",
     "profileUpdated": "Profile updated successfully.",
-    "failedToUpdate": "Failed to update profile. Please try again."
+    "failedToUpdate": "Failed to update profile. Please try again.",
+    "firstNamePlaceholder": "First name",
+    "lastNamePlaceholder": "Last name",
+    "emailPlaceholder": "your@email.com",
+    "phonePlaceholder": "+1 (555) 000-0000",
+    "couldntSave": "Couldn't Save",
+    "couldntSaveMessage": "We couldn't save your profile. Your changes are still here. Check your connection and try again."
   },
   "notificationPreferences": {
     "title": "Notifications",
@@ -309,7 +365,9 @@
     "comingSoon": "Coming Soon",
     "subscriptionComingSoon": "Subscription management will be available in a future update.",
     "preferencesUpdated": "Notification preferences updated.",
-    "failedToUpdate": "Failed to update preferences. Please try again."
+    "failedToUpdate": "Failed to update preferences. Please try again.",
+    "couldntSave": "Couldn't Save",
+    "couldntSaveMessage": "We couldn't save your notification preferences. Your choices are still here. Check your connection and try again."
   },
   "helpCenter": {
     "title": "Help Center",
@@ -331,7 +389,12 @@
     "thankYou": "Thank You",
     "submittedMessage": "Your {{type}} has been submitted. We'll get back to you soon.",
     "requiredMessage": "Please enter your message before submitting.",
-    "unableToOpenLink": "Unable to open the link."
+    "unableToOpenLink": "Unable to open the link.",
+    "required": "Required",
+    "errorTitle": "Error",
+    "message": "message",
+    "report": "report",
+    "suggestion": "suggestion"
   },
   "tabs": {
     "dashboard": "Dashboard",
@@ -352,6 +415,15 @@
     "gardening": { "label": "Gardening", "question": "What do they grow or tend?", "placeholder": "e.g., roses, vegetable garden..." },
     "travel": { "label": "Travel", "question": "Where have they traveled or want to go?", "placeholder": "e.g., visited Paris, wants to see Grand Canyon..." },
     "cooking": { "label": "Cooking", "question": "What do they like to cook or eat?", "placeholder": "e.g., Italian food, baking cookies..." }
+  },
+  "days": {
+    "sun": "Sun",
+    "mon": "Mon",
+    "tue": "Tue",
+    "wed": "Wed",
+    "thu": "Thu",
+    "fri": "Fri",
+    "sat": "Sat"
   },
   "relationships": {
     "Daughter": "Daughter",

@@ -39,6 +39,8 @@ import {
   isBefore,
   getDay,
 } from "date-fns";
+import { useTranslation } from "react-i18next";
+import { getDateFnsLocale } from "@/src/lib/dateFnsLocale";
 import { COLORS } from "@/src/constants/theme";
 import {
   useCurrentSenior,
@@ -79,8 +81,7 @@ interface CallCardData {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
-const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// DAY_LETTERS and DAY_LABELS are now loaded from translations inside the component
 
 function parseTimeString(timeStr: string): { hours: number; minutes: number } | null {
   const matchAmPm = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
@@ -161,12 +162,12 @@ function getConversationForDate(date: Date, conversations: Conversation[]): Conv
   });
 }
 
-function getCallStatus(conversation: Conversation): "Answered" | "Missed" {
+function getCallStatusKey(conversation: Conversation): "answered" | "missed" {
   const duration = conversation.durationSeconds ?? 0;
   if (conversation.status === "completed" || (conversation.endedAt && duration > 10)) {
-    return "Answered";
+    return "answered";
   }
-  return "Missed";
+  return "missed";
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +175,10 @@ function getCallStatus(conversation: Conversation): "Answered" | "Missed" {
 // ---------------------------------------------------------------------------
 
 export default function ScheduleScreen() {
+  const { t } = useTranslation();
+  const dateFnsLocale = getDateFnsLocale();
+  const DAY_LETTERS = t("schedule.dayLetters", { returnObjects: true }) as string[];
+  const DAY_LABELS = t("schedule.dayLabels", { returnObjects: true }) as string[];
   const { senior, seniorId, isLoading: seniorLoading } = useCurrentSenior();
   const { data: rawSchedule, isLoading: scheduleLoading } = useSchedule(seniorId);
   const updateSchedule = useUpdateSchedule(seniorId);
@@ -191,7 +196,7 @@ export default function ScheduleScreen() {
   const [deleteConfirmIndex, setDeleteConfirmIndex] = useState<number | null>(null);
 
   // Edit form state
-  const [formTitle, setFormTitle] = useState("Daily Call");
+  const [formTitle, setFormTitle] = useState(t("schedule.dailyCall"));
   const [formFrequency, setFormFrequency] = useState<Frequency>("daily");
   const [formDays, setFormDays] = useState<number[]>([]);
   const [formDate, setFormDate] = useState("");
@@ -203,8 +208,8 @@ export default function ScheduleScreen() {
 
   const seniorFirstName = senior?.name?.split(" ")[0] ?? "your loved one";
   const timeHelperText = senior?.name
-    ? `${seniorFirstName}'s local time`
-    : "Senior's local time";
+    ? t("reminders.localTime", { name: seniorFirstName })
+    : t("reminders.seniorLocalTime");
 
   // ---------------------------------------------------------------------------
   // Data
@@ -309,7 +314,7 @@ export default function ScheduleScreen() {
   const openAddModal = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setEditingIndex(null);
-    setFormTitle("Daily Call");
+    setFormTitle(t("schedule.dailyCall"));
     setFormFrequency("daily");
     setFormDays([]);
     setFormDate(format(selectedDate, "MM/dd/yyyy"));
@@ -317,7 +322,7 @@ export default function ScheduleScreen() {
     setFormNotes("");
     setFormReminderIds([]);
     setModalVisible(true);
-  }, [selectedDate]);
+  }, [selectedDate, t]);
 
   const openEditModal = useCallback(
     (globalIndex: number) => {
@@ -326,7 +331,7 @@ export default function ScheduleScreen() {
       if (!item) return;
 
       setEditingIndex(globalIndex);
-      setFormTitle(item.title || "Daily Call");
+      setFormTitle(item.title || t("schedule.dailyCall"));
       setFormFrequency(item.frequency || "daily");
       setFormDays(item.recurringDays ?? []);
       setFormDate(item.date ? format(new Date(item.date), "MM/dd/yyyy") : "");
@@ -335,7 +340,7 @@ export default function ScheduleScreen() {
       setFormReminderIds(item.reminderIds ?? []);
       setModalVisible(true);
     },
-    [scheduleItems],
+    [scheduleItems, t],
   );
 
   const handleSave = useCallback(async () => {
@@ -432,7 +437,7 @@ export default function ScheduleScreen() {
           style={{ fontFamily: "PlayfairDisplay_400Regular" }}
           className="text-[40px] text-cream leading-[48px]"
         >
-          {format(selectedDate, "EEEE")}
+          {format(selectedDate, "EEEE", { locale: dateFnsLocale }).replace(/^\w/, (c) => c.toUpperCase())}
         </Text>
 
         {/* Month/year toggle */}
@@ -444,10 +449,10 @@ export default function ScheduleScreen() {
           }}
           className="flex-row items-center mt-1 min-h-[48px]"
           accessibilityRole="button"
-          accessibilityLabel={`${format(selectedDate, "MMMM yyyy")}. Tap to open month picker.`}
+          accessibilityLabel={`${format(selectedDate, "MMMM yyyy", { locale: dateFnsLocale })}`}
         >
           <Text className="text-[13px] uppercase tracking-widest text-cream/80">
-            {format(selectedDate, "MMM yyyy")}
+            {format(selectedDate, "MMM yyyy", { locale: dateFnsLocale })}
           </Text>
           <ChevronDown
             size={14}
@@ -462,7 +467,7 @@ export default function ScheduleScreen() {
             onPress={handlePrevWeek}
             className="min-w-[44px] min-h-[48px] items-center justify-center"
             accessibilityRole="button"
-            accessibilityLabel="Previous week"
+            accessibilityLabel={t("schedule.previousWeek")}
           >
             <ChevronLeft size={20} color="rgba(253,252,248,0.6)" />
           </Pressable>
@@ -477,7 +482,7 @@ export default function ScheduleScreen() {
                   onPress={() => handleSelectDate(date)}
                   className="items-center min-w-[40px] min-h-[56px] justify-center"
                   accessibilityRole="button"
-                  accessibilityLabel={format(date, "EEEE, MMMM d")}
+                  accessibilityLabel={format(date, "EEEE, MMMM d", { locale: dateFnsLocale })}
                   accessibilityState={{ selected: isSelected }}
                 >
                   <Text
@@ -485,7 +490,7 @@ export default function ScheduleScreen() {
                       isSelected ? "text-cream font-semibold" : "text-cream/60"
                     }`}
                   >
-                    {format(date, "EEEEE")}
+                    {format(date, "EEEEE", { locale: dateFnsLocale })}
                   </Text>
                   <Text
                     style={
@@ -530,7 +535,7 @@ export default function ScheduleScreen() {
             onPress={handleNextWeek}
             className="min-w-[44px] min-h-[48px] items-center justify-center"
             accessibilityRole="button"
-            accessibilityLabel="Next week"
+            accessibilityLabel={t("schedule.nextWeek")}
           >
             <ChevronRight size={20} color="rgba(253,252,248,0.6)" />
           </Pressable>
@@ -564,7 +569,7 @@ export default function ScheduleScreen() {
               }}
               className="min-w-[48px] min-h-[48px] items-center justify-center"
               accessibilityRole="button"
-              accessibilityLabel="Previous month"
+              accessibilityLabel={t("schedule.previousMonth")}
             >
               <ChevronLeft size={20} color={COLORS.cream} />
             </Pressable>
@@ -572,7 +577,7 @@ export default function ScheduleScreen() {
               style={{ fontFamily: "PlayfairDisplay_500Medium" }}
               className="text-cream text-[18px]"
             >
-              {format(monthPickerDate, "MMMM yyyy")}
+              {format(monthPickerDate, "MMMM yyyy", { locale: dateFnsLocale })}
             </Text>
             <Pressable
               onPress={() => {
@@ -581,7 +586,7 @@ export default function ScheduleScreen() {
               }}
               className="min-w-[48px] min-h-[48px] items-center justify-center"
               accessibilityRole="button"
-              accessibilityLabel="Next month"
+              accessibilityLabel={t("schedule.nextMonth")}
             >
               <ChevronRight size={20} color={COLORS.cream} />
             </Pressable>
@@ -611,7 +616,7 @@ export default function ScheduleScreen() {
                   style={{ width: "14.28%", height: 40 }}
                   className="items-center justify-center"
                   accessibilityRole="button"
-                  accessibilityLabel={format(date, "MMMM d, yyyy")}
+                  accessibilityLabel={format(date, "MMMM d, yyyy", { locale: dateFnsLocale })}
                 >
                   <View
                     className="items-center justify-center"
@@ -644,7 +649,7 @@ export default function ScheduleScreen() {
         <Pressable
           className="absolute inset-0 z-40"
           onPress={() => setShowMonthPicker(false)}
-          accessibilityLabel="Close month picker"
+          accessibilityLabel={t("common.done")}
         />
       )}
 
@@ -653,7 +658,7 @@ export default function ScheduleScreen() {
       {/* ================================================================= */}
       <View className="flex-1 px-6 pt-6">
         <Text className="text-[13px] uppercase tracking-widest text-muted mb-4 font-medium">
-          {format(selectedDate, "EEEE, MMM d")}
+          {format(selectedDate, "EEEE, MMM d", { locale: dateFnsLocale }).replace(/^\w/, (c) => c.toUpperCase())}
         </Text>
 
         {scheduleLoading ? (
@@ -664,10 +669,10 @@ export default function ScheduleScreen() {
           <View className="flex-1 items-center justify-center pb-20">
             <Calendar size={40} color={COLORS.muted} style={{ opacity: 0.4 }} />
             <Text className="text-muted text-[16px] mt-4 text-center">
-              No calls scheduled{"\n"}for this day
+              {t("schedule.noCallsForDay")}
             </Text>
             <Text className="text-muted/60 text-[14px] mt-2 text-center">
-              Tap + to add a call for {seniorFirstName}
+              {t("schedule.tapToAdd", { name: seniorFirstName })}
             </Text>
           </View>
         ) : (
@@ -706,7 +711,7 @@ export default function ScheduleScreen() {
           elevation: 5,
         }}
         accessibilityRole="button"
-        accessibilityLabel="Add new call"
+        accessibilityLabel={t("schedule.addNewCall")}
       >
         <Plus size={24} color={COLORS.white} />
       </Pressable>
@@ -717,14 +722,14 @@ export default function ScheduleScreen() {
       <Modal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
-        title={editingIndex !== null ? "Edit Call" : "Add Call"}
+        title={editingIndex !== null ? t("schedule.editCall") : t("schedule.addCall")}
       >
         <View className="pb-6">
           {/* Title */}
           <View className="mb-5">
             <Input
-              label="Call Title"
-              placeholder="e.g., Daily Call, Morning Check-in"
+              label={t("schedule.callTitle")}
+              placeholder={t("schedule.callTitlePlaceholder")}
               value={formTitle}
               onChangeText={setFormTitle}
               testID="call-title-input"
@@ -734,14 +739,14 @@ export default function ScheduleScreen() {
           {/* Frequency */}
           <View className="mb-5">
             <Text className="text-[13px] font-medium text-muted mb-2 uppercase tracking-wider">
-              Frequency
+              {t("schedule.frequency")}
             </Text>
             <View className="flex-row gap-2">
               {(
                 [
-                  { key: "daily", label: "Daily" },
-                  { key: "recurring", label: "Recurring" },
-                  { key: "one-time", label: "One-Time" },
+                  { key: "daily", label: t("schedule.daily") },
+                  { key: "recurring", label: t("schedule.recurring") },
+                  { key: "one-time", label: t("schedule.oneTime") },
                 ] as const
               ).map(({ key, label }) => (
                 <Pressable
@@ -772,7 +777,7 @@ export default function ScheduleScreen() {
           {formFrequency === "recurring" && (
             <View className="mb-5">
               <Text className="text-[13px] font-medium text-muted mb-2 uppercase tracking-wider">
-                Select Days
+                {t("schedule.selectDays")}
               </Text>
               <View className="flex-row gap-1.5">
                 {DAY_LABELS.map((day, dayIndex) => (
@@ -803,7 +808,7 @@ export default function ScheduleScreen() {
           {formFrequency === "one-time" && (
             <View className="mb-5">
               <Input
-                label="Date"
+                label={t("schedule.date")}
                 placeholder="MM/DD/YYYY"
                 value={formDate}
                 onChangeText={setFormDate}
@@ -826,11 +831,11 @@ export default function ScheduleScreen() {
           {/* Context notes */}
           <View className="mb-5">
             <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-              Context Notes (optional)
+              {t("schedule.contextNotes")}
             </Text>
             <TextInput
               className="bg-beige rounded-2xl p-4 text-charcoal text-[15px] min-h-[80px]"
-              placeholder={`e.g. Ask ${seniorFirstName} about their weekend`}
+              placeholder={t("schedule.contextNotesPlaceholder", { name: seniorFirstName })}
               placeholderTextColor={COLORS.muted}
               multiline
               textAlignVertical="top"
@@ -847,7 +852,7 @@ export default function ScheduleScreen() {
           {reminders && reminders.length > 0 && (
             <View className="mb-5">
               <Text className="text-[13px] font-medium text-muted mb-2 uppercase tracking-wider">
-                Include Reminders
+                {t("schedule.includeReminders")}
               </Text>
               <View className="gap-2">
                 {reminders.map((reminder) => {
@@ -883,14 +888,14 @@ export default function ScheduleScreen() {
           {/* Action buttons */}
           <View className="gap-3 mt-2">
             <Button
-              title={editingIndex !== null ? "Save Changes" : "Add Call"}
+              title={editingIndex !== null ? t("common.save") : t("schedule.addCall")}
               onPress={handleSave}
               loading={updateSchedule.isPending}
               disabled={!formTitle || !formTime || updateSchedule.isPending}
             />
             {editingIndex !== null && (
               <Button
-                title="Delete Call"
+                title={t("schedule.deleteCall")}
                 onPress={() => {
                   setModalVisible(false);
                   setDeleteConfirmIndex(editingIndex);
@@ -905,7 +910,7 @@ export default function ScheduleScreen() {
             <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
               {getErrorMessage(
                 updateSchedule.error,
-                "We couldn't save this call schedule. Your changes are still here. Please try again.",
+                t("schedule.failedToSave"),
                 "save",
               )}
             </Text>
@@ -919,21 +924,21 @@ export default function ScheduleScreen() {
       <Modal
         visible={deleteConfirmIndex !== null}
         onClose={() => setDeleteConfirmIndex(null)}
-        title="Delete Call"
+        title={t("schedule.deleteCall")}
         variant="centered"
       >
         <Text className="text-[15px] text-muted mb-6">
-          Are you sure you want to delete this scheduled call?
+          {t("schedule.deleteCallMessage")}
         </Text>
         <View className="gap-3">
           <Button
-            title="Delete"
+            title={t("common.delete")}
             onPress={handleDelete}
             variant="destructive"
             loading={updateSchedule.isPending}
           />
           <Button
-            title="Cancel"
+            title={t("common.cancel")}
             onPress={() => setDeleteConfirmIndex(null)}
             variant="ghost"
           />
@@ -956,9 +961,11 @@ function ScheduleCallCard({
   reminders: Reminder[];
   onEdit: () => void;
 }) {
+  const { t } = useTranslation();
   const { schedule, isPast, conversation } = data;
-  const status = conversation ? getCallStatus(conversation) : null;
-  const isAnswered = status === "Answered";
+  const displayTitle = schedule.title === "Daily Call" ? t("schedule.dailyCall") : schedule.title;
+  const statusKey = conversation ? getCallStatusKey(conversation) : null;
+  const isAnswered = statusKey === "answered";
 
   // Get reminder titles for this call
   const callReminders = useMemo(() => {
@@ -983,7 +990,7 @@ function ScheduleCallCard({
         <View className="flex-row items-center justify-between mb-2">
           <View className="flex-row items-center flex-1">
             <Text className="text-[16px] font-semibold text-charcoal" numberOfLines={1}>
-              {schedule.title}
+              {displayTitle}
             </Text>
           </View>
           <View
@@ -998,7 +1005,7 @@ function ScheduleCallCard({
               className="text-[12px] font-semibold"
               style={{ color: isAnswered ? COLORS.success : COLORS.warning }}
             >
-              {status}
+              {statusKey ? t(`dashboard.${statusKey}`) : ""}
             </Text>
           </View>
         </View>
@@ -1036,13 +1043,13 @@ function ScheduleCallCard({
       {/* Header */}
       <View className="flex-row items-center justify-between mb-2">
         <Text className="text-[16px] font-semibold text-charcoal flex-1" numberOfLines={1}>
-          {schedule.title}
+          {displayTitle}
         </Text>
         <Pressable
           onPress={onEdit}
           className="min-w-[44px] min-h-[44px] items-center justify-center"
           accessibilityRole="button"
-          accessibilityLabel={`Edit ${schedule.title}`}
+          accessibilityLabel={`${t("schedule.editCall")} ${displayTitle}`}
         >
           <Edit2 size={16} color={COLORS.muted} />
         </Pressable>
@@ -1058,10 +1065,10 @@ function ScheduleCallCard({
           <View className="bg-beige rounded-full px-2 py-0.5 ml-2">
             <Text className="text-[11px] text-muted capitalize">
               {schedule.frequency === "daily"
-                ? "Every day"
+                ? t("schedule.everyDay")
                 : schedule.recurringDays
-                    ?.map((d) => DAY_LABELS[d])
-                    .join(", ") ?? "Recurring"}
+                    ?.map((d) => (t("schedule.dayLabels", { returnObjects: true }) as string[])[d])
+                    .join(", ") ?? t("schedule.recurring")}
             </Text>
           </View>
         )}

@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { COLORS } from "@/src/constants/theme";
 import { Toggle } from "@/src/components/ui/Toggle";
 import { Button } from "@/src/components/ui/Button";
@@ -21,35 +22,36 @@ import {
 
 type ToggleRow = {
   key: "callCompleted" | "concernDetected" | "reminderMissed" | "weeklySummary";
-  title: string;
-  description: string;
+  titleKey: string;
+  descriptionKey: string;
 };
 
 const NOTIFICATION_TOGGLES: ToggleRow[] = [
   {
     key: "callCompleted",
-    title: "Call Summaries",
-    description: "Receive a summary after each completed call",
+    titleKey: "notificationPreferences.callSummaries",
+    descriptionKey: "notificationPreferences.callSummariesDesc",
   },
   {
     key: "concernDetected",
-    title: "Concern Alerts",
-    description: "Get notified when a health or safety concern is detected",
+    titleKey: "notificationPreferences.concernAlerts",
+    descriptionKey: "notificationPreferences.concernAlertsDesc",
   },
   {
     key: "reminderMissed",
-    title: "Missed Reminder Alerts",
-    description: "Get notified when a scheduled reminder is missed",
+    titleKey: "notificationPreferences.missedReminders",
+    descriptionKey: "notificationPreferences.missedRemindersDesc",
   },
   {
     key: "weeklySummary",
-    title: "Weekly Summary",
-    description: "Receive a weekly report of all calls and activity",
+    titleKey: "notificationPreferences.weeklySummary",
+    descriptionKey: "notificationPreferences.weeklySummaryDesc",
   },
 ];
 
 export default function NotificationPreferencesScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { data: preferences, isLoading } = useNotificationPreferences();
   const updatePreferences = useUpdateNotificationPreferences();
 
@@ -90,13 +92,13 @@ export default function NotificationPreferencesScreen() {
         reminderMissed,
         weeklySummary,
       });
-      Alert.alert("Saved", "Notification preferences updated.", [
-        { text: "OK", onPress: () => router.back() },
+      Alert.alert(t("common.saved"), t("notificationPreferences.preferencesUpdated"), [
+        { text: t("common.ok"), onPress: () => router.back() },
       ]);
     } catch {
       Alert.alert(
-        "Couldn't Save",
-        "We couldn't save your notification preferences. Your choices are still here. Check your connection and try again.",
+        t("notificationPreferences.couldntSave"),
+        t("notificationPreferences.couldntSaveMessage"),
       );
     }
   };
@@ -104,7 +106,7 @@ export default function NotificationPreferencesScreen() {
   if (isLoading) {
     return (
       <SafeAreaView className="flex-1 bg-cream items-center justify-center">
-        <Text className="text-muted">Loading...</Text>
+        <Text className="text-muted">{t("common.loading")}</Text>
       </SafeAreaView>
     );
   }
@@ -121,14 +123,14 @@ export default function NotificationPreferencesScreen() {
             onPress={() => router.back()}
             className="flex-row items-center gap-2"
             accessibilityRole="button"
-            accessibilityLabel="Go back"
+            accessibilityLabel={t("common.back")}
             style={{ minHeight: 48 }}
           >
             <ArrowLeft size={20} color={COLORS.charcoal} />
-            <Text className="text-[15px] text-charcoal">Back</Text>
+            <Text className="text-[15px] text-charcoal">{t("common.back")}</Text>
           </Pressable>
           <Text className="text-[28px] font-semibold text-charcoal mt-4">
-            Notifications
+            {t("notificationPreferences.title")}
           </Text>
         </View>
 
@@ -141,7 +143,7 @@ export default function NotificationPreferencesScreen() {
           {/* Notification Toggles */}
           <View className="mt-4">
             <Text className="text-[13px] font-medium text-muted uppercase tracking-wider mb-3">
-              Alerts
+              {t("notificationPreferences.alerts")}
             </Text>
             <View className="bg-white rounded-2xl border border-charcoal/10 px-4">
               {NOTIFICATION_TOGGLES.map((toggle, index) => (
@@ -152,16 +154,16 @@ export default function NotificationPreferencesScreen() {
                   >
                     <View className="flex-1 mr-4">
                       <Text className="text-[15px] font-medium text-charcoal">
-                        {toggle.title}
+                        {t(toggle.titleKey)}
                       </Text>
                       <Text className="text-[13px] text-muted mt-0.5">
-                        {toggle.description}
+                        {t(toggle.descriptionKey)}
                       </Text>
                     </View>
                     <Toggle
                       value={toggleState[toggle.key]}
                       onToggle={(val) => toggleSetters[toggle.key](val)}
-                      accessibilityLabel={toggle.title}
+                      accessibilityLabel={t(toggle.titleKey)}
                     />
                   </View>
                   {index < NOTIFICATION_TOGGLES.length - 1 && (
@@ -175,26 +177,26 @@ export default function NotificationPreferencesScreen() {
           {/* Subscription Card */}
           <View className="mt-6">
             <Text className="text-[13px] font-medium text-muted uppercase tracking-wider mb-3">
-              Subscription
+              {t("notificationPreferences.subscription")}
             </Text>
             <View
               className="rounded-2xl p-5 overflow-hidden"
               style={{ backgroundColor: COLORS.sage }}
             >
               <Text className="text-[18px] font-semibold text-white">
-                Donna Companion Plan
+                {t("notificationPreferences.planName")}
               </Text>
               <Text className="text-[14px] text-white/80 mt-1">
-                Unlimited calls, daily check-ins, and medication reminders
+                {t("notificationPreferences.planDescription")}
               </Text>
               <View className="mt-4">
                 <Button
-                  title="Manage Subscription"
+                  title={t("notificationPreferences.manageSubscription")}
                   variant="secondary"
                   onPress={() =>
                     Alert.alert(
-                      "Coming Soon",
-                      "Subscription management will be available in a future update."
+                      t("notificationPreferences.comingSoon"),
+                      t("notificationPreferences.subscriptionComingSoon")
                     )
                   }
                   className="bg-white/20 border-0"
@@ -207,7 +209,7 @@ export default function NotificationPreferencesScreen() {
         {/* Fixed Save Button */}
         <View className="absolute bottom-0 left-0 right-0 bg-cream border-t border-charcoal/5 px-6 py-4 pb-8">
           <Button
-            title="Save Changes"
+            title={t("common.save")}
             onPress={handleSave}
             loading={updatePreferences.isPending}
           />

@@ -12,6 +12,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button } from "@/src/components/ui/Button";
 import { Input } from "@/src/components/ui/Input";
@@ -54,6 +55,7 @@ function isBreachedPasswordError(error: unknown): boolean {
 }
 
 export default function CreateAccountScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
   const { signUp, setActive, isLoaded } = useSignUp();
   const { getToken } = useAuth();
@@ -109,10 +111,10 @@ export default function CreateAccountScreen() {
   async function handleCreateAccount() {
     const nextErrors: { email?: string; password?: string } = {};
 
-    if (!email.trim()) nextErrors.email = "Email is required";
-    if (!password) nextErrors.password = "Password is required";
+    if (!email.trim()) nextErrors.email = t("auth.emailRequired");
+    if (!password) nextErrors.password = t("auth.passwordRequired");
     if (password && password.length < MIN_PASSWORD_LENGTH) {
-      nextErrors.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
+      nextErrors.password = t("auth.passwordTooShort", { count: MIN_PASSWORD_LENGTH });
     }
 
     setErrors(nextErrors);
@@ -142,7 +144,7 @@ export default function CreateAccountScreen() {
       const nextFieldErrors = {
         email: clerkFieldErrors.emailAddress,
         password: isBreachedPasswordError(err)
-          ? "That password has appeared in a public breach. Use the suggested strong password, or choose a unique passphrase."
+          ? t("auth.breachedPassword")
           : clerkFieldErrors.password,
       };
 
@@ -153,8 +155,8 @@ export default function CreateAccountScreen() {
         }));
       } else {
         Alert.alert(
-          "Sign Up Failed",
-          getClerkErrorMessage(err, "Could not create account")
+          t("auth.signUpFailed"),
+          getClerkErrorMessage(err, t("auth.couldNotCreateAccount"))
         );
       }
     } finally {
@@ -166,7 +168,7 @@ export default function CreateAccountScreen() {
     const normalizedCode = verificationCode.replace(/\s+/g, "");
 
     if (!normalizedCode) {
-      setVerificationError("Verification code is required");
+      setVerificationError(t("auth.verificationRequired"));
       return;
     }
 
@@ -185,10 +187,10 @@ export default function CreateAccountScreen() {
         return;
       }
 
-      setVerificationError("Verification is not complete yet. Try again.");
+      setVerificationError(t("auth.verificationIncomplete"));
     } catch (err: unknown) {
       setVerificationError(
-        getClerkErrorMessage(err, "Could not verify that code")
+        getClerkErrorMessage(err, t("auth.couldNotVerify"))
       );
     } finally {
       setLoading(false);
@@ -202,10 +204,10 @@ export default function CreateAccountScreen() {
 
     try {
       await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
-      Alert.alert("Code Sent", `We sent a fresh verification code to ${email.trim()}.`);
+      Alert.alert(t("auth.codeSent"), t("auth.codeSentDescription", { email: email.trim() }));
     } catch (err: unknown) {
       setVerificationError(
-        getClerkErrorMessage(err, "Could not resend the verification code")
+        getClerkErrorMessage(err, t("auth.couldNotResend"))
       );
     } finally {
       setLoading(false);
@@ -227,7 +229,7 @@ export default function CreateAccountScreen() {
       }
     } catch (err: unknown) {
       Alert.alert(
-        "OAuth Error",
+        t("auth.oauthError"),
         getClerkErrorMessage(err, `${provider} sign up failed`)
       );
     } finally {
@@ -236,11 +238,11 @@ export default function CreateAccountScreen() {
   }
 
   const title =
-    step === "verify_email" ? "Verify Your Email" : "Create Account";
+    step === "verify_email" ? t("auth.verifyEmail") : t("auth.createAccount");
   const subtitle =
     step === "verify_email"
-      ? `Enter the code we sent to ${email.trim()}.`
-      : "Set up your Donna account to get started";
+      ? `${t("auth.verifyEmailDescription", { email: email.trim() })}.`
+      : t("auth.createAccountSubtitle");
 
   return (
     <SafeAreaView className="flex-1 bg-cream">
@@ -257,10 +259,10 @@ export default function CreateAccountScreen() {
             onPress={handleBack}
             className="mt-2 mb-6 min-h-[48px] justify-center self-start"
             accessibilityRole="button"
-            accessibilityLabel="Go back"
+            accessibilityLabel={t("auth.goBack")}
           >
             <Text className="text-sage text-[16px] font-medium">
-              {"<"} Back
+              {"<"} {t("common.back")}
             </Text>
           </Pressable>
 
@@ -273,8 +275,8 @@ export default function CreateAccountScreen() {
             <>
               <View className="mb-4">
                 <Input
-                  label="Email Address"
-                  placeholder="your@email.com"
+                  label={t("auth.email")}
+                  placeholder={t("auth.emailPlaceholder")}
                   value={email}
                   onChangeText={(value) => {
                     setEmail(value);
@@ -294,7 +296,7 @@ export default function CreateAccountScreen() {
 
               <View className="mb-6">
                 <Input
-                  label="Password"
+                  label={t("auth.password")}
                   placeholder="••••••••"
                   value={password}
                   onChangeText={(value) => {
@@ -314,14 +316,13 @@ export default function CreateAccountScreen() {
                 />
                 {!errors.password && (
                   <Text className="text-muted text-[13px] mt-2 leading-5">
-                    Use at least {MIN_PASSWORD_LENGTH} characters with a mix of
-                    letters and numbers.
+                    {t("auth.passwordMinLength", { count: MIN_PASSWORD_LENGTH })}
                   </Text>
                 )}
               </View>
 
               <Button
-                title="Continue"
+                title={t("common.continue")}
                 onPress={handleCreateAccount}
                 loading={loading}
                 disabled={loading || oauthLoading !== null}
@@ -331,13 +332,13 @@ export default function CreateAccountScreen() {
 
               <View className="flex-row items-center mb-6">
                 <View className="flex-1 h-[1px] bg-charcoal/10" />
-                <Text className="mx-3 text-muted text-[13px]">or</Text>
+                <Text className="mx-3 text-muted text-[13px]">{t("auth.or")}</Text>
                 <View className="flex-1 h-[1px] bg-charcoal/10" />
               </View>
 
               <View className="gap-3 mb-8">
                 <Button
-                  title="Continue with Apple"
+                  title={t("auth.continueWithApple")}
                   onPress={() => handleOAuth("apple")}
                   variant="secondary"
                   loading={oauthLoading === "apple"}
@@ -351,7 +352,7 @@ export default function CreateAccountScreen() {
                   }
                 />
                 <Button
-                  title="Continue with Google"
+                  title={t("auth.continueWithGoogle")}
                   onPress={() => handleOAuth("google")}
                   variant="secondary"
                   loading={oauthLoading === "google"}
@@ -368,16 +369,16 @@ export default function CreateAccountScreen() {
 
               <View className="flex-row justify-center mb-8">
                 <Text className="text-muted text-[15px]">
-                  Already have an account?{" "}
+                  {t("auth.hasAccount")}{" "}
                 </Text>
                 <Pressable
                   onPress={() => router.replace("/(auth)/sign-in")}
                   className="min-h-[48px] justify-center"
                   accessibilityRole="link"
-                  accessibilityLabel="Sign In"
+                  accessibilityLabel={t("auth.signIn")}
                 >
                   <Text className="text-sage text-[15px] font-semibold">
-                    Sign In
+                    {t("auth.signIn")}
                   </Text>
                 </Pressable>
               </View>
@@ -386,7 +387,7 @@ export default function CreateAccountScreen() {
             <>
               <View className="mb-4">
                 <Input
-                  label="Verification Code"
+                  label={t("auth.verificationCode")}
                   placeholder="123456"
                   value={verificationCode}
                   onChangeText={(value) => {
@@ -406,7 +407,7 @@ export default function CreateAccountScreen() {
               </View>
 
               <Button
-                title="Verify Email"
+                title={t("auth.verifyEmail")}
                 onPress={handleEmailVerification}
                 loading={loading}
                 disabled={loading}
@@ -415,7 +416,7 @@ export default function CreateAccountScreen() {
               />
 
               <Button
-                title="Resend Code"
+                title={t("auth.resendCode")}
                 onPress={handleResendVerificationCode}
                 variant="secondary"
                 disabled={loading}
@@ -429,10 +430,10 @@ export default function CreateAccountScreen() {
                 }}
                 className="min-h-[48px] justify-center self-center mb-8"
                 accessibilityRole="button"
-                accessibilityLabel="Edit email address"
+                accessibilityLabel={t("auth.editEmailAddress")}
               >
                 <Text className="text-sage text-[15px] font-medium">
-                  Edit email address
+                  {t("auth.editEmailAddress")}
                 </Text>
               </Pressable>
             </>

@@ -2,10 +2,12 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { Pressable, Text, View, useWindowDimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useTranslation } from "react-i18next";
 import { COLORS } from "@/src/constants/theme";
 
 export default function LandingScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { height } = useWindowDimensions();
 
   return (
@@ -47,8 +49,7 @@ export default function LandingScreen() {
               Donna
             </Text>
             <Text className="text-[18px] text-muted leading-[26px]">
-              A helpful assistant for your parents.{"\n"}A game-changing
-              caregiving tool for you.
+              {t("landing.tagline")}
             </Text>
           </View>
 
@@ -58,11 +59,11 @@ export default function LandingScreen() {
               onPress={() => router.push("/(auth)/create-account")}
               className="bg-sage rounded-3xl min-h-[52px] items-center justify-center mb-4"
               accessibilityRole="button"
-              accessibilityLabel="Get Started"
+              accessibilityLabel={t("landing.getStarted")}
               testID="landing-get-started"
             >
               <Text className="text-white text-[17px] font-semibold">
-                Get Started
+                {t("landing.getStarted")}
               </Text>
             </Pressable>
 
@@ -70,11 +71,11 @@ export default function LandingScreen() {
               onPress={() => router.push("/(auth)/sign-in")}
               className="min-h-[48px] items-center justify-center"
               accessibilityRole="button"
-              accessibilityLabel="Sign In"
+              accessibilityLabel={t("landing.signIn")}
               testID="landing-sign-in"
             >
               <Text className="text-sage text-[16px] font-medium">
-                Sign In
+                {t("landing.signIn")}
               </Text>
             </Pressable>
           </View>

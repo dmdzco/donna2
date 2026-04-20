@@ -21,18 +21,20 @@ import {
   Shield,
   ExternalLink,
 } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { COLORS } from "@/src/constants/theme";
 import { Modal } from "@/src/components/ui/Modal";
 import { Button } from "@/src/components/ui/Button";
 
 type HelpRow = {
   icon: React.ReactNode;
-  label: string;
+  labelKey: string;
   action: () => void;
 };
 
 export default function HelpCenterScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const [contactModalVisible, setContactModalVisible] = useState(false);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [suggestModalVisible, setSuggestModalVisible] = useState(false);
@@ -41,7 +43,7 @@ export default function HelpCenterScreen() {
 
   const handleSubmitFeedback = async (type: string) => {
     if (!feedbackText.trim()) {
-      Alert.alert("Required", "Please enter your message before submitting.");
+      Alert.alert(t("helpCenter.required"), t("helpCenter.requiredMessage"));
       return;
     }
     setSubmitting(true);
@@ -53,39 +55,39 @@ export default function HelpCenterScreen() {
     setReportModalVisible(false);
     setSuggestModalVisible(false);
     Alert.alert(
-      "Thank You",
-      `Your ${type} has been submitted. We'll get back to you soon.`
+      t("helpCenter.thankYou"),
+      t("helpCenter.submittedMessage", { type: t(`helpCenter.${type}`) })
     );
   };
 
   const openURL = (url: string) => {
     Linking.openURL(url).catch(() =>
-      Alert.alert("Error", "Unable to open the link.")
+      Alert.alert(t("helpCenter.errorTitle"), t("helpCenter.unableToOpenLink"))
     );
   };
 
   const helpRows: HelpRow[] = [
     {
       icon: <HelpCircle size={18} color={COLORS.sage} />,
-      label: "FAQ",
+      labelKey: "helpCenter.faq",
       action: () =>
         Alert.alert(
-          "FAQ",
-          "Frequently asked questions will be available soon. Contact support for any questions in the meantime."
+          t("helpCenter.faq"),
+          t("helpCenter.faqMessage")
         ),
     },
     {
       icon: <Sparkles size={18} color={COLORS.sage} />,
-      label: "What's New",
+      labelKey: "helpCenter.whatsNew",
       action: () =>
         Alert.alert(
-          "What's New",
-          "Donna v1.0.0\n\n- Daily companion calls\n- Medication reminders\n- Call summaries\n- Notification preferences\n\nMore features coming soon!"
+          t("helpCenter.whatsNew"),
+          t("helpCenter.whatsNewMessage")
         ),
     },
     {
       icon: <MessageCircle size={18} color={COLORS.sage} />,
-      label: "Contact Support",
+      labelKey: "helpCenter.contactSupport",
       action: () => setContactModalVisible(true),
     },
   ];
@@ -93,12 +95,12 @@ export default function HelpCenterScreen() {
   const feedbackRows: HelpRow[] = [
     {
       icon: <Flag size={18} color={COLORS.warning} />,
-      label: "Report a Problem",
+      labelKey: "helpCenter.reportProblem",
       action: () => setReportModalVisible(true),
     },
     {
       icon: <Lightbulb size={18} color={COLORS.sage} />,
-      label: "Make a Suggestion",
+      labelKey: "helpCenter.makeSuggestion",
       action: () => setSuggestModalVisible(true),
     },
   ];
@@ -106,37 +108,37 @@ export default function HelpCenterScreen() {
   const aboutRows: HelpRow[] = [
     {
       icon: <Shield size={18} color={COLORS.sage} />,
-      label: "Privacy Policy",
+      labelKey: "helpCenter.privacyPolicy",
       action: () => openURL("https://getdonna.ai/privacy"),
     },
     {
       icon: <ExternalLink size={18} color={COLORS.sage} />,
-      label: "Third Party Services",
+      labelKey: "helpCenter.thirdPartyServices",
       action: () => openURL("https://getdonna.ai/third-party"),
     },
   ];
 
-  function renderSection(title: string, rows: HelpRow[]) {
+  function renderSection(titleKey: string, rows: HelpRow[]) {
     return (
       <View className="mb-6">
         <Text className="text-[13px] font-medium text-muted uppercase tracking-wider mb-3">
-          {title}
+          {t(titleKey)}
         </Text>
         <View className="bg-white rounded-2xl border border-charcoal/10 px-4">
           {rows.map((row, index) => (
-            <View key={row.label}>
+            <View key={row.labelKey}>
               <Pressable
                 onPress={row.action}
                 className="flex-row items-center py-3.5"
                 accessibilityRole="button"
-                accessibilityLabel={row.label}
+                accessibilityLabel={t(row.labelKey)}
                 style={{ minHeight: 48 }}
               >
                 <View className="w-9 h-9 rounded-full items-center justify-center bg-sage/10">
                   {row.icon}
                 </View>
                 <Text className="flex-1 text-[15px] text-charcoal ml-3">
-                  {row.label}
+                  {t(row.labelKey)}
                 </Text>
                 <ChevronRight size={18} color={COLORS.muted} />
               </Pressable>
@@ -153,16 +155,16 @@ export default function HelpCenterScreen() {
   function renderFeedbackModal(
     visible: boolean,
     onClose: () => void,
-    title: string,
-    placeholder: string,
+    titleKey: string,
+    placeholderKey: string,
     type: string
   ) {
     return (
-      <Modal visible={visible} onClose={onClose} title={title}>
+      <Modal visible={visible} onClose={onClose} title={t(titleKey)}>
         <View className="py-2">
           <TextInput
             className="bg-beige px-4 py-3 rounded-xl text-[15px] text-charcoal border border-charcoal/5"
-            placeholder={placeholder}
+            placeholder={t(placeholderKey)}
             placeholderTextColor={COLORS.muted}
             value={feedbackText}
             onChangeText={setFeedbackText}
@@ -172,7 +174,7 @@ export default function HelpCenterScreen() {
           />
           <View className="mt-4">
             <Button
-              title="Submit"
+              title={t("common.submit")}
               onPress={() => handleSubmitFeedback(type)}
               loading={submitting}
             />
@@ -190,14 +192,14 @@ export default function HelpCenterScreen() {
           onPress={() => router.back()}
           className="flex-row items-center gap-2"
           accessibilityRole="button"
-          accessibilityLabel="Go back"
+          accessibilityLabel={t("common.back")}
           style={{ minHeight: 48 }}
         >
           <ArrowLeft size={20} color={COLORS.charcoal} />
-          <Text className="text-[15px] text-charcoal">Back</Text>
+          <Text className="text-[15px] text-charcoal">{t("common.back")}</Text>
         </Pressable>
         <Text className="text-[28px] font-semibold text-charcoal mt-4">
-          Help Center
+          {t("helpCenter.title")}
         </Text>
       </View>
 
@@ -208,9 +210,9 @@ export default function HelpCenterScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View className="mt-4">
-          {renderSection("Help", helpRows)}
-          {renderSection("Feedback", feedbackRows)}
-          {renderSection("About", aboutRows)}
+          {renderSection("helpCenter.help", helpRows)}
+          {renderSection("helpCenter.feedback", feedbackRows)}
+          {renderSection("helpCenter.about", aboutRows)}
         </View>
       </ScrollView>
 
@@ -221,8 +223,8 @@ export default function HelpCenterScreen() {
           setContactModalVisible(false);
           setFeedbackText("");
         },
-        "Contact Support",
-        "Describe how we can help you...",
+        "helpCenter.contactSupport",
+        "helpCenter.contactPlaceholder",
         "message"
       )}
       {renderFeedbackModal(
@@ -231,8 +233,8 @@ export default function HelpCenterScreen() {
           setReportModalVisible(false);
           setFeedbackText("");
         },
-        "Report a Problem",
-        "Describe the issue you're experiencing...",
+        "helpCenter.reportProblem",
+        "helpCenter.reportPlaceholder",
         "report"
       )}
       {renderFeedbackModal(
@@ -241,8 +243,8 @@ export default function HelpCenterScreen() {
           setSuggestModalVisible(false);
           setFeedbackText("");
         },
-        "Make a Suggestion",
-        "Tell us your idea for improving Donna...",
+        "helpCenter.makeSuggestion",
+        "helpCenter.suggestPlaceholder",
         "suggestion"
       )}
     </SafeAreaView>

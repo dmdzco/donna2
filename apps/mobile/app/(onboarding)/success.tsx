@@ -13,6 +13,7 @@ import Animated, {
   withSequence,
   Easing,
 } from "react-native-reanimated";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
 import { useQueryClient } from "@tanstack/react-query";
@@ -146,6 +147,7 @@ function ConfettiCircle({
 
 export default function SuccessScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { getToken } = useAuth();
   const queryClient = useQueryClient();
   const store = useOnboardingStore();
@@ -265,13 +267,12 @@ export default function SuccessScreen() {
 
         {/* Heading */}
         <Text className="text-[28px] font-semibold text-charcoal text-center mb-4 leading-9">
-          Congratulations, your account set up is complete!
+          {t("onboarding.success.title")}
         </Text>
 
         {/* Subtitle */}
         <Text className="text-[16px] text-muted text-center leading-6">
-          We're excited for you and {store.lovedOneName || "your loved one"} to
-          get started with Donna
+          {t("onboarding.success.subtitle", { name: store.lovedOneName || "your loved one" })}
         </Text>
       </View>
 
@@ -283,7 +284,7 @@ export default function SuccessScreen() {
           </Text>
         )}
         <Button
-          title="Continue to Homepage"
+          title={t("onboarding.success.goToDashboard")}
           onPress={handleContinue}
           loading={loading}
           disabled={loading}

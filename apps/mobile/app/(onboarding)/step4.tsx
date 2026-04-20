@@ -26,6 +26,7 @@ import {
   Plane,
   ChefHat,
 } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { Button, Input, ProgressBar } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
 import { INTERESTS } from "@/src/constants/interests";
@@ -48,6 +49,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
 
 export default function Step4Screen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const {
     selectedInterests,
     additionalTopics,
@@ -104,21 +106,20 @@ export default function Step4Screen() {
             onPress={() => router.back()}
             className="flex-row items-center mb-6 min-h-[48px] self-start"
             accessibilityRole="button"
-            accessibilityLabel="Go back"
+            accessibilityLabel={t("common.back")}
           >
             <ArrowLeft size={18} color={COLORS.sage} />
             <Text className="text-sage text-[16px] font-medium ml-1">
-              Back
+              {t("common.back")}
             </Text>
           </Pressable>
 
           {/* Header */}
           <Text className="text-[28px] font-semibold text-charcoal mb-2">
-            Interests
+            {t("onboarding.step4.title")}
           </Text>
           <Text className="text-[15px] text-muted mb-6">
-            Select topics your loved one enjoys. Donna will use these to start
-            engaging conversations.
+            {t("onboarding.step4.subtitle")}
           </Text>
 
           {/* Interest grid */}
@@ -139,25 +140,25 @@ export default function Step4Screen() {
                       <View className="flex-row items-center gap-2">
                         {Icon && <Icon size={18} color={COLORS.white} />}
                         <Text className="text-[15px] font-semibold text-white">
-                          {interest.label}
+                          {t(`interests.${interest.id}.label`)}
                         </Text>
                       </View>
                       <Pressable
                         onPress={() => handleRemove(interest.id)}
                         className="min-w-[48px] min-h-[48px] items-center justify-center"
                         accessibilityRole="button"
-                        accessibilityLabel={`Remove ${interest.label}`}
+                        accessibilityLabel={`Remove ${t(`interests.${interest.id}.label`)}`}
                       >
                         <X size={16} color={COLORS.white} />
                       </Pressable>
                     </View>
 
                     <Text className="text-[14px] text-white/80 mb-2">
-                      {interest.question}
+                      {t(`interests.${interest.id}.question`)}
                     </Text>
                     <TextInput
                       className="w-full bg-white/20 px-4 py-3 rounded-xl text-[15px] text-white min-h-[44px]"
-                      placeholder={interest.placeholder}
+                      placeholder={t(`interests.${interest.id}.placeholder`)}
                       placeholderTextColor="rgba(255,255,255,0.5)"
                       value={selectedInterests[interest.id] ?? ""}
                       onChangeText={(v) =>
@@ -166,7 +167,7 @@ export default function Step4Screen() {
                       multiline
                     />
                     <Button
-                      title="Done"
+                      title={t("common.done")}
                       onPress={() => handleDone(interest.id)}
                       variant="secondary"
                       className="mt-3"
@@ -186,7 +187,7 @@ export default function Step4Screen() {
                   }`}
                   style={{ width: "31%" }}
                   accessibilityRole="button"
-                  accessibilityLabel={`${interest.label}${isSelected ? ", selected" : ""}`}
+                  accessibilityLabel={`${t(`interests.${interest.id}.label`)}${isSelected ? ", selected" : ""}`}
                 >
                   {/* X badge for selected */}
                   {isSelected && (
@@ -206,7 +207,7 @@ export default function Step4Screen() {
                     }`}
                     numberOfLines={1}
                   >
-                    {interest.label}
+                    {t(`interests.${interest.id}.label`)}
                   </Text>
                 </Pressable>
               );
@@ -216,11 +217,11 @@ export default function Step4Screen() {
           {/* Additional topics */}
           <View className="mb-4">
             <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-              Additional Topics
+              {t("onboarding.step4.additionalTopics")}
             </Text>
             <TextInput
               className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 text-[15px] text-charcoal min-h-[80px]"
-              placeholder="Any other topics they enjoy talking about..."
+              placeholder={t("onboarding.step4.additionalTopicsPlaceholder")}
               placeholderTextColor={COLORS.muted}
               value={additionalTopics}
               onChangeText={(v) => setField("additionalTopics", v)}
@@ -232,11 +233,11 @@ export default function Step4Screen() {
           {/* Topics to avoid */}
           <View className="mb-6">
             <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-              Topics to Avoid
+              {t("onboarding.step4.topicsToAvoid")}
             </Text>
             <TextInput
               className="w-full bg-white px-4 py-3.5 rounded-2xl border-2 border-accent-pink text-[15px] text-charcoal min-h-[80px]"
-              placeholder="Any topics that should be avoided..."
+              placeholder={t("onboarding.step4.topicsToAvoidPlaceholder")}
               placeholderTextColor={COLORS.muted}
               value={topicsToAvoid}
               onChangeText={(v) => setField("topicsToAvoid", v)}
@@ -248,7 +249,7 @@ export default function Step4Screen() {
 
         {/* Fixed bottom button */}
         <View className="absolute bottom-0 left-0 right-0 bg-cream border-t border-charcoal/10 px-6 pt-4 pb-8">
-          <Button title="Continue" onPress={handleContinue} />
+          <Button title={t("common.next")} onPress={handleContinue} />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

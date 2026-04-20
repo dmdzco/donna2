@@ -14,6 +14,8 @@ import { useUser } from "@clerk/clerk-expo";
 import { Phone, Calendar } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { format, differenceInCalendarDays } from "date-fns";
+import { useTranslation } from "react-i18next";
+import { getDateFnsLocale } from "@/src/lib/dateFnsLocale";
 import { COLORS } from "@/src/constants/theme";
 import {
   useCurrentSenior,
@@ -89,8 +91,8 @@ function getNextCallDate(
   return null;
 }
 
-function formatNextCall(nextDate: Date | null, timezone: string): string {
-  if (!nextDate) return "No calls scheduled";
+function formatNextCall(nextDate: Date | null, timezone: string, t: (key: string, opts?: Record<string, unknown>) => string): string {
+  if (!nextDate) return t("dashboard.noCallsScheduled");
 
   const nowLocal = getDatePartsInTimezone(new Date(), timezone);
   const nextLocal = getDatePartsInTimezone(nextDate, timezone);
@@ -99,27 +101,28 @@ function formatNextCall(nextDate: Date | null, timezone: string): string {
   );
   const timeStr = formatTime12h(nextLocal.hours, nextLocal.minutes);
 
-  if (dayDiff === 0) return `Today at ${timeStr}`;
-  if (dayDiff === 1) return `Tomorrow at ${timeStr}`;
-  return `In ${dayDiff} days at ${timeStr}`;
+  if (dayDiff === 0) return t("dashboard.todayAt", { time: timeStr });
+  if (dayDiff === 1) return t("dashboard.tomorrowAt", { time: timeStr });
+  return t("dashboard.inDaysAt", { count: dayDiff, time: timeStr });
 }
 
 // --- Status badge ---
 
-function getCallStatus(conversation: Conversation) {
+function getCallStatusKey(conversation: Conversation): "answered" | "missed" {
   const duration = conversation.durationSeconds ?? 0;
   if (
     conversation.status === "completed" ||
     (conversation.endedAt && duration > 10)
   ) {
-    return "Answered";
+    return "answered";
   }
-  return "Missed";
+  return "missed";
 }
 
 // --- Component ---
 
 export default function DashboardScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
   const { user } = useUser();
   const { senior, seniorId, isLoading: seniorLoading } = useCurrentSenior();
@@ -135,8 +138,8 @@ export default function DashboardScreen() {
   const [callContext, setCallContext] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
-  const caregiverName = user?.firstName ?? "there";
-  const seniorName = senior?.name ?? "your loved one";
+  const caregiverName = user?.firstName ?? null;
+  const seniorName = senior?.name ?? t("dashboard.yourLovedOne");
   const seniorFirstName = seniorName.split(" ")[0];
   const seniorTimezone = useMemo(() => resolveSeniorTimezone(senior), [senior]);
 
@@ -191,8 +194,8 @@ export default function DashboardScreen() {
     [resolvedSchedule, seniorTimezone],
   );
   const nextCallText = useMemo(
-    () => formatNextCall(nextCallDate, seniorTimezone),
-    [nextCallDate, seniorTimezone],
+    () => formatNextCall(nextCallDate, seniorTimezone, t),
+    [nextCallDate, seniorTimezone, t],
   );
 
   const recentConversations = useMemo(
@@ -251,10 +254,10 @@ export default function DashboardScreen() {
         {/* Greeting */}
         <View className="px-6 pt-4 pb-2">
           <Text className="text-[28px] font-semibold text-charcoal">
-            Hello, {caregiverName}
+            {caregiverName ? t("dashboard.greeting", { name: caregiverName }) : t("dashboard.greetingNoName")}
           </Text>
           <Text className="text-[15px] text-muted mt-1">
-            Here's what's happening with {seniorFirstName}
+            {t("dashboard.subtitle", { name: seniorFirstName })}
           </Text>
         </View>
 
@@ -270,12 +273,12 @@ export default function DashboardScreen() {
           }}
           onPress={() => router.push("/(tabs)/schedule")}
           accessibilityRole="button"
-          accessibilityLabel={`Next call: ${nextCallText}. Tap to view schedule.`}
+          accessibilityLabel={`${t("dashboard.nextCall")}: ${nextCallText}`}
         >
           <View className="flex-row items-center mb-3">
             <Calendar size={16} color={COLORS.white} />
             <Text className="text-white/70 text-[11px] font-semibold tracking-widest ml-2">
-              NEXT CALL
+              {t("dashboard.nextCall")}
             </Text>
           </View>
           {scheduleLoading ? (
@@ -290,7 +293,7 @@ export default function DashboardScreen() {
         {/* Recent Call Highlights */}
         <View className="px-6 mt-8">
           <Text className="text-[20px] font-semibold text-charcoal mb-4">
-            Recent Call Highlights
+            {t("dashboard.recentHighlights")}
           </Text>
 
           {convoLoading ? (
@@ -306,8 +309,7 @@ export default function DashboardScreen() {
             >
               <Phone size={32} color={COLORS.muted} />
               <Text className="text-muted text-[15px] mt-3 text-center">
-                No recent calls yet.{"\n"}Donna will call {seniorFirstName} at the
-                scheduled time.
+                {t("dashboard.noRecentCalls", { name: seniorFirstName })}
               </Text>
             </View>
           ) : (
@@ -331,7 +333,7 @@ export default function DashboardScreen() {
         }}
         onPress={handleOpenCallModal}
         accessibilityRole="button"
-        accessibilityLabel={`Call ${seniorFirstName} now`}
+        accessibilityLabel={t("dashboard.callNow", { name: seniorFirstName })}
       >
         <Phone size={24} color={COLORS.white} />
       </Pressable>
@@ -340,16 +342,16 @@ export default function DashboardScreen() {
       <Modal
         visible={callModalVisible}
         onClose={() => setCallModalVisible(false)}
-        title="Instant Call"
+        title={t("dashboard.instantCall")}
         variant="bottom-sheet"
       >
         <View className="pb-6">
           <Text className="text-muted text-[14px] mb-3">
-            Is there any additional context for this call?
+            {t("dashboard.callContext")}
           </Text>
           <TextInput
             className="bg-beige rounded-2xl p-4 text-charcoal text-[15px] min-h-[100px]"
-            placeholder={`e.g. Remind ${seniorFirstName} about their doctor appointment tomorrow`}
+            placeholder={t("dashboard.callContextPlaceholder", { name: seniorFirstName })}
             placeholderTextColor={COLORS.muted}
             multiline
             textAlignVertical="top"
@@ -358,7 +360,7 @@ export default function DashboardScreen() {
           />
           <View className="mt-5">
             <Button
-              title={`Call ${seniorFirstName} Now`}
+              title={t("dashboard.callNow", { name: seniorFirstName })}
               onPress={handleInitiateCall}
               loading={initiateCall.isPending}
               disabled={initiateCall.isPending}
@@ -370,7 +372,7 @@ export default function DashboardScreen() {
             <Text className="text-[13px] text-center mt-3" style={{ color: COLORS.destructive }}>
               {getErrorMessage(
                 initiateCall.error,
-                "Donna couldn't start the call. Please try again in a moment. If this is urgent, call your loved one directly.",
+                t("dashboard.failedToInitiate"),
                 "call",
               )}
             </Text>
@@ -384,21 +386,23 @@ export default function DashboardScreen() {
 // --- Call Card Sub-component ---
 
 function CallCard({ conversation }: { conversation: Conversation }) {
-  const status = getCallStatus(conversation);
-  const isAnswered = status === "Answered";
+  const { t } = useTranslation();
+  const statusKey = getCallStatusKey(conversation);
+  const isAnswered = statusKey === "answered";
 
   const dateStr = useMemo(() => {
     try {
+      const locale = getDateFnsLocale();
       const date = new Date(conversation.startedAt);
       const dayDiff = differenceInCalendarDays(new Date(), date);
-      const time = format(date, "h:mm a");
-      if (dayDiff === 0) return `Today at ${time}`;
-      if (dayDiff === 1) return `Yesterday at ${time}`;
-      return format(date, "MMM d") + ` at ${time}`;
+      const time = format(date, "h:mm a", { locale });
+      if (dayDiff === 0) return t("dashboard.todayAtTime", { time });
+      if (dayDiff === 1) return t("dashboard.yesterdayAtTime", { time });
+      return format(date, "d MMM", { locale }) + ` ${time}`;
     } catch {
-      return "Unknown date";
+      return t("dashboard.unknownDate");
     }
-  }, [conversation.startedAt]);
+  }, [conversation.startedAt, t]);
 
   return (
     <View
@@ -425,7 +429,7 @@ function CallCard({ conversation }: { conversation: Conversation }) {
             className="text-[12px] font-semibold"
             style={{ color: isAnswered ? COLORS.success : COLORS.warning }}
           >
-            {status}
+            {t(`dashboard.${statusKey}`)}
           </Text>
         </View>
       </View>
@@ -435,7 +439,7 @@ function CallCard({ conversation }: { conversation: Conversation }) {
         </Text>
       ) : (
         <Text className="text-muted/60 text-[14px] italic">
-          No summary available
+          {t("dashboard.noSummary")}
         </Text>
       )}
     </View>

@@ -12,6 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useUser } from "@clerk/clerk-expo";
 import { ArrowLeft, ChevronDown } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { COLORS, RELATIONSHIP_OPTIONS } from "@/src/constants/theme";
 import { Input } from "@/src/components/ui/Input";
 import { Button } from "@/src/components/ui/Button";
@@ -19,6 +20,7 @@ import { Modal } from "@/src/components/ui/Modal";
 
 export default function CaregiverProfileScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { user } = useUser();
 
   const [firstName, setFirstName] = useState("");
@@ -54,13 +56,13 @@ export default function CaregiverProfileScreen() {
           relationship,
         },
       });
-      Alert.alert("Saved", "Profile updated successfully.", [
-        { text: "OK", onPress: () => router.back() },
+      Alert.alert(t("common.saved"), t("caregiverProfile.profileUpdated"), [
+        { text: t("common.ok"), onPress: () => router.back() },
       ]);
     } catch {
       Alert.alert(
-        "Couldn't Save",
-        "We couldn't save your profile. Your changes are still here. Check your connection and try again.",
+        t("caregiverProfile.couldntSave"),
+        t("caregiverProfile.couldntSaveMessage"),
       );
     } finally {
       setSaving(false);
@@ -69,10 +71,10 @@ export default function CaregiverProfileScreen() {
 
   const handleChangePassword = () => {
     Alert.alert(
-      "Change Password",
-      "Use Forgot password from the sign-in screen to reset your password. This profile screen should not trigger a verification code flow on its own.",
+      t("caregiverProfile.changePassword"),
+      t("caregiverProfile.changePasswordMessage"),
       [
-        { text: "OK" },
+        { text: t("common.ok") },
       ]
     );
   };
@@ -89,14 +91,14 @@ export default function CaregiverProfileScreen() {
             onPress={() => router.back()}
             className="flex-row items-center gap-2"
             accessibilityRole="button"
-            accessibilityLabel="Go back"
+            accessibilityLabel={t("common.back")}
             style={{ minHeight: 48 }}
           >
             <ArrowLeft size={20} color={COLORS.charcoal} />
-            <Text className="text-[15px] text-charcoal">Back</Text>
+            <Text className="text-[15px] text-charcoal">{t("common.back")}</Text>
           </Pressable>
           <Text className="text-[28px] font-semibold text-charcoal mt-4">
-            Caregiver Profile
+            {t("caregiverProfile.title")}
           </Text>
         </View>
 
@@ -111,27 +113,27 @@ export default function CaregiverProfileScreen() {
             <View className="flex-row gap-3">
               <View className="flex-1">
                 <Input
-                  label="First Name"
+                  label={t("caregiverProfile.firstName")}
                   value={firstName}
                   onChangeText={setFirstName}
-                  placeholder="First name"
+                  placeholder={t("caregiverProfile.firstNamePlaceholder")}
                 />
               </View>
               <View className="flex-1">
                 <Input
-                  label="Last Name"
+                  label={t("caregiverProfile.lastName")}
                   value={lastName}
                   onChangeText={setLastName}
-                  placeholder="Last name"
+                  placeholder={t("caregiverProfile.lastNamePlaceholder")}
                 />
               </View>
             </View>
 
             <Input
-              label="Email"
+              label={t("caregiverProfile.email")}
               value={email}
               onChangeText={setEmail}
-              placeholder="your@email.com"
+              placeholder={t("caregiverProfile.emailPlaceholder")}
               keyboardType="email-address"
               autoCapitalize="none"
               editable={false}
@@ -139,23 +141,23 @@ export default function CaregiverProfileScreen() {
             />
 
             <Input
-              label="Phone Number"
+              label={t("caregiverProfile.phone")}
               value={phone}
               onChangeText={setPhone}
-              placeholder="+1 (555) 000-0000"
+              placeholder={t("caregiverProfile.phonePlaceholder")}
               keyboardType="phone-pad"
             />
 
             {/* Relationship Dropdown */}
             <View className="w-full">
               <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
-                Relationship
+                {t("caregiverProfile.relationship")}
               </Text>
               <Pressable
                 onPress={() => setShowRelationshipPicker(true)}
                 className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
                 accessibilityRole="button"
-                accessibilityLabel="Select relationship"
+                accessibilityLabel={t("caregiverProfile.selectRelationship")}
                 style={{ minHeight: 48 }}
               >
                 <Text
@@ -163,7 +165,7 @@ export default function CaregiverProfileScreen() {
                     relationship ? "text-charcoal" : "text-muted"
                   }`}
                 >
-                  {relationship || "Select relationship"}
+                  {relationship ? t(`relationships.${relationship}`) : t("caregiverProfile.selectRelationship")}
                 </Text>
                 <ChevronDown size={18} color={COLORS.muted} />
               </Pressable>
@@ -173,7 +175,7 @@ export default function CaregiverProfileScreen() {
           {/* Change Password */}
           <View className="mt-8">
             <Button
-              title="Change Password"
+              title={t("caregiverProfile.changePassword")}
               variant="secondary"
               onPress={handleChangePassword}
             />
@@ -183,7 +185,7 @@ export default function CaregiverProfileScreen() {
         {/* Fixed Save Button */}
         <View className="absolute bottom-0 left-0 right-0 bg-cream border-t border-charcoal/5 px-6 py-4 pb-8">
           <Button
-            title="Save Changes"
+            title={t("common.save")}
             onPress={handleSave}
             loading={saving}
           />
@@ -194,7 +196,7 @@ export default function CaregiverProfileScreen() {
       <Modal
         visible={showRelationshipPicker}
         onClose={() => setShowRelationshipPicker(false)}
-        title="Select Relationship"
+        title={t("caregiverProfile.selectRelationshipTitle")}
       >
         <View className="py-2">
           {RELATIONSHIP_OPTIONS.map((option) => (
@@ -208,7 +210,7 @@ export default function CaregiverProfileScreen() {
                 relationship === option ? "bg-sage/10" : ""
               }`}
               accessibilityRole="button"
-              accessibilityLabel={option}
+              accessibilityLabel={t(`relationships.${option}`)}
               style={{ minHeight: 48 }}
             >
               <Text
@@ -218,7 +220,7 @@ export default function CaregiverProfileScreen() {
                     : "text-charcoal"
                 }`}
               >
-                {option}
+                {t(`relationships.${option}`)}
               </Text>
             </Pressable>
           ))}

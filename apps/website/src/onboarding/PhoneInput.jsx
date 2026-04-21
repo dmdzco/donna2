@@ -1,22 +1,37 @@
 import { useState, useRef, useEffect } from 'react';
 
 const COUNTRY_CODES = [
-  { code: '+1', label: 'US', flag: '🇺🇸' },
-  { code: '+1', label: 'CA', flag: '🇨🇦' },
-  { code: '+44', label: 'UK', flag: '🇬🇧' },
-  { code: '+52', label: 'MX', flag: '🇲🇽' },
-  { code: '+61', label: 'AU', flag: '🇦🇺' },
-  { code: '+49', label: 'DE', flag: '🇩🇪' },
-  { code: '+33', label: 'FR', flag: '🇫🇷' },
-  { code: '+91', label: 'IN', flag: '🇮🇳' },
-  { code: '+86', label: 'CN', flag: '🇨🇳' },
-  { code: '+81', label: 'JP', flag: '🇯🇵' },
-  { code: '+82', label: 'KR', flag: '🇰🇷' },
-  { code: '+55', label: 'BR', flag: '🇧🇷' },
-  { code: '+234', label: 'NG', flag: '🇳🇬' },
-  { code: '+254', label: 'KE', flag: '🇰🇪' },
-  { code: '+63', label: 'PH', flag: '🇵🇭' },
+  { code: '+1', iso: 'us', name: 'United States' },
+  { code: '+1', iso: 'ca', name: 'Canada' },
+  { code: '+44', iso: 'gb', name: 'United Kingdom' },
+  { code: '+52', iso: 'mx', name: 'Mexico' },
+  { code: '+61', iso: 'au', name: 'Australia' },
+  { code: '+49', iso: 'de', name: 'Germany' },
+  { code: '+33', iso: 'fr', name: 'France' },
+  { code: '+91', iso: 'in', name: 'India' },
+  { code: '+86', iso: 'cn', name: 'China' },
+  { code: '+81', iso: 'jp', name: 'Japan' },
+  { code: '+82', iso: 'kr', name: 'South Korea' },
+  { code: '+55', iso: 'br', name: 'Brazil' },
+  { code: '+234', iso: 'ng', name: 'Nigeria' },
+  { code: '+254', iso: 'ke', name: 'Kenya' },
+  { code: '+63', iso: 'ph', name: 'Philippines' },
 ];
+
+function FlagImg({ iso, size = 24, circle = false }) {
+  const px = size * 2; // 2x for retina
+  const style = circle
+    ? { width: size, height: size, borderRadius: '50%', objectFit: 'cover', display: 'block' }
+    : { width: size, height: Math.round(size * 0.75), objectFit: 'cover', display: 'block', borderRadius: 2 };
+  return (
+    <img
+      src={`https://flagcdn.com/w${px}/${iso}.png`}
+      srcSet={`https://flagcdn.com/w${px * 2}/${iso}.png 2x`}
+      alt={iso.toUpperCase()}
+      style={style}
+    />
+  );
+}
 
 export default function PhoneInput({ value, onChange, placeholder = '(555) 123-4567', countryCode, onCountryCodeChange }) {
   const [open, setOpen] = useState(false);
@@ -25,10 +40,9 @@ export default function PhoneInput({ value, onChange, placeholder = '(555) 123-4
   const dropdownRef = useRef(null);
 
   const selected = COUNTRY_CODES.find(
-    (c) => c.code === countryCode && c.label === (countryCode === '+1' ? 'US' : c.label)
+    (c) => c.code === countryCode && c.iso === (countryCode === '+1' ? 'us' : c.iso)
   ) || COUNTRY_CODES[0];
 
-  // Check if current code is a custom one
   const isCustom = !COUNTRY_CODES.some((c) => c.code === countryCode) && countryCode && countryCode !== '+1';
 
   useEffect(() => {
@@ -66,7 +80,7 @@ export default function PhoneInput({ value, onChange, placeholder = '(555) 123-4
         onClick={() => { setOpen(!open); setCustomMode(false); }}
       >
         <span className="ob-phone-input__flag">
-          {isCustom ? '🌐' : <img src={`https://flagcdn.com/20x15/${selected.label.toLowerCase()}.png`} alt={selected.label} width="20" height="15" style={{ objectFit: 'contain' }} />}
+          {isCustom ? '🌐' : <FlagImg iso={selected.iso} size={20} />}
         </span>
         <span className="ob-phone-input__dial">
           {isCustom ? countryCode : selected.code}
@@ -86,12 +100,12 @@ export default function PhoneInput({ value, onChange, placeholder = '(555) 123-4
         <div className="ob-phone-input__dropdown">
           {COUNTRY_CODES.map((c, i) => (
             <button
-              key={`${c.label}-${i}`}
+              key={`${c.iso}-${i}`}
               type="button"
               className="ob-phone-input__option"
               onClick={() => handleSelect(c)}
             >
-              <img src={`https://flagcdn.com/20x15/${c.label.toLowerCase()}.png`} alt={c.label} width="20" height="15" style={{ objectFit: 'contain' }} />
+              <FlagImg iso={c.iso} size={22} />
               <span style={{ color: '#888', marginLeft: 'auto' }}>{c.code}</span>
             </button>
           ))}
@@ -131,3 +145,5 @@ export default function PhoneInput({ value, onChange, placeholder = '(555) 123-4
     </div>
   );
 }
+
+export { FlagImg };

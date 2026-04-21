@@ -46,6 +46,13 @@ const routes = [
     description: 'Donna Terms of Service. The legal terms governing your use of the Donna service.',
     canonical: 'https://calldonna.co/termsofservice',
   },
+  {
+    route: '/signup',
+    file: 'signup.html',
+    title: 'Sign Up — Donna',
+    description: 'Create your Donna account and set up daily calls for your loved one. Get started in minutes.',
+    canonical: 'https://calldonna.co/signup',
+  },
 ];
 
 for (const r of routes) {

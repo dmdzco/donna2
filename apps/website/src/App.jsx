@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import './App.css';
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
@@ -11,6 +11,8 @@ import Footer from './components/Footer';
 import WaitlistModal from './components/WaitlistModal';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
+
+const OnboardingFlow = lazy(() => import('./onboarding/OnboardingFlow'));
 
 function normalizePath(p) {
   if (!p) return '/';
@@ -25,6 +27,15 @@ function App({ path = '/' }) {
   const route = normalizePath(path);
   const isPrivacy = route === '/privacypolicy' || route === '/privacy';
   const isTerms = route === '/termsofservice' || route === '/terms';
+  const isSignup = route === '/signup' || route.startsWith('/signup/');
+
+  if (isSignup) {
+    return (
+      <Suspense fallback={<div style={{ minHeight: '100vh', background: 'var(--color-cream)' }} />}>
+        <OnboardingFlow />
+      </Suspense>
+    );
+  }
 
   return (
     <>

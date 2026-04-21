@@ -53,6 +53,22 @@ export default function Hero({ onOpenWaitlist }) {
                 <div className="hero__store-name">Google Play</div>
               </div>
             </button>
+            <a
+              href="/signup"
+              className="hero__store-badge hero__store-badge--web"
+              aria-label="Sign up on our website"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+              </svg>
+              <div>
+                <div className="hero__store-label">Sign up on the</div>
+                <div className="hero__store-name">Website</div>
+              </div>
+              <span className="hero__new-badge">NEW</span>
+            </a>
           </div>
 
           <div className="hero__try">

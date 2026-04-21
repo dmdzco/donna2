@@ -11,7 +11,27 @@ from services.interest_discovery import (
     update_interest_scores,
     MAX_INTERESTS,
     _GENERIC_BLOCKLIST,
+    _match_category,
 )
+
+
+def _ids(results):
+    """Extract interest IDs from discover_new_interests results."""
+    return [r["id"] for r in results]
+
+
+class TestMatchCategory:
+    def test_exact_match(self):
+        assert _match_category("gardening") == "gardening"
+
+    def test_keyword_match(self):
+        assert _match_category("birdwatching") == "animals"
+        assert _match_category("Seattle Seahawks") == "sports"
+        assert _match_category("Netflix shows") == "film"
+
+    def test_no_match(self):
+        assert _match_category("pottery") is None
+        assert _match_category("knitting") is None
 
 
 class TestDiscoverNewInterests:
@@ -22,7 +42,8 @@ class TestDiscoverNewInterests:
             "positive_observations": ["Senior was very engaged"],
         }
         result = discover_new_interests(["gardening"], analysis, [])
-        assert "birdwatching" in result
+        ids = _ids(result)
+        assert "animals" in ids  # birdwatching maps to animals category
 
     def test_skips_existing_interests(self):
         analysis = {
@@ -31,8 +52,9 @@ class TestDiscoverNewInterests:
             "positive_observations": [],
         }
         result = discover_new_interests(["gardening"], analysis, [])
-        assert "gardening" not in result
-        assert "birdwatching" in result
+        ids = _ids(result)
+        assert "gardening" not in ids
+        assert "animals" in ids  # birdwatching -> animals
 
     def test_skips_existing_interests_case_insensitive(self):
         analysis = {
@@ -68,7 +90,8 @@ class TestDiscoverNewInterests:
             "positive_observations": ["Really enjoyed talking about pottery"],
         }
         result = discover_new_interests([], analysis, [])
-        assert "pottery" in result
+        ids = _ids(result)
+        assert "pottery" in ids  # no predefined category, keeps raw
 
     def test_includes_tracker_topics(self):
         analysis = {
@@ -77,7 +100,8 @@ class TestDiscoverNewInterests:
             "positive_observations": [],
         }
         result = discover_new_interests([], analysis, ["knitting"])
-        assert "knitting" in result
+        ids = _ids(result)
+        assert "knitting" in ids
 
     def test_returns_empty_for_none_analysis(self):
         result = discover_new_interests(["gardening"], None, ["knitting"])
@@ -108,16 +132,41 @@ class TestDiscoverNewInterests:
             "positive_observations": [],
         }
         result = discover_new_interests([], analysis, ["painting"])
-        assert result.count("painting") == 1
+        ids = _ids(result)
+        assert ids.count("painting") == 1
+
+    def test_maps_to_predefined_categories(self):
+        analysis = {
+            "topics_discussed": ["rose garden", "NFL football", "jazz music"],
+            "engagement_score": 8,
+            "positive_observations": [],
+        }
+        result = discover_new_interests([], analysis, [])
+        ids = _ids(result)
+        assert "gardening" in ids
+        assert "sports" in ids
+        assert "music" in ids
+
+    def test_returns_detail_text(self):
+        analysis = {
+            "topics_discussed": ["rose garden"],
+            "engagement_score": 8,
+            "positive_observations": [],
+        }
+        result = discover_new_interests([], analysis, [])
+        assert len(result) == 1
+        assert result[0]["id"] == "gardening"
+        assert result[0]["detail"] == "rose garden"
 
 
 class TestAddInterestsToSenior:
     @pytest.mark.asyncio
     async def test_merges_new_interests(self):
-        with patch("services.seniors.update", new_callable=AsyncMock) as mock_update:
+        with patch("services.seniors.update", new_callable=AsyncMock) as mock_update, \
+             patch("services.seniors.get_by_id", new_callable=AsyncMock, return_value={"family_info": {}}):
             mock_update.return_value = None
             result = await add_interests_to_senior(
-                "s1", ["painting"], ["gardening", "cooking"]
+                "s1", [{"id": "painting", "detail": "watercolor painting"}], ["gardening", "cooking"]
             )
             assert "painting" in result
             assert "gardening" in result
@@ -128,7 +177,7 @@ class TestAddInterestsToSenior:
     async def test_deduplicates(self):
         with patch("services.seniors.update", new_callable=AsyncMock) as mock_update:
             result = await add_interests_to_senior(
-                "s1", ["gardening"], ["gardening", "cooking"]
+                "s1", [{"id": "gardening", "detail": ""}], ["gardening", "cooking"]
             )
             assert len(result) == 2
             mock_update.assert_not_awaited()
@@ -137,10 +186,41 @@ class TestAddInterestsToSenior:
     async def test_caps_at_max(self):
         existing = [f"interest_{i}" for i in range(MAX_INTERESTS)]
         with patch("services.seniors.update", new_callable=AsyncMock) as mock_update:
-            result = await add_interests_to_senior("s1", ["new_one"], existing)
+            result = await add_interests_to_senior("s1", [{"id": "new_one", "detail": ""}], existing)
             assert len(result) == MAX_INTERESTS
             assert "new_one" not in result
             mock_update.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_updates_interest_details(self):
+        existing_family_info = {"donnaLanguage": "en", "interestDetails": {"sports": "loves football"}}
+        with patch("services.seniors.update", new_callable=AsyncMock) as mock_update, \
+             patch("services.seniors.get_by_id", new_callable=AsyncMock, return_value={"family_info": existing_family_info}):
+            mock_update.return_value = None
+            await add_interests_to_senior(
+                "s1", [{"id": "gardening", "detail": "rose garden"}], ["sports"]
+            )
+            call_data = mock_update.call_args[0][1]
+            assert "familyInfo" in call_data
+            details = call_data["familyInfo"]["interestDetails"]
+            assert details["gardening"] == "Detected from call: rose garden"
+            # Existing detail should be preserved
+            assert details["sports"] == "loves football"
+
+    @pytest.mark.asyncio
+    async def test_does_not_overwrite_existing_details(self):
+        existing_family_info = {"interestDetails": {"gardening": "My custom description"}}
+        with patch("services.seniors.update", new_callable=AsyncMock) as mock_update, \
+             patch("services.seniors.get_by_id", new_callable=AsyncMock, return_value={"family_info": existing_family_info}):
+            mock_update.return_value = None
+            await add_interests_to_senior(
+                "s1", [{"id": "cooking", "detail": "Italian recipes"}], ["gardening"]
+            )
+            call_data = mock_update.call_args[0][1]
+            details = call_data["familyInfo"]["interestDetails"]
+            # Gardening description should NOT be overwritten
+            assert details["gardening"] == "My custom description"
+            assert details["cooking"] == "Detected from call: Italian recipes"
 
 
 class TestComputeInterestScores:

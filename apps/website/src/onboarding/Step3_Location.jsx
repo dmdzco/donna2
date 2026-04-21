@@ -81,9 +81,9 @@ export default function Step3_Location({ data, update }) {
 
   return (
     <div>
-      <h1 className="ob-step-title">Where do they live?</h1>
+      <h1 className="ob-step-title">About your <em className="ob-step-title__accent">loved one.</em></h1>
       <p className="ob-step-subtitle">
-        This helps Donna talk about local weather, news, and events.
+        Location: letting us know where your loved one lives helps ensure calls are delivered in the proper time zones and that Donna can answer related questions about things like the local weather and news.
       </p>
 
       <div className="ob-city-chips">

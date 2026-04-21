@@ -66,7 +66,7 @@ export default function PhoneInput({ value, onChange, placeholder = '(555) 123-4
         onClick={() => { setOpen(!open); setCustomMode(false); }}
       >
         <span className="ob-phone-input__flag">
-          {isCustom ? '🌐' : selected.flag}
+          {isCustom ? '🌐' : <img src={`https://flagcdn.com/20x15/${selected.label.toLowerCase()}.png`} alt={selected.label} width="20" height="15" style={{ objectFit: 'contain' }} />}
         </span>
         <span className="ob-phone-input__dial">
           {isCustom ? countryCode : selected.code}
@@ -91,8 +91,7 @@ export default function PhoneInput({ value, onChange, placeholder = '(555) 123-4
               className="ob-phone-input__option"
               onClick={() => handleSelect(c)}
             >
-              <span>{c.flag}</span>
-              <span>{c.label}</span>
+              <img src={`https://flagcdn.com/20x15/${c.label.toLowerCase()}.png`} alt={c.label} width="20" height="15" style={{ objectFit: 'contain' }} />
               <span style={{ color: '#888', marginLeft: 'auto' }}>{c.code}</span>
             </button>
           ))}

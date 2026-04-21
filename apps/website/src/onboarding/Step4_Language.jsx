@@ -17,7 +17,7 @@ export default function Step4_Language({ data, update }) {
           onClick={() => update({ language: 'english' })}
         >
           <div className="ob-radio-card__icon" style={{ background: '#EEF2FF' }}>
-            🇺🇸
+            <img src="https://flagcdn.com/40x30/us.png" alt="US" width="32" height="24" style={{ borderRadius: '50%', objectFit: 'cover' }} />
           </div>
           <div className="ob-radio-card__text">
             <div className="ob-radio-card__title">English</div>
@@ -34,7 +34,7 @@ export default function Step4_Language({ data, update }) {
           onClick={() => update({ language: 'spanish' })}
         >
           <div className="ob-radio-card__icon" style={{ background: '#FEF3E2' }}>
-            🇲🇽
+            <img src="https://flagcdn.com/40x30/mx.png" alt="MX" width="32" height="24" style={{ borderRadius: '50%', objectFit: 'cover' }} />
           </div>
           <div className="ob-radio-card__text">
             <div className="ob-radio-card__title">Spanish</div>

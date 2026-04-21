@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { ArrowLeft, ChevronDown, ChevronUp, Dumbbell, Landmark, Music, Film, Vote, Feather, Globe, PawPrint, BookOpen, Flower2, Plane, ChefHat } from "lucide-react-native";
+import { ArrowLeft, ChevronDown, ChevronUp, Clock, Check, Dumbbell, Landmark, Music, Film, Vote, Feather, Globe, PawPrint, BookOpen, Flower2, Plane, ChefHat } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { COLORS } from "@/src/constants/theme";
 import { INTERESTS } from "@/src/constants/interests";
@@ -20,6 +20,27 @@ import { Button } from "@/src/components/ui/Button";
 import { useCurrentSenior, useSenior, useUpdateSenior } from "@/src/hooks";
 import { getErrorMessage } from "@/src/lib/api";
 import { getDeviceTimezone } from "@/src/lib/timezone";
+
+const TIMEZONE_OPTIONS = [
+  { value: "America/New_York", label: "Eastern (ET)" },
+  { value: "America/Chicago", label: "Central (CT)" },
+  { value: "America/Denver", label: "Mountain (MT)" },
+  { value: "America/Los_Angeles", label: "Pacific (PT)" },
+  { value: "America/Anchorage", label: "Alaska (AKT)" },
+  { value: "Pacific/Honolulu", label: "Hawaii (HT)" },
+  { value: "America/Argentina/Buenos_Aires", label: "Argentina (ART)" },
+  { value: "America/Mexico_City", label: "Mexico City (CST)" },
+  { value: "America/Bogota", label: "Colombia (COT)" },
+  { value: "America/Santiago", label: "Chile (CLT)" },
+  { value: "America/Sao_Paulo", label: "Brazil (BRT)" },
+  { value: "Europe/London", label: "London (GMT/BST)" },
+  { value: "Europe/Madrid", label: "Spain (CET)" },
+] as const;
+
+function timezoneLabel(tz: string): string {
+  const found = TIMEZONE_OPTIONS.find((o) => o.value === tz);
+  return found ? found.label : tz.replace(/_/g, " ").split("/").pop() ?? tz;
+}
 
 const ICON_MAP: Record<string, React.ComponentType<{ size?: number; color?: string }>> = {
   Dumbbell, Landmark, Music, Film, Vote, Feather, Globe, PawPrint, BookOpen, Flower2, Plane, ChefHat,
@@ -49,6 +70,8 @@ export default function LovedOneProfileScreen() {
   const [additionalTopics, setAdditionalTopics] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [topicsToAvoid, setTopicsToAvoid] = useState("");
+  const [seniorTimezone, setSeniorTimezone] = useState(getDeviceTimezone());
+  const [showTimezonePicker, setShowTimezonePicker] = useState(false);
   const [donnaLanguage, setDonnaLanguage] = useState<"en" | "es">("en");
 
   // Pre-fill form when senior data loads
@@ -67,6 +90,7 @@ export default function LovedOneProfileScreen() {
       setAdditionalTopics(senior.additionalInfo ?? "");
       setDateOfBirth((family?.dateOfBirth as string) ?? "");
       setTopicsToAvoid((family?.topicsToAvoid as string) ?? "");
+      setSeniorTimezone(senior.timezone || getDeviceTimezone());
       setDonnaLanguage((family?.donnaLanguage as "en" | "es") ?? "en");
     }
   }, [senior]);
@@ -88,7 +112,7 @@ export default function LovedOneProfileScreen() {
       await updateSenior.mutateAsync({
         name: name.trim(),
         phone: phone.trim(),
-        timezone: getDeviceTimezone(),
+        timezone: seniorTimezone,
         city: city.trim() || undefined,
         state: state.trim() || undefined,
         zipCode: zipCode.trim() || undefined,
@@ -211,6 +235,54 @@ export default function LovedOneProfileScreen() {
                   testID="loved-one-zip-input"
                 />
               </View>
+            </View>
+
+            {/* Timezone Selector */}
+            <View>
+              <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
+                {t("lovedOneProfile.timezone")}
+              </Text>
+              <Pressable
+                onPress={() => setShowTimezonePicker(!showTimezonePicker)}
+                className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
+                accessibilityRole="button"
+                accessibilityLabel={t("lovedOneProfile.timezone")}
+                style={{ minHeight: 48 }}
+              >
+                <View className="flex-row items-center">
+                  <Clock size={16} color={COLORS.muted} style={{ marginRight: 8 }} />
+                  <Text className="text-[15px] text-charcoal">{timezoneLabel(seniorTimezone)}</Text>
+                </View>
+                <ChevronDown size={18} color={COLORS.muted} />
+              </Pressable>
+              {showTimezonePicker && (
+                <View className="mt-2 rounded-2xl border border-charcoal/10 bg-white overflow-hidden">
+                  {TIMEZONE_OPTIONS.map((tz) => (
+                    <Pressable
+                      key={tz.value}
+                      onPress={() => {
+                        setSeniorTimezone(tz.value);
+                        setShowTimezonePicker(false);
+                      }}
+                      className="flex-row items-center justify-between px-4 py-3 border-b border-charcoal/5"
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: seniorTimezone === tz.value }}
+                      style={{ minHeight: 44 }}
+                    >
+                      <Text
+                        className={`text-[15px] ${
+                          seniorTimezone === tz.value ? "text-sage font-semibold" : "text-charcoal"
+                        }`}
+                      >
+                        {tz.label}
+                      </Text>
+                      {seniorTimezone === tz.value && (
+                        <Check size={18} color={COLORS.sage} />
+                      )}
+                    </Pressable>
+                  ))}
+                </View>
+              )}
             </View>
           </View>
 

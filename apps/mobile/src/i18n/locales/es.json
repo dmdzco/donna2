@@ -326,6 +326,7 @@
     "donnaLanguageSubtitle": "En que idioma deberia Donna hablar cuando llame a {{name}}?",
     "english": "Ingles",
     "spanish": "Espanol",
+    "timezone": "Zona Horaria",
     "couldntSave": "No se pudo guardar",
     "couldntSaveMessage": "No pudimos guardar este perfil. Tus cambios siguen aquí. Por favor intenta de nuevo."
   },

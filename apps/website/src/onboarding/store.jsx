@@ -11,9 +11,11 @@ const initialState = {
   firstName: '',
   lastName: '',
   phone: '',
+  phoneCountryCode: '+1',
   // Step 2: Loved One
   lovedOneName: '',
   lovedOnePhone: '',
+  lovedOneCountryCode: '+1',
   relationship: '',
   // Step 3: Location
   city: '',

@@ -1,11 +1,13 @@
 import { CheckIcon } from './icons';
 
 export default function Step4_Language({ data, update }) {
+  const name = data.lovedOneName || 'your loved one';
+
   return (
     <div>
-      <h1 className="ob-step-title">Preferred language</h1>
+      <h1 className="ob-step-title">Language.</h1>
       <p className="ob-step-subtitle">
-        What language should Donna speak during calls?
+        What language should Donna speak to {name} in?
       </p>
 
       <div className="ob-radio-cards">
@@ -19,7 +21,7 @@ export default function Step4_Language({ data, update }) {
           </div>
           <div className="ob-radio-card__text">
             <div className="ob-radio-card__title">English</div>
-            <div className="ob-radio-card__desc">Donna will speak in English</div>
+            <div className="ob-radio-card__desc">US English</div>
           </div>
           <div className="ob-radio-card__check">
             {data.language === 'english' && <CheckIcon size={14} />}
@@ -32,11 +34,11 @@ export default function Step4_Language({ data, update }) {
           onClick={() => update({ language: 'spanish' })}
         >
           <div className="ob-radio-card__icon" style={{ background: '#FEF3E2' }}>
-            🇪🇸
+            🇲🇽
           </div>
           <div className="ob-radio-card__text">
             <div className="ob-radio-card__title">Spanish</div>
-            <div className="ob-radio-card__desc">Donna hablará en español</div>
+            <div className="ob-radio-card__desc">Español</div>
           </div>
           <div className="ob-radio-card__check">
             {data.language === 'spanish' && <CheckIcon size={14} />}

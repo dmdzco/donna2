@@ -11,10 +11,12 @@ const RELATIONSHIPS = [
   'Other',
 ];
 
+import PhoneInput from './PhoneInput';
+
 export default function Step2_LovedOne({ data, update }) {
   return (
     <div>
-      <h1 className="ob-step-title">About your loved one</h1>
+      <h1 className="ob-step-title">About your <em className="ob-step-title__accent">loved one.</em></h1>
       <p className="ob-step-subtitle">
         Tell us about the person Donna will be calling.
       </p>
@@ -32,12 +34,11 @@ export default function Step2_LovedOne({ data, update }) {
 
       <div className="ob-form-group">
         <label className="ob-label">Their phone number</label>
-        <input
-          className="ob-input"
-          type="tel"
+        <PhoneInput
           value={data.lovedOnePhone}
-          onChange={(e) => update({ lovedOnePhone: e.target.value })}
-          placeholder="(555) 987-6543"
+          onChange={(val) => update({ lovedOnePhone: val })}
+          countryCode={data.lovedOneCountryCode || '+1'}
+          onCountryCodeChange={(code) => update({ lovedOneCountryCode: code })}
         />
       </div>
 

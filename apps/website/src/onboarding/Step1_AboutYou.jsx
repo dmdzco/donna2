@@ -1,7 +1,9 @@
+import PhoneInput from './PhoneInput';
+
 export default function Step1_AboutYou({ data, update }) {
   return (
     <div>
-      <h1 className="ob-step-title">About you</h1>
+      <h1 className="ob-step-title">About <em className="ob-step-title__accent">you.</em></h1>
       <p className="ob-step-subtitle">
         Tell us a bit about yourself so we can personalize the experience.
       </p>
@@ -42,12 +44,11 @@ export default function Step1_AboutYou({ data, update }) {
 
       <div className="ob-form-group">
         <label className="ob-label">Phone number</label>
-        <input
-          className="ob-input"
-          type="tel"
+        <PhoneInput
           value={data.phone}
-          onChange={(e) => update({ phone: e.target.value })}
-          placeholder="(555) 123-4567"
+          onChange={(val) => update({ phone: val })}
+          countryCode={data.phoneCountryCode || '+1'}
+          onCountryCodeChange={(code) => update({ phoneCountryCode: code })}
         />
       </div>
     </div>

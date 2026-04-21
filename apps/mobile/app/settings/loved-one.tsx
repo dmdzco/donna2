@@ -19,6 +19,7 @@ import { Input } from "@/src/components/ui/Input";
 import { Button } from "@/src/components/ui/Button";
 import { useCurrentSenior, useSenior, useUpdateSenior } from "@/src/hooks";
 import { getErrorMessage } from "@/src/lib/api";
+import { getDeviceTimezone } from "@/src/lib/timezone";
 
 const ICON_MAP: Record<string, React.ComponentType<{ size?: number; color?: string }>> = {
   Dumbbell, Landmark, Music, Film, Vote, Feather, Globe, PawPrint, BookOpen, Flower2, Plane, ChefHat,
@@ -87,6 +88,7 @@ export default function LovedOneProfileScreen() {
       await updateSenior.mutateAsync({
         name: name.trim(),
         phone: phone.trim(),
+        timezone: getDeviceTimezone(),
         city: city.trim() || undefined,
         state: state.trim() || undefined,
         zipCode: zipCode.trim() || undefined,

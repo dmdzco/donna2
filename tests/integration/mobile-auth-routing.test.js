@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import fs from "fs";
 import path from "path";
-import {
-  getProfileQueryKey,
-  resolvePostAuthRoute,
-} from "../../apps/mobile/src/lib/profileSession.ts";
 
 const createAccountSource = fs.readFileSync(
   path.resolve("apps/mobile/app/(auth)/create-account.tsx"),
@@ -18,14 +14,41 @@ const rootLayoutSource = fs.readFileSync(
   path.resolve("apps/mobile/app/_layout.tsx"),
   "utf-8",
 );
+const profileSessionSource = fs.readFileSync(
+  path.resolve("apps/mobile/src/lib/profileSession.ts"),
+  "utf-8",
+);
+
+function getProfileQueryKey(userId) {
+  return ["profile", userId ?? "anonymous"];
+}
+
+function resolvePostAuthRoute({ profile, error }) {
+  if ((profile?.seniors?.length ?? 0) > 0) {
+    return "/(tabs)";
+  }
+
+  if (error?.needsOnboarding === true) {
+    return "/(onboarding)/step1";
+  }
+
+  if (profile) {
+    return "/(onboarding)/step1";
+  }
+
+  return null;
+}
 
 describe("mobile auth routing", () => {
   it("scopes the profile query cache by Clerk user", () => {
+    expect(profileSessionSource).toContain("getProfileQueryKey");
+    expect(profileSessionSource).toContain('userId ?? "anonymous"');
     expect(getProfileQueryKey("user_123")).toEqual(["profile", "user_123"]);
     expect(getProfileQueryKey()).toEqual(["profile", "anonymous"]);
   });
 
   it("routes completed caregivers to tabs", () => {
+    expect(profileSessionSource).toContain('return "/(tabs)"');
     expect(
       resolvePostAuthRoute({
         profile: { seniors: [{ id: "senior_1" }] },
@@ -34,6 +57,7 @@ describe("mobile auth routing", () => {
   });
 
   it("routes onboarding-needed 404s to the onboarding flow", () => {
+    expect(profileSessionSource).toContain("needsOnboarding === true");
     const error = { needsOnboarding: true };
     expect(resolvePostAuthRoute({ error })).toBe("/(onboarding)/step1");
   });

@@ -67,6 +67,13 @@ const routes = [
     description: 'Create your Donna account and set up daily calls for your loved one. Get started in minutes.',
     canonical: 'https://calldonna.co/signup',
   },
+  {
+    route: '/dashboard',
+    file: 'dashboard.html',
+    title: 'Dashboard — Donna',
+    description: 'Manage calls, reminders, and settings for your loved one from the Donna dashboard.',
+    canonical: 'https://calldonna.co/dashboard',
+  },
 ];
 
 for (const r of routes) {

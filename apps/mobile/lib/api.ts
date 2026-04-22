@@ -1,16 +1,7 @@
 import { useAuth } from '@clerk/clerk-expo';
+import { getApiUrl } from '@/src/lib/runtimeConfig';
 
-function getRequiredApiUrl() {
-  const apiUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
-  if (!apiUrl) {
-    throw new Error(
-      'EXPO_PUBLIC_API_URL is required for the mobile app. Set it in apps/mobile/.env or the EAS environment.',
-    );
-  }
-  return apiUrl.replace(/\/+$/, '');
-}
-
-const API_URL = getRequiredApiUrl();
+const API_URL = getApiUrl();
 
 async function fetchWithAuth(path: string, options: RequestInit = {}, token?: string | null) {
   const headers: Record<string, string> = {

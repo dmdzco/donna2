@@ -2,8 +2,9 @@ import type { ComponentType, ErrorInfo } from "react";
 import Constants from "expo-constants";
 import * as Sentry from "@sentry/react-native";
 import type { Breadcrumb, ErrorEvent } from "@sentry/react-native";
+import { getSentryDsn } from "@/src/lib/runtimeConfig";
 
-const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
+const SENTRY_DSN = getSentryDsn();
 const isEnabled = Boolean(SENTRY_DSN);
 
 if (isEnabled) {

@@ -41,7 +41,7 @@ export default function TermsOfService() {
           <ul>
             <li>Maintaining the confidentiality of your account credentials</li>
             <li>All activity that occurs under your account</li>
-            <li>Notifying us immediately at <a href="mailto:nick@calldonna.co">nick@calldonna.co</a> if you suspect unauthorized access</li>
+            <li>Notifying us immediately at <a href="mailto:support@calldonna.co">support@calldonna.co</a> if you suspect unauthorized access</li>
           </ul>
           <p>We reserve the right to suspend or terminate accounts that we reasonably believe have been compromised or are being used in violation of these Terms.</p>
 
@@ -54,7 +54,7 @@ export default function TermsOfService() {
             <li>You have the legal authority to provide this consent on behalf of the Call Recipient</li>
             <li>You will promptly notify Donna if the Call Recipient revokes their consent or requests that calls cease</li>
           </ol>
-          <p>You agree to indemnify and hold Donna harmless from any claims, damages, or penalties arising from your failure to obtain proper consent. Call Recipients (or their Subscriber) may request to stop receiving calls at any time by contacting <a href="mailto:nick@calldonna.co">nick@calldonna.co</a> or by managing settings in the app.</p>
+          <p>You agree to indemnify and hold Donna harmless from any claims, damages, or penalties arising from your failure to obtain proper consent. Call Recipients (or their Subscriber) may request to stop receiving calls at any time by contacting <a href="mailto:support@calldonna.co">support@calldonna.co</a> or by managing settings in the app.</p>
 
           <h2>6. Subscription, Pricing, and Payment</h2>
           <h3>6.1 Subscription Plans</h3>
@@ -64,10 +64,10 @@ export default function TermsOfService() {
           <h3>6.3 Failed Payments</h3>
           <p>If a payment fails, we will attempt to process it again and notify you by email. If payment is not resolved within 7 days, we reserve the right to suspend the Service until the balance is settled.</p>
           <h3>6.4 Refunds</h3>
-          <p>Subscription fees are generally non-refundable. However, if you are dissatisfied with the Service within the first 14 days of your initial subscription, you may request a full refund by contacting <a href="mailto:nick@calldonna.co">nick@calldonna.co</a>. Refund requests after this period will be considered on a case-by-case basis at our sole discretion.</p>
+          <p>Subscription fees are generally non-refundable. However, if you are dissatisfied with the Service within the first 14 days of your initial subscription, you may request a full refund by contacting <a href="mailto:support@calldonna.co">support@calldonna.co</a>. Refund requests after this period will be considered on a case-by-case basis at our sole discretion.</p>
 
           <h2>7. Cancellation</h2>
-          <p>You may cancel your subscription at any time through the app or by contacting <a href="mailto:nick@calldonna.co">nick@calldonna.co</a>. Upon cancellation:</p>
+          <p>You may cancel your subscription at any time through the app or by contacting <a href="mailto:support@calldonna.co">support@calldonna.co</a>. Upon cancellation:</p>
           <ul>
             <li>Your subscription will remain active through the end of the current billing period</li>
             <li>No further charges will be incurred after the current period</li>
@@ -139,7 +139,7 @@ export default function TermsOfService() {
           <h2>15. Governing Law and Dispute Resolution</h2>
           <p>These Terms shall be governed by and construed in accordance with the laws of the State of Michigan, without regard to conflict of law principles.</p>
           <h3>15.1 Informal Resolution</h3>
-          <p>Before initiating any formal dispute resolution, you agree to contact us at <a href="mailto:nick@calldonna.co">nick@calldonna.co</a> and attempt to resolve the dispute informally for at least 30 days.</p>
+          <p>Before initiating any formal dispute resolution, you agree to contact us at <a href="mailto:support@calldonna.co">support@calldonna.co</a> and attempt to resolve the dispute informally for at least 30 days.</p>
           <h3>15.2 Binding Arbitration</h3>
           <p>If informal resolution fails, any dispute, claim, or controversy arising out of or relating to these Terms or the Service shall be resolved by binding arbitration administered by the American Arbitration Association (&ldquo;AAA&rdquo;) under its Consumer Arbitration Rules. The arbitration shall be conducted in the State of Michigan. Judgment on the arbitration award may be entered in any court of competent jurisdiction.</p>
           <h3>15.3 Class Action Waiver</h3>
@@ -161,7 +161,7 @@ export default function TermsOfService() {
           <p>If you have questions about these Terms of Service, please contact us:</p>
           <p>
             <strong>Donna</strong><br />
-            Email: <a href="mailto:nick@calldonna.co">nick@calldonna.co</a><br />
+            Email: <a href="mailto:support@calldonna.co">support@calldonna.co</a><br />
             Website: calldonna.co
           </p>
         </div>

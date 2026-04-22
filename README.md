@@ -56,7 +56,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ### Frontend Apps
 - **Admin Dashboard v2** — React + Vite + Tailwind ([admin-v2-liart.vercel.app](https://admin-v2-liart.vercel.app))
-- **Public Website** — Marketing, signup, legal pages, and caregiver dashboard ([calldonna.co](https://www.calldonna.co))
+- **Public Website** — Marketing, signup, legal pages, and caregiver dashboard ([calldonna.co](https://calldonna.co))
 - **Observability Dashboard** — Live call monitoring ([observability-five.vercel.app](https://observability-five.vercel.app))
 
 ### Security
@@ -397,7 +397,7 @@ cd apps/website && npx vercel --prod --yes       # Public website and caregiver 
 | Pipecat API | Railway | https://donna-pipecat-production.up.railway.app |
 | Node.js API | Railway | https://donna-api-production-2450.up.railway.app |
 | Admin Dashboard | Vercel | https://admin-v2-liart.vercel.app |
-| Public Website | Vercel | https://www.calldonna.co |
+| Public Website | Vercel | https://calldonna.co |
 | Observability | Vercel | https://observability-five.vercel.app |
 
 ## Documentation

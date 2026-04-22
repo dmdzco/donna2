@@ -14,7 +14,7 @@ appId: com.donna.caregiver
 
 ---
 
-- evalScript: '${output.freshOnboardingEmail = typeof TEST_ONBOARDING_EMAIL !== "undefined" && TEST_ONBOARDING_EMAIL ? TEST_ONBOARDING_EMAIL : "maestro-fresh-" + Date.now() + "+clerk_test@getdonna.ai"}'
+- evalScript: '${output.freshOnboardingEmail = typeof TEST_ONBOARDING_EMAIL !== "undefined" && TEST_ONBOARDING_EMAIL ? TEST_ONBOARDING_EMAIL : "maestro-fresh-" + Date.now() + "+clerk_test@calldonna.co"}'
 - evalScript: ${output.onboardingSeniorPhone = "555" + String(Date.now()).slice(-7)}
 - evalScript: '${output.createPassword = typeof TEST_PASSWORD !== "undefined" && TEST_PASSWORD ? TEST_PASSWORD : "Dx7mQ9vLp2"}'
 
@@ -150,7 +150,7 @@ appId: com.donna.caregiver
 - inputText: "Tester"
 - tapOn:
     id: "input-email"
-- inputText: "jane+clerk_test@getdonna.ai"
+- inputText: "jane+clerk_test@calldonna.co"
 - pressKey: enter
 - tapOn:
     id: "input-phone"

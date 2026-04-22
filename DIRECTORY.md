@@ -184,7 +184,7 @@ apps/
 │   ├── src/pages/   Legal pages
 │   ├── src/onboarding/  Signup/onboarding flow
 │   ├── src/dashboard/   Caregiver dashboard
-│   └── Live: https://www.calldonna.co
+│   └── Live: https://calldonna.co
 │
 ├── _old-consumer-do-not-use/  Archived previous caregiver web app
 │

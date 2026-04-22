@@ -1,0 +1,54 @@
+{
+  "call_started_at": "2026-04-22T15:30:00+00:00",
+  "senior_context": {
+    "name": "Test Senior",
+    "timezone": "America/Chicago",
+    "medical_notes": "None known",
+    "family": [],
+    "family_info": {}
+  },
+  "transcript": [
+    {
+      "role": "assistant",
+      "content": "Good morning. This is your reminder to take your daily vitamins."
+    },
+    {
+      "role": "user",
+      "content": "Thanks, I have them here and I just took them."
+    },
+    {
+      "role": "assistant",
+      "content": "Glad to hear it. How are you feeling today?"
+    },
+    {
+      "role": "user",
+      "content": "Pretty good. I am going to water the plants later."
+    }
+  ],
+  "llm_response": {
+    "summary": "Test Senior sounded calm and positive. The reminder was acknowledged without difficulty, and the conversation was routine.",
+    "sentiment": "neutral",
+    "topics_discussed": ["daily vitamins", "plants"],
+    "reminders_delivered": ["Daily vitamins"],
+    "engagement_score": 7,
+    "mood": "calm",
+    "caregiver_sms": "The call went smoothly and the reminder was acknowledged. The conversation lasted a few minutes.",
+    "caregiver_takeaways": ["Reminder acknowledged", "Mood sounded calm"],
+    "recommended_caregiver_action": "",
+    "concerns": [],
+    "positive_observations": ["Acknowledged the reminder clearly"],
+    "follow_up_suggestions": [],
+    "call_quality": {
+      "rapport": "strong",
+      "goals_achieved": true,
+      "duration_appropriate": true
+    }
+  },
+  "expected": {
+    "sentiment": "neutral",
+    "engagement_score": 7,
+    "recommended_caregiver_action": "",
+    "concerns": [],
+    "follow_up_suggestions": []
+  }
+}

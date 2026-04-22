@@ -1,0 +1,62 @@
+{
+  "call_started_at": "2026-04-22T20:15:00+00:00",
+  "senior_context": {
+    "name": "Test Senior",
+    "timezone": "America/Chicago",
+    "medical_notes": "None known",
+    "family": [],
+    "family_info": {}
+  },
+  "transcript": [
+    {
+      "role": "assistant",
+      "content": "How has your afternoon been?"
+    },
+    {
+      "role": "user",
+      "content": "I slipped by the doorway earlier. I am sitting down now, but I feel a bit shaken."
+    },
+    {
+      "role": "assistant",
+      "content": "Are you hurt or in pain?"
+    },
+    {
+      "role": "user",
+      "content": "My hip is sore and I do not want to stand again yet."
+    }
+  ],
+  "llm_response": {
+    "summary": "Test Senior sounded shaken after reporting a slip near the doorway. The sore hip and hesitation to stand may need caregiver follow-up.",
+    "sentiment": "worried",
+    "topics_discussed": ["slip near doorway", "sore hip"],
+    "reminders_delivered": [],
+    "engagement_score": 5,
+    "mood": "shaken",
+    "caregiver_sms": "The call surfaced a possible safety concern. Consider checking in soon.",
+    "caregiver_takeaways": ["Reported a slip", "Mentioned a sore hip"],
+    "recommended_caregiver_action": "Check in soon to confirm safety and whether support is needed.",
+    "concerns": [
+      {
+        "type": "safety",
+        "severity": "high",
+        "description": "Reported a slip and soreness afterward.",
+        "evidence": "Senior said they slipped and their hip is sore.",
+        "recommended_action": "Check in soon and assess whether additional help is needed."
+      }
+    ],
+    "positive_observations": ["Answered follow-up questions clearly"],
+    "follow_up_suggestions": ["Ask whether the soreness improved and whether the doorway area is safe."],
+    "call_quality": {
+      "rapport": "moderate",
+      "goals_achieved": true,
+      "duration_appropriate": true
+    }
+  },
+  "expected": {
+    "sentiment": "worried",
+    "engagement_score": 5,
+    "recommended_caregiver_action": "Check in soon to confirm safety and whether support is needed.",
+    "concerns_count": 1,
+    "follow_up_suggestions_count": 1
+  }
+}

@@ -66,7 +66,7 @@ export default function ThirdPartyServices() {
           ))}
 
           <h2>Changes</h2>
-          <p>We update this page when material providers are added, removed, or their role changes. For questions, contact <a href="mailto:nick@calldonna.co">nick@calldonna.co</a>.</p>
+          <p>We update this page when material providers are added, removed, or their role changes. For questions, contact <a href="mailto:support@calldonna.co">support@calldonna.co</a>.</p>
         </div>
       </div>
     </section>

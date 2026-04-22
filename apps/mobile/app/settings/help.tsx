@@ -26,9 +26,9 @@ import { COLORS } from "@/src/constants/theme";
 import { Modal } from "@/src/components/ui/Modal";
 import { Button } from "@/src/components/ui/Button";
 
-const SUPPORT_EMAIL = "nick@calldonna.co";
-const PRIVACY_POLICY_URL = "https://www.calldonna.co/privacypolicy";
-const THIRD_PARTY_SERVICES_URL = "https://www.calldonna.co/third-party";
+const SUPPORT_EMAIL = "support@calldonna.co";
+const PRIVACY_POLICY_URL = "https://calldonna.co/privacy";
+const TERMS_OF_SERVICE_URL = "https://calldonna.co/terms";
 
 type HelpRow = {
   icon: React.ReactNode;
@@ -129,8 +129,8 @@ export default function HelpCenterScreen() {
     },
     {
       icon: <ExternalLink size={18} color={COLORS.sage} />,
-      labelKey: "helpCenter.thirdPartyServices",
-      action: () => openURL(THIRD_PARTY_SERVICES_URL),
+      labelKey: "helpCenter.termsOfService",
+      action: () => openURL(TERMS_OF_SERVICE_URL),
     },
   ];
 

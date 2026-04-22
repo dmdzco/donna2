@@ -4,7 +4,7 @@
 appId: com.donna.caregiver
 
 env:
-  TEST_EMAIL: "maestro+clerk_test@getdonna.ai"
+  TEST_EMAIL: "maestro+clerk_test@calldonna.co"
   TEST_PASSWORD: "Maestro2026!"
 
 ---

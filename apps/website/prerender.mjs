@@ -37,7 +37,7 @@ const routes = [
     file: 'privacypolicy.html',
     title: 'Privacy Policy — Donna',
     description: 'Donna Privacy Policy. Learn how we collect, use, and protect your personal information.',
-    canonical: 'https://calldonna.co/privacypolicy',
+    canonical: 'https://calldonna.co/privacy',
   },
   {
     route: '/support',
@@ -58,7 +58,7 @@ const routes = [
     file: 'termsofservice.html',
     title: 'Terms of Service — Donna',
     description: 'Donna Terms of Service. The legal terms governing your use of the Donna service.',
-    canonical: 'https://calldonna.co/termsofservice',
+    canonical: 'https://calldonna.co/terms',
   },
   {
     route: '/signup',

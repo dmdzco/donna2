@@ -11,7 +11,7 @@ export default function Support() {
 
         <div className="legal-page__body">
           <h2>Contact Donna</h2>
-          <p>Email <a href="mailto:nick@calldonna.co">nick@calldonna.co</a> for account help, onboarding questions, privacy requests, cancellation requests, or app support.</p>
+          <p>Email <a href="mailto:support@calldonna.co">support@calldonna.co</a> for account help, onboarding questions, privacy requests, cancellation requests, or app support.</p>
 
           <h2>Privacy-Safe Support</h2>
           <p>Please avoid sending medical details, full transcripts, medication lists, or other sensitive information by email unless we specifically ask for the minimum details needed to resolve your request.</p>

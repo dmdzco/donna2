@@ -12,7 +12,7 @@ export default function PrivacyPolicy() {
         <div className="legal-page__body">
           <h2>1. Introduction</h2>
           <p>Donna (&ldquo;Donna,&rdquo; &ldquo;we,&rdquo; &ldquo;us,&rdquo; or &ldquo;our&rdquo;) provides AI-powered companion calls for seniors and tools for family caregivers. This Privacy Policy explains how we collect, use, disclose, and protect information when you use calldonna.co, the Donna mobile app, Donna phone services, or otherwise contact us.</p>
-          <p>Contact us at <a href="mailto:nick@calldonna.co">nick@calldonna.co</a> with questions or privacy requests.</p>
+          <p>Contact us at <a href="mailto:support@calldonna.co">support@calldonna.co</a> with questions or privacy requests.</p>
 
           <div className="legal-page__notice">
             <strong>AI disclosure:</strong> Donna calls are placed by an automated AI system, not a human caller. Caregivers are responsible for telling call recipients that Donna is AI-generated and for obtaining any consent required to place calls.
@@ -82,10 +82,10 @@ export default function PrivacyPolicy() {
 
           <h2>8. Data Retention</h2>
           <p>We retain personal information for as long as needed to provide Donna, meet legal and operational obligations, resolve disputes, maintain security, and enforce agreements. Sensitive call content is retained only as long as needed for care continuity, caregiver access, quality, legal, and operational purposes, then deleted or de-identified according to our retention practices.</p>
-          <p>You can request deletion by contacting <a href="mailto:nick@calldonna.co">nick@calldonna.co</a>. Some records may be retained where required by law, security needs, fraud prevention, backup retention, or unresolved disputes.</p>
+          <p>You can request deletion by contacting <a href="mailto:support@calldonna.co">support@calldonna.co</a>. Some records may be retained where required by law, security needs, fraud prevention, backup retention, or unresolved disputes.</p>
 
           <h2>9. Your Rights and Choices</h2>
-          <p>Depending on your location, you may have rights to access, correct, delete, or receive a copy of personal information, opt out of marketing communications, or withdraw consent for certain processing. Contact <a href="mailto:nick@calldonna.co">nick@calldonna.co</a> to make a request.</p>
+          <p>Depending on your location, you may have rights to access, correct, delete, or receive a copy of personal information, opt out of marketing communications, or withdraw consent for certain processing. Contact <a href="mailto:support@calldonna.co">support@calldonna.co</a> to make a request.</p>
 
           <h3>California Residents</h3>
           <p>Donna does not sell personal information or share personal information for cross-context behavioral advertising. California residents may request details about the categories of personal information collected, purposes for collection, and categories of service providers involved in processing.</p>
@@ -102,7 +102,7 @@ export default function PrivacyPolicy() {
           <h2>13. Contact Us</h2>
           <p>
             <strong>Donna</strong><br />
-            Email: <a href="mailto:nick@calldonna.co">nick@calldonna.co</a><br />
+            Email: <a href="mailto:support@calldonna.co">support@calldonna.co</a><br />
             Website: calldonna.co
           </p>
         </div>

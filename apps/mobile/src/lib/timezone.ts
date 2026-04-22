@@ -2,6 +2,15 @@ import type { Reminder, Senior } from "@/src/types";
 
 export const DEFAULT_TIMEZONE = "America/New_York";
 
+/** Returns the IANA timezone of the device (e.g. "America/Argentina/Buenos_Aires"). */
+export function getDeviceTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIMEZONE;
+  } catch {
+    return DEFAULT_TIMEZONE;
+  }
+}
+
 const STATE_NAMES: Record<string, string> = {
   alabama: "AL",
   alaska: "AK",
@@ -199,6 +208,8 @@ export function isValidTimezone(timezone?: string) {
 }
 
 export function resolveSeniorTimezone(senior?: Pick<Senior, "timezone" | "city" | "state">) {
+  if (isValidTimezone(senior?.timezone)) return senior!.timezone!;
+
   const state = normalizeState(senior?.state);
   const city = normalizeCity(senior?.city);
 
@@ -208,8 +219,8 @@ export function resolveSeniorTimezone(senior?: Pick<Senior, "timezone" | "city" 
   }
 
   if (state && STATE_TIMEZONES[state]) return STATE_TIMEZONES[state];
-  if (isValidTimezone(senior?.timezone)) return senior!.timezone!;
-  return DEFAULT_TIMEZONE;
+  // Fallback to the device's timezone instead of hardcoded US Eastern
+  return getDeviceTimezone();
 }
 
 export function parseTimeString(timeStr: string): TimeParts | null {

@@ -114,6 +114,21 @@ Conditional reminder, main, winding_down, and closing phases are managed by `Flo
 
 Retired handlers remain in `pipecat/flows/tools.py` for Gemini/future work, but `make_flows_tools()` exposes only the two active tools above. Memory and caregiver-note context is prefetched/injected instead of exposed as Claude tools.
 
+### Senior Context Assembly
+
+`pipecat/flows/nodes.py:_build_senior_context()` builds the senior-specific prompt context before the call flow starts. It includes:
+
+- Current local date/time from the senior's IANA timezone
+- Name and city/state profile context
+- English/Spanish call-language instruction from `familyInfo.donnaLanguage`
+- Date-of-birth derived age and birthday awareness from `familyInfo.dateOfBirth`
+- Interest IDs plus caregiver/AI detail text from `familyInfo.interestDetails`
+- Additional caregiver context from `seniors.additional_info`
+- Topics to avoid from `familyInfo.topicsToAvoid`, falling back to `preferred_call_times.topicsToAvoid` for onboarding-created rows
+- Health notes, memory context, recent turns, last-call follow-ups, and today's same-day context
+
+Prompt context events are recorded through `services.context_trace` without logging raw PHI to application logs.
+
 ---
 
 ## Post-Call Processing (`services/post_call.py`)
@@ -128,7 +143,7 @@ Step 1: Complete conversation (prerequisite) ───────── sequent
     ├── Step 5: Reminder cleanup              ─────┤
     └── Step 6: Cache clearing                ─────┘
                                                     │
-Step 3.5: Interest discovery (depends on Step 2) ── sequential
+Step 3.5: Interest discovery + category/detail merge ── sequential
 Step 3.6: Interest scores (depends on Step 3.5)  ── sequential
 Step 4: Daily context (depends on Step 2)        ── sequential
 ```
@@ -141,7 +156,7 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 
 | Table | Purpose | Key Fields / Indexes |
 |-------|---------|-------------|
-| `seniors` | User profiles, interests, call settings | phone (unique) |
+| `seniors` | User profiles, interests, encrypted family/additional context, call settings | phone (unique), `family_info_encrypted`, `additional_info_encrypted`, `call_context_snapshot_encrypted` |
 | `conversations` | Call records with encrypted transcripts and summaries | call_sid, senior_id + started_at DESC |
 | `memories` | Semantic memory store (pgvector embeddings) | senior_id, HNSW on embedding |
 | `reminders` | Scheduled reminders (one-time + recurring) | scheduled_time WHERE active, is_recurring |

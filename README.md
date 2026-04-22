@@ -28,6 +28,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - LLM responses (Claude Haiku 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - Text-to-speech (ElevenLabs by default; Cartesia remains an evaluation-only provider flag; active Telnyx calls use 16kHz PCM)
 - English/Spanish Donna call language support (caregiver-selected; switches STT language, prompt instruction, and optional Spanish TTS voice)
+- Rich senior profile context in calls: local timezone, age/birthday awareness, interest descriptions, caregiver-provided additional context, and topics to avoid
 - Semantic memory with decay + deduplication (pgvector + HNSW index)
 - Full in-call context retention (APPEND strategy, no summary truncation)
 - Cross-call turn history (recent turns from previous calls in system prompt)
@@ -41,7 +42,8 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Call context snapshot (pre-computed JSONB, eliminates 6 DB queries per call)
 - Context + news pre-caching at 5 AM local time
 - Caregiver notes delivery (family can leave notes read during calls)
-- Per-senior call settings (configurable time limits, greeting style, memory decay)
+- AI interest discovery maps post-call topics to predefined mobile interest categories and saves editable interest details
+- Per-senior profile and call settings (timezone, language, birthday, interests, time limits, greeting style, memory decay)
 - 2 active LLM tools: web_search and mark_reminder_acknowledged (fire-and-forget)
 - Ephemeral context model (Director injections stripped each turn, prevents prompt bloat)
 
@@ -167,7 +169,7 @@ Phone Call → Telnyx → WebSocket → Pipecat Pipeline
                              TTS 16kHz PCM → Telnyx Audio Out (L16)
                                        │
                                        ▼ (on disconnect)
-                             Post-Call: Analysis + Memory + Daily Context
+                             Post-Call: Analysis + Interest Discovery + Memory + Daily Context
 ```
 
 ### Split Director Architecture
@@ -234,8 +236,8 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── conversations.py                # Conversation CRUD
 │   ├── daily_context.py                # Cross-call same-day memory
 │   ├── greetings.py                    # Greeting templates + rotation
-│   ├── interest_discovery.py           # Interest extraction from conversations
-│   ├── seniors.py                      # Senior profile CRUD
+│   ├── interest_discovery.py           # Interest extraction, category mapping, editable details
+│   ├── seniors.py                      # Senior profile CRUD + encrypted PHI fields
 │   ├── caregivers.py                   # Caregiver-senior relationships
 │   └── news.py                         # OpenAI cached news + Tavily/OpenAI web_search
 ├── api/

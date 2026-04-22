@@ -98,10 +98,11 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 │   │              Post-Call Processing (services/post_call.py)             │   │
 │   │              1. Complete conversation record (DB)                     │   │
 │   │              2. Call analysis — Gemini Flash (summary, concerns)     │   │
-│   │              3. Memory extraction — OpenAI (facts, preferences)      │   │
-│   │              4. Daily context — cross-call same-day memory            │   │
-│   │              5. Reminder cleanup + cache clearing                     │   │
-│   │              6. Snapshot rebuild — pre-compute context for next call  │   │
+│   │              3. Interest discovery + scores                           │   │
+│   │              4. Memory extraction — OpenAI (facts, preferences)      │   │
+│   │              5. Daily context — cross-call same-day memory            │   │
+│   │              6. Reminder cleanup + cache clearing                     │   │
+│   │              7. Snapshot rebuild — pre-compute context for next call  │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
@@ -147,6 +148,7 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 | Process | File | Model | Trigger | Output |
 |---------|------|-------|---------|--------|
 | Call Analysis | `services/call_analysis.py` | Gemini 3 Flash Preview | Call ends | Summary, concerns, engagement score, follow-ups |
+| Interest Discovery | `services/interest_discovery.py` | Rule/category mapping over analysis output | After call analysis | New interest categories, editable interest details, engagement scores |
 | Memory Extraction | `services/memory.py` | OpenAI GPT-4o-mini | Call ends | Facts, preferences, events stored with embeddings |
 
 ---
@@ -281,8 +283,8 @@ pipecat/
 │   ├── conversations.py             ← Conversation CRUD + transcripts
 │   ├── daily_context.py             ← Cross-call same-day memory
 │   ├── greetings.py                 ← Greeting templates + rotation
-│   ├── interest_discovery.py        ← Interest extraction from conversations
-│   ├── seniors.py                   ← Senior profile CRUD
+│   ├── interest_discovery.py        ← Interest extraction, category mapping, editable details
+│   ├── seniors.py                   ← Senior profile CRUD + encrypted PHI fields
 │   ├── caregivers.py                ← Caregiver relationships
 │   └── news.py                      ← Cached news + live web_search provider fallback
 ├── api/
@@ -302,7 +304,7 @@ pipecat/
 
 | Table | Purpose | Key Fields |
 |-------|---------|------------|
-| **seniors** | User profiles | name, phone, interests, familyInfo, medicalNotes, timezone, call_settings (JSONB), call_context_snapshot (JSONB), cached_news (TEXT) |
+| **seniors** | User profiles | name, phone, timezone, interests, encrypted familyInfo/additionalInfo/medicalNotes, call_settings (JSONB), call_context_snapshot (JSONB), cached_news (TEXT) |
 | **conversations** | Call records | callSid, encrypted transcript, duration, status, encrypted summary |
 | **memories** | Long-term memory | content, type, importance, embedding (1536d, HNSW index) |
 | **reminders** | Scheduled reminders | title, scheduledTime, isRecurring, type |

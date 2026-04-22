@@ -40,7 +40,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
     - Guidance Director (~400ms): Conversation guidance on 250ms silence (speculative)
     - Ephemeral context: All injections tagged `[EPHEMERAL:`, stripped each turn
     - Metrics: Logs speculative hit rate per call
-  - Post-Call: Analysis, memory extraction, daily context, snapshot rebuild (Gemini Flash)
+  - Post-Call: Analysis, interest discovery, memory extraction, daily context, snapshot rebuild (Gemini Flash)
 - **Caregiver summaries and alerts** — Post-call Gemini analysis generates privacy-respecting caregiver-facing summaries and follow-up guidance for email/in-app notifications. SMS is inactive for now.
 - **Director-First Architecture** — Eliminated ~14s of Claude tool-call latency per call:
   - `search_memories` → Director injects memories as ephemeral context (500ms gate)
@@ -65,6 +65,8 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Sentiment-Aware Greetings** - Uses last call's engagement/rapport score for greeting tone
 - **Semantic Memory** - pgvector with HNSW index + decay + deduplication + tiered retrieval
 - **Caregiver Notes** - Family can leave notes that are prefetched at call start and injected into Donna's context
+- **Senior Profile Context** - Calls include local time, language, birthday/age, rich interest details, caregiver additional context, and topics to avoid from the senior profile
+- **Interest Discovery** - Post-call analysis maps newly discovered topics to predefined mobile interest categories and writes editable `familyInfo.interestDetails`
 - **Per-Senior Call Settings** - Configurable time limits, greeting style, memory decay via `call_settings` JSONB
 - **Scheduled Reminder Calls** - Polling scheduler with prefetch + delivery tracking
 - **Call Context Snapshot** - Pre-computed JSONB snapshot (analysis, summaries, turns, daily context) rebuilt after each call, eliminates 6 DB queries at call time
@@ -213,13 +215,13 @@ pipecat/
 │   ├── director_llm.py              ← Split Director LLM: Query Director + Guidance Director (580 LOC)
 │   ├── call_analysis.py             ← Post-call analysis + call quality scoring (246 LOC)
 │   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (392 LOC)
-│   ├── interest_discovery.py        ← Interest extraction from conversations (183 LOC)
+│   ├── interest_discovery.py        ← Interest extraction, category mapping, editable details
 │   ├── call_snapshot.py             ← Pre-computed call context snapshot for seniors (53 LOC)
 │   ├── context_cache.py             ← Pre-cache at 5 AM local + news persistence (304 LOC)
 │   ├── conversations.py             ← Conversation CRUD (250 LOC)
 │   ├── daily_context.py             ← Cross-call same-day memory (161 LOC)
 │   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation (326 LOC)
-│   ├── seniors.py                   ← Senior profile + per-senior call_settings (131 LOC)
+│   ├── seniors.py                   ← Senior profile CRUD + encrypted PHI fields + per-senior call_settings
 │   ├── caregivers.py                ← Caregiver relationships + notes delivery (101 LOC)
 │   ├── news.py                      ← Tavily web search (raw results) + OpenAI fallback + circuit breaker (213 LOC)
 │   ├── data_retention.py            ← HIPAA data retention: batched purge of 7 tables, 24h loop

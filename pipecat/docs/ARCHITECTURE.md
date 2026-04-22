@@ -135,6 +135,22 @@ The pipeline processors don't call each other directly. They communicate through
 
 ---
 
+## Senior Context Assembly
+
+Flow nodes build senior-specific prompt context from decrypted profile fields before the main flow starts:
+
+- Current local date/time from the senior timezone
+- Name, location, and English/Spanish call-language instruction
+- Age and birthday awareness from `familyInfo.dateOfBirth`
+- Interest IDs plus caregiver/AI detail text from `familyInfo.interestDetails`
+- Additional family context from `additional_info`
+- Topics to avoid from `familyInfo.topicsToAvoid`, with fallback to `preferred_call_times.topicsToAvoid` for onboarding-created rows
+- Health notes, memory context, prior-call follow-ups, recent turns, and same-day context
+
+Each section is also recorded in the context trace for observability. Application logs still use masked identifiers and must not print raw profile context.
+
+---
+
 ## Runtime Audio Profile
 
 Runtime source of truth is `bot.py:get_audio_profile()` plus the active serializer. Telnyx's default wire format is `16kHz` L16, and active Telnyx calls request TTS at that native phone rate for stable packet cadence. Non-phone/browser paths can still keep TTS/model audio at higher internal rates:
@@ -395,7 +411,7 @@ When the telephony client disconnects, `run_post_call()` in `services/post_call.
 2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), mood, caregiver takeaways, recommended caregiver action, and follow-up suggestions. The encrypted JSON still includes a legacy `caregiver_sms` key, but SMS delivery is inactive.
 2.5. **Caregiver notes + notifications** — Marks caregiver notes delivered only when assistant transcript evidence shows Donna delivered them. POSTs to Node.js API for call_completed + concern_detected alerts, raising on non-2xx responses and retrying transient failures once. Node sends email/in-app notification records; SMS is inactive.
 3. **Summary persistence** — Writes analysis summary to `conversations.summary` (enables `get_recent_summaries()` and cross-call context)
-3.5. **Interest discovery** — Extracts new interests from conversation, updates senior profile
+3.5. **Interest discovery** — Maps new topics to predefined interest categories and updates `seniors.interests` plus editable `familyInfo.interestDetails`
 3.6. **Interest scores** — Computes engagement scores per interest topic
 4. **Memory extraction** — OpenAI extracts facts/preferences/events from transcript, stores with embeddings
 5. **Daily context** — Saves topics, advice, reminders, and summary for same-day cross-call memory
@@ -452,8 +468,8 @@ pipecat/
 │   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (526 LOC)
 │   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation (352 LOC)
 │   ├── conversations.py             ← Conversation CRUD + transcript history
-│   ├── interest_discovery.py        ← Interest extraction from conversations
-│   ├── seniors.py                   ← Senior profile + per-senior call_settings (188 LOC)
+│   ├── interest_discovery.py        ← Interest extraction, category mapping, editable details
+│   ├── seniors.py                   ← Senior profile CRUD + encrypted PHI fields + per-senior call_settings
 │   ├── caregivers.py                ← Caregiver relationships + notes delivery (111 LOC)
 │   ├── scheduler.py                 ← Pipecat-side scheduler helpers + encrypted Redis context handoff; Node scheduler is active
 │   ├── call_snapshot.py             ← Pre-computed call context snapshot (71 LOC)
@@ -567,7 +583,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 
 | Table | Purpose |
 |-------|---------|
-| `seniors` | Senior profiles (name, phone, interests, timezone, call_settings JSONB, call_context_snapshot JSONB, cached_news TEXT) |
+| `seniors` | Senior profiles (name, phone, timezone, interests, encrypted family/additional context, call_settings JSONB, call_context_snapshot JSONB, cached_news TEXT) |
 | `conversations` | Call records (duration, metrics, transcript) |
 | `memories` | Semantic memories (pgvector embeddings, HNSW index, decay) |
 | `reminders` | Scheduled reminders |

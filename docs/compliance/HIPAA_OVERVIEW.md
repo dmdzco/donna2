@@ -81,7 +81,9 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | Senior name + phone number | `seniors` table | Yes (identifiers) | High |
 | Medication reminders (drug name, dosage, schedule) | `reminders` table | Yes | High |
 | Conversation transcripts mentioning health | `conversations.transcript_encrypted`, `transcript_text_encrypted`; legacy `conversations.transcript` read fallback | Yes | High |
-| Medical notes | `seniors.medical_notes` | Yes | High |
+| Medical notes | `seniors.medical_notes` / `medical_notes_encrypted` | Yes | High |
+| Family/profile context (relationship, Donna language, date of birth, interest details, topics to avoid) | `seniors.family_info_encrypted`; legacy `family_info` read fallback | Yes when tied to the senior | High |
+| Additional caregiver context | `seniors.additional_info_encrypted`; legacy `additional_info` read fallback | Yes when it references health, family, or care needs | High |
 | Memories about health conditions | `memories` table | Yes | High |
 | Call analyses mentioning health concerns | `call_analyses.concerns` | Yes | High |
 | Caregiver mood/concern notifications | `notifications.content_encrypted`, `metadata_encrypted`; legacy `notifications.content` fallback | Yes | Medium |

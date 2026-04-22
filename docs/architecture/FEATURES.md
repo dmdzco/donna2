@@ -40,6 +40,12 @@
 - Spanish calls set Deepgram STT language to `es`, inject a Spanish-only prompt instruction, and use optional Spanish ElevenLabs/Cartesia voice IDs when configured
 - Gemini post-call analysis writes caregiver-facing summaries and concern text in the configured Donna language
 
+### Senior Profile Context
+- Donna grounds every call in the senior's local timezone and profile location
+- Caregiver profile fields can add date of birth, interest-specific detail text, additional context, and topics to avoid
+- Date of birth is converted into age and birthday awareness in the prompt; upcoming birthdays are mentioned only when relevant
+- Topics to avoid are read from `familyInfo.topicsToAvoid`, with a compatibility fallback to `preferredCallTimes.topicsToAvoid` for onboarding-created rows
+
 ### 4-Phase Call State Machine (Pipecat Flows)
 - **Reminder phase** (conditional) — Delivers pending reminders before main conversation
 - **Main phase** — Free-form conversation with all tools available
@@ -96,6 +102,8 @@
 
 ### Interest Discovery
 - Automatic interest extraction from conversations
+- New interests are mapped to predefined mobile app categories where possible
+- AI-detected topic details are stored in `familyInfo.interestDetails` so caregivers can review and edit them
 - Engagement scores computed per interest topic
 - Interest-weighted news story selection
 
@@ -174,7 +182,7 @@ Runs automatically after every call disconnect:
 
 ## Admin Dashboard
 
-- Senior management (CRUD, interests, medical notes, timezone)
+- Senior management (CRUD, language, DOB, rich interests, additional context, topics to avoid, medical notes, timezone)
 - Call history with transcripts and analysis
 - Reminder management (create, edit, schedule)
 - Caregiver management
@@ -197,7 +205,7 @@ Runs automatically after every call disconnect:
 
 ### Reliability
 - Circuit breakers for all external services (Groq, Gemini, OpenAI, Tavily/news)
-- DB-backed feature flags with 5-minute in-memory cache
+- GrowthBook feature flags with safe defaults when unavailable
 - Graceful shutdown with active call tracking (7s drain on SIGTERM)
 - Enhanced /health endpoint (database + circuit breaker states)
 

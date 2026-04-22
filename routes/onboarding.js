@@ -38,6 +38,10 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
     // Get familyInfo from request body (contains interestDetails from frontend)
     const { familyInfo: clientFamilyInfo } = req.body;
 
+    const topicsToAvoidText = Array.isArray(topicsToAvoid)
+      ? topicsToAvoid.filter(Boolean).join('; ')
+      : topicsToAvoid || '';
+
     // Prepare senior data with structured info in JSON fields
     seniorCreateData = {
       name: seniorData.name,
@@ -54,6 +58,7 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
         relation,
         donnaLanguage: clientFamilyInfo?.donnaLanguage || 'en',
         interestDetails: clientFamilyInfo?.interestDetails || {},
+        topicsToAvoid: topicsToAvoidText || undefined,
       },
       // Store call schedule and topics to avoid in preferredCallTimes
       preferredCallTimes: {

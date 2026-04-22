@@ -177,6 +177,17 @@ def _build_senior_context(session_state: dict) -> str:
             family_info = _json.loads(family_info)
         except Exception:
             family_info = {}
+    if not isinstance(family_info, dict):
+        family_info = {}
+    preferred_call_times = senior.get("preferred_call_times") or senior.get("preferredCallTimes") or {}
+    if isinstance(preferred_call_times, str):
+        import json as _json
+        try:
+            preferred_call_times = _json.loads(preferred_call_times)
+        except Exception:
+            preferred_call_times = {}
+    if not isinstance(preferred_call_times, dict):
+        preferred_call_times = {}
     donna_language = family_info.get("donnaLanguage", "en")
     if donna_language == "es":
         from prompts import SPANISH_LANGUAGE_INSTRUCTION
@@ -242,7 +253,13 @@ def _build_senior_context(session_state: dict) -> str:
         )
 
     # Topics to avoid (set by caregiver)
-    topics_to_avoid = family_info.get("topicsToAvoid") or ""
+    topics_to_avoid = (
+        family_info.get("topicsToAvoid")
+        or preferred_call_times.get("topicsToAvoid")
+        or ""
+    )
+    if isinstance(topics_to_avoid, list):
+        topics_to_avoid = "; ".join(str(topic).strip() for topic in topics_to_avoid if str(topic).strip())
     if topics_to_avoid:
         avoid_text = f"Topics to AVOID (family request): {topics_to_avoid}"
         parts.append(avoid_text)

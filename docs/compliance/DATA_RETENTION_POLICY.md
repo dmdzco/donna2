@@ -65,6 +65,7 @@ This policy applies to all data stored in:
 | **Reminder deliveries** | `reminder_deliveries.user_response_encrypted`; legacy `user_response` fallback | Yes (LOW) | 90 days from delivery date | `reminder_deliveries.created_at` | Automated purge job: DELETE row |
 | **Senior profiles** | `seniors` | Yes (HIGH) | Retained while active + 1 year after last call | `seniors.is_active` + last `conversations.started_at` | Manual review + DELETE row (cascades to all related data) |
 | **Senior medical notes** | `seniors.medical_notes_encrypted`; legacy `medical_notes` fallback | Yes (CRITICAL) | Same as senior profile | Same as senior profile | Cleared when senior is purged |
+| **Senior family/additional profile context** | `seniors.family_info_encrypted`, `additional_info_encrypted`; legacy `family_info` / `additional_info` fallback | Yes (HIGH) | Same as senior profile | Same as senior profile | Cleared when senior is purged |
 | **Caregiver relationships** | `caregivers` | Low | Retained while linked + 90 days after unlinking | Manual unlinking date | Manual review + DELETE row |
 | **Caregiver notifications** | `notifications.content_encrypted`, `metadata_encrypted`; legacy content/metadata fallback | Yes (MEDIUM) | 180 days from send date | `notifications.sent_at` | Automated purge job: DELETE row |
 | **Notification preferences** | `notification_preferences` | No | Retained while caregiver exists | Cascade from caregiver deletion | CASCADE DELETE |
@@ -103,6 +104,12 @@ This policy applies to all data stored in:
 - Semantic memories are the foundation of Donna's personalization. They contain facts about a senior's life, preferences, and health that enable meaningful conversations across calls.
 - Two years balances personalization value against data minimization. Memories older than 2 years are unlikely to be relevant (interests change, health conditions evolve).
 - Memory decay (existing feature) naturally reduces the retrieval score of older memories, making them less likely to surface in conversations before the hard purge.
+
+### Senior Profile Context
+
+- Caregiver-provided profile context includes `familyInfo` values such as relationship, Donna language, date of birth, interest detail text, and topics to avoid, plus `additionalInfo`.
+- New writes use encrypted companion columns (`family_info_encrypted`, `additional_info_encrypted`) with legacy plaintext read fallback during migration.
+- Date of birth and topics to avoid should be retained only while the senior profile is active and needed for personalization/safety; they are included in senior export and deletion workflows.
 
 ### Call Analyses (1 year)
 

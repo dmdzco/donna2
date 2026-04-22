@@ -18,6 +18,7 @@
     "test:e2e:auth": "maestro test .maestro/flows/01_auth_sign_in.yaml",
     "test:e2e:auth-2fa": "maestro test .maestro/manual/auth_2fa_visible_code.yaml",
     "test:e2e:dashboard": "maestro test .maestro/flows/02_dashboard.yaml",
+    "test:e2e:instant-call": "maestro test .maestro/manual/instant_call.yaml",
     "test:e2e:schedule": "maestro test .maestro/flows/03_schedule_tab.yaml",
     "test:e2e:reminders": "maestro test .maestro/flows/04_reminders_tab.yaml",
     "test:e2e:settings": "maestro test .maestro/flows/05_settings_root.yaml",

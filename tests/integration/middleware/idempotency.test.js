@@ -7,6 +7,7 @@ const read = (...parts) => fs.readFileSync(path.join(process.cwd(), ...parts), '
 const middlewareSource = read('middleware', 'idempotency.js');
 const schemaSource = read('db', 'schema.js');
 const migrationSource = read('db', 'migrations', '002_idempotency_keys.sql');
+const migrationBackfillSource = read('db', 'migrations', '004_idempotency_keys_path_hash_backfill.sql');
 const retentionSource = read('services', 'data-retention.js');
 const mobileApiSource = read('apps', 'mobile', 'src', 'lib', 'api.ts');
 
@@ -51,6 +52,16 @@ describe('idempotency replay cache', () => {
     expect(middlewareSource).toContain("existing.state === 'completed'");
     expect(middlewareSource).toContain("res.setHeader('Idempotency-Status', 'replayed')");
     expect(middlewareSource).toContain('clearRecord(key, getRequestId(req))');
+  });
+
+  it('fails open when legacy idempotency storage is missing path_hash', () => {
+    expect(middlewareSource).toContain("error?.code === '42703'");
+    expect(middlewareSource).toContain('Idempotency storage unavailable; continuing without replay protection');
+    expect(middlewareSource).toContain('/does not exist|relation|column/i');
+    expect(migrationBackfillSource).toContain('ADD COLUMN IF NOT EXISTS path_hash varchar(64)');
+    expect(migrationBackfillSource).toContain('DELETE FROM idempotency_keys');
+    expect(migrationBackfillSource).toContain('ALTER COLUMN path_hash SET NOT NULL');
+    expect(migrationBackfillSource).toContain('DROP COLUMN IF EXISTS path');
   });
 
   it('cleans up expired replay entries through data retention', () => {

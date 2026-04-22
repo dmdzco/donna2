@@ -576,10 +576,12 @@ async def _store_prospect_metadata(
     except Exception as exc:
         logger.error("[{cid}] Error in Telnyx prospect lookup/create: {err}", cid=call_control_id, err=str(exc))
 
+    conversation_id = None
     try:
         from services.conversations import create
 
-        await create(None, call_control_id, prospect_id=prospect_id)
+        conv = await create(None, call_control_id, prospect_id=prospect_id)
+        conversation_id = str(conv["id"]) if conv else None
     except Exception as exc:
         logger.error("[{cid}] Error creating Telnyx onboarding conversation: {err}", cid=call_control_id, err=str(exc))
 
@@ -588,7 +590,7 @@ async def _store_prospect_metadata(
         "prospect": prospect,
         "prospect_id": prospect_id,
         "memory_context": memory_context,
-        "conversation_id": None,
+        "conversation_id": conversation_id,
         "is_outbound": False,
         "call_type": "onboarding",
         "target_phone": target_phone,
@@ -599,6 +601,8 @@ async def _store_prospect_metadata(
         "telnyx_start_stream_after_answer": start_stream_after_answer,
         "telnyx_stream_codec": profile.codec,
         "telnyx_stream_sample_rate": profile.sample_rate,
+        "telnyx_context_ready": True,
+        "telnyx_context_ready_at": time.time(),
     }
     await _upsert_call_metadata(call_control_id, metadata)
 

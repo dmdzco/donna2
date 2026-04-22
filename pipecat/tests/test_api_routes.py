@@ -255,6 +255,78 @@ class TestTelnyxAndCallContext:
         assert metadata == {}
 
     @pytest.mark.asyncio
+    async def test_inbound_unknown_telnyx_caller_uses_onboarding_and_starts_stream(self):
+        """Unknown inbound callers should answer as onboarding prospects and start media."""
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        prospect = {"id": "prospect-1", "phone": "4078856316", "call_count": 0}
+        call_metadata.clear()
+
+        try:
+            with patch("services.seniors.find_by_phone", new=AsyncMock(return_value=None)), \
+                 patch("services.seniors.find_any_by_phone", new=AsyncMock(return_value=None)), \
+                 patch("services.prospects.find_by_phone", new=AsyncMock(return_value=None)), \
+                 patch("services.prospects.create", new=AsyncMock(return_value=prospect)) as mock_create_prospect, \
+                 patch("services.conversations.create", new=AsyncMock(return_value={"id": "conv-1"})) as mock_create_conversation, \
+                 patch.object(telnyx, "_persist_metadata", new=AsyncMock()), \
+                 patch.object(telnyx, "_telnyx_post", new=AsyncMock(return_value={})) as mock_post, \
+                 patch.object(telnyx, "_start_telnyx_stream", new=AsyncMock()) as mock_start_stream:
+                await telnyx._handle_call_initiated(
+                    {
+                        "call_control_id": "v3:unknown-caller",
+                        "from": "+14078856316",
+                        "to": "+15551234567",
+                    }
+                )
+
+                metadata = call_metadata["v3:unknown-caller"]
+                assert metadata["senior"] is None
+                assert metadata["call_type"] == "onboarding"
+                assert metadata["prospect_id"] == "prospect-1"
+                assert metadata["conversation_id"] == "conv-1"
+                assert metadata["telnyx_context_ready"] is True
+                assert mock_post.await_args.args[0].endswith("/actions/answer")
+
+                await telnyx._handle_call_answered("v3:unknown-caller")
+
+            mock_create_prospect.assert_awaited_once_with("+14078856316")
+            mock_create_conversation.assert_awaited_once_with(None, "v3:unknown-caller", prospect_id="prospect-1")
+            mock_start_stream.assert_awaited_once_with("v3:unknown-caller", metadata["ws_token"])
+            assert call_metadata["v3:unknown-caller"]["telnyx_stream_started"] is True
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
+    async def test_inbound_inactive_telnyx_senior_hangs_up_without_onboarding(self):
+        """Inactive known seniors should not be treated as new prospects."""
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        inactive_senior = {"id": "senior-inactive", "phone": "4078856316", "is_active": False}
+        call_metadata.clear()
+
+        try:
+            with patch("services.seniors.find_by_phone", new=AsyncMock(return_value=None)), \
+                 patch("services.seniors.find_any_by_phone", new=AsyncMock(return_value=inactive_senior)), \
+                 patch("services.prospects.create", new=AsyncMock()) as mock_create_prospect, \
+                 patch.object(telnyx, "_persist_metadata", new=AsyncMock()), \
+                 patch.object(telnyx, "_telnyx_post", new=AsyncMock(return_value={})) as mock_post:
+                await telnyx._handle_call_initiated(
+                    {
+                        "call_control_id": "v3:inactive-caller",
+                        "from": "+14078856316",
+                        "to": "+15551234567",
+                    }
+                )
+
+            assert "v3:inactive-caller" not in call_metadata
+            assert mock_post.await_args.args[0].endswith("/actions/hangup")
+            mock_create_prospect.assert_not_awaited()
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
     async def test_outbound_call_seeds_metadata_before_context_hydration(self):
         from api.routes import telnyx
         from api.routes.call_context import call_metadata

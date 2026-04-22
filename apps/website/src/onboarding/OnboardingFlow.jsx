@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@clerk/clerk-react';
 import { OnboardingProvider, useOnboarding } from './store.jsx';
@@ -81,10 +81,19 @@ function OnboardingInner() {
 
   // Try to get Clerk auth (may not be available in dev mode / SSR)
   let getToken = null;
+  let isSignedIn = false;
   try {
     const auth = useAuth();
     getToken = auth.getToken;
+    isSignedIn = !!auth.isSignedIn;
   } catch {}
+
+  // If already signed in and still on create account step, skip ahead
+  useEffect(() => {
+    if (isSignedIn && data.step === 0 && !devMode) {
+      setStep(1);
+    }
+  }, [isSignedIn, data.step, devMode, setStep]);
 
   const step = data.step;
 
@@ -131,7 +140,7 @@ function OnboardingInner() {
     switch (step) {
       case 1: return data.firstName && data.lastName;
       case 2: return data.lovedOneName && data.lovedOnePhone && data.relationship;
-      case 3: return data.city;
+      case 3: return data.usBased ? (data.city && data.state) : (data.city && data.country);
       case 4: return data.language;
       case 5: return true; // optional
       case 6: return true; // optional

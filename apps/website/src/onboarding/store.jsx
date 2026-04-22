@@ -18,9 +18,11 @@ const initialState = {
   lovedOneCountryCode: '+1',
   relationship: '',
   // Step 3: Location
+  usBased: true,
   city: '',
   state: '',
   zipcode: '',
+  country: '',
   // Step 4: Language
   language: 'english',
   // Step 5: Reminders

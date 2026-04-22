@@ -979,6 +979,58 @@
   background: var(--color-sage-dark);
 }
 
+/* ===== Toggle ===== */
+.ob-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 12px 0;
+}
+
+.ob-toggle-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--color-charcoal);
+}
+
+.ob-toggle-value {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.ob-toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  border: none;
+  background: #ccc;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s ease;
+}
+
+.ob-toggle--on {
+  background: var(--color-sage);
+}
+
+.ob-toggle__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.ob-toggle--on .ob-toggle__thumb {
+  transform: translateX(20px);
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 480px) {
   .ob-interest-grid {

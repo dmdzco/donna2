@@ -78,6 +78,6 @@
   "private": true,
   "overrides": {
     "@clerk/shared": "3.47.5",
-    "@xmldom/xmldom": "0.9.10"
+    "@xmldom/xmldom": "0.8.13"
   }
 }

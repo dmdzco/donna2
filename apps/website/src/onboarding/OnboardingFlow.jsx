@@ -86,7 +86,9 @@ function OnboardingInner() {
     const auth = useAuth();
     getToken = auth.getToken;
     isSignedIn = !!auth.isSignedIn;
-  } catch {}
+  } catch {
+    // Clerk hooks are unavailable during static rendering and local dev fallbacks.
+  }
 
   // If already signed in and still on create account step, skip ahead
   useEffect(() => {
@@ -119,7 +121,11 @@ function OnboardingInner() {
       setStep(8);
       window.scrollTo(0, 0);
       // Clear localStorage on success
-      try { localStorage.removeItem('donna_onboarding'); } catch {}
+      try {
+        localStorage.removeItem('donna_onboarding');
+      } catch {
+        // Local storage can be unavailable in private browsing or SSR-like contexts.
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -184,7 +190,7 @@ function OnboardingInner() {
       case 7:
         return <Step7_Schedule data={data} update={update} />;
       case 8:
-        return <Success data={data} onReset={reset} />;
+        return <Success data={data} />;
       default:
         return null;
     }

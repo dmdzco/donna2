@@ -97,7 +97,7 @@ export default function TermsOfService() {
           <ul>
             <li>The call is with an AI system, not a human</li>
             <li>The experience is a limited preview and does not reflect the full personalized service available to Subscribers</li>
-            <li>The call may be recorded or analyzed for quality improvement purposes</li>
+            <li>The call may be transcribed or analyzed to operate and improve Donna; recordings are not used by default unless separately enabled or disclosed</li>
             <li>No personal information will be stored beyond the duration needed for call processing unless you subsequently create an account</li>
           </ul>
 

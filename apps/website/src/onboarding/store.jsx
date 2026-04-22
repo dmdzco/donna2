@@ -61,7 +61,9 @@ export function OnboardingProvider({ children }) {
         const parsed = JSON.parse(saved);
         return { ...initialState, ...parsed };
       }
-    } catch {}
+    } catch {
+      // Ignore invalid or unavailable local storage and start fresh.
+    }
     return initialState;
   });
 
@@ -69,7 +71,9 @@ export function OnboardingProvider({ children }) {
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {}
+    } catch {
+      // Ignore persistence failures; onboarding state still works in memory.
+    }
   }, [state]);
 
   const update = useCallback((payload) => {
@@ -82,7 +86,11 @@ export function OnboardingProvider({ children }) {
 
   const reset = useCallback(() => {
     dispatch({ type: 'RESET' });
-    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Ignore unavailable local storage during reset.
+    }
   }, []);
 
   return (

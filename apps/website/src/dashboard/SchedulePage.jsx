@@ -8,7 +8,6 @@ import ScheduleCallModal from './components/ScheduleCallModal';
 export default function SchedulePage() {
   const { senior, loading: ctxLoading, api } = useDashboard();
   const [schedule, setSchedule] = useState(null);
-  const [reminders, setReminders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [modalOpen, setModalOpen] = useState(false);
@@ -21,12 +20,8 @@ export default function SchedulePage() {
 
   async function loadData() {
     try {
-      const [sched, rems] = await Promise.all([
-        api.getSchedule(senior.id),
-        api.getReminders(),
-      ]);
+      const sched = await api.getSchedule(senior.id);
       setSchedule(sched);
-      setReminders(Array.isArray(rems) ? rems : []);
     } catch (err) {
       console.error('Failed to load schedule:', err);
     } finally {
@@ -146,7 +141,6 @@ export default function SchedulePage() {
       {modalOpen && (
         <ScheduleCallModal
           call={editingCall}
-          reminders={reminders}
           onSave={handleSave}
           onClose={() => { setModalOpen(false); setEditingCall(null); }}
         />

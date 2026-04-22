@@ -19,21 +19,21 @@ test.describe('Consumer Onboarding (Authenticated)', () => {
   });
 
   test('onboarding page loads for authenticated user', async ({ page }) => {
-    await page.goto('/onboarding', { waitUntil: 'networkidle' });
+    await page.goto('/signup', { waitUntil: 'networkidle' });
     await page.waitForTimeout(2000);
 
     const url = page.url();
     // Should stay on onboarding or redirect to dashboard (if already onboarded)
-    const isAuthed = url.includes('/onboarding') || url.includes('/dashboard');
+    const isAuthed = url.includes('/signup') || url.includes('/dashboard');
     expect(isAuthed).toBe(true);
   });
 
   test('onboarding shows form fields when available', async ({ page }) => {
-    await page.goto('/onboarding', { waitUntil: 'networkidle' });
+    await page.goto('/signup', { waitUntil: 'networkidle' });
     await page.waitForTimeout(2000);
 
     // Skip if redirected to dashboard (already onboarded)
-    if (!page.url().includes('/onboarding')) {
+    if (!page.url().includes('/signup')) {
       test.skip();
       return;
     }

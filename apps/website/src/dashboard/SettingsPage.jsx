@@ -21,7 +21,6 @@ export default function SettingsPage() {
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
   const [zipcode, setZipcode] = useState('');
-  const [interests, setInterests] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -36,7 +35,6 @@ export default function SettingsPage() {
     setCity(senior.city || '');
     setState(senior.state || '');
     setZipcode(senior.zipcode || '');
-    setInterests(senior.interests ? (typeof senior.interests === 'string' ? senior.interests : JSON.stringify(senior.interests)) : '');
   }, [senior]);
 
   useEffect(() => {
@@ -96,9 +94,9 @@ export default function SettingsPage() {
         <h1 className="db-page__title">Settings</h1>
       </motion.div>
 
-      {/* Loved One's Profile */}
+      {/* Loved One Profile */}
       <motion.div className="db-card db-section" {...fadeUp} transition={{ delay: 0.1 }}>
-        <h3 className="db-card__title">Loved One's Profile</h3>
+        <h3 className="db-card__title">Loved One&apos;s Profile</h3>
         <div className="db-field">
           <label className="db-label">Name</label>
           <input className="db-input" value={name} onChange={(e) => setName(e.target.value)} />

@@ -56,7 +56,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ### Frontend Apps
 - **Admin Dashboard v2** — React + Vite + Tailwind ([admin-v2-liart.vercel.app](https://admin-v2-liart.vercel.app))
-- **Consumer App** — Caregiver onboarding + dashboard ([consumer-ruddy.vercel.app](https://consumer-ruddy.vercel.app))
+- **Public Website** — Marketing, signup, legal pages, and caregiver dashboard ([calldonna.co](https://www.calldonna.co))
 - **Observability Dashboard** — Live call monitoring ([observability-five.vercel.app](https://observability-five.vercel.app))
 
 ### Security
@@ -112,7 +112,7 @@ make test-regression         # Scenario-based regression tests
 npx playwright install chromium  # First time only
 npm run test:e2e                 # Run all (~15s)
 npm run test:e2e:admin           # Admin dashboard only
-npm run test:e2e:consumer        # Consumer app only
+npm run test:e2e:website         # Public website only
 npx playwright test --ui         # Interactive debug mode
 ```
 
@@ -120,7 +120,7 @@ See [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) for ful
 
 **Frontend apps** (run locally against the Railway API):
 - Admin dashboard: `cd apps/admin-v2 && npm run dev` → http://localhost:5175
-- Consumer app: `cd apps/consumer && npm run dev` → http://localhost:5174
+- Public website and caregiver web app: `cd apps/website && npm run dev` → http://localhost:5174
 - Observability: `cd apps/observability && npm run dev` → http://localhost:3002
 - Mobile app: `cd apps/mobile && npm run ios` after setting `EXPO_PUBLIC_API_URL` in `apps/mobile/.env`
 
@@ -258,13 +258,14 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 /                                       # Node.js admin API (Express, Railway port 3001)
 ├── index.js                            # Express server entry
 ├── routes/                             # 17 route modules (frontend APIs, health, waitlist)
-├── services/                           # DB access and scheduler services for admin/consumer APIs
+├── services/                           # DB access and scheduler services for admin/website APIs
 ├── middleware/                          # auth, api-auth, rate-limit, security, validation
 └── db/                                 # Drizzle ORM schema + client
 
 apps/                                   # Frontend apps (Vercel)
 ├── admin-v2/                           # Admin dashboard (React + Vite + Tailwind)
-├── consumer/                           # Caregiver onboarding + dashboard (React + Clerk)
+├── website/                            # Public site + caregiver onboarding/dashboard (React + Clerk)
+├── _old-consumer-do-not-use/           # Archived previous caregiver web app
 └── observability/                      # Live call monitoring dashboard
 ```
 
@@ -388,7 +389,7 @@ Security follow-up: the staged PHI encryption/export migration remains a separat
 **Frontend apps (Vercel):**
 ```bash
 cd apps/admin-v2 && npx vercel --prod --yes     # Admin dashboard
-cd apps/consumer && npx vercel --prod --yes      # Consumer app
+cd apps/website && npx vercel --prod --yes       # Public website and caregiver web app
 ```
 
 | Service | Platform | URL |
@@ -396,7 +397,7 @@ cd apps/consumer && npx vercel --prod --yes      # Consumer app
 | Pipecat API | Railway | https://donna-pipecat-production.up.railway.app |
 | Node.js API | Railway | https://donna-api-production-2450.up.railway.app |
 | Admin Dashboard | Vercel | https://admin-v2-liart.vercel.app |
-| Consumer App | Vercel | https://consumer-ruddy.vercel.app |
+| Public Website | Vercel | https://www.calldonna.co |
 | Observability | Vercel | https://observability-five.vercel.app |
 
 ## Documentation

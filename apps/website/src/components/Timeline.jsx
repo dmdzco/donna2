@@ -5,7 +5,7 @@ const setupSteps = [
   {
     number: '1',
     title: 'Download the app',
-    description: 'Available on iOS and Android. Free to download.',
+    description: 'Available on iOS. Free to download.',
   },
   {
     number: '2',

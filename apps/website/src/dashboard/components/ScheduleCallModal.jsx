@@ -10,7 +10,7 @@ for (let h = 7; h <= 21; h++) {
   }
 }
 
-export default function ScheduleCallModal({ call, reminders, onSave, onClose }) {
+export default function ScheduleCallModal({ call, onSave, onClose }) {
   const [title, setTitle] = useState(call?.title || 'Daily Check-in');
   const [frequency, setFrequency] = useState(
     call?.frequency || (call?.days?.length === 7 ? 'daily' : call?.days?.length ? 'specific' : 'daily')

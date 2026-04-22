@@ -58,12 +58,6 @@ export default function Pricing({ onOpenWaitlist }) {
               </svg>
               Download on iOS
             </button>
-            <button onClick={onOpenWaitlist} className="btn btn-secondary pricing__cta pricing__cta--android">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M3.18 23.76c.34.19.74.2 1.1.02L16.6 12 12 7.4 3.18 23.76zm17.14-11.3L17.7 11l-3.44 3.44 3.44 3.44 2.64-1.49c.75-.43.75-1.46-.02-1.93zM2.02 1.07C1.69 1.4 1.5 1.89 1.5 2.53v18.94c0 .64.19 1.13.52 1.46L12 12 2.02 1.07zm9.56 9.56l-8.8-9.8C3.13.65 3.53.6 3.93.8L16.42 7.6l-4.84 3.03z"/>
-              </svg>
-              Download on Android
-            </button>
           </div>
         </motion.div>
       </div>

@@ -25,10 +25,12 @@ export default function Footer() {
             <div className="footer__col">
               <h4 className="footer__col-title">Legal</h4>
               <a href="/privacypolicy">Privacy Policy</a>
+              <a href="/third-party">Third-Party Services</a>
               <a href="/termsofservice">Terms of Service</a>
             </div>
             <div className="footer__col">
               <h4 className="footer__col-title">Contact</h4>
+              <a href="/support">Support</a>
               <a href="mailto:nick@calldonna.co">nick@calldonna.co</a>
               <a
                 href="http://www.linkedin.com/in/nicholas-mehdi"

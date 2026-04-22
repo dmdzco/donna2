@@ -35,11 +35,6 @@ export function useApi() {
     return fetchWithAuth(path, { method: 'POST', body: JSON.stringify(body) }, token);
   }
 
-  async function put(path, body) {
-    const token = await getToken();
-    return fetchWithAuth(path, { method: 'PUT', body: JSON.stringify(body) }, token);
-  }
-
   async function patch(path, body) {
     const token = await getToken();
     return fetchWithAuth(path, { method: 'PATCH', body: JSON.stringify(body) }, token);

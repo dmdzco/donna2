@@ -40,6 +40,20 @@ const routes = [
     canonical: 'https://calldonna.co/privacypolicy',
   },
   {
+    route: '/support',
+    file: 'support.html',
+    title: 'Support — Donna',
+    description: 'Contact Donna support for account help, privacy requests, cancellation requests, and app support.',
+    canonical: 'https://calldonna.co/support',
+  },
+  {
+    route: '/third-party',
+    file: 'third-party.html',
+    title: 'Third-Party Services — Donna',
+    description: 'Third-party services Donna uses to operate calling, AI, app, account, hosting, and support infrastructure.',
+    canonical: 'https://calldonna.co/third-party',
+  },
+  {
     route: '/termsofservice',
     file: 'termsofservice.html',
     title: 'Terms of Service — Donna',

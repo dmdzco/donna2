@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { PlusIcon, TrashIcon } from './icons';
 
 const CALL_TITLES = ['Daily Check-in', 'Morning Call', 'Evening Chat', 'Medication Reminder'];

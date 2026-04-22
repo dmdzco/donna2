@@ -2,17 +2,6 @@ import { ChevronLeftIcon } from './icons';
 
 const TOTAL_STEPS = 7;
 
-const STEP_LABELS = [
-  'Create Account',
-  'About You',
-  'Loved One',
-  'Location',
-  'Language',
-  'Reminders',
-  'Interests',
-  'Schedule',
-];
-
 export default function OnboardingShell({
   step,
   onBack,

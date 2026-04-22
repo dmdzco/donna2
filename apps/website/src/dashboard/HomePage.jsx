@@ -56,7 +56,7 @@ export default function HomePage() {
     <div>
       <motion.div className="db-page__header" {...fadeUp}>
         <h1 className="db-page__title">Hello, {firstName}</h1>
-        <p className="db-page__subtitle">Here's how {seniorName} is doing</p>
+        <p className="db-page__subtitle">Here&apos;s how {seniorName} is doing</p>
       </motion.div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>

@@ -4,6 +4,8 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import './index.css';
 import MarketingLayout from './App.jsx';
 import PrivacyPolicy from './pages/PrivacyPolicy';
+import Support from './pages/Support';
+import ThirdPartyServices from './pages/ThirdPartyServices';
 import TermsOfService from './pages/TermsOfService';
 import LandingPage from './LandingPage.jsx';
 
@@ -26,6 +28,9 @@ const router = createBrowserRouter([
       { index: true, element: <LandingPage /> },
       { path: 'privacypolicy', element: <main><PrivacyPolicy /></main> },
       { path: 'privacy', element: <main><PrivacyPolicy /></main> },
+      { path: 'support', element: <main><Support /></main> },
+      { path: 'third-party', element: <main><ThirdPartyServices /></main> },
+      { path: 'thirdparty', element: <main><ThirdPartyServices /></main> },
       { path: 'termsofservice', element: <main><TermsOfService /></main> },
       { path: 'terms', element: <main><TermsOfService /></main> },
     ],

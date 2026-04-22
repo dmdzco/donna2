@@ -112,12 +112,6 @@
   border: none;
 }
 
-.pricing__cta--android {
-  background: #fff;
-  color: #1a1a1a;
-  border: 1.5px solid #ddd;
-}
-
 .pricing__launch-note {
   margin-top: 16px;
   font-size: 0.82rem;

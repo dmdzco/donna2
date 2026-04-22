@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { CheckIcon } from './icons';
 
-export default function Success({ data, onReset }) {
+export default function Success({ data }) {
   const selectedInterests = Object.entries(data.interests || {})
     .filter(([, v]) => v.selected)
     .map(([k]) => k)

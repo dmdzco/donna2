@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import './IntakeModal.css';
 
 const API_URL = 'https://donna-api-production-2450.up.railway.app';
-const GOOGLE_SHEET_URL = 'https://script.google.com/macros/s/AKfycbw-q62iV6FO80cQhNdo-Ll1eXpZ0cY6PH4x0EXUG4HWf6aOFn0Mub9dmEhLTo5Amlw2/exec';
 
 const WHO_FOR_OPTIONS = [
   'Mother',
@@ -48,27 +47,17 @@ export default function WaitlistModal({ isOpen, onClose }) {
     const payload = JSON.stringify({ name, email, phone, whoFor, thoughts });
 
     try {
-      // Fire both requests in parallel — success if either one works
-      const results = await Promise.allSettled([
-        fetch(`${API_URL}/waitlist`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: payload,
-        }).then((res) => { if (!res.ok) throw new Error('API failed'); }),
-        fetch(GOOGLE_SHEET_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          headers: { 'Content-Type': 'application/json' },
-          body: payload,
-        }),
-      ]);
+      const response = await fetch(`${API_URL}/waitlist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+      });
 
-      const anySucceeded = results.some((r) => r.status === 'fulfilled');
-      if (anySucceeded) {
-        setSubmitted(true);
-      } else {
-        setError('Something went wrong. Please try again.');
+      if (!response.ok) {
+        throw new Error('API failed');
       }
+
+      setSubmitted(true);
     } catch {
       setError('Something went wrong. Please try again.');
     } finally {

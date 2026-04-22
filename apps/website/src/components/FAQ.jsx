@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import './FAQ.css';
 
 const faqs = [
@@ -29,7 +28,7 @@ const faqs = [
   },
   {
     q: "Is my loved one's information kept private?",
-    a: 'Absolutely. All personal information is encrypted and never shared with third parties. You can review our full privacy policy at the bottom of this page.',
+    a: 'We encrypt sensitive information and do not sell personal data. We use service providers only as needed to operate Donna. You can review the privacy policy and third-party services pages at the bottom of this page.',
   },
   {
     q: 'Should I let my parent know I\'m getting Donna for them?',

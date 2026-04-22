@@ -318,55 +318,164 @@
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
-  margin-bottom: 24px;
+  margin-bottom: 0;
+}
+
+.ob-interest-grid--gap {
+  margin-top: 12px;
 }
 
 .ob-interest-tile {
-  padding: 14px 10px;
-  border: 1.5px solid var(--ob-input-border);
-  border-radius: var(--ob-radius-md);
+  position: relative;
+  padding: 20px 10px 14px;
+  border: none;
+  border-radius: 16px;
   text-align: center;
   cursor: pointer;
-  background: white;
+  background: #edebe6;
   transition: all var(--ob-transition);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body);
 }
 
 .ob-interest-tile:hover {
-  border-color: var(--color-sage-light);
+  background: #e2dfda;
 }
 
 .ob-interest-tile--selected {
-  border-color: var(--color-sage);
-  background: rgba(95, 116, 100, 0.06);
+  background: var(--color-sage-dark);
+  cursor: default;
 }
 
-.ob-interest-tile__emoji {
-  font-size: 1.5rem;
-  margin-bottom: 4px;
+.ob-interest-tile--selected:hover {
+  background: var(--color-sage-dark);
+}
+
+.ob-interest-tile__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
 }
 
 .ob-interest-tile__name {
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   font-weight: 500;
   color: var(--color-charcoal);
 }
 
-.ob-interest-detail {
-  margin-top: 8px;
+.ob-interest-tile--selected .ob-interest-tile__name {
+  color: white;
 }
 
-.ob-interest-detail input {
+.ob-interest-tile__remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background var(--ob-transition);
+}
+
+.ob-interest-tile__remove:hover {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+/* ===== Interest Expanded Card ===== */
+.ob-interest-expanded {
+  background: var(--color-sage-dark);
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.ob-interest-expanded__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.ob-interest-expanded__title {
+  font-family: var(--font-heading);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: white;
+  flex: 1;
+}
+
+.ob-interest-expanded__close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  opacity: 0.7;
+  transition: opacity var(--ob-transition);
+}
+
+.ob-interest-expanded__close:hover {
+  opacity: 1;
+}
+
+.ob-interest-expanded__question {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.ob-interest-expanded__input {
   width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--ob-input-border);
-  border-radius: var(--ob-radius-sm);
-  font-size: 0.82rem;
+  padding: 12px 14px;
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  font-size: 0.9rem;
   font-family: var(--font-body);
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
   outline: none;
+  margin-bottom: 12px;
+  transition: border-color var(--ob-transition);
 }
 
-.ob-interest-detail input:focus {
-  border-color: var(--color-sage);
+.ob-interest-expanded__input:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.ob-interest-expanded__input::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.ob-interest-expanded__done {
+  width: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+  background: white;
+  color: var(--color-charcoal);
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: background var(--ob-transition), transform var(--ob-transition);
+}
+
+.ob-interest-expanded__done:hover {
+  background: #f5f5f5;
+  transform: translateY(-1px);
 }
 
 /* ===== Reminder Cards ===== */

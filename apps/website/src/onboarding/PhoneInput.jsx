@@ -19,14 +19,12 @@ const COUNTRY_CODES = [
 ];
 
 function FlagImg({ iso, size = 24, circle = false }) {
-  const px = size * 2; // 2x for retina
   const style = circle
     ? { width: size, height: size, borderRadius: '50%', objectFit: 'cover', display: 'block' }
     : { width: size, height: Math.round(size * 0.75), objectFit: 'cover', display: 'block', borderRadius: 2 };
   return (
     <img
-      src={`https://flagcdn.com/w${px}/${iso}.png`}
-      srcSet={`https://flagcdn.com/w${px * 2}/${iso}.png 2x`}
+      src={`https://flagcdn.com/${iso}.svg`}
       alt={iso.toUpperCase()}
       style={style}
     />
@@ -106,7 +104,8 @@ export default function PhoneInput({ value, onChange, placeholder = '(555) 123-4
               onClick={() => handleSelect(c)}
             >
               <FlagImg iso={c.iso} size={22} />
-              <span style={{ color: '#888', marginLeft: 'auto' }}>{c.code}</span>
+              <span className="ob-phone-input__country-name">{c.name}</span>
+              <span style={{ color: '#888', marginLeft: 'auto', flexShrink: 0 }}>{c.code}</span>
             </button>
           ))}
           <div className="ob-phone-input__divider" />

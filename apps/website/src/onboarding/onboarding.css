@@ -902,6 +902,13 @@
   background: rgba(95, 116, 100, 0.06);
 }
 
+.ob-phone-input__country-name {
+  font-size: 0.85rem;
+  color: var(--color-charcoal);
+  flex: 1;
+  text-align: left;
+}
+
 .ob-phone-input__option--custom {
   color: var(--color-sage);
   font-weight: 500;

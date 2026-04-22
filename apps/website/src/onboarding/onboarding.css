@@ -805,6 +805,18 @@
   border-bottom: none;
 }
 
+.ob-city-result__zip {
+  font-size: 0.8rem;
+  color: #aaa;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.ob-city-result {
+  display: flex;
+  align-items: center;
+}
+
 .ob-city-chips {
   display: flex;
   flex-wrap: wrap;

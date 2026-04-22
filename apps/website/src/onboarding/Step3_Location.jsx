@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 
 const POPULAR_CITIES = [
   { city: 'New York', state: 'NY' },
@@ -9,72 +9,56 @@ const POPULAR_CITIES = [
   { city: 'Miami', state: 'FL' },
 ];
 
-// A selection of US cities for autocomplete
-const US_CITIES = [
-  { city: 'New York', state: 'NY' },
-  { city: 'Los Angeles', state: 'CA' },
-  { city: 'Chicago', state: 'IL' },
-  { city: 'Houston', state: 'TX' },
-  { city: 'Phoenix', state: 'AZ' },
-  { city: 'Philadelphia', state: 'PA' },
-  { city: 'San Antonio', state: 'TX' },
-  { city: 'San Diego', state: 'CA' },
-  { city: 'Dallas', state: 'TX' },
-  { city: 'San Jose', state: 'CA' },
-  { city: 'Austin', state: 'TX' },
-  { city: 'Jacksonville', state: 'FL' },
-  { city: 'Fort Worth', state: 'TX' },
-  { city: 'Columbus', state: 'OH' },
-  { city: 'Charlotte', state: 'NC' },
-  { city: 'San Francisco', state: 'CA' },
-  { city: 'Indianapolis', state: 'IN' },
-  { city: 'Seattle', state: 'WA' },
-  { city: 'Denver', state: 'CO' },
-  { city: 'Washington', state: 'DC' },
-  { city: 'Nashville', state: 'TN' },
-  { city: 'Oklahoma City', state: 'OK' },
-  { city: 'El Paso', state: 'TX' },
-  { city: 'Boston', state: 'MA' },
-  { city: 'Portland', state: 'OR' },
-  { city: 'Las Vegas', state: 'NV' },
-  { city: 'Memphis', state: 'TN' },
-  { city: 'Louisville', state: 'KY' },
-  { city: 'Baltimore', state: 'MD' },
-  { city: 'Milwaukee', state: 'WI' },
-  { city: 'Albuquerque', state: 'NM' },
-  { city: 'Tucson', state: 'AZ' },
-  { city: 'Fresno', state: 'CA' },
-  { city: 'Sacramento', state: 'CA' },
-  { city: 'Miami', state: 'FL' },
-  { city: 'Atlanta', state: 'GA' },
-  { city: 'Tampa', state: 'FL' },
-  { city: 'Orlando', state: 'FL' },
-  { city: 'St. Louis', state: 'MO' },
-  { city: 'Pittsburgh', state: 'PA' },
-  { city: 'Cincinnati', state: 'OH' },
-  { city: 'Cleveland', state: 'OH' },
-  { city: 'Minneapolis', state: 'MN' },
-  { city: 'Raleigh', state: 'NC' },
-  { city: 'Salt Lake City', state: 'UT' },
-  { city: 'Detroit', state: 'MI' },
-  { city: 'Honolulu', state: 'HI' },
-  { city: 'Boise', state: 'ID' },
-];
-
 export default function Step3_Location({ data, update }) {
   const [query, setQuery] = useState(data.city ? `${data.city}, ${data.state}` : '');
   const [showResults, setShowResults] = useState(false);
+  const [allCities, setAllCities] = useState(null);
+  const loadedRef = useRef(false);
+
+  // Lazy-load the full city dataset on mount
+  useEffect(() => {
+    if (loadedRef.current) return;
+    loadedRef.current = true;
+    import('./us-cities.js').then((mod) => {
+      setAllCities(mod.US_CITIES);
+    });
+  }, []);
 
   const results = useMemo(() => {
     if (!query || query.length < 2) return [];
-    const q = query.toLowerCase();
-    return US_CITIES.filter(
-      (c) => c.city.toLowerCase().includes(q) || c.state.toLowerCase().includes(q)
-    ).slice(0, 6);
-  }, [query]);
+    const q = query.toLowerCase().trim();
+
+    // If we have the full dataset, search it; otherwise fall back to popular cities
+    const cities = allCities || POPULAR_CITIES;
+
+    const matches = [];
+    const startsWithCity = [];
+    const startsWithState = [];
+    const containsMatch = [];
+    const zipMatch = [];
+
+    for (const c of cities) {
+      const cityLower = c.city.toLowerCase();
+      const stateLower = c.state.toLowerCase();
+
+      if (cityLower === q || `${cityLower}, ${stateLower}` === q) {
+        matches.push(c); // exact match first
+      } else if (cityLower.startsWith(q)) {
+        startsWithCity.push(c);
+      } else if (stateLower.startsWith(q) || stateLower === q) {
+        startsWithState.push(c);
+      } else if (cityLower.includes(q)) {
+        containsMatch.push(c);
+      } else if (c.zip && c.zip.startsWith(q)) {
+        zipMatch.push(c);
+      }
+    }
+
+    return [...matches, ...startsWithCity, ...zipMatch, ...containsMatch, ...startsWithState].slice(0, 8);
+  }, [query, allCities]);
 
   const selectCity = (c) => {
-    update({ city: c.city, state: c.state });
+    update({ city: c.city, state: c.state, zipcode: c.zip || data.zipcode || '' });
     setQuery(`${c.city}, ${c.state}`);
     setShowResults(false);
   };
@@ -108,24 +92,24 @@ export default function Step3_Location({ data, update }) {
           onChange={(e) => {
             setQuery(e.target.value);
             setShowResults(true);
-            // Clear selection if user edits
-            if (data.city) update({ city: '', state: '' });
+            if (data.city) update({ city: '', state: '', zipcode: '' });
           }}
           onFocus={() => setShowResults(true)}
           onBlur={() => setTimeout(() => setShowResults(false), 200)}
-          placeholder="Search for a city..."
+          placeholder="Search for a city or zip code..."
         />
         {showResults && results.length > 0 && (
           <div className="ob-city-results">
-            {results.map((c) => (
+            {results.map((c, i) => (
               <button
-                key={`${c.city}-${c.state}`}
+                key={`${c.city}-${c.state}-${i}`}
                 className="ob-city-result"
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => selectCity(c)}
               >
-                {c.city}, {c.state}
+                <span>{c.city}, {c.state}</span>
+                {c.zip && <span className="ob-city-result__zip">{c.zip}</span>}
               </button>
             ))}
           </div>

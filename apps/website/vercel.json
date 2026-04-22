@@ -5,6 +5,7 @@
     { "source": "/privacy", "destination": "/privacypolicy" },
     { "source": "/terms", "destination": "/termsofservice" },
     { "source": "/signup/sso-callback", "destination": "/signup.html" },
-    { "source": "/signup", "destination": "/signup.html" }
+    { "source": "/signup", "destination": "/signup.html" },
+    { "source": "/dashboard/:path*", "destination": "/index.html" }
   ]
 }

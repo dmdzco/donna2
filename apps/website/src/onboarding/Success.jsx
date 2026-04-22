@@ -38,7 +38,7 @@ export default function Success({ data, onReset }) {
         transition={{ delay: 0.4 }}
       >
         Donna is ready to start calling {data.lovedOneName || 'your loved one'}.
-        You can manage everything from the mobile app.
+        You can manage everything from your dashboard or the mobile app.
       </motion.p>
 
       <motion.div
@@ -82,8 +82,8 @@ export default function Success({ data, onReset }) {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.6 }}
       >
-        <a href="/" className="ob-success__btn">
-          Go to Homepage
+        <a href="/dashboard" className="ob-success__btn">
+          Go to Dashboard
         </a>
       </motion.div>
     </div>

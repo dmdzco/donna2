@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| Last Updated | April 16, 2026 |
+| Last Updated | April 22, 2026 |
 | Owner | TBD |
 | Review Cadence | Quarterly |
 | Related Docs | [BAA Tracker](BAA_TRACKER.md), [Breach Notification](BREACH_NOTIFICATION.md), [Data Retention](DATA_RETENTION_POLICY.md), [Vendor Security](VENDOR_SECURITY_EVALUATION.md) |
@@ -105,7 +105,7 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | Access controls (authorization) | Partial | Admin vs. caregiver roles exist, but no granular per-senior access control for admin users |
 | Encryption in transit | Implemented | TLS everywhere: Railway (HTTPS), Neon (SSL), Telnyx webhook/media paths, Resend email API, and all AI/vendor API calls over HTTPS/WSS where applicable |
 | Encryption at rest | Partial | Neon PostgreSQL encrypts at rest (AES-256); application-level encryption is implemented for new PHI writes across conversations, memories, analyses, senior profile PHI, reminders, daily context, notifications, waitlist/prospect context, and caregiver notes. Legacy plaintext backfill/nulling must still be run per environment. |
-| Audit logging | Minimal | Sentry captures errors with request IDs; no dedicated HIPAA audit log (who accessed what PHI, when) |
+| Audit logging | Partial | Structured `audit_logs` table plus Node/Pipecat audit services exist for PHI access paths. Coverage should still be verified before production PHI launch. |
 | PII sanitization in logs | Implemented | `sanitize.py` masks phone numbers and names in application logs |
 | Input validation | Implemented | Pydantic schemas on all Pipecat API inputs; Zod schemas on Node.js API inputs |
 | Rate limiting | Implemented | 5-tier rate limiting on all API endpoints |
@@ -121,17 +121,17 @@ PHI is any individually identifiable health information. In Donna's system, the 
 |-----------|--------|----------|--------|
 | Business Associate Agreements (BAAs) | **Not signed with any vendor** | CRITICAL | Medium (sales outreach) |
 | Complete application-level encryption of PHI | Partial | HIGH | Low/Medium (new writes are covered; run SQL migration plus encrypted backfill/nulling in every deployed database, then test exports and calls) |
-| HIPAA audit trail | Not implemented | HIGH | Medium (dedicated audit log table: who, what, when, from where) |
-| Data retention / automated purge | Not implemented | HIGH | Medium (see [Data Retention Policy](DATA_RETENTION_POLICY.md)) |
+| HIPAA audit trail coverage verification | Partial | HIGH | Low/Medium (confirm every PHI read/write path writes `audit_logs`) |
+| Data retention operational verification | Partial | HIGH | Low/Medium (Node owns daily purge; verify per environment and document run history) |
 | Formal risk assessment | Not performed | HIGH | Medium (documented risk analysis per 45 CFR 164.308(a)(1)) |
 | Workforce training | Not performed | MEDIUM | Low (document policies, train team) |
-| Breach notification procedures | Not documented | HIGH | Low (see [Breach Notification](BREACH_NOTIFICATION.md)) |
+| Breach notification tabletop/testing | Documented, not tested | HIGH | Low (see [Breach Notification](BREACH_NOTIFICATION.md)) |
 | Backup and disaster recovery plan | Partial (Neon has backups) | MEDIUM | Low (document and test) |
 | Minimum necessary standard | Not enforced | MEDIUM | Medium (limit PHI in API responses to what's needed) |
 | De-identification for analytics | Not implemented | MEDIUM | Medium (strip identifiers for aggregated metrics) |
 | Physical safeguard documentation | Not documented | LOW | Low (Railway/Neon/Vercel handle physical security) |
 | Contingency plan (emergency mode) | Not documented | MEDIUM | Low |
-| Unique user identification | Partial | LOW | Low (admin users exist but no individual audit trail per action) |
+| Unique user identification | Partial | LOW | Low (admin JWT and Clerk IDs exist; verify coverage for shared/cofounder service access) |
 
 ---
 
@@ -141,7 +141,7 @@ PHI is any individually identifiable health information. In Donna's system, the 
 
 | Requirement | Status | Implementation |
 |------------|--------|----------------|
-| Unique user identification | Partial | Admin JWT has `adminId`; Clerk has `userId`. No individual audit per API call. |
+| Unique user identification | Partial | Admin JWT has `adminId`; Clerk has `userId`; audit events record actor IDs where middleware context is available. Verify coverage for shared/cofounder service access. |
 | Emergency access procedure | Not implemented | No documented procedure for emergency PHI access. |
 | Automatic logoff | Partial | JWT tokens expire (configurable). No forced session termination. |
 | Encryption and decryption | Partial | TLS in transit. Neon AES-256 at rest. New PHI writes use app-level field encryption for the main PHI tables; legacy plaintext rows remain until the per-environment migration/backfill/nulling runbook is completed. |
@@ -157,19 +157,22 @@ PHI is any individually identifiable health information. In Donna's system, the 
 
 | Requirement | Status |
 |------------|--------|
-| Hardware/software/procedural mechanisms to record and examine access to PHI | Not implemented |
+| Hardware/software/procedural mechanisms to record and examine access to PHI | Partial |
 
-**Gap: No HIPAA audit log.** The system logs errors via Sentry and application logs via Railway, but there is no structured, tamper-evident audit trail recording:
-- Who accessed a senior's records
-- What data was accessed or modified
-- When the access occurred
-- From which IP address/system
+**Implemented baseline:** Donna has an `audit_logs` table plus Node (`services/audit.js`) and Pipecat (`pipecat/services/audit.py`) audit helpers. PHI-heavy routes such as seniors, conversations, memories, reminders, call analyses, observability reads, exports, and Pipecat call/metrics routes write audit events.
+
+**Remaining gap:** Audit logging is not yet proven complete or tamper-evident. Before real PHI launch, verify:
+- Every PHI read/write path emits an audit event
+- High-risk exports fail closed if audit persistence fails
+- Audit logs are retained for 6 years
+- Audit logs are append-only or protected from normal application updates/deletes
+- Operational review procedures exist for querying audit events during an incident
 
 **Remediation:**
-1. Create an `audit_logs` table with fields: `id`, `timestamp`, `actor_id`, `actor_type`, `action`, `resource_type`, `resource_id`, `ip_address`, `details`, `created_at`.
-2. Add middleware to log all PHI read/write operations automatically.
+1. Add or update tests that assert audit writes on every PHI route in Node and Pipecat.
+2. Make export and hard-delete paths fail closed when audit persistence fails.
 3. Retain audit logs for minimum 6 years (HIPAA requirement).
-4. Ensure audit logs themselves are append-only (no UPDATE/DELETE).
+4. Restrict update/delete privileges for `audit_logs` outside the retention worker and administrative break-glass process.
 
 ### (c)(1) Integrity -- Addressable
 
@@ -243,11 +246,11 @@ A formal risk assessment per 45 CFR 164.308(a)(1)(ii)(A) has not yet been conduc
 |-----------|-----------|--------|------------|------------|
 | Third-party vendor breach (no BAAs) | High | High | **CRITICAL** | Sign BAAs with all vendors processing PHI |
 | Database credential compromise | Medium | High | **HIGH** | App-level field encryption, key rotation, least-privilege DB users |
-| No audit trail for PHI access | High | Medium | **HIGH** | Implement audit logging |
-| Conversation data in 13+ vendor systems | High | High | **CRITICAL** | Minimize data sent to vendors, sign BAAs, evaluate vendor alternatives |
+| Audit trail coverage not fully verified | High | Medium | **HIGH** | Verify audit logging coverage and harden append-only controls |
+| Conversation data in 12+ vendor systems | High | High | **CRITICAL** | Minimize data sent to vendors, sign BAAs, evaluate vendor alternatives |
 | Developer access to production data | Medium | Medium | **MEDIUM** | Synthetic data for dev, restrict production access |
-| No data retention policy | High | Medium | **HIGH** | Implement automated purge (see [Data Retention](DATA_RETENTION_POLICY.md)) |
-| No breach notification procedures | Medium | High | **HIGH** | Document and drill procedures (see [Breach Notification](BREACH_NOTIFICATION.md)) |
+| Data retention purge not yet operationally verified in every environment | High | Medium | **HIGH** | Verify the Node-owned daily purge and document purge history (see [Data Retention](DATA_RETENTION_POLICY.md)) |
+| Breach notification procedures not drilled | Medium | High | **HIGH** | Run tabletop exercises and update [Breach Notification](BREACH_NOTIFICATION.md) from findings |
 | No workforce training | High | Medium | **MEDIUM** | Develop and deliver HIPAA training |
 | Clerk JWKS configuration drift | Low | High | **MEDIUM** | Python auth now verifies Clerk RS256 tokens with JWKS when `CLERK_JWKS_URL` or `CLERK_PUBLISHABLE_KEY` is configured; monitor env coverage in all deployments |
 

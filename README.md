@@ -27,6 +27,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Speech transcription (Deepgram Nova 3)
 - LLM responses (Claude Haiku 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - Text-to-speech (ElevenLabs by default; Cartesia remains an evaluation-only provider flag; active Telnyx calls use 16kHz PCM)
+- English/Spanish Donna call language support (caregiver-selected; switches STT language, prompt instruction, and optional Spanish TTS voice)
 - Semantic memory with decay + deduplication (pgvector + HNSW index)
 - Full in-call context retention (APPEND strategy, no summary truncation)
 - Cross-call turn history (recent turns from previous calls in system prompt)
@@ -125,7 +126,7 @@ See [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) for ful
 
 ### Pipecat Voice Pipeline (bot.py)
 
-Linear pipeline of `FrameProcessor`s. The Conversation Director is **non-blocking** — it passes frames through instantly while running analysis in a background task.
+Linear pipeline of `FrameProcessor`s. The Conversation Director is **non-blocking for LLM analysis** — Groq/Gemini work runs in background tasks, while final transcripts may briefly wait for the memory prefetch cache before Claude responds.
 
 ```
 Phone Call → Telnyx → WebSocket → Pipecat Pipeline
@@ -154,7 +155,7 @@ Phone Call → Telnyx → WebSocket → Pipecat Pipeline
                              │                      │   │ + Memory prefetch      │
                              │                      │   └───────────────────────┘
                              └─────────┬───────────┘
-                                       │ (no delay)
+                                       │ (0-500ms memory gate)
                                        ▼
                              Context Aggregator (user)
                                        ▼
@@ -294,8 +295,10 @@ ANTHROPIC_MODEL=claude-haiku-4-5-20251001 # Voice LLM model
 GOOGLE_API_KEY=...                      # Gemini 3 Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...                    # STT (Nova 3)
 ELEVENLABS_API_KEY=...                  # TTS
+ELEVENLABS_VOICE_ID_ES=...              # Optional Spanish Donna voice
 CARTESIA_API_KEY=...                    # Optional Cartesia TTS provider
 CARTESIA_VOICE_ID=...                   # Optional Cartesia voice override
+CARTESIA_VOICE_ID_ES=...                # Optional Spanish Cartesia voice
 OPENAI_API_KEY=...                      # Embeddings + news search
 TAVILY_API_KEY=...                      # Optional fast in-call web search
 

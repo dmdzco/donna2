@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| Last Updated | April 16, 2026 |
+| Last Updated | April 22, 2026 |
 | Owner | TBD |
 | Review Cadence | Quarterly |
 | Related Docs | [HIPAA Overview](HIPAA_OVERVIEW.md), [Vendor Security Evaluation](VENDOR_SECURITY_EVALUATION.md) |

@@ -1,5 +1,7 @@
 # E2E Browser Testing Implementation Plan
 
+> Historical implementation plan. Mock fixtures below may include old Sonnet model IDs or SMS preference fields; current runtime defaults are documented in `README.md`, `DIRECTORY.md`, and `docs/architecture/`.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add Playwright browser tests across all 3 web apps (admin-v2, consumer, observability) covering critical user flows with mocked APIs.

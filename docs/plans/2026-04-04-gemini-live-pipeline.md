@@ -2,7 +2,7 @@
 
 > Historical implementation plan. Do not use this as runtime source of truth.
 > Current runtime source of truth is `pipecat/bot_gemini.py`, `pipecat/config.py`, and `pipecat/docs/ARCHITECTURE.md`.
-> Superseded detail: Gemini Live currently uses 16kHz internal input and 24kHz internal output; Twilio conversion stays at the serializer edge.
+> Superseded detail: Gemini Live evaluation uses 16kHz internal input and 24kHz internal output; active Telnyx calls use L16/16k at the serializer edge.
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 

@@ -1,5 +1,7 @@
 # New Engineer Prototype TODOs
 
+> Active architecture and compliance references live in `docs/architecture/`, `docs/compliance/`, `DIRECTORY.md`, and `pipecat/docs/`. Dated files under `docs/plans/` are historical unless their own status says otherwise.
+
 This is the starter backlog for getting Donna ready to test with real prototype users before a full production launch.
 
 Priority definitions:

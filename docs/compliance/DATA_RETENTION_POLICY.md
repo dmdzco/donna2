@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| Last Updated | April 16, 2026 |
+| Last Updated | April 22, 2026 |
 | Owner | TBD (HIPAA Security Officer) |
 | Review Cadence | Annually |
 | Related Docs | [HIPAA Overview](HIPAA_OVERVIEW.md), [BAA Tracker](BAA_TRACKER.md), [Breach Notification](BREACH_NOTIFICATION.md) |
@@ -72,7 +72,7 @@ This policy applies to all data stored in:
 | **Cached news** | `seniors.cached_news` | No | Overwritten daily at 5 AM; set to NULL on senior purge | N/A (ephemeral) | Set to NULL on senior purge |
 | **Admin users** | `admin_users` | No (email/password hash) | Retained while active | Manual deactivation | DELETE row |
 | **Waitlist signups** | `waitlist.payload_encrypted`; legacy contact columns fallback | Possible (name, email, phone) | 1 year from signup | `waitlist.created_at` | Automated purge job: DELETE row |
-| **Audit logs** | `audit_logs` (to be created) | Yes (references PHI) | **6 years** (HIPAA minimum) | `audit_logs.created_at` | Automated purge job: DELETE row |
+| **Audit logs** | `audit_logs` | Yes (references PHI) | **6 years** (HIPAA minimum) | `audit_logs.created_at` | Automated purge job: DELETE row after retention period |
 
 ### Non-Database Data
 

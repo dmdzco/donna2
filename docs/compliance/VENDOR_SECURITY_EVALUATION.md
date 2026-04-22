@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| Last Updated | April 16, 2026 |
+| Last Updated | April 22, 2026 |
 | Owner | TBD (HIPAA Security Officer) |
 | Review Cadence | Annually + before adding any new vendor |
 | Related Docs | [HIPAA Overview](HIPAA_OVERVIEW.md), [BAA Tracker](BAA_TRACKER.md), [Data Retention](DATA_RETENTION_POLICY.md) |

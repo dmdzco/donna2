@@ -32,7 +32,7 @@
 
 ## Pipecat Pipeline (bot.py)
 
-Linear pipeline of `FrameProcessor`s. The Conversation Director sits in the pipeline but is **non-blocking** — it passes frames through instantly while running Groq/Gemini analysis in a background `asyncio.create_task()`.
+Linear pipeline of `FrameProcessor`s. The Conversation Director sits in the pipeline but is **non-blocking for LLM analysis** — Groq/Gemini work runs in background `asyncio.create_task()` calls, while final transcripts may briefly wait for the memory prefetch cache before Claude responds.
 
 ```
 Telnyx Audio ──► FastAPIWebsocketTransport
@@ -63,16 +63,16 @@ Telnyx Audio ──► FastAPIWebsocketTransport
               │    previous-turn)    │     │  via speculative)         │
               │ 2. Injects news when │     │                           │
               │    Director signals  │     │  Also handles:            │
-              │ 3. Passes frame      │     │  • Memory prefetch        │
-              │    immediately       │     │    (2 waves + interim)    │
+              │ 3. Brief memory gate │     │  • Memory prefetch        │
+              │    before Claude     │     │    (2 waves + interim)    │
               │ 4. Fires background  │     │  • Mid-call memory refresh│
               │    analysis ────────►│     │    (after 5+ min)         │
-              │ 5. Passes frames     │     │  • Force winding-down 9min│
-              │    immediately       │     │                           │
+              │ 5. Passes other      │     │  • Force winding-down 9min│
+              │    frames through    │     │                           │
               │                      │     │                           │
               │                      │     │                           │
               └─────────┬───────────┘     └──────────────────────────┘
-                        │ (no delay)
+                        │ (0-500ms memory gate)
                         ▼
               ┌─────────────────────┐
               │  Context Aggregator  │  Builds LLM context from
@@ -365,7 +365,7 @@ The opening phase is merged into main — the bot starts directly in main (or re
 |-------|-------|
 | **Reminder** *(conditional)* | `mark_reminder_acknowledged`, `transition_to_main` |
 | **Main** | `web_search`, `mark_reminder_acknowledged`, `transition_to_winding_down` |
-| **Winding Down** | `web_search`, `mark_reminder_acknowledged`, `transition_to_closing` |
+| **Winding Down** | `mark_reminder_acknowledged`, `transition_to_closing` |
 | **Closing** | *(none — post_action ends call)* |
 
 *Note: Memory and caregiver-note context is prefetched/injected. Web search remains an active Claude tool.*
@@ -459,7 +459,7 @@ pipecat/
 │   ├── call_snapshot.py             ← Pre-computed call context snapshot (71 LOC)
 │   ├── context_cache.py             ← Pre-cache senior context + news persistence (5 AM local)
 │   ├── daily_context.py             ← Cross-call same-day memory
-│   └── news.py                      ← News via OpenAI web search + circuit breaker (256 LOC)
+│   └── news.py                      ← Cached OpenAI news + Tavily/OpenAI in-call web search + circuit breakers (256 LOC)
 │
 ├── db/
 │   ├── client.py                    ← asyncpg pool + query helpers + health check (126 LOC)
@@ -554,8 +554,8 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Director** | Groq (`gpt-oss-20b`) | Primary fast provider |
 | **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Full guidance fallback when Groq unavailable |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
-| **STT** | Deepgram Nova 3 | Telnyx 16kHz L16 is passed through as internal 16kHz PCM before STT |
-| **TTS** | ElevenLabs by default; Cartesia behind provider flag | Telnyx calls request 16kHz PCM; non-phone paths can use ElevenLabs `44100` or Cartesia Sonic 3 `48000` |
+| **STT** | Deepgram Nova 3 | Telnyx 16kHz L16 is passed through as internal 16kHz PCM before STT; language follows `familyInfo.donnaLanguage` |
+| **TTS** | ElevenLabs by default; Cartesia behind provider flag | Telnyx calls request 16kHz PCM; optional Spanish voice IDs selected for Spanish calls |
 | **VAD** | Silero | confidence=0.6, min_volume=0.5; stop_secs=1.2 (senior calls), 0.8 (onboarding) |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
@@ -615,8 +615,10 @@ GOOGLE_API_KEY=...               # Gemini Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...             # STT
 ELEVENLABS_API_KEY=...           # TTS
 ELEVENLABS_VOICE_ID=...          # Voice ID (optional, has default)
+ELEVENLABS_VOICE_ID_ES=...       # Optional Spanish Donna voice
 CARTESIA_API_KEY=...             # Optional TTS provider
 CARTESIA_VOICE_ID=...            # Optional Cartesia voice override
+CARTESIA_VOICE_ID_ES=...         # Optional Spanish Cartesia voice
 OPENAI_API_KEY=...               # Embeddings + news search
 TAVILY_API_KEY=...               # Optional in-call web_search fast path
 

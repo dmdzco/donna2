@@ -41,7 +41,7 @@ Telnyx L16/16k audio ──► FastAPIWebsocketTransport
               │ Injects guidance +   │   │ + Same-turn guidance    │
               │ dynamic news context │   │ + Force end at 9/12min  │
               └─────────┬───────────┘   └─────────────────────────┘
-                        ▼ (no delay)
+                        ▼ (0-500ms memory gate)
               Context Aggregator (user) ← builds LLM context from transcriptions
                         ▼
               Claude Haiku 4.5 + FlowManager (4-phase state machine)
@@ -167,8 +167,8 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 | Director LLM (active fast path) | Groq | gpt-oss-20b |
 | Director LLM (regular fallback helper) | Google Gemini Flash | gemini-3-flash-preview |
 | Post-Call Analysis | Google Gemini Flash | gemini-3-flash-preview |
-| STT | Deepgram Nova 3 | Telnyx L16/16k reaches STT as 16kHz PCM |
-| TTS | ElevenLabs by default; Cartesia behind provider flag | Telnyx L16 calls use 16kHz PCM from TTS; non-phone paths can use higher internal rates |
+| STT | Deepgram Nova 3 | Telnyx L16/16k reaches STT as 16kHz PCM; language follows `familyInfo.donnaLanguage` (`en`/`es`) |
+| TTS | ElevenLabs by default; Cartesia behind provider flag | Telnyx L16 calls use 16kHz PCM from TTS; optional Spanish voice IDs selected for Spanish calls |
 | VAD | Silero | confidence=0.6, stop_secs=1.2 |
 | Embeddings | OpenAI | text-embedding-3-small |
 | News / Web Search | OpenAI GPT-4o-mini + Tavily | OpenAI cached news; Tavily first/OpenAI fallback for in-call web_search |

@@ -34,6 +34,12 @@
 - Warm, grandchild-like tone tuned for elderly users
 - Barge-in support via Silero VAD (interrupt detection)
 
+### Language Support
+- Caregivers can configure Donna's call language per senior through `familyInfo.donnaLanguage`
+- English and Spanish are active call languages
+- Spanish calls set Deepgram STT language to `es`, inject a Spanish-only prompt instruction, and use optional Spanish ElevenLabs/Cartesia voice IDs when configured
+- Gemini post-call analysis writes caregiver-facing summaries and concern text in the configured Donna language
+
 ### 4-Phase Call State Machine (Pipecat Flows)
 - **Reminder phase** (conditional) — Delivers pending reminders before main conversation
 - **Main phase** — Free-form conversation with all tools available
@@ -54,7 +60,7 @@
   - Family/relationship pattern matching
   - Safety concern flagging (scams, strangers, emergencies)
   - Cognitive signal detection (confusion, repetition)
-  - Goodbye detection → programmatic call end after configured delay
+  - Strong-goodbye detection → guarded programmatic call end after minimum call age and configured delay
 - **Layer 2: Conversation Director** — Groq primary, Gemini fallback LLM analysis (non-blocking)
   - Call phase tracking and pacing guidance
   - Topic management (stay, transition, or wrap up)
@@ -122,10 +128,9 @@
 
 ### Web Search (In-Call)
 - Senior can ask any factual question during a call
-- `web_search` tool powered by OpenAI web search
-- Async execution via `asyncio.to_thread` (non-blocking)
-- 15-second timeout with graceful fallback
-- Prefetch-accelerated (see Optimizations below)
+- `web_search` tool uses Tavily raw snippets first and OpenAI web search as fallback
+- Search queries are sanitized to avoid sending names, phone numbers, addresses, caregiver names, or private medical history
+- Async execution with a 15-second timeout and graceful fallback
 
 ---
 
@@ -156,7 +161,7 @@ Runs automatically after every call disconnect:
 
 1. **Conversation completion** — Duration, status, encrypted transcript saved to DB
 2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions
-3. **Caregiver notification** — Alerts sent for completed calls and detected concerns
+3. **Caregiver notification** — Email/in-app alerts recorded for completed calls and detected concerns; SMS is inactive
 4. **Summary persistence** — Encrypted at rest; enables cross-call context and caregiver call summaries
 5. **Interest discovery** — Extracts new interests, computes engagement scores
 6. **Memory extraction** — OpenAI extracts facts/preferences/events, stores with embeddings

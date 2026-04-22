@@ -401,6 +401,16 @@
   color: var(--ob-error);
 }
 
+.ob-reminder-tip {
+  margin-top: 20px;
+  padding: 14px 18px;
+  background: rgba(95, 116, 100, 0.06);
+  border-left: 3px solid var(--color-sage);
+  border-radius: 0 var(--ob-radius-sm) var(--ob-radius-sm) 0;
+  color: var(--color-sage);
+  font-size: 0.9rem;
+}
+
 .ob-add-btn {
   display: flex;
   align-items: center;

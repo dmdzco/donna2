@@ -636,6 +636,7 @@ describe('onboardingSchema', () => {
     const result = onboardingSchema.safeParse({
       ...validPayload,
       familyInfo: {
+        donnaLanguage: 'es',
         interestDetails: { gardening: 'Loves roses and tulips' },
       },
     });

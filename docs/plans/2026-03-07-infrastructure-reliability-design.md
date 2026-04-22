@@ -1,5 +1,7 @@
 # Infrastructure Reliability for 8000+ Users
 
+> Historical scale plan. Use `docs/architecture/SCALABILITY.md` for current capacity assumptions, Telnyx voice, and provider-limit blockers.
+
 **Date:** 2026-03-07
 **Branch:** `feat/droid-4-workspace`
 **Timeline:** 3-4 weeks (phased, alongside other feature work)

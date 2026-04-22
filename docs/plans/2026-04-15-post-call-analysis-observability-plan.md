@@ -1,5 +1,7 @@
 # Post-Call Analysis and Observability Plan
 
+> Historical plan. SMS-specific wording is superseded: current caregiver notifications are email/in-app only, and active live calls use Telnyx rather than Twilio.
+
 Date: 2026-04-15
 
 ## Context
@@ -166,7 +168,7 @@ Current state:
 
 Risk:
 
-- A `200` from the trigger endpoint may not mean SMS/email/push delivery succeeded.
+- A `200` from the trigger endpoint may not mean email/in-app delivery succeeded.
 - Operators cannot easily answer whether a caregiver actually got the summary.
 
 Plan:
@@ -186,7 +188,7 @@ Current state:
 Risk:
 
 - Summaries can drift back toward generic internal summaries.
-- Caregiver SMS may over-share sensitive content or fail to mention actionable concerns.
+- Caregiver notifications may over-share sensitive content or fail to mention actionable concerns.
 
 Plan:
 
@@ -203,7 +205,7 @@ Plan:
    - actionable follow-up when needed
    - no raw quotes
    - no unsupported medical or financial advice
-   - no over-sharing in caregiver SMS
+   - no over-sharing in caregiver notifications
 3. Run the evaluator locally against mocked or recorded model outputs first, then wire it into a lightweight CI job when stable.
 
 ### 8. Privacy and Log Hygiene Should Become a Post-Call Smoke Test
@@ -249,5 +251,5 @@ Each implementation slice should include:
 - Node API tests for observability route output shape.
 - Observability frontend build.
 - `make test-regression` for voice invariants.
-- One Railway dev live call when the change touches live call state, Twilio timing, or post-call background execution.
+- One Railway dev live call when the change touches live call state, Telnyx timing, or post-call background execution.
 - A PHI-safe log review after live testing.

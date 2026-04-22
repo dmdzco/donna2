@@ -32,7 +32,7 @@
 
 ## Pipecat Pipeline (bot.py)
 
-Linear pipeline of `FrameProcessor`s. The Conversation Director sits in the pipeline but is **non-blocking** — it passes frames through instantly while running Groq/Gemini analysis in a background `asyncio.create_task()`.
+Linear pipeline of `FrameProcessor`s. The Conversation Director sits in the pipeline but is **non-blocking for LLM analysis** — Groq/Gemini work runs in background `asyncio.create_task()` calls, while final transcripts may briefly wait for the memory prefetch cache before Claude responds.
 
 ```
 Telnyx Audio ──► FastAPIWebsocketTransport
@@ -63,16 +63,16 @@ Telnyx Audio ──► FastAPIWebsocketTransport
               │    previous-turn)    │     │  via speculative)         │
               │ 2. Injects news when │     │                           │
               │    Director signals  │     │  Also handles:            │
-              │ 3. Passes frame      │     │  • Memory prefetch        │
-              │    immediately       │     │    (2 waves + interim)    │
+              │ 3. Brief memory gate │     │  • Memory prefetch        │
+              │    before Claude     │     │    (2 waves + interim)    │
               │ 4. Fires background  │     │  • Mid-call memory refresh│
               │    analysis ────────►│     │    (after 5+ min)         │
-              │ 5. Passes frames     │     │  • Force winding-down 9min│
-              │    immediately       │     │                           │
+              │ 5. Passes other      │     │  • Force winding-down 9min│
+              │    frames through    │     │                           │
               │                      │     │                           │
               │                      │     │                           │
               └─────────┬───────────┘     └──────────────────────────┘
-                        │ (no delay)
+                        │ (0-500ms memory gate)
                         ▼
               ┌─────────────────────┐
               │  Context Aggregator  │  Builds LLM context from
@@ -132,6 +132,22 @@ The pipeline processors don't call each other directly. They communicate through
    - `_last_quick_analysis` — `AnalysisResult` from Quick Observer, read by prefetch engine for family/health/activity signals
 
 3. **Pipeline task reference** — Both QuickObserver and Director receive a `set_pipeline_task(task)` call after pipeline creation. This lets them queue `EndFrame` directly to force call termination, bypassing the normal frame flow.
+
+---
+
+## Senior Context Assembly
+
+Flow nodes build senior-specific prompt context from decrypted profile fields before the main flow starts:
+
+- Current local date/time from the senior timezone
+- Name, location, and English/Spanish call-language instruction
+- Age and birthday awareness from `familyInfo.dateOfBirth`
+- Interest IDs plus caregiver/AI detail text from `familyInfo.interestDetails`
+- Additional family context from `additional_info`
+- Topics to avoid from `familyInfo.topicsToAvoid`, with fallback to `preferred_call_times.topicsToAvoid` for onboarding-created rows
+- Health notes, memory context, prior-call follow-ups, recent turns, and same-day context
+
+Each section is also recorded in the context trace for observability. Application logs still use masked identifiers and must not print raw profile context.
 
 ---
 
@@ -365,7 +381,7 @@ The opening phase is merged into main — the bot starts directly in main (or re
 |-------|-------|
 | **Reminder** *(conditional)* | `mark_reminder_acknowledged`, `transition_to_main` |
 | **Main** | `web_search`, `mark_reminder_acknowledged`, `transition_to_winding_down` |
-| **Winding Down** | `web_search`, `mark_reminder_acknowledged`, `transition_to_closing` |
+| **Winding Down** | `mark_reminder_acknowledged`, `transition_to_closing` |
 | **Closing** | *(none — post_action ends call)* |
 
 *Note: Memory and caregiver-note context is prefetched/injected. Web search remains an active Claude tool.*
@@ -395,7 +411,7 @@ When the telephony client disconnects, `run_post_call()` in `services/post_call.
 2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), mood, caregiver takeaways, recommended caregiver action, and follow-up suggestions. The encrypted JSON still includes a legacy `caregiver_sms` key, but SMS delivery is inactive.
 2.5. **Caregiver notes + notifications** — Marks caregiver notes delivered only when assistant transcript evidence shows Donna delivered them. POSTs to Node.js API for call_completed + concern_detected alerts, raising on non-2xx responses and retrying transient failures once. Node sends email/in-app notification records; SMS is inactive.
 3. **Summary persistence** — Writes analysis summary to `conversations.summary` (enables `get_recent_summaries()` and cross-call context)
-3.5. **Interest discovery** — Extracts new interests from conversation, updates senior profile
+3.5. **Interest discovery** — Maps new topics to predefined interest categories and updates `seniors.interests` plus editable `familyInfo.interestDetails`
 3.6. **Interest scores** — Computes engagement scores per interest topic
 4. **Memory extraction** — OpenAI extracts facts/preferences/events from transcript, stores with embeddings
 5. **Daily context** — Saves topics, advice, reminders, and summary for same-day cross-call memory
@@ -452,14 +468,14 @@ pipecat/
 │   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (526 LOC)
 │   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation (352 LOC)
 │   ├── conversations.py             ← Conversation CRUD + transcript history
-│   ├── interest_discovery.py        ← Interest extraction from conversations
-│   ├── seniors.py                   ← Senior profile + per-senior call_settings (188 LOC)
+│   ├── interest_discovery.py        ← Interest extraction, category mapping, editable details
+│   ├── seniors.py                   ← Senior profile CRUD + encrypted PHI fields + per-senior call_settings
 │   ├── caregivers.py                ← Caregiver relationships + notes delivery (111 LOC)
 │   ├── scheduler.py                 ← Pipecat-side scheduler helpers + encrypted Redis context handoff; Node scheduler is active
 │   ├── call_snapshot.py             ← Pre-computed call context snapshot (71 LOC)
 │   ├── context_cache.py             ← Pre-cache senior context + news persistence (5 AM local)
 │   ├── daily_context.py             ← Cross-call same-day memory
-│   └── news.py                      ← News via OpenAI web search + circuit breaker (256 LOC)
+│   └── news.py                      ← Cached OpenAI news + Tavily/OpenAI in-call web search + circuit breakers (256 LOC)
 │
 ├── db/
 │   ├── client.py                    ← asyncpg pool + query helpers + health check (126 LOC)
@@ -554,8 +570,8 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Director** | Groq (`gpt-oss-20b`) | Primary fast provider |
 | **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Full guidance fallback when Groq unavailable |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
-| **STT** | Deepgram Nova 3 | Telnyx 16kHz L16 is passed through as internal 16kHz PCM before STT |
-| **TTS** | ElevenLabs by default; Cartesia behind provider flag | Telnyx calls request 16kHz PCM; non-phone paths can use ElevenLabs `44100` or Cartesia Sonic 3 `48000` |
+| **STT** | Deepgram Nova 3 | Telnyx 16kHz L16 is passed through as internal 16kHz PCM before STT; language follows `familyInfo.donnaLanguage` |
+| **TTS** | ElevenLabs by default; Cartesia behind provider flag | Telnyx calls request 16kHz PCM; optional Spanish voice IDs selected for Spanish calls |
 | **VAD** | Silero | confidence=0.6, min_volume=0.5; stop_secs=1.2 (senior calls), 0.8 (onboarding) |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
@@ -567,7 +583,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 
 | Table | Purpose |
 |-------|---------|
-| `seniors` | Senior profiles (name, phone, interests, timezone, call_settings JSONB, call_context_snapshot JSONB, cached_news TEXT) |
+| `seniors` | Senior profiles (name, phone, timezone, interests, encrypted family/additional context, call_settings JSONB, call_context_snapshot JSONB, cached_news TEXT) |
 | `conversations` | Call records (duration, metrics, transcript) |
 | `memories` | Semantic memories (pgvector embeddings, HNSW index, decay) |
 | `reminders` | Scheduled reminders |
@@ -615,8 +631,10 @@ GOOGLE_API_KEY=...               # Gemini Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...             # STT
 ELEVENLABS_API_KEY=...           # TTS
 ELEVENLABS_VOICE_ID=...          # Voice ID (optional, has default)
+ELEVENLABS_VOICE_ID_ES=...       # Optional Spanish Donna voice
 CARTESIA_API_KEY=...             # Optional TTS provider
 CARTESIA_VOICE_ID=...            # Optional Cartesia voice override
+CARTESIA_VOICE_ID_ES=...         # Optional Spanish Cartesia voice
 OPENAI_API_KEY=...               # Embeddings + news search
 TAVILY_API_KEY=...               # Optional in-call web_search fast path
 

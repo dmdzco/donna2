@@ -76,6 +76,35 @@ class TestSeniorContext:
         ctx = _build_senior_context(state)
         assert "gardening" in ctx
 
+    def test_includes_rich_profile_context(self):
+        state = _make_session_state(
+            senior={
+                "name": "Margaret Smith",
+                "interests": ["gardening"],
+                "family_info": {
+                    "interestDetails": {"gardening": "Loves roses and tomatoes"},
+                    "topicsToAvoid": "politics",
+                },
+                "additional_info": "Prefers gentle humor.",
+            }
+        )
+        ctx = _build_senior_context(state)
+        assert "gardening: Loves roses and tomatoes" in ctx
+        assert "Additional context from family: Prefers gentle humor." in ctx
+        assert "Topics to AVOID" in ctx
+        assert "politics" in ctx
+
+    def test_topics_to_avoid_falls_back_to_preferred_call_times(self):
+        state = _make_session_state(
+            senior={
+                "name": "Margaret Smith",
+                "preferred_call_times": {"topicsToAvoid": ["politics", "recent loss"]},
+            }
+        )
+        ctx = _build_senior_context(state)
+        assert "Topics to AVOID" in ctx
+        assert "politics; recent loss" in ctx
+
     def test_includes_previous_calls(self):
         state = _make_session_state()
         ctx = _build_senior_context(state)

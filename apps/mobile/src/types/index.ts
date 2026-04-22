@@ -99,7 +99,12 @@ export interface OnboardingInput {
   };
   relation: string;
   interests?: string[];
-  familyInfo?: { relation?: string; interestDetails?: Record<string, string> };
+  familyInfo?: {
+    relation?: string;
+    donnaLanguage?: "en" | "es";
+    interestDetails?: Record<string, string>;
+    topicsToAvoid?: string;
+  };
   additionalInfo?: string;
   reminders?: string[];
   topicsToAvoid?: string[];

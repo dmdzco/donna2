@@ -114,18 +114,20 @@ Applied to all responses via `SecurityHeadersMiddleware`:
 
 ## Input Validation
 
-**File**: `pipecat/api/validators/schemas.py`
+**Files**: `pipecat/api/validators/schemas.py`, `validators/schemas.js`
 
-All API inputs validated via Pydantic models before reaching handlers:
+Pipecat API inputs are validated via Pydantic models before reaching handlers:
 
 | Schema | Validates |
 |--------|----------|
-| `CreateSeniorRequest` | name (1-255 chars), phone (E.164), timezone, interests |
+| `CreateSeniorRequest` | name (1-255 chars), phone (E.164), timezone, interests, `family_info`, `medical_notes`, `preferred_call_times` |
 | `UpdateSeniorRequest` | Same fields, all optional |
 | `CreateMemoryRequest` | type (10 allowed values), content (1-5000 chars), importance (0-100) |
 | `CreateReminderRequest` | type (5 allowed values), title (1-255), scheduled_time, cron |
 | `InitiateCallRequest` | seniorId/senior_id; server resolves phone after authorization |
 | `AdminLoginRequest` | email, password |
+
+Node/frontend API inputs are validated through Zod. Senior create/update accepts timezone, interests, `familyInfo`, medical notes, preferred call times, city/state/zip, and `additionalInfo`. Onboarding additionally validates Donna language, interest detail text, reminders, call schedule, and `topicsToAvoid`.
 
 Caregiver/admin call initiation does not accept arbitrary client-supplied phone numbers. The API accepts a senior ID, checks authorization, then resolves the stored senior phone number server-side.
 
@@ -165,7 +167,7 @@ Redis/shared-state call payloads are also treated as PHI. Pipecat writes `call_m
 
 The remaining high-risk PHI fields now follow the same companion-column pattern:
 
-- Senior profile PHI: `family_info_encrypted`, `medical_notes_encrypted`, `preferred_call_times_encrypted`, `additional_info_encrypted`, and `call_context_snapshot_encrypted`.
+- Senior profile PHI: `family_info_encrypted` (relationship, Donna language, date of birth, interest detail text, topics to avoid), `medical_notes_encrypted`, `preferred_call_times_encrypted`, `additional_info_encrypted`, and `call_context_snapshot_encrypted`.
 - Reminders: `title_encrypted`, `description_encrypted`, and `reminder_deliveries.user_response_encrypted`.
 - Daily call context: `daily_call_context.context_encrypted`.
 - Notifications: `content_encrypted` and `metadata_encrypted`.

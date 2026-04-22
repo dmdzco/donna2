@@ -1,5 +1,7 @@
 # Production Readiness TODOs
 
+> Current status note (April 22, 2026): This dated TODO is retained for launch context. Active voice now uses Telnyx Call Control/media streams with L16/16k audio, Claude Haiku 4.5, Groq Director with Gemini fallback, ElevenLabs Flash, Gemini post-call analysis, and email/in-app notifications only. Treat Twilio voice/SMS, Sonnet, Cerebras, and 8kHz details below as superseded unless explicitly marked archived/inactive.
+
 > Status: Not ready for real PHI-bearing production users.
 > Baseline audited: `origin/main` at `dfa5956`; branch drift checked against `origin/zuludev` through `6073629`, with voice TODO fixes staged on `codex/voice-pipeline-todos`.
 > Created: April 14, 2026.
@@ -11,7 +13,7 @@ This document tracks the remaining work to take Donna from technical beta to pro
 
 Donna's core voice architecture is strong enough to continue controlled testing:
 
-- Pipecat owns the real-time Twilio voice path and post-call processing.
+- Pipecat owns the real-time Telnyx voice path and post-call processing.
 - Conversation Director work is non-blocking.
 - Quick Observer owns programmatic goodbye handling.
 - Redis-backed Pipecat call metadata and reminder context exist.
@@ -27,7 +29,7 @@ The `codex/voice-pipeline-todos` branch closed several runtime issues that were 
 - Pipecat now rejects inactive senior phone matches through a no-PHI hangup path.
 - Pipecat hydrates known manual/welfare outbound calls itself, so Node process-local prefetch maps are no longer required for correct call context.
 - Node-scheduled reminder context can be recovered through shared Redis/DB paths already present on `zuludev`.
-- `/ws` validates the Twilio start frame and `ws_token` before consuming active-call capacity, then consumes the token after capacity is reserved.
+- `/ws` validates the Telnyx media-stream start frame and `ws_token` before consuming active-call capacity, then consumes the token after capacity is reserved.
 - Reminder acknowledgments remain low-latency during the call, but post-call waits briefly and re-reads `reminder_deliveries.status` before retry decisions.
 - Caregiver notes are marked delivered only after assistant transcript evidence.
 - Assistant turns are persisted after guidance stripping.
@@ -44,7 +46,7 @@ Remaining production blockers below are still real, especially BAAs/vendor gatin
 - [ ] Assign named compliance owners for HIPAA Security Officer, breach response, vendor review, and data retention.
 - [ ] Sign and file BAAs for critical vendors that receive, store, or transmit PHI:
   - [ ] Neon
-  - [ ] Twilio
+  - [ ] Telnyx
   - [ ] Anthropic
   - [ ] Google/Gemini
   - [ ] Deepgram
@@ -145,7 +147,7 @@ Relevant files:
 - [ ] Store manual outbound prefetch context in Redis or Postgres keyed by `callSid` if we want to preserve Node's precomputed context instead of rehydrating in Pipecat.
 - [x] Store Node-scheduled reminder context in shared state/DB paths Pipecat can read. Redis reminder context and DB `call_sid` fallback are present.
 - [x] Make Pipecat hydrate generic outbound calls with senior context, memory context, caregiver notes, settings, greeting, recent turns, and daily context when a senior is known.
-- [x] Add retry/backoff in Pipecat `/voice/answer` for just-created reminder delivery rows to avoid a race between Twilio answer and DB delivery persistence. Node/Pipecat reminder call URLs now include `call_type=reminder`, and Pipecat waits briefly for the delivery row before falling back.
+- [x] Historical Twilio reminder-row race item: superseded by Telnyx call-context/prewarm paths. Node/Pipecat reminder calls pass reminder context, and Pipecat waits briefly for the delivery row before falling back.
 - [ ] Add remaining tests for manual outbound, Pipecat-scheduled reminder, and missing-context fallback. This branch added coverage for inactive senior handling, tagged Node-scheduled reminder race, and the affected WebSocket/reminder/post-call paths.
 
 Acceptance criteria:
@@ -245,7 +247,7 @@ Relevant files:
 - [ ] Remove or gate raw `console.*` usage in backend services.
 - [ ] Add log redaction tests for Node and Pipecat.
 - [ ] Validate Sentry configuration and scrubbers with production-like error events.
-- [x] Pipecat WebSocket auth path does not log raw `ws_token` values or Twilio start-frame bodies.
+- [x] Pipecat WebSocket auth path does not log raw `ws_token` values or Telnyx start-frame bodies.
 - [x] Assistant transcript persistence now receives guidance-stripped text.
 
 Acceptance criteria:
@@ -278,13 +280,13 @@ Relevant files:
   - [ ] export routes
   - [ ] notification trigger routes
   - [ ] Pipecat API routes
-  - [ ] Twilio webhook endpoints, within Twilio retry expectations
+  - [ ] Telnyx webhook endpoints, within Telnyx retry expectations
 - [ ] Add metrics for rejected requests and repeated invalid-key attempts.
 
 Acceptance criteria:
 
 - Rate limits hold across multiple Node and Pipecat replicas.
-- Brute force or accidental call storms cannot create unbounded Twilio/vendor spend.
+- Brute force or accidental call storms cannot create unbounded Telnyx/vendor spend.
 
 Relevant files:
 
@@ -301,12 +303,12 @@ Relevant files:
 - [ ] Add migration validation to CI/deploy before production traffic.
 - [ ] Add production config validation for both Node and Pipecat.
 - [ ] Add health checks that verify database, Redis, provider credentials, and encryption readiness.
-- [ ] Add a live dev/staging Twilio smoke call before production deploy.
+- [ ] Add a live dev/staging Telnyx smoke call before production deploy.
 - [ ] Add a production canary or staged rollout process.
 - [ ] Document rollback commands and criteria.
 - [ ] Add alert thresholds for:
   - [ ] call answer failures
-  - [ ] Twilio webhook failures
+  - [ ] Telnyx webhook failures
   - [ ] STT/TTS/LLM provider errors
   - [ ] post-call processing failures
   - [ ] audit write failures
@@ -341,7 +343,7 @@ Relevant files:
 - [ ] Define target launch capacity: concurrent calls, daily calls, caregivers, seniors, reminders, and post-call jobs.
 - [ ] Calculate database pool usage per Node and Pipecat replica.
 - [ ] Calculate Redis connections per replica.
-- [ ] Confirm Twilio, Deepgram, Anthropic, Google, OpenAI, Groq, TTS, and Neon rate/concurrency limits.
+- [ ] Confirm Telnyx, Deepgram, Anthropic, Google, OpenAI, Groq, TTS, and Neon rate/concurrency limits.
 - [ ] Add load tests for:
   - [ ] concurrent Pipecat calls
   - [ ] reminder scheduler bursts

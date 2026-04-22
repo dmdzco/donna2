@@ -254,7 +254,7 @@ Each cohort transition:
 | `REDIS_URL` | *(empty)* | Optional — enables Redis protocol shared state. Dev and production use Railway Redis service references. |
 | `UPSTASH_REDIS_REST_URL` | *(empty)* | Optional fallback for non-Railway deployments — enables Upstash REST shared state when paired with token |
 | `UPSTASH_REDIS_REST_TOKEN` | *(empty)* | Optional fallback for non-Railway deployments — Upstash REST bearer token |
-| `SCHEDULER_ENABLED` | false | Only one instance should run the scheduler |
+| `SCHEDULER_ENABLED` | false | Pipecat-side scheduler toggle; keep false because Node `services/scheduler.js` is authoritative |
 | `TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE` | 16000 | Internal STT input rate after telephony serializer conversion |
 | `ELEVENLABS_OUTPUT_SAMPLE_RATE` | 44100 | Non-phone ElevenLabs TTS output rate; active Telnyx calls override to 16kHz |
 | `CARTESIA_OUTPUT_SAMPLE_RATE` | 48000 | Non-phone Cartesia PCM output rate; active Telnyx calls override to 16kHz |

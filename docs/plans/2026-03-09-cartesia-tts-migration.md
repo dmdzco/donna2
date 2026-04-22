@@ -2,7 +2,7 @@
 
 > Historical implementation plan. Do not use this as runtime source of truth.
 > Current runtime source of truth is `pipecat/bot.py`, `pipecat/config.py`, and `pipecat/docs/LEARNINGS.md`.
-> Superseded detail: Cartesia must output PCM (`pcm_s16le`) and currently defaults to 48kHz internally; do not request `pcm_mulaw` from Cartesia for Twilio calls.
+> Superseded detail: Cartesia must output PCM (`pcm_s16le`) and defaults to 48kHz for non-phone output; active Telnyx calls request 16kHz PCM before the serializer. Do not request `pcm_mulaw` from Cartesia for phone calls.
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 

@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| Last Updated | April 16, 2026 |
+| Last Updated | April 22, 2026 |
 | Owner | TBD (HIPAA Security Officer) |
 | Review Cadence | Annually + before adding any new vendor |
 | Related Docs | [HIPAA Overview](HIPAA_OVERVIEW.md), [BAA Tracker](BAA_TRACKER.md), [Data Retention](DATA_RETENTION_POLICY.md) |
@@ -130,7 +130,7 @@ Senior (phone call)
 
 | Criterion | Assessment |
 |-----------|-----------|
-| **PHI Exposure** | CRITICAL -- receives full conversation context including system prompt (with senior name, interests, medical notes, memories, recent call history), all user utterances, and all assistant responses. Every word spoken in a call passes through Claude. |
+| **PHI Exposure** | CRITICAL -- receives full conversation context including system prompt (with senior name, language setting, age/birthday context, interests and interest details, additional family context, topics to avoid, medical notes, memories, recent call history), all user utterances, and all assistant responses. Every word spoken in a call passes through Claude. |
 | **BAA Available** | **Yes** -- Anthropic offers BAA on enterprise plans |
 | **Security Certifications** | SOC 2 Type II |
 | **Data Retention** | API inputs/outputs retained for 30 days by default for trust & safety. Enterprise plans can negotiate shorter retention or opt-out. |

@@ -1,6 +1,7 @@
 # Voice Testing Pipeline - Architecture Design
 
 > Design document for Donna's voice pipeline integration and scenario testing infrastructure.
+> Historical note: active live calls now use Telnyx L16/16k. Twilio transport references below describe old mocks/design examples unless the current test code explicitly says otherwise.
 
 ---
 

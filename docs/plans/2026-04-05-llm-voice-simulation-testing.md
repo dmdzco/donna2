@@ -1,5 +1,7 @@
 # LLM-to-LLM Voice Simulation Testing
 
+> Historical simulation plan. Current live runtime uses Telnyx L16/16k, no Director-owned web-search gating, and no live `search_memories` Claude tool. Use current `pipecat/tests/` and `pipecat/docs/ARCHITECTURE.md` before implementing anything from this plan.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Build an LLM-to-LLM voice pipeline test system where Haiku acts as a synthetic caller against the real Donna pipeline (real Claude, Director, Observer, tool handlers, dev DB), verifying web_search calls, memory injection, reminder processing, and post-call artifacts across multiple calls.

@@ -14,11 +14,11 @@
 - **Reporter**: Nick
 - **App**: Mobile (consumer signup)
 - **Severity**: Critical — blocks new user registration
-- **Description**: When creating an account, every password entered is rejected with a message saying it was "found in a data leak" and that a different password must be used. After 7+ attempts with different passwords, none were accepted. This effectively prevents any new user from signing up.
+- **Description**: When creating an account, every password entered is rejected with a message saying it was "found in data leak" and that a different password must be used. After 7+ attempts with different passwords, none were accepted. This effectively prevents any new user from signing up.
 - **Steps to Reproduce**:
   1. Open the app and begin account creation
   2. Enter email and any password
-  3. Password is rejected as "found in a data leak"
+  3. Password is rejected as "found in data leak"
   4. Try different passwords — all rejected
 - **Expected**: Valid, strong passwords should be accepted
 - **Screenshot**: ![BUG-001](screenshots/bug-001-password-rejected.png)

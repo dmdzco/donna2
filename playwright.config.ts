@@ -33,7 +33,7 @@ export default defineConfig({
       },
     },
 
-    // Consumer public pages (no auth needed)
+    // Public website pages (no auth needed). Project name kept for compatibility with existing scripts.
     {
       name: 'consumer',
       testDir: './tests/e2e/consumer',
@@ -44,7 +44,7 @@ export default defineConfig({
       },
     },
 
-    // Consumer authenticated pages (signs in via @clerk/testing per test)
+    // Website authenticated pages (signs in via @clerk/testing per test)
     {
       name: 'consumer-authenticated',
       testDir: './tests/e2e/consumer/authenticated',
@@ -75,7 +75,7 @@ export default defineConfig({
       timeout: 120000,
     },
     {
-      command: 'npm run dev --prefix apps/consumer',
+      command: 'npm run dev --prefix apps/website',
       url: 'http://localhost:5174',
       reuseExistingServer: !process.env.CI,
       timeout: 120000,

@@ -35,7 +35,7 @@
 | Change frontend/manual call initiation | `routes/calls.js` (Node asks Pipecat to create a Telnyx call) |
 | Change admin dashboard UI | `apps/admin-v2/src/pages/` |
 | Change admin API client | `apps/admin-v2/src/lib/api.ts` |
-| Change consumer app | `apps/consumer/src/` |
+| Change public website / caregiver web app | `apps/website/src/` |
 | Change admin/consumer API endpoints | `routes/*.js` (Node.js — serves all /api/* for frontends) |
 | Change admin API middleware/auth | `middleware/*.js` (Node.js) |
 | Change database schema | `db/schema.js` (Drizzle ORM, shared app/API schema) + `pipecat/db/migrations/` (Pipecat/shared runtime additions) |
@@ -180,9 +180,13 @@ apps/
 │   ├── src/lib/     api.ts (API client → Node.js), auth.ts (JWT)
 │   └── Live: https://admin-v2-liart.vercel.app
 │
-├── consumer/        Caregiver app (React + Vite + Clerk auth + Radix UI)
-│   ├── src/pages/   Landing, Onboarding, Dashboard, FAQ
-│   └── Auth: Clerk OAuth
+├── website/         Public website + caregiver web app (React + Vite + Clerk auth)
+│   ├── src/pages/   Legal pages
+│   ├── src/onboarding/  Signup/onboarding flow
+│   ├── src/dashboard/   Caregiver dashboard
+│   └── Live: https://www.calldonna.co
+│
+├── _old-consumer-do-not-use/  Archived previous caregiver web app
 │
 └── observability/   Call monitoring dashboard (REST polling, low use)
 ```
@@ -204,7 +208,7 @@ tests/e2e/
 │   ├── seniors.spec.ts          Senior list, create form
 │   ├── calls.spec.ts            Call history, transcript modal
 │   └── reminders.spec.ts        Reminder CRUD
-├── consumer/                    Consumer app tests
+├── consumer/                    Website/caregiver app tests (legacy directory name)
 │   ├── landing.spec.ts          Landing page, FAQ (public)
 │   ├── dashboard.spec.ts        Protected route redirects (public)
 │   └── authenticated/           Clerk-authenticated tests (5 tests)

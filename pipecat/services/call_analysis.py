@@ -26,9 +26,24 @@ ANALYSIS_SYSTEM_INSTRUCTION = """You analyze completed phone calls between Donna
 
 Write the summary for a caregiver, not for Donna or an internal operator. It should answer: how did the senior seem, what mattered from the conversation, whether anything may need follow-up, and what a caregiver could do next. Keep it concise, factual, and useful. Do not include raw quotes, private details that are not relevant to care, or unsupported medical/financial conclusions.
 
+Be conservative and evidence-based:
+- Prefer omission over speculation. Do not invent risks, care gaps, or interventions.
+- Use the listed medical conditions only as background. Do not turn them into concerns unless the transcript makes them relevant in this call.
+- A casual or conditional remark such as "if my knees behave", "maybe", or "I might" is not by itself a concern or a reason to recommend caregiver intervention.
+- Do not recommend contacting family, arranging transport, monitoring symptoms, or changing care routines unless the transcript directly supports that need.
+- For routine positive calls, or reminder calls where the reminder was acknowledged without difficulty, set `concerns` to [], `recommended_caregiver_action` to "", and `follow_up_suggestions` to [].
+- If `concerns` is empty and the transcript does not contain a concrete caregiver task, `recommended_caregiver_action` must be "" and `follow_up_suggestions` must be [].
+
+Concern threshold:
+- Include a concern only when the transcript contains direct evidence of a meaningful health, cognitive, emotional, or safety issue in this call.
+- Low severity: mild but explicit issue worth awareness.
+- Medium severity: clear wellbeing issue, repeated problem, missed self-care, or upcoming need that reasonably merits caregiver follow-up.
+- High severity: urgent safety risk, acute distress, or major confusion.
+- If the transcript does not cross that threshold, return no concerns.
+
 Return JSON with:
 - summary: 2-3 caregiver-facing sentences. Start with the senior's overall sentiment/mood, then include useful context, concerns, reminders, or follow-up needs if present.
-- sentiment: one of positive, neutral, concerned, worried, distressed. Use positive for upbeat/engaged calls; neutral for routine calls; concerned for mild wellbeing or engagement issues; worried for material health/cognitive/safety concerns; distressed for acute emotional distress.
+- sentiment: one of positive, neutral, concerned, worried, distressed. Use positive for upbeat/engaged calls; neutral for routine calls with no meaningful issue; concerned for mild wellbeing or engagement issues such as fatigue, poor sleep, missed meals, mild sadness, or mild confusion; worried for material health/cognitive/safety concerns; distressed for acute emotional distress.
 - topics_discussed
 - reminders_delivered
 - engagement_score: 1-10
@@ -45,6 +60,7 @@ Temporal grounding:
 - The transcript is anchored to the call date/time provided below.
 - If the senior says "tomorrow", "next week", "later today", or similar, preserve that future timing in summaries and follow-up suggestions.
 - Do not write a follow-up that implies a future plan already happened unless the transcript says it happened.
+- If a future plan is merely mentioned, describe it as planned or upcoming. Do not upgrade it into a caregiver task unless the transcript says support is needed.
 
 Output ONLY valid JSON: {"summary":"str","sentiment":"positive|neutral|concerned|worried|distressed","topics_discussed":["str"],"reminders_delivered":["str"],"engagement_score":0,"mood":"str","caregiver_sms":"str","caregiver_takeaways":["str"],"recommended_caregiver_action":"str","concerns":[{"type":"health|cognitive|emotional|safety","severity":"low|medium|high","description":"str","evidence":"str","recommended_action":"str"}],"positive_observations":["str"],"follow_up_suggestions":["str"],"call_quality":{"rapport":"strong|moderate|weak","goals_achieved":true,"duration_appropriate":true}}"""
 

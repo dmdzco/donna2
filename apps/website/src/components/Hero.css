@@ -1,0 +1,532 @@
+.hero {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding: 120px 0 80px;
+}
+
+.hero__inner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 60px;
+  align-items: center;
+}
+
+.hero__title {
+  font-size: clamp(2.5rem, 5vw, 3.75rem);
+  line-height: 1.1;
+  margin-bottom: 24px;
+}
+
+.hero__title-accent {
+  color: var(--color-sage);
+}
+
+.hero__subtitle {
+  font-size: 1.2rem;
+  color: #555;
+  line-height: 1.7;
+  margin-bottom: 36px;
+  max-width: 520px;
+}
+
+.hero__actions {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 40px;
+}
+
+.hero__trust {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.hero__trust-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+/* App Store Badges */
+.hero__actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.hero__store-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  border-radius: 12px;
+  font-family: var(--font-body);
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.hero__store-badge--ios {
+  background: #1a1a1a;
+  color: #fff;
+}
+
+.hero__store-badge--android {
+  background: #fff;
+  color: #1a1a1a;
+  border: 1px solid #e0e0e0;
+}
+
+.hero__store-badge--web {
+  background: linear-gradient(135deg, #f0f7f1 0%, #e4ede5 100%);
+  color: var(--color-sage-dark);
+  border: 1.5px solid var(--color-sage-light);
+  position: relative;
+}
+
+.hero__new-badge {
+  position: absolute;
+  top: -8px;
+  right: -6px;
+  background: var(--color-sage);
+  color: white;
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 50px;
+  letter-spacing: 0.05em;
+  line-height: 1.3;
+}
+
+.hero__store-badge:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+}
+
+.hero__store-label {
+  font-size: 0.7rem;
+  opacity: 0.75;
+  line-height: 1;
+}
+
+.hero__store-name {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.hero__coming-soon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: #888;
+  margin-bottom: 28px;
+}
+
+/* Try Donna CTA */
+.hero__try {
+  margin-bottom: 32px;
+}
+
+.hero__try-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 24px 14px 16px;
+  background: linear-gradient(135deg, #f0f7f1 0%, #e4ede5 100%);
+  border: 2px solid var(--color-sage-light);
+  border-radius: 16px;
+  text-decoration: none;
+  color: var(--color-charcoal);
+  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+  cursor: pointer;
+}
+
+.hero__try-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(95, 116, 100, 0.18);
+  border-color: var(--color-sage);
+}
+
+.hero__try-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--color-sage);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.hero__try-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hero__try-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-sage-dark);
+  letter-spacing: 0.02em;
+}
+
+.hero__try-number {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--color-charcoal);
+  letter-spacing: 0.03em;
+}
+
+.hero__try-arrow {
+  font-size: 1.2rem;
+  color: var(--color-sage);
+  margin-left: 4px;
+  transition: transform 0.2s;
+}
+
+.hero__try-btn:hover .hero__try-arrow {
+  transform: translateX(4px);
+}
+
+.hero__try-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: #888;
+}
+
+.hero__info-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #999;
+  display: inline-flex;
+  align-items: center;
+  transition: color 0.2s;
+  vertical-align: middle;
+}
+
+.hero__info-btn:hover {
+  color: var(--color-sage);
+}
+
+/* Info Modal */
+.hero__info-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.hero__info-modal {
+  background: var(--color-white);
+  border-radius: 20px;
+  padding: 36px 32px;
+  max-width: 520px;
+  width: 100%;
+  position: relative;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+}
+
+.hero__info-modal p {
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: #444;
+  margin-bottom: 16px;
+}
+
+.hero__info-modal p:last-of-type {
+  margin-bottom: 0;
+}
+
+.hero__info-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #999;
+  padding: 4px;
+  transition: color 0.2s;
+}
+
+.hero__info-close:hover {
+  color: var(--color-charcoal);
+}
+
+.hero__info-link {
+  color: var(--color-sage);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.hero__info-link:hover {
+  color: var(--color-sage-dark);
+}
+
+/* ===== iPhone Mockup ===== */
+.hero__phone-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
+  height: 560px;
+}
+
+.iphone {
+  position: absolute;
+  width: 260px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.iphone__frame {
+  background: #1a1a1a;
+  border-radius: 40px;
+  padding: 0;
+  box-shadow:
+    0 0 0 2px #2a2a2a,
+    0 0 0 4px #1a1a1a,
+    0 30px 60px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 2px rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  position: relative;
+}
+
+/* Status bar */
+.iphone__status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px 0;
+  height: 54px;
+  background: #f5f2ed;
+  color: #1a1a1a;
+  position: relative;
+  z-index: 5;
+}
+
+.iphone__status-bar--dark {
+  background: #f5f2ed;
+  color: #1a1a1a;
+}
+
+.iphone__time {
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: var(--font-body);
+  letter-spacing: 0.01em;
+  width: 50px;
+}
+
+.iphone__dynamic-island {
+  width: 90px;
+  height: 26px;
+  background: #1a1a1a;
+  border-radius: 20px;
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.iphone__status-icons {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 50px;
+  justify-content: flex-end;
+}
+
+.iphone__signal,
+.iphone__wifi {
+  width: 15px;
+  height: 11px;
+}
+
+/* Battery */
+.iphone__battery {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.iphone__battery-body {
+  width: 22px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+  padding: 1.5px;
+  position: relative;
+}
+
+.iphone__battery-fill {
+  width: 80%;
+  height: 100%;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.iphone__battery-cap {
+  width: 2px;
+  height: 5px;
+  background: currentColor;
+  border-radius: 0 1px 1px 0;
+  opacity: 0.5;
+}
+
+/* Screen */
+.iphone__screen {
+  background: #f5f2ed;
+  margin: 0;
+}
+
+.iphone__screen img {
+  width: 100%;
+  display: block;
+  margin-top: -2px;
+}
+
+/* Home indicator bar */
+.iphone__home-bar {
+  height: 24px;
+  background: #f5f2ed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.iphone__home-bar::after {
+  content: '';
+  width: 100px;
+  height: 4px;
+  background: #1a1a1a;
+  border-radius: 4px;
+  opacity: 0.2;
+}
+
+/* Ensure phones never overflow their container */
+.hero__visual {
+  overflow: visible;
+}
+
+.hero__phone-wrap {
+  overflow: visible;
+}
+
+@media (max-width: 900px) {
+  .hero {
+    padding: 100px 0 60px;
+  }
+
+  .hero__inner {
+    grid-template-columns: 1fr;
+    gap: 40px;
+    text-align: center;
+  }
+
+  .hero__subtitle {
+    margin: 0 auto 32px;
+  }
+
+  .hero__actions {
+    justify-content: center;
+  }
+
+  .hero__try {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* Phones go BELOW text on narrow screens */
+  .hero__visual {
+    order: 1;
+    max-width: 400px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  .hero__phone-wrap {
+    height: 420px;
+    max-width: 360px;
+  }
+
+  .iphone {
+    width: 190px;
+  }
+
+  .iphone__frame {
+    border-radius: 30px;
+  }
+
+  .iphone__dynamic-island {
+    width: 68px;
+    height: 20px;
+  }
+
+  .iphone__status-bar {
+    height: 44px;
+    padding: 10px 18px 0;
+  }
+
+  .iphone__time {
+    font-size: 0.72rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero__phone-wrap {
+    height: 360px;
+    max-width: 320px;
+  }
+
+  .iphone {
+    width: 165px;
+  }
+
+  .iphone__frame {
+    border-radius: 26px;
+  }
+
+  .iphone__dynamic-island {
+    width: 58px;
+    height: 18px;
+    top: 8px;
+  }
+
+  .iphone__status-bar {
+    height: 38px;
+    padding: 8px 14px 0;
+  }
+
+  .iphone__time {
+    font-size: 0.65rem;
+  }
+
+  .iphone__home-bar {
+    height: 18px;
+  }
+
+  .iphone__home-bar::after {
+    width: 70px;
+    height: 3px;
+  }
+}

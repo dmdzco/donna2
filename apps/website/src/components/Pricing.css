@@ -1,0 +1,125 @@
+.pricing {
+  padding: var(--section-padding);
+}
+
+.pricing__header {
+  text-align: center;
+  margin-bottom: 48px;
+}
+
+.pricing__header .section-subtitle {
+  margin: 0 auto;
+}
+
+.pricing__card {
+  max-width: 480px;
+  margin: 0 auto;
+  background: var(--color-white);
+  border-radius: var(--border-radius);
+  padding: 48px 40px;
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+  position: relative;
+  border: 2px solid var(--color-sage);
+}
+
+.pricing__badge {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-sage);
+  color: var(--color-white);
+  padding: 6px 20px;
+  border-radius: 50px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.pricing__plan-name {
+  font-family: var(--font-body);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-sage);
+  margin-bottom: 8px;
+  margin-top: 8px;
+}
+
+.pricing__price {
+  margin-bottom: 8px;
+}
+
+.pricing__amount {
+  font-family: var(--font-heading);
+  font-size: 3.5rem;
+  font-weight: 700;
+  color: var(--color-charcoal);
+}
+
+.pricing__period {
+  font-size: 1.1rem;
+  color: #888;
+}
+
+.pricing__tagline {
+  font-size: 0.9rem;
+  color: #888;
+  margin-bottom: 32px;
+}
+
+.pricing__features {
+  list-style: none;
+  text-align: left;
+  margin-bottom: 36px;
+}
+
+.pricing__features li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  font-size: 0.95rem;
+  color: #444;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.pricing__features li:last-child {
+  border-bottom: none;
+}
+
+.pricing__cta-group {
+  display: flex;
+  gap: 12px;
+  flex-direction: column;
+}
+
+.pricing__cta {
+  width: 100%;
+  padding: 14px 24px;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-decoration: none;
+}
+
+.pricing__cta--ios {
+  background: #1a1a1a;
+  color: #fff;
+  border: none;
+}
+
+.pricing__cta--android {
+  background: #fff;
+  color: #1a1a1a;
+  border: 1.5px solid #ddd;
+}
+
+.pricing__launch-note {
+  margin-top: 16px;
+  font-size: 0.82rem;
+  color: #aaa;
+}

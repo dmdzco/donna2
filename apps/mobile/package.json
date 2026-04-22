@@ -12,7 +12,9 @@
     "build:prod": "eas build --platform ios --profile production",
     "build:ios": "eas build --platform ios",
     "build:android": "eas build --platform android",
+    "typecheck": "tsc --noEmit",
     "verify:assets": "node scripts/verify-assets.js",
+    "test:unit": "vitest run",
     "test:auth-guard": "node scripts/check-auth-test-bypasses.js",
     "test:e2e": "maestro test .maestro/flows/",
     "test:e2e:auth": "maestro test .maestro/flows/01_auth_sign_in.yaml",
@@ -73,7 +75,8 @@
   "devDependencies": {
     "@babel/core": "^7.25.0",
     "@types/react": "~19.1.10",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.4"
   },
   "private": true
 }

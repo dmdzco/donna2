@@ -25,6 +25,7 @@ import {
   useOnboardingStore,
   type OnboardingCall,
 } from "@/src/stores/onboarding";
+import { getDeviceTimezone } from "@/src/lib/timezone";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const ALL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -192,6 +193,7 @@ export default function SuccessScreen() {
         senior: {
           name: store.lovedOneName,
           phone: store.lovedOnePhone,
+          timezone: getDeviceTimezone(),
           city: store.city || undefined,
           state: store.state || undefined,
           zipCode: store.zipcode || undefined,

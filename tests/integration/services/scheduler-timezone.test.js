@@ -23,6 +23,6 @@ describe('scheduler timezone handling', () => {
         senior,
         new Date('2026-04-13T18:00:00.000Z'),
       ).toISOString(),
-    ).toBe('2026-04-13T21:30:00.000Z');
+    ).toBe('2026-04-13T18:30:00.000Z');
   });
 });

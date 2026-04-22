@@ -29,25 +29,49 @@ _GENERIC_BLOCKLIST = {
 
 MAX_INTERESTS = 15
 
+# Predefined interest categories — must match the mobile app's INTERESTS constant IDs.
+# Keywords map free-form topics from call analysis to the canonical category ID.
+_CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "sports": ["sport", "football", "soccer", "baseball", "basketball", "tennis", "golf", "nfl", "nba", "mlb", "hockey", "boxing", "wrestling", "surfing", "skiing", "swimming", "running", "cycling", "exercise", "workout", "fitness", "gym", "push-up", "seahawks", "cowboys", "lakers"],
+    "history": ["history", "historical", "wwii", "civil war", "revolution", "ancient", "medieval"],
+    "music": ["music", "song", "band", "concert", "jazz", "rock", "classical", "piano", "guitar", "singer", "album"],
+    "film": ["film", "movie", "tv", "television", "show", "series", "netflix", "documentary", "actor", "actress", "cinema"],
+    "politics": ["politic", "election", "congress", "senate", "president", "democrat", "republican", "vote", "government"],
+    "poetry": ["poetry", "poem", "poet", "verse", "sonnet"],
+    "geography": ["geography", "travel", "country", "continent", "map", "capital", "explore"],
+    "animals": ["animal", "pet", "dog", "cat", "bird", "horse", "fish", "puppy", "kitten"],
+    "literature": ["book", "read", "novel", "author", "library", "literature", "biography", "fiction"],
+    "gardening": ["garden", "plant", "flower", "vegetable", "herb", "rose", "seed", "grow", "yard", "lawn"],
+    "travel": ["travel", "trip", "vacation", "flight", "destination", "cruise", "beach", "tourism"],
+    "cooking": ["cook", "recipe", "bake", "kitchen", "food", "chef", "cuisine", "ingredient", "restaurant"],
+}
+
+def _match_category(topic: str) -> str | None:
+    """Try to match a free-form topic to a predefined interest category."""
+    low = topic.lower()
+    # Exact match first
+    if low in _CATEGORY_KEYWORDS:
+        return low
+    # Keyword search
+    for category, keywords in _CATEGORY_KEYWORDS.items():
+        if any(kw in low for kw in keywords):
+            return category
+    return None
+
 
 def discover_new_interests(
     current_interests: list[str],
     analysis: dict | None,
     tracker_topics: list[str] | None = None,
-) -> list[str]:
+) -> list[dict[str, str]]:
     """Identify new interests from a completed call.
 
     Collects candidate topics from analysis + tracker, filters out known
     interests & generic topics, and returns only those with strong engagement
     signals.
 
-    Args:
-        current_interests: Senior's existing interests list.
-        analysis: Post-call analysis dict (from call_analysis service).
-        tracker_topics: Topics from ConversationTracker.
-
-    Returns:
-        List of new interest strings to add.
+    Returns list of dicts with 'id' (predefined category or raw string) and
+    'detail' (original topic text as detected by AI).
     """
     if not analysis:
         return []
@@ -65,12 +89,10 @@ def discover_new_interests(
     positive_obs = " ".join(analysis.get("positive_observations") or []).lower()
     engagement = analysis.get("engagement_score", 0)
 
-    new_interests: list[str] = []
+    new_interests: list[dict[str, str]] = []
+    seen_categories: set[str] = set(existing)
     for candidate in candidates:
         low = candidate.lower()
-        # Skip if already known
-        if low in existing:
-            continue
         # Skip generic / non-hobby topics
         if any(word in _GENERIC_BLOCKLIST for word in low.split()):
             continue
@@ -78,35 +100,73 @@ def discover_new_interests(
         if len(low) < 3 or len(low) > 40:
             continue
         # Require strong engagement signal
-        if engagement >= 7 or low in positive_obs:
-            new_interests.append(candidate)
+        if not (engagement >= 7 or low in positive_obs):
+            continue
+
+        # Map to predefined category when possible
+        category = _match_category(candidate)
+        interest_id = category or low
+        if interest_id in seen_categories:
+            continue
+        seen_categories.add(interest_id)
+        new_interests.append({"id": interest_id, "detail": candidate})
 
     return new_interests
 
 
 async def add_interests_to_senior(
     senior_id: str,
-    new_interests: list[str],
+    new_interests: list[dict[str, str]],
     existing_interests: list[str],
 ) -> list[str]:
     """Merge new interests into the senior's profile (capped at MAX_INTERESTS).
+
+    Also updates familyInfo.interestDetails with AI-detected descriptions
+    so caregivers can see and edit them in the mobile app.
 
     Returns the updated full interests list.
     """
     existing_lower = {i.lower() for i in existing_interests}
     merged = list(existing_interests)
-    for interest in new_interests:
-        if interest.lower() not in existing_lower and len(merged) < MAX_INTERESTS:
-            merged.append(interest)
-            existing_lower.add(interest.lower())
+    details_to_add: dict[str, str] = {}
+
+    for entry in new_interests:
+        interest_id = entry["id"]
+        detail = entry.get("detail", "")
+        if interest_id.lower() not in existing_lower and len(merged) < MAX_INTERESTS:
+            merged.append(interest_id)
+            existing_lower.add(interest_id.lower())
+            if detail and detail.lower() != interest_id.lower():
+                details_to_add[interest_id] = f"Detected from call: {detail}"
 
     if len(merged) != len(existing_interests):
-        from services.seniors import update
-        await update(senior_id, {"interests": merged})
+        from services.seniors import update, get_by_id
+        update_data: dict = {"interests": merged}
+
+        # Merge AI-detected details into familyInfo.interestDetails
+        if details_to_add:
+            senior = await get_by_id(senior_id)
+            family_info = (senior or {}).get("family_info") or {}
+            if isinstance(family_info, str):
+                import json as _json
+                try:
+                    family_info = _json.loads(family_info)
+                except Exception:
+                    family_info = {}
+            existing_details = family_info.get("interestDetails") or {}
+            # Only add details for interests that don't already have a description
+            for k, v in details_to_add.items():
+                if k not in existing_details:
+                    existing_details[k] = v
+            family_info["interestDetails"] = existing_details
+            update_data["familyInfo"] = family_info
+
+        await update(senior_id, update_data)
         logger.info(
-            "Added {n} interests for senior_id={sid}",
+            "Added {n} interests for senior_id={sid} (details={d})",
             n=len(merged) - len(existing_interests),
             sid=str(senior_id)[:8],
+            d=len(details_to_add),
         )
 
     return merged

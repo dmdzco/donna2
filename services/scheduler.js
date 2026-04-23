@@ -41,6 +41,10 @@ let lastWelfareClearDate = new Date().toISOString().slice(0, 10);
 const scheduleCalledToday = new Set();
 let lastScheduleClearDate = new Date().toISOString().slice(0, 10);
 
+// Per-senior cooldown — prevents any call to the same senior within 10 minutes of the last trigger.
+// Maps seniorId → timestamp (ms) of last call trigger.
+const seniorLastCallTime = new Map();
+
 const REMINDER_PREWARM_TARGET_LEAD_MS = 2 * 60 * 1000;
 const REMINDER_PREWARM_LOOKAHEAD_MS = REMINDER_PREWARM_TARGET_LEAD_MS + 60 * 1000;
 const REMINDER_PREWARM_TTL_MS = 10 * 60 * 1000;
@@ -787,6 +791,13 @@ export const schedulerService = {
         const dedupKey = `${senior.id}:${item.id || `${item.time}-${item.frequency}`}`;
         if (scheduleCalledToday.has(dedupKey)) continue;
 
+        // Per-senior cooldown: skip if a call was triggered for this senior recently (10 min)
+        const lastCall = seniorLastCallTime.get(senior.id);
+        if (lastCall && (now.getTime() - lastCall) < 10 * 60 * 1000) {
+          log.info('Schedule item skipped (senior cooldown)', { seniorId: senior.id, title: item.title, cooldown_remaining_s: Math.round((10 * 60 * 1000 - (now.getTime() - lastCall)) / 1000) });
+          continue;
+        }
+
         // Gather pending reminders for this senior (active reminders whose event is today)
         const seniorReminders = await this._getPendingRemindersForSenior(senior.id, timezone, now, item.reminderIds);
 
@@ -934,20 +945,40 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
           await new Promise(resolve => setTimeout(resolve, 50));
         }
         inFlight++;
+
+        // Mark dedup BEFORE triggering to prevent duplicate calls if the next
+        // polling cycle runs while this call is still being initiated.
+        if (spec.type === 'schedule') {
+          scheduleCalledToday.add(spec.dedupKey);
+          seniorLastCallTime.set(spec.senior.id, Date.now());
+        } else {
+          welfareCalledToday.add(spec.senior.id);
+          seniorLastCallTime.set(spec.senior.id, Date.now());
+        }
+
         try {
           const call = await schedulerService.triggerOutboundCall(spec, baseUrl);
           if (call) {
-            if (spec.type === 'schedule') {
-              scheduleCalledToday.add(spec.dedupKey);
-            } else {
-              welfareCalledToday.add(spec.senior.id);
-            }
             succeeded++;
           } else {
+            // Trigger returned null — revert dedup so it can be retried next cycle
+            if (spec.type === 'schedule') {
+              scheduleCalledToday.delete(spec.dedupKey);
+            } else {
+              welfareCalledToday.delete(spec.senior.id);
+            }
+            seniorLastCallTime.delete(spec.senior.id);
             failed++;
           }
         } catch (err) {
           log.error('Trigger failed', { type: spec.type, error: err.message });
+          // Revert dedup on failure so it can be retried next cycle
+          if (spec.type === 'schedule') {
+            scheduleCalledToday.delete(spec.dedupKey);
+          } else {
+            welfareCalledToday.delete(spec.senior.id);
+          }
+          seniorLastCallTime.delete(spec.senior.id);
           failed++;
         } finally {
           inFlight--;

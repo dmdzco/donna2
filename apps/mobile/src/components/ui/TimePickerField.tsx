@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import DateTimePicker, {
   type DateTimePickerEvent,
@@ -28,18 +28,45 @@ export function TimePickerField({
   testID,
 }: TimePickerFieldProps) {
   const [showPicker, setShowPicker] = useState(false);
-  const pickerValue = useMemo(() => dateFromTimeString(value), [value]);
+  const baseDate = useMemo(() => dateFromTimeString(value), [value]);
+
+  // On iOS spinner, keep a local Date state so the picker visually follows
+  // the user's scroll without triggering parent re-renders.
+  const [iosPickerDate, setIosPickerDate] = useState<Date>(baseDate);
+
+  // Sync local iOS date when the parent value changes (e.g. opening picker again)
+  const prevValueRef = useRef(value);
+  if (prevValueRef.current !== value) {
+    prevValueRef.current = value;
+    setIosPickerDate(baseDate);
+  }
+
+  const pickerValue = Platform.OS === "ios" ? iosPickerDate : baseDate;
 
   const handlePickerChange = (
     event: DateTimePickerEvent,
     selectedDate?: Date,
   ) => {
-    if (Platform.OS === "android") {
+    if (event.type === "dismissed") {
       setShowPicker(false);
+      return;
     }
 
-    if (event.type === "dismissed" || !selectedDate) return;
-    onChange(formatTimeFromDate(selectedDate));
+    if (!selectedDate) return;
+
+    if (Platform.OS === "ios") {
+      // On iOS spinner, update local state so picker follows the scroll
+      setIosPickerDate(selectedDate);
+    } else {
+      // On Android, commit immediately and close
+      setShowPicker(false);
+      onChange(formatTimeFromDate(selectedDate));
+    }
+  };
+
+  const handleDone = () => {
+    onChange(formatTimeFromDate(iosPickerDate));
+    setShowPicker(false);
   };
 
   return (
@@ -75,7 +102,7 @@ export function TimePickerField({
           />
           {Platform.OS === "ios" ? (
             <Pressable
-              onPress={() => setShowPicker(false)}
+              onPress={handleDone}
               className="items-center py-3 border-t border-charcoal/10"
               accessibilityRole="button"
               accessibilityLabel="Done selecting time"

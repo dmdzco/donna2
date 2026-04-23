@@ -49,7 +49,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             apps/admin-v2/package-lock.json
-            apps/consumer/package-lock.json
+            apps/website/package-lock.json
             apps/observability/package-lock.json
 
       - name: Install root dependencies
@@ -58,13 +58,13 @@ jobs:
       - name: Install frontend dependencies
         run: |
           npm ci --prefix apps/admin-v2
-          npm ci --prefix apps/consumer
+          npm ci --prefix apps/website
           npm ci --prefix apps/observability
 
       - name: Build frontend apps
         run: |
           npm run build --prefix apps/admin-v2
-          npm run build --prefix apps/consumer
+          npm run build --prefix apps/website
           npm run build --prefix apps/observability
 
       - name: Install Playwright browser

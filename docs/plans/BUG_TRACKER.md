@@ -74,6 +74,53 @@
 
 ---
 
+### BUG-008: Instant Call button, Call Schedule button, and Power Bar text should be slightly lower
+- **Reported**: 2026-04-22
+- **Reporter**: Nick
+- **App**: Mobile (iOS)
+- **Severity**: Low — UI polish
+- **Description**: The Instant Call button, Call Schedule button, and the words on the Power Bar (below their icons) should all be moved a tiny bit lower for better visual alignment.
+- **Screenshot**: ![BUG-008](screenshots/bug-008-move-buttons-lower.png)
+
+---
+
+### BUG-009: Add "Myself" as an option for who Donna is for
+- **Reported**: 2026-04-22
+- **Reporter**: Nick
+- **App**: Mobile (iOS)
+- **Severity**: Medium — missing option in onboarding
+- **Description**: When the user is asked who Donna is for during onboarding, "Myself" should be one of the available options. Currently it is not listed.
+- **Screenshot**: ![BUG-009](screenshots/bug-009-add-myself-option.png)
+
+---
+
+### BUG-010: Sign In button should be centered below "Already have an account?"
+- **Reported**: 2026-04-22
+- **Reporter**: Nick
+- **App**: Mobile (iOS)
+- **Severity**: Low — UI polish
+- **Description**: On the initial/Get Started page, the Sign In button should be positioned below the "Already have an account?" text and centered on the screen.
+- **Screenshot**: ![BUG-010](screenshots/bug-010-center-sign-in.png)
+
+---
+
+### BUG-011: Call times not visible in dark mode when scheduling a call
+- **Reported**: 2026-04-22
+- **Reporter**: Nick
+- **App**: Mobile (iOS)
+- **Severity**: High — content invisible to dark mode users
+- **Description**: When the user has dark mode enabled on their iPhone, the call times are not visible when scheduling a call. The text likely blends into the background.
+- **Screenshot**: ![BUG-011](screenshots/bug-011-dark-mode-call-times.png)
+
+---
+
+### Note: Splash Screen Draft Available
+- **Date**: 2026-04-22
+- **Description**: This image can be used as a splash screen if needed (dark sage background, off-white Donna logo). Relates to BUG-006.
+- **Image**: ![Splash Screen Draft](screenshots/splash-screen-draft.jpg)
+
+---
+
 ## Resolved Bugs
 
 ### BUG-001: Signup rejects all passwords as "found in data leak"

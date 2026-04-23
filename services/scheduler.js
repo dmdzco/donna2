@@ -10,6 +10,7 @@ import {
   DEFAULT_TIMEZONE,
   getDatePartsInTimezone,
   parseDailyCronExpression,
+  parseTimeString,
   resolveTimezoneFromProfile,
   zonedWallTimeToUtcDate,
 } from '../lib/timezone.js';
@@ -34,6 +35,11 @@ async function retryTelnyxCall(params, maxAttempts = 3) {
 // Welfare check tracking — prevents calling the same senior twice per day
 const welfareCalledToday = new Set();
 let lastWelfareClearDate = new Date().toISOString().slice(0, 10);
+
+// Schedule call tracking — prevents triggering the same schedule item twice per day
+// Key format: "seniorId:scheduleItemId" or "seniorId:time-frequency" for items without id
+const scheduleCalledToday = new Set();
+let lastScheduleClearDate = new Date().toISOString().slice(0, 10);
 
 const REMINDER_PREWARM_TARGET_LEAD_MS = 2 * 60 * 1000;
 const REMINDER_PREWARM_LOOKAHEAD_MS = REMINDER_PREWARM_TARGET_LEAD_MS + 60 * 1000;
@@ -479,30 +485,33 @@ export const schedulerService = {
   },
 
   /**
-   * Merge due reminders and welfare-eligible seniors into a deduplicated call plan.
-   * Reminder calls take priority — if a senior has both a reminder and needs welfare,
-   * only the reminder fires (it counts as contact).
-   * Returns an array of CallSpec objects: { type, senior, reminder?, scheduledFor?, existingDelivery? }
+   * Merge due scheduled calls and welfare-eligible seniors into a deduplicated call plan.
+   * Scheduled calls take priority — if a senior has a scheduled call and needs welfare,
+   * only the scheduled call fires (it counts as contact).
+   * Returns an array of CallSpec objects: { type, senior, scheduleItem?, pendingReminders?, dedupKey? }
    */
-  buildCallPlan(dueReminders, welfareSeniors) {
+  buildCallPlan(dueScheduledCalls, welfareSeniors) {
     const specs = [];
-    const seniorIdsWithReminders = new Set();
+    const seniorIdsWithSchedule = new Set();
 
-    // Reminder specs first (higher priority)
-    for (const { reminder, senior, scheduledFor, existingDelivery } of dueReminders) {
+    // Scheduled call specs first (higher priority)
+    for (const { senior, scheduleItem, dedupKey, pendingReminders } of dueScheduledCalls) {
+      // Only one call per senior per cycle even if multiple schedule items match
+      if (seniorIdsWithSchedule.has(senior.id)) continue;
+
       specs.push({
-        type: 'reminder',
+        type: 'schedule',
         senior,
-        reminder,
-        scheduledFor,
-        existingDelivery
+        scheduleItem,
+        dedupKey,
+        pendingReminders,
       });
-      seniorIdsWithReminders.add(senior.id);
+      seniorIdsWithSchedule.add(senior.id);
     }
 
-    // Welfare specs — skip seniors already getting a reminder call or already called today
+    // Welfare specs — skip seniors already getting a scheduled call or already called today
     for (const senior of welfareSeniors) {
-      if (seniorIdsWithReminders.has(senior.id)) continue;
+      if (seniorIdsWithSchedule.has(senior.id)) continue;
       if (welfareCalledToday.has(senior.id)) continue;
 
       specs.push({
@@ -521,20 +530,20 @@ export const schedulerService = {
    */
   async triggerOutboundCall(spec, baseUrl) {
     const { type, senior } = spec;
-    cleanupReminderPrewarmCache();
 
-    // Gate ALL outbound calls through the timezone call window.
-    // Reminder calls with an explicit caregiver-set time are allowed as early as 5 AM.
-    const earlyAllowed = type === 'reminder' && !!spec.reminder?.scheduledTime;
-    const timezone = getSeniorTimezone(senior);
-    if (!isInCallWindow(timezone, { earlyAllowed })) {
-      log.info('Outside call window, skipping', { type, name: senior.name, timezone, earlyAllowed });
-      return null;
+    // Scheduled calls bypass the call window — the caregiver explicitly chose that time.
+    // Welfare calls are gated through the default 9 AM – 7 PM window.
+    if (type !== 'schedule') {
+      const timezone = getSeniorTimezone(senior);
+      if (!isInCallWindow(timezone)) {
+        log.info('Outside call window, skipping', { type, name: senior.name, timezone });
+        return null;
+      }
     }
 
     try {
-      if (type === 'reminder') {
-        return await this._triggerReminderPath(spec, baseUrl);
+      if (type === 'schedule') {
+        return await this._triggerSchedulePath(spec, baseUrl);
       } else {
         return await this._triggerWelfarePath(spec, baseUrl);
       }
@@ -545,32 +554,28 @@ export const schedulerService = {
   },
 
   /**
-   * Reminder call path: create a Telnyx call through Pipecat.
-   * Pipecat writes the delivery row and seeds call metadata before the stream starts.
+   * Scheduled call path: create a Telnyx call through Pipecat.
+   * Passes pending reminders as context so Donna can mention them during the call.
    */
-  async _triggerReminderPath(spec, baseUrl) {
-    const { senior, reminder, scheduledFor, existingDelivery } = spec;
+  async _triggerSchedulePath(spec, baseUrl) {
+    const { senior, scheduleItem, pendingReminders } = spec;
 
-    const targetScheduledFor = scheduledFor || this.getScheduledForTime(reminder, senior) || new Date();
-    const reminderSpec = { ...spec, scheduledFor: targetScheduledFor };
-    const prewarmedContext = this.getReminderPrewarm(reminderSpec);
-    log.info('Triggering Telnyx reminder call', { seniorId: senior.id, reminderId: reminder.id });
+    const reminderIds = (pendingReminders || []).map(r => r.id);
+    log.info('Triggering Telnyx scheduled call', {
+      seniorId: senior.id,
+      scheduleTime: scheduleItem.time,
+      pendingReminders: reminderIds.length,
+    });
 
     const call = await retryTelnyxCall({
       seniorId: senior.id,
-      callType: 'reminder',
-      reminderId: reminder.id,
-      scheduledFor: targetScheduledFor.toISOString(),
-      existingDeliveryId: existingDelivery?.id,
-      ...(prewarmedContext ? { prewarmedContext } : {}),
+      callType: 'schedule',
+      reminderIds,
+      contextNotes: scheduleItem.contextNotes || null,
       baseUrl,
     });
 
-    if (prewarmedContext) {
-      const key = reminderPrewarmKey(reminder.id, targetScheduledFor);
-      if (key) reminderPrewarmCache.delete(key);
-    }
-    log.info('Reminder call initiated', { callSid: call.callSid, seniorId: senior.id });
+    log.info('Scheduled call initiated', { callSid: call.callSid, seniorId: senior.id });
     return { sid: call.callSid, callSid: call.callSid, callControlId: call.callControlId };
   },
 
@@ -698,6 +703,131 @@ export const schedulerService = {
   },
 
   /**
+   * Find scheduled calls that are due now based on seniors' preferredCallTimes.schedule.
+   * Schedule items drive outbound calls; reminders are informational context only.
+   */
+  async getDueScheduledCalls() {
+    const now = new Date();
+
+    // Load all active seniors with their schedule
+    const results = await db.execute(sql`
+      SELECT s.id, s.name, s.phone, s.timezone, s.interests,
+             s.family_info AS "familyInfo",
+             s.family_info_encrypted AS "familyInfoEncrypted",
+             s.medical_notes AS "medicalNotes",
+             s.medical_notes_encrypted AS "medicalNotesEncrypted",
+             s.preferred_call_times AS "preferredCallTimes",
+             s.preferred_call_times_encrypted AS "preferredCallTimesEncrypted",
+             s.is_active AS "isActive",
+             s.city, s.state, s.zip_code AS "zipCode",
+             s.additional_info AS "additionalInfo",
+             s.additional_info_encrypted AS "additionalInfoEncrypted",
+             s.call_context_snapshot AS "callContextSnapshot",
+             s.call_context_snapshot_encrypted AS "callContextSnapshotEncrypted"
+      FROM seniors s
+      WHERE s.is_active = true
+    `);
+    const allSeniors = (results.rows || []).map(decryptSeniorPhi);
+
+    const dueScheduleCalls = [];
+
+    if (allSeniors.length > 0) {
+      log.info('Checking schedules', { seniors: allSeniors.length });
+    }
+
+    for (const senior of allSeniors) {
+      const schedule = senior.preferredCallTimes?.schedule;
+      if (!Array.isArray(schedule) || schedule.length === 0) continue;
+
+      const timezone = getSeniorTimezone(senior);
+      const nowLocal = getDatePartsInTimezone(now, timezone);
+      // Reconstruct a Date in the senior's local wall-clock to get reliable day-of-week
+      const nowDayOfWeek = new Date(nowLocal.year, nowLocal.month - 1, nowLocal.day).getDay();
+
+      log.info('Evaluating schedule', {
+        senior: senior.name,
+        timezone,
+        nowLocal: `${nowLocal.hours}:${String(nowLocal.minutes).padStart(2, '0')}`,
+        dayOfWeek: nowDayOfWeek,
+        items: schedule.length,
+      });
+
+      for (const item of schedule) {
+        // Check frequency match
+        if (item.frequency === 'recurring') {
+          if (!item.recurringDays?.includes(nowDayOfWeek)) {
+            log.info('Schedule item skipped (wrong day)', { title: item.title, time: item.time, recurringDays: item.recurringDays, today: nowDayOfWeek });
+            continue;
+          }
+        } else if (item.frequency === 'one-time') {
+          if (!item.date) continue;
+          const itemDate = new Date(item.date);
+          const itemLocal = getDatePartsInTimezone(itemDate, timezone);
+          if (itemLocal.year !== nowLocal.year || itemLocal.month !== nowLocal.month || itemLocal.day !== nowLocal.day) {
+            log.info('Schedule item skipped (wrong date)', { title: item.title, itemDate: item.date });
+            continue;
+          }
+        }
+        // frequency === 'daily' always matches
+
+        // Check time match (within 5-minute window)
+        const wallTime = parseTimeString(item.time);
+        if (!wallTime) {
+          log.warn('Schedule item skipped (invalid time)', { title: item.title, time: item.time });
+          continue;
+        }
+
+        const gap = minutesApart(minutesSinceMidnight(wallTime), minutesSinceMidnight(nowLocal));
+        if (gap > 5) {
+          log.info('Schedule item not due', { title: item.title, time: item.time, gap_minutes: gap });
+          continue;
+        }
+
+        // Dedup: skip if already called for this schedule item today
+        const dedupKey = `${senior.id}:${item.id || `${item.time}-${item.frequency}`}`;
+        if (scheduleCalledToday.has(dedupKey)) continue;
+
+        // Gather pending reminders for this senior (active reminders whose event is today)
+        const seniorReminders = await this._getPendingRemindersForSenior(senior.id, timezone, now, item.reminderIds);
+
+        dueScheduleCalls.push({
+          senior,
+          scheduleItem: item,
+          dedupKey,
+          pendingReminders: seniorReminders,
+        });
+      }
+    }
+
+    return dueScheduleCalls;
+  },
+
+  /**
+   * Get active reminders for a senior that are relevant for today's call.
+   * If reminderIds are specified on the schedule item, use those.
+   * Otherwise, return all active reminders for today.
+   */
+  async _getPendingRemindersForSenior(seniorId, timezone, now, linkedReminderIds) {
+    const allReminders = (await db.select()
+      .from(reminders)
+      .where(and(
+        eq(reminders.seniorId, seniorId),
+        eq(reminders.isActive, true),
+      ))).map(decryptReminderPhi);
+
+    if (!allReminders.length) return [];
+
+    // If the schedule item links specific reminders, filter to those
+    if (linkedReminderIds?.length) {
+      const linked = allReminders.filter(r => linkedReminderIds.includes(r.id));
+      if (linked.length) return linked;
+    }
+
+    // Otherwise return all active reminders (Donna will mention them naturally)
+    return allReminders;
+  },
+
+  /**
    * Find active seniors who haven't had a completed conversation in 2+ days.
    * These seniors need a welfare check call.
    */
@@ -762,36 +892,33 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
     let succeeded = 0;
     let failed = 0;
     try {
-      // Date-rollover clear of welfare tracking
+      // Date-rollover clear of tracking sets
       const today = new Date().toISOString().slice(0, 10);
       if (today !== lastWelfareClearDate) {
         welfareCalledToday.clear();
         lastWelfareClearDate = today;
         log.info('Welfare tracking cleared for new day', { date: today });
       }
+      if (today !== lastScheduleClearDate) {
+        scheduleCalledToday.clear();
+        lastScheduleClearDate = today;
+        log.info('Schedule tracking cleared for new day', { date: today });
+      }
 
       // Fetch both sources in parallel
-      const [dueReminders, welfareSeniors, reminderPrewarmCandidates] = await Promise.all([
-        schedulerService.getDueReminders(),
+      const [dueScheduledCalls, welfareSeniors] = await Promise.all([
+        schedulerService.getDueScheduledCalls(),
         schedulerService.getSeniorsNeedingWelfareCheck(),
-        schedulerService.getReminderPrewarmCandidates(),
       ]);
 
       // Merge and deduplicate into a single call plan
-      const callPlan = schedulerService.buildCallPlan(dueReminders, welfareSeniors);
+      const callPlan = schedulerService.buildCallPlan(dueScheduledCalls, welfareSeniors);
 
       if (callPlan.length > 0) {
-        const reminderCount = callPlan.filter(s => s.type === 'reminder').length;
+        const scheduleCount = callPlan.filter(s => s.type === 'schedule').length;
         const welfareCount = callPlan.filter(s => s.type === 'welfare').length;
-        log.info('Unified call plan', { total: callPlan.length, reminders: reminderCount, welfare: welfareCount });
+        log.info('Unified call plan', { total: callPlan.length, scheduled: scheduleCount, welfare: welfareCount });
       }
-
-      const prewarmPromise = reminderPrewarmCandidates.length > 0
-        ? schedulerService.prewarmReminderCalls(reminderPrewarmCandidates, baseUrl).catch(error => {
-            log.warn('Reminder prewarm sweep failed', { error: error.message });
-            return null;
-          })
-        : null;
 
       // Resolve flags once per scheduler cycle
       const flags = await resolveFlags({ source: 'scheduler' });
@@ -810,8 +937,8 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
         try {
           const call = await schedulerService.triggerOutboundCall(spec, baseUrl);
           if (call) {
-            if (spec.type === 'reminder') {
-              await schedulerService.markDelivered(spec.reminder.id);
+            if (spec.type === 'schedule') {
+              scheduleCalledToday.add(spec.dedupKey);
             } else {
               welfareCalledToday.add(spec.senior.id);
             }
@@ -828,10 +955,6 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
       };
 
       const results = await Promise.allSettled(callPlan.map(triggerOne));
-
-      if (prewarmPromise) {
-        await prewarmPromise;
-      }
 
       if (succeeded > 0) {
         log.info('Unified check complete', { succeeded, failed, planned: callPlan.length });
@@ -888,7 +1011,7 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
   });
 
   log.info('Context pre-caching enabled (hourly check for 5 AM local time)');
-  log.info('Unified scheduler ready (reminders + welfare every 60s)');
+  log.info('Unified scheduler ready (scheduled calls + welfare every 60s)');
 
   // Weekly report polling (hourly check)
   const checkWeeklyReports = async () => {

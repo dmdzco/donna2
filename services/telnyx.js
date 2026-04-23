@@ -54,18 +54,22 @@ export async function initiateTelnyxOutboundCall({
   seniorId,
   callType = 'check-in',
   reminderId,
+  reminderIds,
   scheduledFor,
   existingDeliveryId,
   prewarmedContext,
+  contextNotes,
   baseUrl,
 }) {
   return postPipecat('/telnyx/outbound', {
     seniorId,
     callType,
     ...(reminderId ? { reminderId } : {}),
+    ...(reminderIds?.length ? { reminderIds } : {}),
     ...(scheduledFor ? { scheduledFor } : {}),
     ...(existingDeliveryId ? { existingDeliveryId } : {}),
     ...(prewarmedContext ? { prewarmedContext } : {}),
+    ...(contextNotes ? { contextNotes } : {}),
   }, { baseUrl });
 }
 

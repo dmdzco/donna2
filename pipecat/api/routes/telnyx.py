@@ -74,6 +74,8 @@ class TelnyxOutboundCallRequest(BaseModel):
     senior_id: str = Field(alias="seniorId")
     call_type: str = Field(default="check-in", alias="callType")
     reminder_id: str | None = Field(default=None, alias="reminderId")
+    reminder_ids: list[str] | None = Field(default=None, alias="reminderIds")
+    context_notes: str | None = Field(default=None, alias="contextNotes")
     scheduled_for: datetime | None = Field(default=None, alias="scheduledFor")
     existing_delivery_id: str | None = Field(default=None, alias="existingDeliveryId")
     prewarmed_context: "TelnyxPrewarmedOutboundContext | None" = Field(
@@ -1170,6 +1172,114 @@ async def _prepare_reminder_context(
     return format_reminder_prompt(normalized_reminder), reminder_context
 
 
+def _format_reminder_event_time(reminder: dict, senior_timezone: str | None = None) -> str | None:
+    """Format the reminder's event date/time into a human-readable string in the senior's timezone."""
+    from datetime import datetime as dt, timezone as tz
+    import zoneinfo
+
+    is_recurring = reminder.get("is_recurring", False)
+    scheduled_time = reminder.get("scheduled_time")
+    cron_expression = reminder.get("cron_expression")
+
+    if is_recurring and cron_expression:
+        # Parse cron "M H * * *" — these are already in the senior's local time
+        parts = str(cron_expression).strip().split()
+        if len(parts) == 5:
+            try:
+                minute = int(parts[0])
+                hour = int(parts[1])
+                period = "AM" if hour < 12 else "PM"
+                display_hour = hour if 1 <= hour <= 12 else (hour - 12 if hour > 12 else 12)
+                return f"every day at {display_hour}:{minute:02d} {period}"
+            except (ValueError, IndexError):
+                pass
+        return "recurring (daily)"
+
+    if scheduled_time:
+        try:
+            if isinstance(scheduled_time, str):
+                event_dt = dt.fromisoformat(scheduled_time.replace("Z", "+00:00"))
+            else:
+                event_dt = scheduled_time
+
+            # Convert from UTC to senior's local timezone
+            if senior_timezone:
+                try:
+                    tz_info = zoneinfo.ZoneInfo(senior_timezone)
+                    # If naive datetime, assume UTC
+                    if event_dt.tzinfo is None:
+                        event_dt = event_dt.replace(tzinfo=tz.utc)
+                    event_dt = event_dt.astimezone(tz_info)
+                except Exception:
+                    pass  # Fall through to UTC formatting
+
+            # Format as readable: "Wednesday, April 23 at 5:20 PM"
+            return event_dt.strftime("%A, %B %d at %-I:%M %p")
+        except Exception:
+            return str(scheduled_time)
+
+    return None
+
+
+async def _prepare_schedule_context(
+    body: TelnyxOutboundCallRequest,
+    senior: dict | None = None,
+) -> tuple[str | None, dict | None]:
+    """Prepare context for a scheduled call with pending reminders."""
+    if body.call_type != "schedule":
+        return None, None
+
+    from services.reminder_delivery import get_reminder_by_id
+
+    senior_timezone = (senior or {}).get("timezone")
+
+    pending_reminders = []
+    if body.reminder_ids:
+        for rid in body.reminder_ids:
+            reminder = await get_reminder_by_id(rid)
+            if reminder:
+                event_time = _format_reminder_event_time(reminder, senior_timezone)
+                pending_reminders.append({
+                    "id": rid,
+                    "title": reminder.get("title", ""),
+                    "description": reminder.get("description", ""),
+                    "type": reminder.get("reminder_type") or reminder.get("type", ""),
+                    "event_time": event_time,
+                    "is_recurring": reminder.get("is_recurring", False),
+                })
+
+    if not pending_reminders and not body.context_notes:
+        return None, None
+
+    # Build a prompt for Donna to naturally mention reminders during the call
+    lines = []
+    if pending_reminders:
+        lines.append("\nREMINDERS TO MENTION DURING THIS CALL:")
+        lines.append(
+            "Bring these up naturally during the conversation — "
+            "don't list them all at once. Make sure to mention WHEN each event happens."
+        )
+        for r in pending_reminders:
+            detail = f"- {r['title']}"
+            if r.get("description"):
+                detail += f" — {r['description']}"
+            if r.get("event_time"):
+                detail += f" (Event happens: {r['event_time']})"
+            elif r.get("is_recurring"):
+                detail += " (recurring daily)"
+            lines.append(detail)
+
+    if body.context_notes:
+        lines.append(f"\nAdditional context from caregiver: {body.context_notes}")
+
+    reminder_prompt = "\n".join(lines) if lines else None
+    schedule_context = {
+        "pending_reminders": pending_reminders,
+        "context_notes": body.context_notes,
+    }
+    return reminder_prompt, schedule_context
+
+
 async def create_telnyx_outbound_call(body: TelnyxOutboundCallRequest) -> dict:
     """Create an outbound Telnyx call and seed Pipecat call metadata."""
     cfg = get_settings()
@@ -1235,7 +1345,11 @@ async def create_telnyx_outbound_call(body: TelnyxOutboundCallRequest) -> dict:
     )
 
     try:
-        reminder_prompt, reminder_context = await _prepare_reminder_context(body, call_control_id)
+        # Prepare context based on call type
+        if body.call_type == "schedule":
+            reminder_prompt, reminder_context = await _prepare_schedule_context(body, senior)
+        else:
+            reminder_prompt, reminder_context = await _prepare_reminder_context(body, call_control_id)
         await _store_senior_metadata(
             call_control_id=call_control_id,
             senior=senior,

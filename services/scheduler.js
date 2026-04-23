@@ -774,16 +774,19 @@ export const schedulerService = {
         }
         // frequency === 'daily' always matches
 
-        // Check time match (within 5-minute window)
+        // Check time match — only trigger AT or AFTER the scheduled time, within a 3-minute window.
+        // nowMinutes - schedMinutes > 0 means we're past the scheduled time.
         const wallTime = parseTimeString(item.time);
         if (!wallTime) {
           log.warn('Schedule item skipped (invalid time)', { title: item.title, time: item.time });
           continue;
         }
 
-        const gap = minutesApart(minutesSinceMidnight(wallTime), minutesSinceMidnight(nowLocal));
-        if (gap > 5) {
-          log.info('Schedule item not due', { title: item.title, time: item.time, gap_minutes: gap });
+        const nowMinutes = minutesSinceMidnight(nowLocal);
+        const schedMinutes = minutesSinceMidnight(wallTime);
+        const minutesPast = nowMinutes - schedMinutes;
+        if (minutesPast < 0 || minutesPast > 3) {
+          log.info('Schedule item not due', { title: item.title, time: item.time, minutes_past: minutesPast });
           continue;
         }
 

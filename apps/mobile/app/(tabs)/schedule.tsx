@@ -308,11 +308,13 @@ export default function ScheduleScreen() {
     }
 
     try {
+      console.log('[Schedule] Saving schedule', JSON.stringify(updated));
       await updateSchedule.mutateAsync({ schedule: updated });
+      console.log('[Schedule] Save succeeded');
       setModalVisible(false);
       setRecentlySavedTitle(newItem.title);
-    } catch {
-      // Error handled by react-query
+    } catch (err) {
+      console.error('[Schedule] Save failed', err);
     }
   }, [
     formTitle,

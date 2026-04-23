@@ -34,11 +34,16 @@ env:
 # Edit phone
 - tapOn: "Phone Number"
 - eraseText: 50
-- inputText: "5559876543"
+- runFlow:
+    file: ../subflows/tap_digits.yaml
+    env:
+      DIGITS: "5559876543"
 
 # Select relationship
-- tapOn: "Select relationship"
-- tapOn: "Son"
+- tapOn:
+    id: "caregiver-relationship-input"
+- tapOn:
+    id: "caregiver-relationship-option-Son"
 
 # Change Password button visible
 - scrollUntilVisible:

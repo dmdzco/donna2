@@ -4,8 +4,10 @@
 # KEY LEARNINGS (from previous test runs):
 #   - Input component: label <Text> is accessible={false}, so tapOn by original
 #     case (e.g., "Call Title") targets the TextInput directly.
-#   - hideKeyboard fails on iOS — use pressKey:enter for single-line fields,
-#     or tap a non-interactive heading for phone-pad keyboards.
+#   - Use pressKey:enter for single-line text fields when Return is visible.
+#     For phone/number pads, tap visible keypad digits via ../subflows/tap_digits.yaml.
+#   - Do not tap random headings or empty space to dismiss keyboards; tap the
+#     visible CTA/control directly so the flow matches the intended UX.
 #   - Modal title and save button share text — use index: 1 for the button.
 #   - Do NOT use scrollUntilVisible inside modals.
 #   - Native iOS Alert body text is NOT accessible — only check buttons (OK/Cancel).

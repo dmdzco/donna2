@@ -6,8 +6,10 @@
 #     BUT textTransform:uppercase on the label makes its accessibility text uppercase
 #     ("CALL TITLE") while TextInput keeps original case ("Call Title"). So tapOn
 #     by original case targets the TextInput directly — no index needed.
-#   - hideKeyboard fails on iOS. Use pressKey:enter (single-line) or tap a
-#     non-interactive element (multiline/phone-pad) to dismiss.
+#   - Use pressKey:enter for single-line text fields when Return is visible.
+#     For phone/number pads, tap visible keypad digits via ../subflows/tap_digits.yaml.
+#   - Do not tap random headings or empty space to dismiss keyboards; tap the
+#     visible CTA/control directly so the flow matches the intended UX.
 #   - Do NOT use scrollUntilVisible inside modals — it scrolls the background.
 #   - Modal title text and save button share the same text. Use index: 1 for button.
 

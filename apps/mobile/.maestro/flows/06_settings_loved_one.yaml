@@ -31,7 +31,10 @@ env:
 - tapOn:
     id: "loved-one-phone-input"
 - eraseText: 50
-- inputText: ${output.lovedOnePhone}
+- runFlow:
+    file: ../subflows/tap_digits.yaml
+    env:
+      DIGITS: ${output.lovedOnePhone}
 
 # Edit city
 - tapOn:

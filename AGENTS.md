@@ -65,6 +65,16 @@ Read `DIRECTORY.md` before writing code. It is the navigation map for active vs.
 - Pipecat dev deploy: `make deploy-dev-pipecat`
 - Combined dev deploy: `make deploy-dev`
 
+## Mobile Simulator / Maestro
+
+- When running `apps/mobile` from a clean worktree, especially latest `origin/main`, verify `apps/mobile/.env` exists before building or launching the simulator app.
+- If the clean worktree is missing that file, copy it from the primary checkout's `apps/mobile/.env` with `0600` permissions before running `expo run:ios` or Maestro.
+- Only print the names of mobile env vars, never their values. The required public keys include `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`.
+- Do not treat a failed mobile login as an app regression until the rebuilt simulator bundle is confirmed to include the mobile env.
+- Maestro mobile flows should exercise human-visible input paths. For iOS `phone-pad` and `number-pad` fields, focus the field and tap the visible keypad digits using `.maestro/subflows/tap_digits.yaml`; do not use `inputText` for those fields.
+- Maestro form tests must use values that differ from placeholders and assert those values are visible before tapping the next CTA. A visible placeholder is not evidence that input succeeded.
+- Do not dismiss the keyboard by tapping random headings or empty screen space just to reach a CTA. If `Next`, `Continue`, or `Create Profile` is not clearly tappable while the keyboard is open, fix the UI/footer behavior and make the flow tap the visible CTA directly.
+
 ## Canonical Edit Paths
 
 - Change Donna's voice behavior: `pipecat/prompts.py`, `pipecat/flows/nodes.py`, `pipecat/flows/tools.py`

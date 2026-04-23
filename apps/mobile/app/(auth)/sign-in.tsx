@@ -1,4 +1,4 @@
-import { useAuth, useOAuth, useSignIn } from "@clerk/clerk-expo";
+import { useAuth, useOAuth, useSignIn, useSignInWithApple } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
@@ -110,9 +110,7 @@ export default function SignInScreen() {
   const { startOAuthFlow: startGoogleOAuth } = useOAuth({
     strategy: "oauth_google",
   });
-  const { startOAuthFlow: startAppleOAuth } = useOAuth({
-    strategy: "oauth_apple",
-  });
+  const { startAppleAuthenticationFlow } = useSignInWithApple();
 
   const [authStep, setAuthStep] = useState<AuthStep>({ type: "credentials" });
   const [email, setEmail] = useState("");
@@ -244,6 +242,12 @@ export default function SignInScreen() {
       .filter((factor) => SECOND_FACTOR_CODE_STRATEGIES.has(factor.strategy));
   }
 
+  function getSupportedFirstFactorStrategies(resource: any): string[] {
+    return ((resource?.supportedFirstFactors as Array<{ strategy?: string }> | undefined) || [])
+      .map((factor) => factor.strategy)
+      .filter((strategy): strategy is string => Boolean(strategy));
+  }
+
   function getSupportedResetPasswordFactors(resource: any): AuthFactor[] {
     return ((resource?.supportedFirstFactors as AuthFactor[] | undefined) || [])
       .filter((factor) => RESET_PASSWORD_CODE_STRATEGIES.has(factor.strategy));
@@ -307,6 +311,25 @@ export default function SignInScreen() {
       case "complete":
         await finishSession(result.createdSessionId);
         return;
+      case "needs_first_factor": {
+        const supportedFirstFactors = getSupportedFirstFactorStrategies(result);
+
+        if (password && signIn && supportedFirstFactors.includes("password")) {
+          const attemptedPassword = await signIn.attemptFirstFactor({
+            strategy: "password",
+            password,
+          } as any);
+
+          if (attemptedPassword?.status !== "needs_first_factor") {
+            await handleSignInResult(attemptedPassword);
+            return;
+          }
+        }
+
+        throw new Error(
+          `The sign-in flow still needs a first-factor step the mobile app does not support yet (supported: ${supportedFirstFactors.join(", ") || "none"}).`
+        );
+      }
       case "needs_second_factor":
         await routeToSecondFactor(result);
         return;
@@ -315,7 +338,9 @@ export default function SignInScreen() {
         setAuthStep({ type: "forgot_password_new_password" });
         return;
       default:
-        throw new Error("The sign-in flow needs an unsupported verification step.");
+        throw new Error(
+          `The sign-in flow needs an unsupported verification step (${result?.status ?? "missing"}).`
+        );
     }
   }
 
@@ -333,10 +358,10 @@ export default function SignInScreen() {
 
     try {
       const result = await signIn.create({
+        strategy: "password",
         identifier: email.trim(),
         password,
       });
-
       await handleSignInResult(result);
     } catch (err: unknown) {
       const clerkFieldErrors = getClerkFieldErrors(err);
@@ -539,10 +564,21 @@ export default function SignInScreen() {
     setOauthLoading(provider);
 
     try {
-      const startFlow =
-        provider === "google" ? startGoogleOAuth : startAppleOAuth;
+      if (provider === "apple") {
+        if (Platform.OS !== "ios") return;
+
+        const { createdSessionId, setActive: setAppleActive } =
+          await startAppleAuthenticationFlow();
+
+        if (createdSessionId && setAppleActive) {
+          await setAppleActive({ session: createdSessionId });
+          await navigateAfterAuth();
+        }
+        return;
+      }
+
       const { createdSessionId, setActive: setOAuthActive } =
-        await startFlow();
+        await startGoogleOAuth();
 
       if (createdSessionId && setOAuthActive) {
         await setOAuthActive({ session: createdSessionId });
@@ -692,20 +728,22 @@ export default function SignInScreen() {
               </View>
 
               <View className="gap-3 mb-8">
-                <Button
-                  title={t("auth.continueWithApple")}
-                  onPress={() => handleOAuth("apple")}
-                  variant="secondary"
-                  loading={oauthLoading === "apple"}
-                  disabled={loading || oauthLoading !== null}
-                  icon={
-                    <Ionicons
-                      name="logo-apple"
-                      size={20}
-                      color={COLORS.charcoal}
-                    />
-                  }
-                />
+                {Platform.OS === "ios" && (
+                  <Button
+                    title={t("auth.continueWithApple")}
+                    onPress={() => handleOAuth("apple")}
+                    variant="secondary"
+                    loading={oauthLoading === "apple"}
+                    disabled={loading || oauthLoading !== null}
+                    icon={
+                      <Ionicons
+                        name="logo-apple"
+                        size={20}
+                        color={COLORS.charcoal}
+                      />
+                    }
+                  />
+                )}
                 <Button
                   title={t("auth.continueWithGoogle")}
                   onPress={() => handleOAuth("google")}

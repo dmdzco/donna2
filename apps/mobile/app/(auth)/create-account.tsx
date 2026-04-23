@@ -1,4 +1,4 @@
-import { useAuth, useOAuth, useSignUp } from "@clerk/clerk-expo";
+import { useAuth, useOAuth, useSignInWithApple, useSignUp } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
@@ -23,8 +23,6 @@ import { getClerkErrorMessage, getClerkFieldErrors } from "@/src/lib/clerkErrors
 import { resolvePostAuthRoute } from "@/src/lib/profileSession";
 
 WebBrowser.maybeCompleteAuthSession();
-
-type CreateAccountStep = "form" | "verify_email";
 
 const MIN_PASSWORD_LENGTH = 10;
 
@@ -64,15 +62,10 @@ export default function CreateAccountScreen() {
   const { startOAuthFlow: startGoogleOAuth } = useOAuth({
     strategy: "oauth_google",
   });
-  const { startOAuthFlow: startAppleOAuth } = useOAuth({
-    strategy: "oauth_apple",
-  });
+  const { startAppleAuthenticationFlow } = useSignInWithApple();
 
-  const [step, setStep] = useState<CreateAccountStep>("form");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [verificationCode, setVerificationCode] = useState("");
-  const [verificationError, setVerificationError] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<
     "google" | "apple" | null
@@ -116,18 +109,7 @@ export default function CreateAccountScreen() {
     router.replace("/(onboarding)/step1" as any);
   }
 
-  function resetVerificationState() {
-    setVerificationCode("");
-    setVerificationError(undefined);
-  }
-
   function handleBack() {
-    if (step === "verify_email") {
-      setStep("form");
-      resetVerificationState();
-      return;
-    }
-
     router.back();
   }
 
@@ -146,7 +128,6 @@ export default function CreateAccountScreen() {
     if (!isLoaded) return;
 
     setLoading(true);
-    setVerificationError(undefined);
 
     try {
       const result = await signUp.create({
@@ -160,9 +141,19 @@ export default function CreateAccountScreen() {
         return;
       }
 
-      await result.prepareEmailAddressVerification({ strategy: "email_code" });
-      resetVerificationState();
-      setStep("verify_email");
+      if (
+        Array.isArray((result as any).unverifiedFields) &&
+        (result as any).unverifiedFields.includes("email_address")
+      ) {
+        throw new Error(
+          "Email verification is still enabled for mobile sign-up in Clerk. Turn it off before using this flow."
+        );
+      }
+
+      Alert.alert(
+        t("auth.signUpFailed"),
+        t("auth.couldNotCreateAccount"),
+      );
     } catch (err: unknown) {
       const clerkFieldErrors = getClerkFieldErrors(err);
       const nextFieldErrors = {
@@ -188,65 +179,25 @@ export default function CreateAccountScreen() {
     }
   }
 
-  async function handleEmailVerification() {
-    Keyboard.dismiss();
-    const normalizedCode = verificationCode.replace(/\s+/g, "");
-
-    if (!normalizedCode) {
-      setVerificationError(t("auth.verificationRequired"));
-      return;
-    }
-
-    if (!isLoaded) return;
-    setLoading(true);
-    setVerificationError(undefined);
-
-    try {
-      const result = await signUp.attemptEmailAddressVerification({
-        code: normalizedCode,
-      });
-
-      if (result.createdSessionId) {
-        await setActive({ session: result.createdSessionId });
-        await navigateAfterAuth();
-        return;
-      }
-
-      setVerificationError(t("auth.verificationIncomplete"));
-    } catch (err: unknown) {
-      setVerificationError(
-        getClerkErrorMessage(err, t("auth.couldNotVerify"))
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleResendVerificationCode() {
-    if (!isLoaded) return;
-    setLoading(true);
-    setVerificationError(undefined);
-
-    try {
-      await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
-      Alert.alert(t("auth.codeSent"), t("auth.codeSentDescription", { email: email.trim() }));
-    } catch (err: unknown) {
-      setVerificationError(
-        getClerkErrorMessage(err, t("auth.couldNotResend"))
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function handleOAuth(provider: "google" | "apple") {
     setOauthLoading(provider);
 
     try {
-      const startFlow =
-        provider === "google" ? startGoogleOAuth : startAppleOAuth;
+      if (provider === "apple") {
+        if (Platform.OS !== "ios") return;
+
+        const { createdSessionId, setActive: setAppleActive } =
+          await startAppleAuthenticationFlow();
+
+        if (createdSessionId && setAppleActive) {
+          await setAppleActive({ session: createdSessionId });
+          await navigateAfterAuth();
+        }
+        return;
+      }
+
       const { createdSessionId, setActive: setOAuthActive } =
-        await startFlow();
+        await startGoogleOAuth();
 
       if (createdSessionId && setOAuthActive) {
         await setOAuthActive({ session: createdSessionId });
@@ -261,13 +212,6 @@ export default function CreateAccountScreen() {
       setOauthLoading(null);
     }
   }
-
-  const title =
-    step === "verify_email" ? t("auth.verifyEmail") : t("auth.createAccount");
-  const subtitle =
-    step === "verify_email"
-      ? `${t("auth.verifyEmailDescription", { email: email.trim() })}.`
-      : t("auth.createAccountSubtitle");
 
   return (
     <SafeAreaView className="flex-1 bg-cream">
@@ -292,181 +236,125 @@ export default function CreateAccountScreen() {
           </Pressable>
 
           <Text className="text-[28px] font-semibold text-charcoal mb-2">
-            {title}
+            {t("auth.createAccount")}
           </Text>
-          <Text className="text-[15px] text-muted mb-8">{subtitle}</Text>
+          <Text className="text-[15px] text-muted mb-8">
+            {t("auth.createAccountSubtitle")}
+          </Text>
 
-          {step === "form" ? (
-            <>
-              <View className="mb-4">
-                <Input
-                  label={t("auth.email")}
-                  placeholder={t("auth.emailPlaceholder")}
-                  value={email}
-                  onChangeText={(value) => {
-                    setEmail(value);
-                    if (errors.email) {
-                      setErrors((current) => ({ ...current, email: undefined }));
-                    }
-                  }}
-                  error={errors.email}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  textContentType="emailAddress"
-                  autoComplete="email"
-                  testID="create-account-email"
-                />
-              </View>
+          <View className="mb-4">
+            <Input
+              label={t("auth.email")}
+              placeholder={t("auth.emailPlaceholder")}
+              value={email}
+              onChangeText={(value) => {
+                setEmail(value);
+                if (errors.email) {
+                  setErrors((current) => ({ ...current, email: undefined }));
+                }
+              }}
+              error={errors.email}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="emailAddress"
+              autoComplete="email"
+              testID="create-account-email"
+            />
+          </View>
 
-              <View className="mb-6">
-                <Input
-                  label={t("auth.password")}
-                  placeholder="••••••••"
-                  value={password}
-                  onChangeText={(value) => {
-                    setPassword(value);
-                    if (errors.password) {
-                      setErrors((current) => ({
-                        ...current,
-                        password: undefined,
-                      }));
-                    }
-                  }}
-                  error={errors.password}
-                  secureTextEntry
-                  textContentType="oneTimeCode"
-                  autoComplete="one-time-code"
-                  returnKeyType="done"
-                  onSubmitEditing={handleCreateAccount}
-                  testID="create-account-password"
-                />
-                {!errors.password && (
-                  <Text className="text-muted text-[13px] mt-2 leading-5">
-                    {t("auth.passwordMinLength", { count: MIN_PASSWORD_LENGTH })}
-                  </Text>
-                )}
-              </View>
+          <View className="mb-6">
+            <Input
+              label={t("auth.password")}
+              placeholder="••••••••"
+              value={password}
+              onChangeText={(value) => {
+                setPassword(value);
+                if (errors.password) {
+                  setErrors((current) => ({
+                    ...current,
+                    password: undefined,
+                  }));
+                }
+              }}
+              error={errors.password}
+              secureTextEntry
+              textContentType="oneTimeCode"
+              autoComplete="one-time-code"
+              returnKeyType="done"
+              onSubmitEditing={handleCreateAccount}
+              testID="create-account-password"
+            />
+            {!errors.password && (
+              <Text className="text-muted text-[13px] mt-2 leading-5">
+                {t("auth.passwordMinLength", { count: MIN_PASSWORD_LENGTH })}
+              </Text>
+            )}
+          </View>
 
+          <Button
+            title={t("common.continue")}
+            onPress={handleCreateAccount}
+            loading={loading}
+            disabled={loading || oauthLoading !== null}
+            className="mb-6"
+            testID="create-account-submit"
+          />
+
+          <View className="flex-row items-center mb-6">
+            <View className="flex-1 h-[1px] bg-charcoal/10" />
+            <Text className="mx-3 text-muted text-[13px]">{t("auth.or")}</Text>
+            <View className="flex-1 h-[1px] bg-charcoal/10" />
+          </View>
+
+          <View className="gap-3 mb-8">
+            {Platform.OS === "ios" && (
               <Button
-                title={t("common.continue")}
-                onPress={handleCreateAccount}
-                loading={loading}
-                disabled={loading || oauthLoading !== null}
-                className="mb-6"
-                testID="create-account-submit"
-              />
-
-              <View className="flex-row items-center mb-6">
-                <View className="flex-1 h-[1px] bg-charcoal/10" />
-                <Text className="mx-3 text-muted text-[13px]">{t("auth.or")}</Text>
-                <View className="flex-1 h-[1px] bg-charcoal/10" />
-              </View>
-
-              <View className="gap-3 mb-8">
-                <Button
-                  title={t("auth.continueWithApple")}
-                  onPress={() => handleOAuth("apple")}
-                  variant="secondary"
-                  loading={oauthLoading === "apple"}
-                  disabled={loading || oauthLoading !== null}
-                  icon={
-                    <Ionicons
-                      name="logo-apple"
-                      size={20}
-                      color={COLORS.charcoal}
-                    />
-                  }
-                />
-                <Button
-                  title={t("auth.continueWithGoogle")}
-                  onPress={() => handleOAuth("google")}
-                  variant="secondary"
-                  loading={oauthLoading === "google"}
-                  disabled={loading || oauthLoading !== null}
-                  icon={
-                    <Ionicons
-                      name="logo-google"
-                      size={18}
-                      color={COLORS.charcoal}
-                    />
-                  }
-                />
-              </View>
-
-              <View className="flex-row justify-center mb-8">
-                <Text className="text-muted text-[15px]">
-                  {t("auth.hasAccount")}{" "}
-                </Text>
-                <Pressable
-                  onPress={() => router.replace("/(auth)/sign-in")}
-                  className="min-h-[48px] justify-center"
-                  accessibilityRole="link"
-                  accessibilityLabel={t("auth.signIn")}
-                >
-                  <Text className="text-sage text-[15px] font-semibold">
-                    {t("auth.signIn")}
-                  </Text>
-                </Pressable>
-              </View>
-            </>
-          ) : (
-            <>
-              <View className="mb-4">
-                <Input
-                  label={t("auth.verificationCode")}
-                  placeholder="123456"
-                  value={verificationCode}
-                  onChangeText={(value) => {
-                    setVerificationCode(value);
-                    if (verificationError) {
-                      setVerificationError(undefined);
-                    }
-                  }}
-                  error={verificationError}
-                  keyboardType="number-pad"
-                  textContentType="oneTimeCode"
-                  autoComplete="one-time-code"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  returnKeyType="done"
-                  onSubmitEditing={handleEmailVerification}
-                  testID="create-account-verification-code"
-                />
-              </View>
-
-              <Button
-                title={t("auth.verifyEmail")}
-                onPress={handleEmailVerification}
-                loading={loading}
-                disabled={loading}
-                className="mb-4"
-                testID="create-account-verify-submit"
-              />
-
-              <Button
-                title={t("auth.resendCode")}
-                onPress={handleResendVerificationCode}
+                title={t("auth.continueWithApple")}
+                onPress={() => handleOAuth("apple")}
                 variant="secondary"
-                disabled={loading}
-                className="mb-4"
+                loading={oauthLoading === "apple"}
+                disabled={loading || oauthLoading !== null}
+                icon={
+                  <Ionicons
+                    name="logo-apple"
+                    size={20}
+                    color={COLORS.charcoal}
+                  />
+                }
               />
+            )}
+            <Button
+              title={t("auth.continueWithGoogle")}
+              onPress={() => handleOAuth("google")}
+              variant="secondary"
+              loading={oauthLoading === "google"}
+              disabled={loading || oauthLoading !== null}
+              icon={
+                <Ionicons
+                  name="logo-google"
+                  size={18}
+                  color={COLORS.charcoal}
+                />
+              }
+            />
+          </View>
 
-              <Pressable
-                onPress={() => {
-                  setStep("form");
-                  resetVerificationState();
-                }}
-                className="min-h-[48px] justify-center self-center mb-8"
-                accessibilityRole="button"
-                accessibilityLabel={t("auth.editEmailAddress")}
-              >
-                <Text className="text-sage text-[15px] font-medium">
-                  {t("auth.editEmailAddress")}
-                </Text>
-              </Pressable>
-            </>
-          )}
+          <View className="flex-row justify-center mb-8">
+            <Text className="text-muted text-[15px]">
+              {t("auth.hasAccount")}{" "}
+            </Text>
+            <Pressable
+              onPress={() => router.replace("/(auth)/sign-in")}
+              className="min-h-[48px] justify-center"
+              accessibilityRole="link"
+              accessibilityLabel={t("auth.signIn")}
+            >
+              <Text className="text-sage text-[15px] font-semibold">
+                {t("auth.signIn")}
+              </Text>
+            </Pressable>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

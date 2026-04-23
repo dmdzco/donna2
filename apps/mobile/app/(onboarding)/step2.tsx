@@ -126,12 +126,16 @@ export default function Step2Screen() {
                 {t("onboarding.step2.relationship")}
               </Text>
               <Pressable
-                onPress={() => setShowRelationshipPicker(true)}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setShowRelationshipPicker(true);
+                }}
                 className={`w-full bg-white px-4 py-3.5 rounded-2xl border flex-row items-center justify-between ${
                   errors.relationship ? "border-red-500" : "border-charcoal/10"
                 }`}
                 accessibilityRole="button"
                 accessibilityLabel={t("onboarding.step2.selectRelationship")}
+                testID="input-relationship"
               >
                 <Text
                   className={`text-[15px] ${relationship ? "text-charcoal" : "text-muted"}`}
@@ -216,6 +220,7 @@ export default function Step2Screen() {
               className="flex-row items-center justify-between py-3.5 px-2 rounded-xl active:bg-beige"
               accessibilityRole="button"
               accessibilityLabel={t(`relationships.${option}`)}
+              testID={`relationship-option-${option}`}
             >
               <Text className="text-[16px] text-charcoal">{t(`relationships.${option}`)}</Text>
               {relationship === option && (

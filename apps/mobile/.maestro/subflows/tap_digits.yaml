@@ -1,0 +1,79 @@
+# Tap a digit string through the visible iOS simulator numeric keypad.
+#
+# Expects:
+#   DIGITS: string containing only visible keypad digits, e.g. "5551234567"
+#
+# Callers must focus the target field first. This intentionally avoids inputText
+# and taps the keypad key centers so Maestro follows the same visible path a
+# caregiver uses without matching unrelated digit text in form fields.
+
+appId: com.donna.caregiver
+
+---
+
+- evalScript: ${output.tapDigitsIndex = 0}
+- repeat:
+    while:
+      true: ${output.tapDigitsIndex < DIGITS.length}
+    commands:
+      - runFlow:
+          when:
+            true: ${DIGITS[output.tapDigitsIndex] === "1"}
+          commands:
+            - tapOn:
+                point: "16%,69%"
+      - runFlow:
+          when:
+            true: ${DIGITS[output.tapDigitsIndex] === "2"}
+          commands:
+            - tapOn:
+                point: "50%,69%"
+      - runFlow:
+          when:
+            true: ${DIGITS[output.tapDigitsIndex] === "3"}
+          commands:
+            - tapOn:
+                point: "84%,69%"
+      - runFlow:
+          when:
+            true: ${DIGITS[output.tapDigitsIndex] === "4"}
+          commands:
+            - tapOn:
+                point: "16%,75%"
+      - runFlow:
+          when:
+            true: ${DIGITS[output.tapDigitsIndex] === "5"}
+          commands:
+            - tapOn:
+                point: "50%,75%"
+      - runFlow:
+          when:
+            true: ${DIGITS[output.tapDigitsIndex] === "6"}
+          commands:
+            - tapOn:
+                point: "84%,75%"
+      - runFlow:
+          when:
+            true: ${DIGITS[output.tapDigitsIndex] === "7"}
+          commands:
+            - tapOn:
+                point: "16%,82%"
+      - runFlow:
+          when:
+            true: ${DIGITS[output.tapDigitsIndex] === "8"}
+          commands:
+            - tapOn:
+                point: "50%,82%"
+      - runFlow:
+          when:
+            true: ${DIGITS[output.tapDigitsIndex] === "9"}
+          commands:
+            - tapOn:
+                point: "84%,82%"
+      - runFlow:
+          when:
+            true: ${DIGITS[output.tapDigitsIndex] === "0"}
+          commands:
+            - tapOn:
+                point: "50%,89%"
+      - evalScript: ${output.tapDigitsIndex = output.tapDigitsIndex + 1}

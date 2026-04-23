@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import {
+  Keyboard,
   View,
   Text,
   Pressable,
@@ -154,10 +155,14 @@ export default function CaregiverProfileScreen() {
                 {t("caregiverProfile.relationship")}
               </Text>
               <Pressable
-                onPress={() => setShowRelationshipPicker(true)}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setShowRelationshipPicker(true);
+                }}
                 className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
                 accessibilityRole="button"
                 accessibilityLabel={t("caregiverProfile.selectRelationship")}
+                testID="caregiver-relationship-input"
                 style={{ minHeight: 48 }}
               >
                 <Text
@@ -211,6 +216,7 @@ export default function CaregiverProfileScreen() {
               }`}
               accessibilityRole="button"
               accessibilityLabel={t(`relationships.${option}`)}
+              testID={`caregiver-relationship-option-${option}`}
               style={{ minHeight: 48 }}
             >
               <Text

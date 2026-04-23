@@ -21,12 +21,22 @@ appId: com.donna.caregiver
     visible: "Sign In"
     timeout: 15000
 
-# After relaunch, first tap can "wake" GestureHandlerRootView, second navigates.
+# In dev-client simulator builds, the first tap can wake GestureHandlerRootView
+# without navigating. A second optional tap mirrors what a user would do when the
+# visible Sign In button did not respond.
 - tapOn:
     id: "landing-sign-in"
 - tapOn:
     id: "landing-sign-in"
     optional: true
+- runFlow:
+    when:
+      visible: "Donna"
+    commands:
+      # Maestro can report the ID tap as completed while iOS ignores it. This
+      # taps the visible Sign In button center, not random empty screen space.
+      - tapOn:
+          point: "50%,92%"
 
 # Wait for sign-in screen to render
 - extendedWaitUntil:
@@ -84,7 +94,10 @@ appId: com.donna.caregiver
     commands:
       - tapOn:
           id: "auth-verification-code"
-      - inputText: "424242"
+      - runFlow:
+          file: tap_digits.yaml
+          env:
+            DIGITS: "424242"
       - tapOn:
           id: "auth-verification-submit"
 

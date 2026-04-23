@@ -72,7 +72,7 @@ appId: com.donna.caregiver
     id: "create-account-submit"
 
 - extendedWaitUntil:
-    visible: "Save Password\\?|Verify Your Email|About You|Automatic Strong Password.*|Password must be at least 10 characters"
+    visible: "Save Password\\?|About You|Automatic Strong Password.*|Password must be at least 10 characters"
     timeout: 90000
 
 - runFlow:
@@ -96,7 +96,7 @@ appId: com.donna.caregiver
       - tapOn:
           id: "create-account-submit"
       - extendedWaitUntil:
-          visible: "Save Password\\?|Verify Your Email|About You"
+          visible: "Save Password\\?|About You"
           timeout: 90000
 
 - runFlow:
@@ -105,26 +105,8 @@ appId: com.donna.caregiver
     commands:
       - tapOn: "Not Now"
       - extendedWaitUntil:
-          visible: "Verify Your Email|About You"
+          visible: "About You"
           timeout: 15000
-
-- runFlow:
-    when:
-      visible: "Verify Your Email"
-    commands:
-      - tapOn:
-          id: "create-account-verification-code"
-      - inputText: "424242"
-      - tapOn:
-          id: "create-account-verify-submit"
-      - extendedWaitUntil:
-          visible: "Save Password\\?|About You"
-          timeout: 90000
-      - runFlow:
-          when:
-            visible: "Save Password\\?"
-          commands:
-            - tapOn: "Not Now"
 
 - extendedWaitUntil:
     visible: "About You"

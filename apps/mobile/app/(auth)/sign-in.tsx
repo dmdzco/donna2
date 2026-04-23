@@ -307,6 +307,7 @@ export default function SignInScreen() {
       case "complete":
         await finishSession(result.createdSessionId);
         return;
+      case "needs_client_trust":
       case "needs_second_factor":
         await routeToSecondFactor(result);
         return;
@@ -315,7 +316,11 @@ export default function SignInScreen() {
         setAuthStep({ type: "forgot_password_new_password" });
         return;
       default:
-        throw new Error("The sign-in flow needs an unsupported verification step.");
+        throw new Error(
+          `The sign-in flow needs an unsupported verification step${
+            result?.status ? ` (${result.status})` : ""
+          }.`
+        );
     }
   }
 

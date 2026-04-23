@@ -16,9 +16,14 @@ describe('timezone helpers', () => {
       .toBe('America/New_York');
   });
 
-  it('falls back to an explicit timezone when location is missing', () => {
+  it('prefers an explicit timezone over inferred location', () => {
     expect(resolveTimezoneFromProfile({ timezone: 'America/Chicago' }))
       .toBe('America/Chicago');
+    expect(resolveTimezoneFromProfile({
+      city: 'Los Angeles',
+      state: 'CA',
+      timezone: 'America/Chicago',
+    })).toBe('America/Chicago');
   });
 
   it('converts senior wall-clock times to UTC with DST-aware offsets', () => {

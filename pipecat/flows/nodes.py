@@ -177,6 +177,17 @@ def _build_senior_context(session_state: dict) -> str:
             family_info = _json.loads(family_info)
         except Exception:
             family_info = {}
+    if not isinstance(family_info, dict):
+        family_info = {}
+    preferred_call_times = senior.get("preferred_call_times") or senior.get("preferredCallTimes") or {}
+    if isinstance(preferred_call_times, str):
+        import json as _json
+        try:
+            preferred_call_times = _json.loads(preferred_call_times)
+        except Exception:
+            preferred_call_times = {}
+    if not isinstance(preferred_call_times, dict):
+        preferred_call_times = {}
     donna_language = family_info.get("donnaLanguage", "en")
     if donna_language == "es":
         from prompts import SPANISH_LANGUAGE_INSTRUCTION
@@ -205,8 +216,17 @@ def _build_senior_context(session_state: dict) -> str:
             pass
 
     interests = senior.get("interests") or []
+    interest_details = family_info.get("interestDetails") or {}
     if interests:
-        interests_text = f"They enjoy: {', '.join(interests)}."
+        # Build rich interest descriptions using detail text when available
+        interest_parts = []
+        for interest in interests:
+            detail = interest_details.get(interest, "")
+            if detail:
+                interest_parts.append(f"- {interest}: {detail}")
+            else:
+                interest_parts.append(f"- {interest}")
+        interests_text = "Their interests:\n" + "\n".join(interest_parts)
         parts.append(interests_text)
         _record_prompt_event(
             session_state,
@@ -216,6 +236,40 @@ def _build_senior_context(session_state: dict) -> str:
             provider="seniors",
             item_count=len(interests),
             dedupe_key="senior_context:interests",
+        )
+
+    # Additional topics / context provided by caregiver
+    additional_info = senior.get("additional_info") or senior.get("additionalInfo") or ""
+    if additional_info:
+        additional_text = f"Additional context from family: {additional_info}"
+        parts.append(additional_text)
+        _record_prompt_event(
+            session_state,
+            source="additional_info",
+            label="Additional info from caregiver",
+            content=additional_text,
+            provider="seniors",
+            dedupe_key="senior_context:additional_info",
+        )
+
+    # Topics to avoid (set by caregiver)
+    topics_to_avoid = (
+        family_info.get("topicsToAvoid")
+        or preferred_call_times.get("topicsToAvoid")
+        or ""
+    )
+    if isinstance(topics_to_avoid, list):
+        topics_to_avoid = "; ".join(str(topic).strip() for topic in topics_to_avoid if str(topic).strip())
+    if topics_to_avoid:
+        avoid_text = f"Topics to AVOID (family request): {topics_to_avoid}"
+        parts.append(avoid_text)
+        _record_prompt_event(
+            session_state,
+            source="topics_to_avoid",
+            label="Topics to avoid",
+            content=avoid_text,
+            provider="seniors",
+            dedupe_key="senior_context:topics_to_avoid",
         )
 
     medical = senior.get("medical_notes") or senior.get("medicalNotes")
@@ -230,6 +284,14 @@ def _build_senior_context(session_state: dict) -> str:
             provider="seniors",
             dedupe_key="senior_context:medical_notes",
         )
+
+    # Profile authority: explicit profile data overrides conversation memories
+    parts.append(
+        "\nIMPORTANT: The profile information above (age, interests, birthday, additional context) "
+        "is authoritative and set by the family. If any conversation memories below contradict "
+        "the profile (e.g., different age, different interests), ALWAYS use the profile data. "
+        "The profile is the source of truth."
+    )
 
     summaries = session_state.get("previous_calls_summary")
     if summaries:

@@ -1,5 +1,7 @@
 # Donna v5.0 — Product Roadmap, Feature Flags & Tool Stack
 
+> Historical roadmap. Current active runtime is Telnyx voice, Claude Haiku 4.5, Groq Director with Gemini fallback, ElevenLabs Flash, and email/in-app notifications only. Twilio SMS and 8kHz audio items below are not active implementation guidance.
+
 > **Created:** February 7, 2026
 > **Status:** Planning — not yet implemented
 > **Depends on:** Pipecat migration (v4.0) complete

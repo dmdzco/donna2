@@ -142,3 +142,69 @@ describe('schedulerService schedule-driven calls', () => {
     expect(plan[1].senior.id).toBe('senior-2');
   });
 });
+
+describe('schedulerService reliability', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.initiateTelnyxOutboundCall.mockResolvedValue({
+      callSid: 'v3:test-call',
+      callControlId: 'v3:test-call',
+    });
+    vi.spyOn(Date.prototype, 'toLocaleString').mockReturnValue('10');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('retries transient Telnyx failures before reporting a call as initiated', async () => {
+    const spec = buildScheduleSpec();
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback) => {
+      callback();
+      return 0;
+    });
+    mocks.initiateTelnyxOutboundCall
+      .mockRejectedValueOnce(new Error('temporary network failure'))
+      .mockRejectedValueOnce(new Error('temporary network failure'))
+      .mockResolvedValueOnce({
+        callSid: 'v3:retry-success',
+        callControlId: 'v3:retry-success',
+      });
+
+    const result = await schedulerService.triggerOutboundCall(spec, 'https://pipecat.example.test');
+
+    expect(result).toEqual({
+      sid: 'v3:retry-success',
+      callSid: 'v3:retry-success',
+      callControlId: 'v3:retry-success',
+    });
+    expect(mocks.initiateTelnyxOutboundCall).toHaveBeenCalledTimes(3);
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      'Telnyx call retry',
+      expect.objectContaining({ attempt: 1, delay_ms: 1000 }),
+    );
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      'Telnyx call retry',
+      expect.objectContaining({ attempt: 2, delay_ms: 2000 }),
+    );
+    setTimeoutSpy.mockRestore();
+  });
+
+  it('keeps recurring reminders pinned to senior wall-clock time across DST', () => {
+    const reminder = {
+      scheduledTime: '2035-03-11T14:30:00.000Z',
+      isRecurring: true,
+      cronExpression: '30 9 * * *',
+    };
+    const senior = {
+      id: 'senior-1',
+      timezone: 'America/New_York',
+    };
+
+    expect(
+      schedulerService
+        .getScheduledForTime(reminder, senior, new Date('2035-03-11T12:00:00.000Z'))
+        .toISOString(),
+    ).toBe('2035-03-11T13:30:00.000Z');
+  });
+});

@@ -11,21 +11,116 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { ArrowLeft, ChevronDown, ChevronUp, Dumbbell, Landmark, Music, Film, Vote, Feather, Globe, PawPrint, BookOpen, Flower2, Plane, ChefHat } from "lucide-react-native";
+import { ArrowLeft, ChevronDown, ChevronUp, Clock, Check, Dumbbell, Landmark, Music, Film, Vote, Feather, Globe, PawPrint, BookOpen, Flower2, Plane, ChefHat } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { COLORS } from "@/src/constants/theme";
 import { INTERESTS } from "@/src/constants/interests";
 import { Input } from "@/src/components/ui/Input";
 import { Button } from "@/src/components/ui/Button";
+import { DatePickerField } from "@/src/components/ui/DatePickerField";
 import { useCurrentSenior, useSenior, useUpdateSenior } from "@/src/hooks";
 import { getErrorMessage } from "@/src/lib/api";
+import { getDeviceTimezone } from "@/src/lib/timezone";
+
+const TIMEZONE_OPTIONS = [
+  { value: "America/New_York", label: "Eastern (ET)" },
+  { value: "America/Chicago", label: "Central (CT)" },
+  { value: "America/Denver", label: "Mountain (MT)" },
+  { value: "America/Los_Angeles", label: "Pacific (PT)" },
+  { value: "America/Anchorage", label: "Alaska (AKT)" },
+  { value: "Pacific/Honolulu", label: "Hawaii (HT)" },
+  { value: "America/Argentina/Buenos_Aires", label: "Argentina (ART)" },
+  { value: "America/Mexico_City", label: "Mexico City (CST)" },
+  { value: "America/Bogota", label: "Colombia (COT)" },
+  { value: "America/Santiago", label: "Chile (CLT)" },
+  { value: "America/Sao_Paulo", label: "Brazil (BRT)" },
+  { value: "Europe/London", label: "London (GMT/BST)" },
+  { value: "Europe/Madrid", label: "Spain (CET)" },
+] as const;
+
+function timezoneLabel(tz: string): string {
+  const found = TIMEZONE_OPTIONS.find((o) => o.value === tz);
+  return found ? found.label : tz.replace(/_/g, " ").split("/").pop() ?? tz;
+}
 
 const ICON_MAP: Record<string, React.ComponentType<{ size?: number; color?: string }>> = {
   Dumbbell, Landmark, Music, Film, Vote, Feather, Globe, PawPrint, BookOpen, Flower2, Plane, ChefHat,
 };
 
+const BIRTHDATE_MIN_DATE = new Date(1900, 0, 1);
+const BIRTHDATE_MAX_DATE = new Date();
+const BIRTHDATE_INITIAL_DATE = new Date(
+  BIRTHDATE_MAX_DATE.getFullYear() - 80,
+  0,
+  1,
+);
+
 function sanitizePhoneInput(value: string): string {
   return value.replace(/[^\d+\-\s()]/g, "").slice(0, 20);
+}
+
+function dateFromParts(year: number, month: number, day: number): Date | null {
+  const date = new Date(year, month - 1, day);
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+function parseDateOfBirth(value: string): Date | null {
+  const trimmed = value.trim();
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+  if (slashMatch) {
+    return dateFromParts(
+      Number(slashMatch[3]),
+      Number(slashMatch[1]),
+      Number(slashMatch[2]),
+    );
+  }
+
+  const isoMatch = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(trimmed);
+  if (isoMatch) {
+    return dateFromParts(
+      Number(isoMatch[1]),
+      Number(isoMatch[2]),
+      Number(isoMatch[3]),
+    );
+  }
+
+  return null;
+}
+
+function formatDateOfBirth(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const year = date.getFullYear();
+  return `${month}/${day}/${year}`;
+}
+
+function formatDateOfBirthDisplay(value: string): string {
+  const date = parseDateOfBirth(value);
+  if (!date) return value;
+
+  return date.toLocaleDateString(undefined, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function normalizeDateOfBirth(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  const date = parseDateOfBirth(trimmed);
+  return date ? formatDateOfBirth(date) : trimmed;
 }
 
 export default function LovedOneProfileScreen() {
@@ -48,6 +143,8 @@ export default function LovedOneProfileScreen() {
   const [additionalTopics, setAdditionalTopics] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [topicsToAvoid, setTopicsToAvoid] = useState("");
+  const [seniorTimezone, setSeniorTimezone] = useState(getDeviceTimezone());
+  const [showTimezonePicker, setShowTimezonePicker] = useState(false);
   const [donnaLanguage, setDonnaLanguage] = useState<"en" | "es">("en");
 
   // Pre-fill form when senior data loads
@@ -66,6 +163,7 @@ export default function LovedOneProfileScreen() {
       setAdditionalTopics(senior.additionalInfo ?? "");
       setDateOfBirth((family?.dateOfBirth as string) ?? "");
       setTopicsToAvoid((family?.topicsToAvoid as string) ?? "");
+      setSeniorTimezone(senior.timezone || getDeviceTimezone());
       setDonnaLanguage((family?.donnaLanguage as "en" | "es") ?? "en");
     }
   }, [senior]);
@@ -87,6 +185,7 @@ export default function LovedOneProfileScreen() {
       await updateSenior.mutateAsync({
         name: name.trim(),
         phone: phone.trim(),
+        timezone: seniorTimezone,
         city: city.trim() || undefined,
         state: state.trim() || undefined,
         zipCode: zipCode.trim() || undefined,
@@ -95,7 +194,7 @@ export default function LovedOneProfileScreen() {
         familyInfo: {
           interestDetails,
           topicsToAvoid: topicsToAvoid.trim(),
-          dateOfBirth: dateOfBirth.trim() || undefined,
+          dateOfBirth: normalizeDateOfBirth(dateOfBirth),
           donnaLanguage,
         } as unknown as Record<string, string>,
       });
@@ -168,13 +267,21 @@ export default function LovedOneProfileScreen() {
               maxLength={20}
               testID="loved-one-phone-input"
             />
-            <Input
+            <DatePickerField
               label={t("lovedOneProfile.dateOfBirth")}
               value={dateOfBirth}
-              onChangeText={setDateOfBirth}
+              onChange={setDateOfBirth}
               placeholder={t("lovedOneProfile.dateOfBirthPlaceholder")}
-              keyboardType="number-pad"
-              maxLength={10}
+              minimumDate={BIRTHDATE_MIN_DATE}
+              maximumDate={BIRTHDATE_MAX_DATE}
+              initialDate={BIRTHDATE_INITIAL_DATE}
+              parseValue={parseDateOfBirth}
+              serializeDate={formatDateOfBirth}
+              formatValue={formatDateOfBirthDisplay}
+              accessibilityLabel={t("lovedOneProfile.dateOfBirth")}
+              doneLabel={t("common.done")}
+              onClear={() => setDateOfBirth("")}
+              clearLabel={t("lovedOneProfile.clearDateOfBirth")}
               testID="loved-one-dob-input"
             />
             <View className="flex-row gap-3">
@@ -209,6 +316,54 @@ export default function LovedOneProfileScreen() {
                   testID="loved-one-zip-input"
                 />
               </View>
+            </View>
+
+            {/* Timezone Selector */}
+            <View>
+              <Text className="text-[13px] font-medium text-muted mb-1.5 uppercase tracking-wider">
+                {t("lovedOneProfile.timezone")}
+              </Text>
+              <Pressable
+                onPress={() => setShowTimezonePicker(!showTimezonePicker)}
+                className="w-full bg-white px-4 py-3.5 rounded-2xl border border-charcoal/10 flex-row items-center justify-between"
+                accessibilityRole="button"
+                accessibilityLabel={t("lovedOneProfile.timezone")}
+                style={{ minHeight: 48 }}
+              >
+                <View className="flex-row items-center">
+                  <Clock size={16} color={COLORS.muted} style={{ marginRight: 8 }} />
+                  <Text className="text-[15px] text-charcoal">{timezoneLabel(seniorTimezone)}</Text>
+                </View>
+                <ChevronDown size={18} color={COLORS.muted} />
+              </Pressable>
+              {showTimezonePicker && (
+                <View className="mt-2 rounded-2xl border border-charcoal/10 bg-white overflow-hidden">
+                  {TIMEZONE_OPTIONS.map((tz) => (
+                    <Pressable
+                      key={tz.value}
+                      onPress={() => {
+                        setSeniorTimezone(tz.value);
+                        setShowTimezonePicker(false);
+                      }}
+                      className="flex-row items-center justify-between px-4 py-3 border-b border-charcoal/5"
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: seniorTimezone === tz.value }}
+                      style={{ minHeight: 44 }}
+                    >
+                      <Text
+                        className={`text-[15px] ${
+                          seniorTimezone === tz.value ? "text-sage font-semibold" : "text-charcoal"
+                        }`}
+                      >
+                        {tz.label}
+                      </Text>
+                      {seniorTimezone === tz.value && (
+                        <Check size={18} color={COLORS.sage} />
+                      )}
+                    </Pressable>
+                  ))}
+                </View>
+              )}
             </View>
           </View>
 

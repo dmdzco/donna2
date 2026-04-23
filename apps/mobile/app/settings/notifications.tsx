@@ -173,37 +173,6 @@ export default function NotificationPreferencesScreen() {
               ))}
             </View>
           </View>
-
-          {/* Subscription Card */}
-          <View className="mt-6">
-            <Text className="text-[13px] font-medium text-muted uppercase tracking-wider mb-3">
-              {t("notificationPreferences.subscription")}
-            </Text>
-            <View
-              className="rounded-2xl p-5 overflow-hidden"
-              style={{ backgroundColor: COLORS.sage }}
-            >
-              <Text className="text-[18px] font-semibold text-white">
-                {t("notificationPreferences.planName")}
-              </Text>
-              <Text className="text-[14px] text-white/80 mt-1">
-                {t("notificationPreferences.planDescription")}
-              </Text>
-              <View className="mt-4">
-                <Button
-                  title={t("notificationPreferences.manageSubscription")}
-                  variant="secondary"
-                  onPress={() =>
-                    Alert.alert(
-                      t("notificationPreferences.comingSoon"),
-                      t("notificationPreferences.subscriptionComingSoon")
-                    )
-                  }
-                  className="bg-white/20 border-0"
-                />
-              </View>
-            </View>
-          </View>
         </ScrollView>
 
         {/* Fixed Save Button */}

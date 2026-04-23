@@ -26,8 +26,10 @@ describe('Onboarding Route (Bug #9 — topicsToAvoid rename)', () => {
     expect(destructureLine[0]).not.toContain('updateTopics');
   });
 
-  it('stores topicsToAvoid in preferredCallTimes', () => {
-    expect(routeSource).toContain('topicsToAvoid: topicsToAvoid');
+  it('stores topicsToAvoid where schedule and voice prompt paths can read it', () => {
+    expect(routeSource).toContain('topicsToAvoidText');
+    expect(routeSource).toContain('topicsToAvoid: topicsToAvoidText || undefined');
+    expect(routeSource).toContain('topicsToAvoid: topicsToAvoid || []');
     // Verify it does NOT store under updateTopics key
     expect(routeSource).not.toMatch(/updateTopics:\s*topicsToAvoid/);
     expect(routeSource).not.toMatch(/updateTopics:\s*updateTopics/);
@@ -97,5 +99,13 @@ describe('Onboarding Route — Security', () => {
 
   it('requires Clerk authentication (rejects cofounder token)', () => {
     expect(routeSource).toContain("clerkUserId === 'cofounder'");
+  });
+
+  it('does not auto-link a new Clerk user to an existing senior by phone', () => {
+    expect(routeSource).toContain("pgCode === '23505'");
+    expect(routeSource).toContain('This phone number is already registered for another senior');
+    expect(routeSource).not.toContain('seniorService.findByPhone');
+    expect(routeSource).not.toContain('caregiverService.linkUserToSenior');
+    expect(routeSource).not.toContain('Reused existing senior');
   });
 });

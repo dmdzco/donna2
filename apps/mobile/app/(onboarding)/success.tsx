@@ -3,6 +3,7 @@ import { Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useAuth } from "@clerk/clerk-expo";
+import { useQueryClient } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react-native";
 import Animated, {
   useSharedValue,
@@ -16,14 +17,15 @@ import Animated, {
 import { useTranslation } from "react-i18next";
 import { Button } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
-import { useQueryClient } from "@tanstack/react-query";
 import { api, getErrorMessage } from "@/src/lib/api";
+import { getProfileQueryKey } from "@/src/lib/profileSession";
 import { useStableIdempotencyKey } from "@/src/hooks/useStableIdempotencyKey";
 import {
   clearOnboardingDraft,
   useOnboardingStore,
   type OnboardingCall,
 } from "@/src/stores/onboarding";
+import { getDeviceTimezone } from "@/src/lib/timezone";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const ALL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -148,8 +150,8 @@ function ConfettiCircle({
 export default function SuccessScreen() {
   const router = useRouter();
   const { t } = useTranslation();
-  const { getToken } = useAuth();
   const queryClient = useQueryClient();
+  const { getToken, userId } = useAuth();
   const store = useOnboardingStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -191,6 +193,7 @@ export default function SuccessScreen() {
         senior: {
           name: store.lovedOneName,
           phone: store.lovedOnePhone,
+          timezone: getDeviceTimezone(),
           city: store.city || undefined,
           state: store.state || undefined,
           zipCode: store.zipcode || undefined,
@@ -214,12 +217,20 @@ export default function SuccessScreen() {
         callSchedule: buildCallSchedule(store.calls[0]),
       };
 
-      await api.onboarding.complete(payload, token!, {
+      const result = await api.onboarding.complete(payload, token!, {
         idempotencyKey: idempotency.getKey(payload),
       });
 
+      if (userId) {
+        queryClient.setQueryData(getProfileQueryKey(userId), {
+          clerkUserId: userId,
+          seniors: [result.senior],
+        });
+      } else {
+        await queryClient.invalidateQueries({ queryKey: ["profile"] });
+      }
+
       idempotency.reset();
-      await queryClient.invalidateQueries({ queryKey: ["profile"] });
       await clearOnboardingDraft();
       router.replace("/(tabs)");
     } catch (err: unknown) {

@@ -1,10 +1,14 @@
 """Tests for call analysis — JSON repair, transcript formatting, default analysis."""
 
 import json
+import sys
 import pytest
 from datetime import datetime, timezone
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from services import call_analysis
 from services.call_analysis import (
     _repair_json,
     _format_transcript,
@@ -12,6 +16,44 @@ from services.call_analysis import (
     _normalize_analysis,
     get_high_severity_concerns,
 )
+
+
+CALL_ANALYSIS_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "call_analysis"
+
+
+def load_call_analysis_fixture(name: str) -> dict:
+    with (CALL_ANALYSIS_FIXTURE_DIR / f"{name}.json").open() as fixture_file:
+        return json.load(fixture_file)
+
+
+def install_fake_genai(monkeypatch, response_text: str, captured: dict):
+    class FakeGenerateContentConfig:
+        def __init__(self, **kwargs):
+            self.system_instruction = kwargs.get("system_instruction")
+            self.max_output_tokens = kwargs.get("max_output_tokens")
+            self.temperature = kwargs.get("temperature")
+
+    class FakeModels:
+        async def generate_content(self, *, model, contents, config):
+            captured["model"] = model
+            captured["contents"] = contents
+            captured["config"] = config
+            return SimpleNamespace(text=response_text)
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            captured["api_key"] = api_key
+            self.aio = SimpleNamespace(models=FakeModels())
+
+    genai_module = ModuleType("google.genai")
+    genai_module.Client = FakeClient
+    genai_module.types = SimpleNamespace(GenerateContentConfig=FakeGenerateContentConfig)
+
+    google_module = ModuleType("google")
+    google_module.genai = genai_module
+
+    monkeypatch.setitem(sys.modules, "google", google_module)
+    monkeypatch.setitem(sys.modules, "google.genai", genai_module)
 
 
 class TestRepairJson:
@@ -152,3 +194,55 @@ class TestGetLatestAnalysis:
         assert result["call_quality"] == {"rapport": "strong"}
         assert result["call_datetime"] == "Tuesday, April 14, 2026 at 3:30 PM"
         assert result["call_time_label"] != "previous call"
+
+
+class TestAnalyzeCompletedCallGoldenTranscripts:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fixture_name", ["routine_reminder", "fall_concern"])
+    async def test_golden_transcript_outputs_are_parsed_and_normalized(
+        self,
+        monkeypatch,
+        fixture_name,
+    ):
+        fixture = load_call_analysis_fixture(fixture_name)
+        captured = {}
+        install_fake_genai(monkeypatch, json.dumps(fixture["llm_response"]), captured)
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
+
+        async def passthrough(coro, fallback=None):
+            return await coro
+
+        monkeypatch.setattr(call_analysis._breaker, "call", passthrough)
+
+        result = await call_analysis.analyze_completed_call(
+            fixture["transcript"],
+            fixture["senior_context"],
+            call_started_at=datetime.fromisoformat(fixture["call_started_at"]),
+        )
+
+        expected = fixture["expected"]
+        assert result["sentiment"] == expected["sentiment"]
+        assert result["engagement_score"] == expected["engagement_score"]
+        assert result["recommended_caregiver_action"] == expected["recommended_caregiver_action"]
+        if "concerns" in expected:
+            assert result["concerns"] == expected["concerns"]
+        if "concerns_count" in expected:
+            assert len(result["concerns"]) == expected["concerns_count"]
+        if "follow_up_suggestions" in expected:
+            assert result["follow_up_suggestions"] == expected["follow_up_suggestions"]
+        if "follow_up_suggestions_count" in expected:
+            assert len(result["follow_up_suggestions"]) == expected["follow_up_suggestions_count"]
+
+        assert captured["api_key"] == "test-google-key"
+        assert captured["model"] == call_analysis.ANALYSIS_MODEL
+        assert "## TRANSCRIPT" in captured["contents"]
+        assert "Test Senior" in captured["contents"]
+        assert "Output ONLY valid JSON" in captured["config"].system_instruction
+
+    def test_system_instruction_keeps_routine_calls_actionless(self):
+        instruction = call_analysis.ANALYSIS_SYSTEM_INSTRUCTION
+
+        assert "For routine positive calls" in instruction
+        assert "set `concerns` to []" in instruction
+        assert "recommended_caregiver_action` must be \"\"" in instruction
+        assert "follow_up_suggestions` must be []" in instruction

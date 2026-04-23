@@ -56,6 +56,14 @@ class Settings:
     telnyx_l16_input_byte_order: str = "little"
     telnyx_l16_output_byte_order: str = "little"
     telnyx_webhook_tolerance_seconds: int = 300
+    telnyx_answering_machine_detection: str = "premium"
+    telnyx_amd_total_analysis_time_millis: int = 0
+    telnyx_amd_greeting_total_analysis_time_millis: int = 0
+    telnyx_voicemail_message: str = "Hi, it's Donna. I was calling to check in. I'll try again later. Take care."
+    telnyx_voicemail_voice: str = "female"
+    telnyx_voicemail_service_level: str = "basic"
+    telnyx_voicemail_language: str = "en-US"
+    telnyx_voicemail_fallback_delay_seconds: float = 8.0
 
     # ---- AI Services ----
     anthropic_api_key: str = ""
@@ -254,6 +262,12 @@ def _load_settings() -> Settings:
         except ValueError:
             return default
 
+    def _env_float(key: str, default: float) -> float:
+        try:
+            return float(_env(key, str(default)))
+        except ValueError:
+            return default
+
     return Settings(
         # Server
         port=int(_env("PORT", "7860")),
@@ -285,6 +299,22 @@ def _load_settings() -> Settings:
         telnyx_l16_input_byte_order=_env("TELNYX_L16_INPUT_BYTE_ORDER", "little").lower(),
         telnyx_l16_output_byte_order=_env("TELNYX_L16_OUTPUT_BYTE_ORDER", "little").lower(),
         telnyx_webhook_tolerance_seconds=_env_int("TELNYX_WEBHOOK_TOLERANCE_SECONDS", 300),
+        telnyx_answering_machine_detection=(
+            _env("TELNYX_ANSWERING_MACHINE_DETECTION", _env("TELNYX_AMD_MODE", "premium")).strip().lower()
+        ),
+        telnyx_amd_total_analysis_time_millis=_env_int("TELNYX_AMD_TOTAL_ANALYSIS_TIME_MILLIS", 0),
+        telnyx_amd_greeting_total_analysis_time_millis=_env_int(
+            "TELNYX_AMD_GREETING_TOTAL_ANALYSIS_TIME_MILLIS",
+            0,
+        ),
+        telnyx_voicemail_message=_env(
+            "TELNYX_VOICEMAIL_MESSAGE",
+            "Hi, it's Donna. I was calling to check in. I'll try again later. Take care.",
+        ),
+        telnyx_voicemail_voice=_env("TELNYX_VOICEMAIL_VOICE", "female"),
+        telnyx_voicemail_service_level=_env("TELNYX_VOICEMAIL_SERVICE_LEVEL", "basic").lower(),
+        telnyx_voicemail_language=_env("TELNYX_VOICEMAIL_LANGUAGE", "en-US"),
+        telnyx_voicemail_fallback_delay_seconds=_env_float("TELNYX_VOICEMAIL_FALLBACK_DELAY_SECONDS", 8.0),
         # AI Services
         anthropic_api_key=_env("ANTHROPIC_API_KEY"),
         deepgram_api_key=_env("DEEPGRAM_API_KEY"),

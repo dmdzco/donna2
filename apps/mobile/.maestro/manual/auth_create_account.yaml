@@ -1,6 +1,6 @@
 # Manual Flow: Create Account
 # Pass a unique Clerk test-mode email with:
-# maestro test -e TEST_CREATE_EMAIL="maestro-create-<unique>+clerk_test@getdonna.ai" .maestro/manual/auth_create_account.yaml
+# maestro test -e TEST_CREATE_EMAIL="maestro-create-<unique>+clerk_test@calldonna.co" .maestro/manual/auth_create_account.yaml
 
 appId: com.donna.caregiver
 

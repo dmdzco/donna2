@@ -34,13 +34,13 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 
 ### Working Features (Pipecat)
 - **2-Layer Observer Architecture + Post-Call**
-  - Layer 1: Quick Observer (0ms) - 268 regex patterns + programmatic goodbye (2s EndFrame)
+  - Layer 1: Quick Observer (0ms) - 268 regex patterns + guarded programmatic goodbye (minimum call age + delayed EndFrame)
   - Layer 2: Split Conversation Director — Two specialized Groq calls:
-    - Query Director (~200ms): Extracts `memory_queries` + `web_queries` continuously on interims
+    - Query Director (~200ms): Extracts `memory_queries` continuously on interims
     - Guidance Director (~400ms): Conversation guidance on 250ms silence (speculative)
     - Ephemeral context: All injections tagged `[EPHEMERAL:`, stripped each turn
     - Metrics: Logs speculative hit rate per call
-  - Post-Call: Analysis, memory extraction, daily context, snapshot rebuild (Gemini Flash)
+  - Post-Call: Analysis, interest discovery, memory extraction, daily context, snapshot rebuild (Gemini Flash)
 - **Caregiver summaries and alerts** — Post-call Gemini analysis generates privacy-respecting caregiver-facing summaries and follow-up guidance for email/in-app notifications. SMS is inactive for now.
 - **Director-First Architecture** — Eliminated ~14s of Claude tool-call latency per call:
   - `search_memories` → Director injects memories as ephemeral context (500ms gate)
@@ -53,9 +53,9 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
   - Interim transcriptions: Debounced prefetch while user is still speaking (1s gap, 15+ chars)
   - 500ms memory gate: Waits for prefetch cache before passing frame to Claude
 - **Pipecat Flows** - 4-phase call state machine (opening → main → winding_down → closing)
-- **2 LLM Tools** - web_search (Claude fallback), mark_reminder_acknowledged (fire-and-forget)
-- **Director-Owned Web Search** — Query Director extracts `web_queries` mid-speech, Director runs web search and gates TranscriptionFrame (filler TTS + [WEB RESULT] injection into Claude's context)
-- **Programmatic Call Ending** - Quick Observer detects goodbye → EndFrame after 2s delay (bypasses LLM)
+- **2 LLM Tools** - web_search (Tavily first, OpenAI fallback), mark_reminder_acknowledged (fire-and-forget)
+- **Claude-Owned Web Search** — Claude calls `web_search` for current factual questions; the tool sanitizes PHI, uses Tavily raw snippets first, and falls back to OpenAI web search.
+- **Programmatic Call Ending** - Quick Observer detects strong goodbye only after the minimum call-age guard, then schedules a delayed EndFrame (bypasses LLM)
 - **Director Fallback Actions** - Force winding-down at 9min, force end at 12min (configurable per-senior)
 - **Full In-Call Context Retention** - APPEND strategy keeps complete conversation history (no summary truncation)
 - **Cross-Call Turn History** - Recent turns from previous calls loaded into system prompt via `get_recent_turns()`
@@ -64,7 +64,9 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Same-Day Cross-Call Memory** - Daily context + call summaries persist across calls per senior per day
 - **Sentiment-Aware Greetings** - Uses last call's engagement/rapport score for greeting tone
 - **Semantic Memory** - pgvector with HNSW index + decay + deduplication + tiered retrieval
-- **Caregiver Notes** - Family can leave notes that are read during calls (check_caregiver_notes tool)
+- **Caregiver Notes** - Family can leave notes that are prefetched at call start and injected into Donna's context
+- **Senior Profile Context** - Calls include local time, language, birthday/age, rich interest details, caregiver additional context, and topics to avoid from the senior profile
+- **Interest Discovery** - Post-call analysis maps newly discovered topics to predefined mobile interest categories and writes editable `familyInfo.interestDetails`
 - **Per-Senior Call Settings** - Configurable time limits, greeting style, memory decay via `call_settings` JSONB
 - **Scheduled Reminder Calls** - Polling scheduler with prefetch + delivery tracking
 - **Call Context Snapshot** - Pre-computed JSONB snapshot (analysis, summaries, turns, daily context) rebuilt after each call, eliminates 6 DB queries at call time
@@ -73,12 +75,13 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - Speech transcription (Deepgram Nova 3 via Pipecat)
 - LLM responses (Claude Haiku 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - TTS (ElevenLabs via Pipecat)
+- English/Spanish Donna call language support from caregiver settings (`familyInfo.donnaLanguage`), including Deepgram language, prompt instruction, and optional Spanish TTS voice IDs
 - VAD (Silero — confidence=0.6, min_volume=0.5; stop_secs=1.2 for senior calls, 0.8 for onboarding calls)
-- News via OpenAI web search (1hr cache), in-call web search via Tavily (raw results, no LLM answer)
+- News via OpenAI web search (1hr cache), in-call web search via Tavily raw snippets with OpenAI fallback
 - Security: JWT admin auth, API key auth, Telnyx webhook validation, rate limiting, security headers
 
 ### Infrastructure & Reliability
-- **Circuit Breakers** - Gemini (5s), OpenAI embedding (10s), news (10s) — `lib/circuit_breaker.py`
+- **Circuit Breakers** - Groq, Gemini, OpenAI embedding/news, and Tavily — `lib/circuit_breaker.py`
 - **Feature Flags** - GrowthBook Cloud SDK integrated (Pipecat + Node.js), managed at app.growthbook.io
 - **Graceful Shutdown** - Tracks active calls, 7s drain on SIGTERM
 - **Enhanced /health** - Database connectivity + circuit breaker states
@@ -90,7 +93,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Field-Level Encryption** - AES-256-GCM encryption for PHI fields (summaries, transcripts, memory content, analysis). Dual-column strategy: `*_encrypted` columns alongside plaintext for gradual migration. `enc:` prefix wire format. (`lib/encryption.py` + `lib/encryption.js`)
 - **Dual-Key JWT Rotation** - `JWT_SECRET` + `JWT_SECRET_PREVIOUS` for zero-downtime credential rotation. Both Python and Node.js auth middleware verify against both keys.
 - **Token Revocation** - DB-backed revoked_tokens table with SHA-256 hashed tokens. Per-token and per-admin revocation. Automatic cleanup of expired entries. (`services/token_revocation.py` + `services/token-revocation.js`)
-- **Data Retention** - Automated batched purge of 7 tables with configurable retention periods (conversations: 365d, memories: 730d, call_analyses: 365d, daily_context: 90d, call_metrics: 180d, reminder_deliveries: 90d, audit_logs: 730d). Runs daily in background loop. (`services/data_retention.py` + `services/data-retention.js`)
+- **Data Retention** - Node-owned automated batched purge with configurable retention periods (conversation PHI: 365d, conversation metadata: 1095d, memories: 730d, call_analyses: 365d, daily_context: 90d, call_metrics: 180d, reminder_deliveries: 90d, notifications: 180d, waitlist: 365d, audit_logs: 2190d). Pipecat has a disabled-by-default parity loop. (`services/data-retention.js` + `pipecat/services/data_retention.py`)
 - **Right-to-Access Export** - HIPAA-compliant data export endpoint (`GET /api/seniors/:id/export`) returns all senior data in one JSON bundle (profile, conversations, memories, reminders, analyses, daily context, caregiver links)
 - **Hard Delete** - Complete senior data deletion across all tables (`DELETE /api/seniors/:id/data`) with audit logging
 - **Sentry PII Scrubbing** - Senior IDs SHA-256 hashed in error reports, exception values truncated to 200 chars, `send_default_pii=False`
@@ -112,7 +115,7 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 
 ### Pipecat Pipeline (bot.py)
 
-Linear pipeline of `FrameProcessor`s. Frames flow top to bottom. The Conversation Director is in the pipeline but **non-blocking** — it passes frames through instantly while running Gemini analysis in the background.
+Linear pipeline of `FrameProcessor`s. Frames flow top to bottom. The Conversation Director is in the pipeline but **non-blocking for LLM analysis** — Groq/Gemini work runs in the background, while final transcripts may briefly wait for the memory prefetch cache before Claude responds.
 
 ```
 Telnyx Audio ──► FastAPIWebsocketTransport
@@ -136,16 +139,15 @@ Telnyx Audio ──► FastAPIWebsocketTransport
               │    → inject SAME or  │     │                           │
               │    PREVIOUS turn's   │     │  Speculative: on 250ms    │
               │    guidance          │     │  silence onset, starts    │
-              │ 2. Web search gate:  │     │  Groq analysis early      │
-              │    if search in-     │     │                           │
-              │    flight, hold frame│     │  Also: Director-owned web │
-              │    + push filler TTS │     │  search (filler + gate),  │
-              │    + inject result   │     │  mid-call memory refresh, │
-              │ 3. Fires background  │     │  predictive prefetch      │
-              │    analysis ────────►│     │  (1st + 2nd wave),        │
+              │ 2. Gate briefly for  │     │  Groq analysis early      │
+              │    memory prefetch   │     │                           │
+              │    cache population  │     │  Also: Query Director     │
+              │ 3. Fires background  │     │  memory_queries, dynamic  │
+              │    analysis ────────►│     │  news injection,          │
+              │                      │     │  predictive prefetch,     │
               │                      │     │  force end at 9min/12min  │
               └─────────┬───────────┘     └──────────────────────────┘
-                        │ (no delay)
+                        │ (0-500ms memory gate)
                         ▼
               Context Aggregator (user) ← builds LLM context from transcriptions
                         ▼
@@ -167,7 +169,7 @@ Telnyx Audio ──► FastAPIWebsocketTransport
 
 **Predictive Context Engine**: The Director also runs speculative memory prefetch in the background. On each transcription, regex extracts topics/entities and pre-fetches memories. After Groq analysis completes, a second wave prefetches based on memory queries, upcoming reminders, and news topics. Results are cached in `session_state["_prefetch_cache"]` (TTL=30s, Jaccard fuzzy match). Memory retrieval is now Director-owned context injection, so Claude does not need a `search_memories` tool call in the live path. Interim transcriptions also trigger debounced prefetch while the user is still speaking.
 
-**Director-Owned Web Search**: When the Groq speculative analysis returns `web_queries`, the Director starts a web search immediately. When the final TranscriptionFrame arrives, if a web search is in-flight, the Director gates the frame: pushes a `TTSSpeakFrame` filler ("Let me check on that for you"), awaits the search result (max 10s), injects it as a `[WEB RESULT]` message into Claude's context, then releases the frame. Claude never calls `web_search` — it just uses the injected result naturally.
+**Web Search Tool**: Claude has an active `web_search` tool in the main flow for current factual questions. The tool prompts Donna to speak a brief filler before searching, sanitizes PHI from the query, uses Tavily raw snippets first, and falls back to OpenAI web search if Tavily is unavailable or empty.
 
 ### Call Phase State Machine (Pipecat Flows)
 
@@ -199,7 +201,7 @@ pipecat/
 ├── processors/
 │   ├── patterns.py                  ← Pattern data: 268 regex patterns, 19 categories (503 LOC)
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame (386 LOC)
-│   ├── conversation_director.py     ← Layer 2: Split Director (Query+Guidance) + web search gating + ephemeral context (850 LOC)
+│   ├── conversation_director.py     ← Layer 2: Split Director (Query+Guidance) + memory/news injection + ephemeral context (850 LOC)
 │   ├── conversation_tracker.py      ← Topic/question/advice tracking + transcript (246 LOC)
 │   ├── metrics_logger.py            ← Call metrics + prefetch stats logging (110 LOC)
 │   ├── goodbye_gate.py              ← False-goodbye grace period — NOT in active pipeline (135 LOC)
@@ -213,13 +215,13 @@ pipecat/
 │   ├── director_llm.py              ← Split Director LLM: Query Director + Guidance Director (580 LOC)
 │   ├── call_analysis.py             ← Post-call analysis + call quality scoring (246 LOC)
 │   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (392 LOC)
-│   ├── interest_discovery.py        ← Interest extraction from conversations (183 LOC)
+│   ├── interest_discovery.py        ← Interest extraction, category mapping, editable details
 │   ├── call_snapshot.py             ← Pre-computed call context snapshot for seniors (53 LOC)
 │   ├── context_cache.py             ← Pre-cache at 5 AM local + news persistence (304 LOC)
 │   ├── conversations.py             ← Conversation CRUD (250 LOC)
 │   ├── daily_context.py             ← Cross-call same-day memory (161 LOC)
 │   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation (326 LOC)
-│   ├── seniors.py                   ← Senior profile + per-senior call_settings (131 LOC)
+│   ├── seniors.py                   ← Senior profile CRUD + encrypted PHI fields + per-senior call_settings
 │   ├── caregivers.py                ← Caregiver relationships + notes delivery (101 LOC)
 │   ├── news.py                      ← Tavily web search (raw results) + OpenAI fallback + circuit breaker (213 LOC)
 │   ├── data_retention.py            ← HIPAA data retention: batched purge of 7 tables, 24h loop
@@ -574,9 +576,11 @@ GOOGLE_API_KEY=...               # Gemini Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...             # STT
 ELEVENLABS_API_KEY=...           # TTS (ElevenLabs)
 ELEVENLABS_VOICE_ID=...          # Voice ID (optional)
+ELEVENLABS_VOICE_ID_ES=...       # Optional Spanish Donna voice
 ELEVENLABS_MODEL=eleven_flash_v2_5 # TTS model (optional, has default)
 CARTESIA_API_KEY=...             # Optional/evaluation TTS provider
 CARTESIA_VOICE_ID=...            # Optional/evaluation Cartesia voice override
+CARTESIA_VOICE_ID_ES=...         # Optional Spanish Cartesia voice
 TTS_PROVIDER=elevenlabs          # Override GrowthBook flag: "elevenlabs" or "cartesia"
 OPENAI_API_KEY=...               # Embeddings + news search
 GROQ_API_KEY=...                 # Groq primary Director

@@ -1,0 +1,107 @@
+.city-autocomplete {
+  position: relative;
+}
+
+.city-autocomplete input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  font-size: 1rem;
+  transition: all 0.2s;
+  background: white;
+}
+
+.city-autocomplete input:focus {
+  border-color: var(--color-sage-green);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(74, 93, 79, 0.1);
+}
+
+.city-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: white;
+  border: 1px solid #ddd;
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+}
+
+.city-option {
+  padding: 10px 16px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background 0.15s;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.city-option:last-child {
+  border-bottom: none;
+}
+
+.city-option:hover,
+.city-option.highlighted {
+  background: rgba(74, 93, 79, 0.08);
+}
+
+.city-option-name {
+  font-weight: 500;
+  color: #1a1a1a;
+}
+
+.city-option-detail {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.city-option-match {
+  font-weight: 700;
+  color: var(--color-sage-green);
+}
+
+.location-grid-auto {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 10px;
+}
+
+.location-grid-auto select {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  font-size: 1rem;
+  transition: all 0.2s;
+  background: white;
+  cursor: pointer;
+}
+
+.location-grid-auto select:focus {
+  border-color: var(--color-sage-green);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(74, 93, 79, 0.1);
+}
+
+.location-grid-auto input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  font-size: 1rem;
+  transition: all 0.2s;
+  background: white;
+}
+
+.location-grid-auto input:focus {
+  border-color: var(--color-sage-green);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(74, 93, 79, 0.1);
+}

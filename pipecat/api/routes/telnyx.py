@@ -53,6 +53,17 @@ _TERMINAL_EVENTS = {
     "call.no_answer",
     "call.busy",
 }
+_AMD_EVENTS = {
+    "call.machine.detection.ended",
+    "call.machine.greeting.ended",
+    "call.machine.premium.detection.ended",
+    "call.machine.premium.greeting.ended",
+}
+_AMD_ALLOWED_MODES = {"premium", "detect", "detect_beep", "detect_words", "greeting_end"}
+_AMD_DISABLED_VALUES = {"", "0", "false", "no", "off", "none", "disabled", "disable"}
+_AMD_HUMAN_RESULTS = {"human", "human_residence", "human_business", "not_sure", "silence"}
+_AMD_MACHINE_RESULTS = {"machine", "beep_detected", "ended", "no_beep_detected"}
+_AMD_HANGUP_RESULTS = {"fax_detected"}
 _recent_telnyx_event_ids: dict[str, float] = {}
 _telnyx_event_lock = asyncio.Lock()
 
@@ -156,6 +167,33 @@ def _telnyx_stream_options(ws_token: str) -> dict[str, Any]:
         "stream_bidirectional_sampling_rate": profile.sample_rate,
         "stream_bidirectional_target_legs": profile.bidirectional_target_legs,
     }
+
+
+def _telnyx_amd_mode() -> str:
+    mode = str(get_settings().telnyx_answering_machine_detection or "").strip().lower()
+    if mode in _AMD_DISABLED_VALUES:
+        return ""
+    if mode not in _AMD_ALLOWED_MODES:
+        logger.warning("Ignoring invalid Telnyx AMD mode mode={mode}", mode=mode)
+        return ""
+    return mode
+
+
+def _telnyx_amd_dial_fields() -> dict[str, Any]:
+    cfg = get_settings()
+    mode = _telnyx_amd_mode()
+    if not mode:
+        return {}
+
+    fields: dict[str, Any] = {"answering_machine_detection": mode}
+    amd_config: dict[str, int] = {}
+    if cfg.telnyx_amd_total_analysis_time_millis > 0:
+        amd_config["total_analysis_time_millis"] = cfg.telnyx_amd_total_analysis_time_millis
+    if cfg.telnyx_amd_greeting_total_analysis_time_millis > 0:
+        amd_config["greeting_total_analysis_time_millis"] = cfg.telnyx_amd_greeting_total_analysis_time_millis
+    if amd_config:
+        fields["answering_machine_detection_config"] = amd_config
+    return fields
 
 
 def _json_dict(value: Any) -> dict[str, Any]:
@@ -408,6 +446,7 @@ async def _seed_outbound_call_metadata(
     context_seed_source: str,
 ) -> dict[str, Any]:
     profile = resolve_telnyx_audio_profile(get_settings())
+    amd_mode = _telnyx_amd_mode()
     seeded_at = time.time()
     metadata = {
         "senior": senior,
@@ -440,6 +479,11 @@ async def _seed_outbound_call_metadata(
         "telnyx_context_ready": False,
         "telnyx_context_seed_source": context_seed_source,
         "telnyx_outbound_seeded_at": seeded_at,
+        "telnyx_amd_enabled": bool(amd_mode),
+        "telnyx_amd_mode": amd_mode or "disabled",
+        "telnyx_amd_status": "pending" if amd_mode else "disabled",
+        "telnyx_voicemail_detected": False,
+        "telnyx_voicemail_message_started": False,
     }
     seeded = await _upsert_call_metadata(call_control_id, metadata)
     logger.info(
@@ -493,6 +537,10 @@ async def _store_senior_metadata(
         logger.error("[{cid}] Error creating Telnyx conversation: {err}", cid=call_control_id, err=str(exc))
 
     current_metadata = call_metadata.get(call_control_id) or {}
+    should_start_stream = bool(
+        start_stream_after_answer
+        and current_metadata.get("telnyx_start_stream_after_answer", start_stream_after_answer)
+    )
     metadata = {
         "senior": senior,
         "prospect": None,
@@ -517,7 +565,7 @@ async def _store_senior_metadata(
         "ws_token_expires_at": current_metadata.get("ws_token_expires_at") or time.time() + 300,
         "ws_token_consumed": current_metadata.get("ws_token_consumed", False),
         "telephony_provider": "telnyx",
-        "telnyx_start_stream_after_answer": start_stream_after_answer,
+        "telnyx_start_stream_after_answer": should_start_stream,
         "telnyx_stream_codec": profile.codec,
         "telnyx_stream_sample_rate": profile.sample_rate,
         "telnyx_context_ready": True,
@@ -578,10 +626,12 @@ async def _store_prospect_metadata(
     except Exception as exc:
         logger.error("[{cid}] Error in Telnyx prospect lookup/create: {err}", cid=call_control_id, err=str(exc))
 
+    conversation_id = None
     try:
         from services.conversations import create
 
-        await create(None, call_control_id, prospect_id=prospect_id)
+        conv = await create(None, call_control_id, prospect_id=prospect_id)
+        conversation_id = str(conv["id"]) if conv else None
     except Exception as exc:
         logger.error("[{cid}] Error creating Telnyx onboarding conversation: {err}", cid=call_control_id, err=str(exc))
 
@@ -590,7 +640,7 @@ async def _store_prospect_metadata(
         "prospect": prospect,
         "prospect_id": prospect_id,
         "memory_context": memory_context,
-        "conversation_id": None,
+        "conversation_id": conversation_id,
         "is_outbound": False,
         "call_type": "onboarding",
         "target_phone": target_phone,
@@ -601,6 +651,8 @@ async def _store_prospect_metadata(
         "telnyx_start_stream_after_answer": start_stream_after_answer,
         "telnyx_stream_codec": profile.codec,
         "telnyx_stream_sample_rate": profile.sample_rate,
+        "telnyx_context_ready": True,
+        "telnyx_context_ready_at": time.time(),
     }
     await _upsert_call_metadata(call_control_id, metadata)
 
@@ -634,6 +686,181 @@ async def _hangup_telnyx_call(call_control_id: str) -> None:
     await _telnyx_post(endpoint, {"command_id": _telnyx_command_id(call_control_id, "hangup")})
 
 
+async def _speak_telnyx_voicemail(call_control_id: str) -> None:
+    cfg = get_settings()
+    message = (cfg.telnyx_voicemail_message or "").strip()[:3000]
+    if not message:
+        logger.warning("[{cid}] Telnyx voicemail message is empty; hanging up", cid=call_control_id)
+        await _hangup_telnyx_call(call_control_id)
+        return
+
+    payload: dict[str, Any] = {
+        "payload": message,
+        "voice": (cfg.telnyx_voicemail_voice or "female").strip() or "female",
+        "payload_type": "text",
+        "target_legs": "self",
+        "command_id": _telnyx_command_id(call_control_id, "voicemail_speak"),
+    }
+    if cfg.telnyx_voicemail_service_level:
+        payload["service_level"] = cfg.telnyx_voicemail_service_level
+    if cfg.telnyx_voicemail_language:
+        payload["language"] = cfg.telnyx_voicemail_language
+
+    endpoint = f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/speak"
+    await _telnyx_post(endpoint, payload)
+    logger.info("[{cid}] Started short Telnyx voicemail message", cid=call_control_id)
+
+
+async def _leave_telnyx_voicemail_message(call_control_id: str, *, reason: str) -> bool:
+    async with _metadata_lock:
+        metadata = call_metadata.get(call_control_id)
+        if not metadata:
+            return False
+        if metadata.get("telnyx_voicemail_message_started"):
+            return False
+        metadata.update(
+            {
+                "telnyx_start_stream_after_answer": False,
+                "telnyx_voicemail_message_started": True,
+                "telnyx_voicemail_message_started_at": time.time(),
+                "telnyx_voicemail_message_reason": reason,
+            }
+        )
+        snapshot = dict(metadata)
+
+    await _persist_metadata(call_control_id, snapshot)
+
+    try:
+        await _speak_telnyx_voicemail(call_control_id)
+    except Exception as exc:
+        logger.error("[{cid}] Telnyx voicemail speak failed: {err}", cid=call_control_id, err=str(exc))
+        await _upsert_call_metadata(
+            call_control_id,
+            {
+                "telnyx_voicemail_message_failed_at": time.time(),
+                "telnyx_voicemail_message_error": type(exc).__name__,
+            },
+        )
+        try:
+            await _hangup_telnyx_call(call_control_id)
+        except Exception as hangup_exc:
+            logger.error(
+                "[{cid}] Telnyx voicemail cleanup hangup failed: {err}",
+                cid=call_control_id,
+                err=str(hangup_exc),
+            )
+        return False
+
+    return True
+
+
+async def _fallback_leave_telnyx_voicemail(call_control_id: str, *, reason: str) -> None:
+    delay = max(0.0, float(get_settings().telnyx_voicemail_fallback_delay_seconds))
+    if delay > 0:
+        await asyncio.sleep(delay)
+
+    metadata = call_metadata.get(call_control_id) or {}
+    if not metadata.get("telnyx_voicemail_detected") or metadata.get("telnyx_voicemail_message_started"):
+        return
+    await _leave_telnyx_voicemail_message(call_control_id, reason=reason)
+
+
+async def _handle_machine_detection_event(
+    call_control_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+) -> None:
+    result = str(payload.get("result") or "").strip().lower()
+    is_greeting_event = event_type in {
+        "call.machine.greeting.ended",
+        "call.machine.premium.greeting.ended",
+    }
+    detected_at = time.time()
+
+    if is_greeting_event or result in _AMD_MACHINE_RESULTS:
+        await _upsert_call_metadata(
+            call_control_id,
+            {
+                "telnyx_start_stream_after_answer": False,
+                "telnyx_amd_status": "machine",
+                "telnyx_amd_result": result or "machine",
+                "telnyx_amd_event": event_type,
+                "telnyx_amd_resolved_at": detected_at,
+                "telnyx_voicemail_detected": True,
+                "telnyx_voicemail_detected_at": detected_at,
+            },
+        )
+        logger.info(
+            "[{cid}] Telnyx AMD detected voicemail event={event} result={result}",
+            cid=call_control_id,
+            event=event_type,
+            result=result or "unknown",
+        )
+        if is_greeting_event:
+            await _leave_telnyx_voicemail_message(call_control_id, reason=event_type)
+        else:
+            await _fallback_leave_telnyx_voicemail(call_control_id, reason="machine_detection_fallback")
+        return
+
+    if result in _AMD_HANGUP_RESULTS:
+        await _upsert_call_metadata(
+            call_control_id,
+            {
+                "telnyx_start_stream_after_answer": False,
+                "telnyx_amd_status": result,
+                "telnyx_amd_result": result,
+                "telnyx_amd_event": event_type,
+                "telnyx_amd_resolved_at": detected_at,
+            },
+        )
+        logger.info(
+            "[{cid}] Telnyx AMD detected non-human answer event={event} result={result}; hanging up",
+            cid=call_control_id,
+            event=event_type,
+            result=result,
+        )
+        await _hangup_telnyx_call(call_control_id)
+        return
+
+    status = "human" if result in _AMD_HUMAN_RESULTS else "unknown_as_human"
+    metadata = await _upsert_call_metadata(
+        call_control_id,
+        {
+            "telnyx_amd_status": status,
+            "telnyx_amd_result": result or "unknown",
+            "telnyx_amd_event": event_type,
+            "telnyx_amd_resolved_at": detected_at,
+        },
+    )
+    logger.info(
+        "[{cid}] Telnyx AMD continuing live call event={event} result={result} context_ready={ready}",
+        cid=call_control_id,
+        event=event_type,
+        result=result or "unknown",
+        ready=bool(metadata.get("telnyx_context_ready")),
+    )
+    await _maybe_start_telnyx_stream(call_control_id, reason="amd_human")
+
+
+async def _handle_speak_ended(call_control_id: str, _payload: dict[str, Any]) -> None:
+    metadata = call_metadata.get(call_control_id) or {}
+    if not metadata.get("telnyx_voicemail_message_started"):
+        return
+
+    await _upsert_call_metadata(
+        call_control_id,
+        {
+            "telnyx_voicemail_message_ended_at": time.time(),
+            "telnyx_voicemail_hangup_started": True,
+        },
+    )
+    logger.info("[{cid}] Telnyx voicemail message ended; hanging up", cid=call_control_id)
+    try:
+        await _hangup_telnyx_call(call_control_id)
+    except Exception as exc:
+        logger.error("[{cid}] Telnyx voicemail hangup failed: {err}", cid=call_control_id, err=str(exc))
+
+
 async def _maybe_start_telnyx_stream(
     call_control_id: str,
     *,
@@ -645,6 +872,12 @@ async def _maybe_start_telnyx_stream(
         if not metadata or not metadata.get("telnyx_start_stream_after_answer"):
             return False
         if metadata.get("telnyx_stream_started"):
+            return False
+        if metadata.get("telnyx_voicemail_detected"):
+            return False
+        if metadata.get("telnyx_amd_enabled") and metadata.get("telnyx_amd_status") == "pending":
+            if log_if_pending:
+                logger.info("[{cid}] Waiting to start Telnyx media stream: AMD pending", cid=call_control_id)
             return False
         if not metadata.get("telnyx_answered"):
             if log_if_pending:
@@ -826,6 +1059,10 @@ async def telnyx_events(request: Request, background_tasks: BackgroundTasks):
         background_tasks.add_task(_handle_call_initiated, payload)
     elif event_type == "call.answered" and call_control_id:
         background_tasks.add_task(_handle_call_answered, call_control_id)
+    elif event_type in _AMD_EVENTS and call_control_id:
+        background_tasks.add_task(_handle_machine_detection_event, call_control_id, event_type, payload)
+    elif event_type == "call.speak.ended" and call_control_id:
+        background_tasks.add_task(_handle_speak_ended, call_control_id, payload)
     elif event_type in {"streaming.started", "streaming.failed", "streaming.stopped"} and call_control_id:
         background_tasks.add_task(_record_streaming_event, call_control_id, event_type, payload)
     elif event_type in _TERMINAL_EVENTS and call_control_id:
@@ -1089,6 +1326,7 @@ async def create_telnyx_outbound_call(body: TelnyxOutboundCallRequest) -> dict:
         "webhook_url_method": "POST",
         "command_id": str(uuid.uuid4()),
     }
+    payload.update(_telnyx_amd_dial_fields())
 
     response = await _telnyx_post("https://api.telnyx.com/v2/calls", payload)
     call_data = response.get("data") or {}

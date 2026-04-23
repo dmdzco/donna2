@@ -255,10 +255,83 @@ class TestTelnyxAndCallContext:
         assert metadata == {}
 
     @pytest.mark.asyncio
-    async def test_outbound_call_seeds_metadata_before_context_hydration(self):
+    async def test_inbound_unknown_telnyx_caller_uses_onboarding_and_starts_stream(self):
+        """Unknown inbound callers should answer as onboarding prospects and start media."""
         from api.routes import telnyx
         from api.routes.call_context import call_metadata
 
+        prospect = {"id": "prospect-1", "phone": "4078856316", "call_count": 0}
+        call_metadata.clear()
+
+        try:
+            with patch("services.seniors.find_by_phone", new=AsyncMock(return_value=None)), \
+                 patch("services.seniors.find_any_by_phone", new=AsyncMock(return_value=None)), \
+                 patch("services.prospects.find_by_phone", new=AsyncMock(return_value=None)), \
+                 patch("services.prospects.create", new=AsyncMock(return_value=prospect)) as mock_create_prospect, \
+                 patch("services.conversations.create", new=AsyncMock(return_value={"id": "conv-1"})) as mock_create_conversation, \
+                 patch.object(telnyx, "_persist_metadata", new=AsyncMock()), \
+                 patch.object(telnyx, "_telnyx_post", new=AsyncMock(return_value={})) as mock_post, \
+                 patch.object(telnyx, "_start_telnyx_stream", new=AsyncMock()) as mock_start_stream:
+                await telnyx._handle_call_initiated(
+                    {
+                        "call_control_id": "v3:unknown-caller",
+                        "from": "+14078856316",
+                        "to": "+15551234567",
+                    }
+                )
+
+                metadata = call_metadata["v3:unknown-caller"]
+                assert metadata["senior"] is None
+                assert metadata["call_type"] == "onboarding"
+                assert metadata["prospect_id"] == "prospect-1"
+                assert metadata["conversation_id"] == "conv-1"
+                assert metadata["telnyx_context_ready"] is True
+                assert mock_post.await_args.args[0].endswith("/actions/answer")
+
+                await telnyx._handle_call_answered("v3:unknown-caller")
+
+            mock_create_prospect.assert_awaited_once_with("+14078856316")
+            mock_create_conversation.assert_awaited_once_with(None, "v3:unknown-caller", prospect_id="prospect-1")
+            mock_start_stream.assert_awaited_once_with("v3:unknown-caller", metadata["ws_token"])
+            assert call_metadata["v3:unknown-caller"]["telnyx_stream_started"] is True
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
+    async def test_inbound_inactive_telnyx_senior_hangs_up_without_onboarding(self):
+        """Inactive known seniors should not be treated as new prospects."""
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        inactive_senior = {"id": "senior-inactive", "phone": "4078856316", "is_active": False}
+        call_metadata.clear()
+
+        try:
+            with patch("services.seniors.find_by_phone", new=AsyncMock(return_value=None)), \
+                 patch("services.seniors.find_any_by_phone", new=AsyncMock(return_value=inactive_senior)), \
+                 patch("services.prospects.create", new=AsyncMock()) as mock_create_prospect, \
+                 patch.object(telnyx, "_persist_metadata", new=AsyncMock()), \
+                 patch.object(telnyx, "_telnyx_post", new=AsyncMock(return_value={})) as mock_post:
+                await telnyx._handle_call_initiated(
+                    {
+                        "call_control_id": "v3:inactive-caller",
+                        "from": "+14078856316",
+                        "to": "+15551234567",
+                    }
+                )
+
+            assert "v3:inactive-caller" not in call_metadata
+            assert mock_post.await_args.args[0].endswith("/actions/hangup")
+            mock_create_prospect.assert_not_awaited()
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
+    async def test_outbound_call_seeds_metadata_before_context_hydration(self, monkeypatch):
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        monkeypatch.setenv("TELNYX_ANSWERING_MACHINE_DETECTION", "premium")
         senior = {
             "id": "senior-1",
             "name": "Test Senior",
@@ -284,9 +357,14 @@ class TestTelnyxAndCallContext:
             assert result["callSid"] == "v3:test-call"
             assert "stream_url" not in dial_payload
             assert "stream_auth_token" not in dial_payload
+            assert dial_payload["answering_machine_detection"] == "premium"
             assert metadata["telnyx_start_stream_after_answer"] is True
             assert metadata["telnyx_context_ready"] is False
             assert metadata["telnyx_answered"] is False
+            assert metadata["telnyx_amd_enabled"] is True
+            assert metadata["telnyx_amd_mode"] == "premium"
+            assert metadata["telnyx_amd_status"] == "pending"
+            assert metadata["telnyx_voicemail_detected"] is False
             assert metadata["senior"]["id"] == "senior-1"
             mock_store.assert_awaited_once()
         finally:
@@ -426,6 +504,132 @@ class TestTelnyxAndCallContext:
             assert call_metadata["v3:test-call"]["telnyx_answered"] is True
             assert call_metadata["v3:test-call"]["telnyx_stream_started"] is False
             mock_start.assert_not_awaited()
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
+    async def test_handle_call_answered_waits_for_amd_before_starting_stream(self):
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        call_metadata.clear()
+        call_metadata["v3:test-call"] = {
+            "ws_token": "token-123",
+            "ws_token_expires_at": time.time() + 300,
+            "ws_token_consumed": False,
+            "telephony_provider": "telnyx",
+            "telnyx_start_stream_after_answer": True,
+            "telnyx_answered": False,
+            "telnyx_context_ready": True,
+            "telnyx_stream_started": False,
+            "telnyx_amd_enabled": True,
+            "telnyx_amd_status": "pending",
+        }
+
+        try:
+            with patch.object(telnyx, "_persist_metadata", new=AsyncMock()), \
+                 patch.object(telnyx, "_start_telnyx_stream", new=AsyncMock()) as mock_start:
+                await telnyx._handle_call_answered("v3:test-call")
+
+            assert call_metadata["v3:test-call"]["telnyx_answered"] is True
+            assert call_metadata["v3:test-call"]["telnyx_stream_started"] is False
+            mock_start.assert_not_awaited()
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
+    async def test_machine_detection_human_result_starts_stream(self):
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        call_metadata.clear()
+        call_metadata["v3:test-call"] = {
+            "ws_token": "token-123",
+            "ws_token_expires_at": time.time() + 300,
+            "ws_token_consumed": False,
+            "telephony_provider": "telnyx",
+            "telnyx_start_stream_after_answer": True,
+            "telnyx_answered": True,
+            "telnyx_context_ready": True,
+            "telnyx_stream_started": False,
+            "telnyx_amd_enabled": True,
+            "telnyx_amd_status": "pending",
+        }
+
+        try:
+            with patch.object(telnyx, "_persist_metadata", new=AsyncMock()), \
+                 patch.object(telnyx, "_start_telnyx_stream", new=AsyncMock()) as mock_start:
+                await telnyx._handle_machine_detection_event(
+                    "v3:test-call",
+                    "call.machine.premium.detection.ended",
+                    {"result": "human_residence"},
+                )
+
+            metadata = call_metadata["v3:test-call"]
+            assert metadata["telnyx_amd_status"] == "human"
+            assert metadata["telnyx_stream_started"] is True
+            mock_start.assert_awaited_once_with("v3:test-call", "token-123")
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
+    async def test_machine_detection_leaves_short_voicemail_without_starting_stream(self):
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        call_metadata.clear()
+        call_metadata["v3:test-call"] = {
+            "ws_token": "token-123",
+            "ws_token_expires_at": time.time() + 300,
+            "ws_token_consumed": False,
+            "telephony_provider": "telnyx",
+            "telnyx_start_stream_after_answer": True,
+            "telnyx_answered": True,
+            "telnyx_context_ready": True,
+            "telnyx_stream_started": False,
+            "telnyx_amd_enabled": True,
+            "telnyx_amd_status": "pending",
+        }
+
+        try:
+            with patch.object(telnyx, "_persist_metadata", new=AsyncMock()), \
+                 patch.object(telnyx, "_start_telnyx_stream", new=AsyncMock()) as mock_start, \
+                 patch.object(telnyx, "_speak_telnyx_voicemail", new=AsyncMock()) as mock_speak:
+                await telnyx._handle_machine_detection_event(
+                    "v3:test-call",
+                    "call.machine.premium.greeting.ended",
+                    {"result": "beep_detected"},
+                )
+
+            metadata = call_metadata["v3:test-call"]
+            assert metadata["telnyx_amd_status"] == "machine"
+            assert metadata["telnyx_voicemail_detected"] is True
+            assert metadata["telnyx_start_stream_after_answer"] is False
+            assert metadata["telnyx_voicemail_message_started"] is True
+            mock_start.assert_not_awaited()
+            mock_speak.assert_awaited_once_with("v3:test-call")
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
+    async def test_voicemail_speak_ended_hangs_up(self):
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        call_metadata.clear()
+        call_metadata["v3:test-call"] = {
+            "telephony_provider": "telnyx",
+            "telnyx_voicemail_detected": True,
+            "telnyx_voicemail_message_started": True,
+        }
+
+        try:
+            with patch.object(telnyx, "_persist_metadata", new=AsyncMock()), \
+                 patch.object(telnyx, "_hangup_telnyx_call", new=AsyncMock()) as mock_hangup:
+                await telnyx._handle_speak_ended("v3:test-call", {"result": "ok"})
+
+            assert call_metadata["v3:test-call"]["telnyx_voicemail_hangup_started"] is True
+            mock_hangup.assert_awaited_once_with("v3:test-call")
         finally:
             call_metadata.clear()
 

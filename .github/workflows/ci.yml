@@ -37,6 +37,68 @@ jobs:
       - name: Run tests
         run: npm test
 
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/admin-v2/package-lock.json
+            apps/website/package-lock.json
+            apps/observability/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: |
+          npm ci --prefix apps/admin-v2
+          npm ci --prefix apps/website
+          npm ci --prefix apps/observability
+
+      - name: Build frontend apps
+        run: |
+          npm run build --prefix apps/admin-v2
+          npm run build --prefix apps/website
+          npm run build --prefix apps/observability
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run mocked frontend E2E
+        run: npm run test:e2e:ci:mocked
+
+  mobile-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install mobile dependencies
+        run: npm ci --prefix apps/mobile
+
+      - name: Verify mobile assets
+        run: npm run verify:assets --prefix apps/mobile
+
+      - name: Check mobile auth guardrails
+        run: npm run test:auth-guard --prefix apps/mobile
+
+      - name: Run mobile unit tests
+        run: npm run test:unit --prefix apps/mobile
+
+      - name: Typecheck mobile app
+        run: npm run typecheck --prefix apps/mobile
+
   regression-tests:
     runs-on: ubuntu-latest
     defaults:
@@ -54,7 +116,7 @@ jobs:
         run: uv run python -m pytest tests/ -m regression --tb=short -q
 
   deploy-staging:
-    needs: [python-tests, node-tests, regression-tests]
+    needs: [python-tests, node-tests, frontend-tests, mobile-checks, regression-tests]
     runs-on: ubuntu-latest
     environment: staging
     steps:

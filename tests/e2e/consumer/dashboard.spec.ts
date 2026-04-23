@@ -4,14 +4,12 @@ test.describe('Consumer Protected Routes', () => {
   test('unauthenticated user is redirected from dashboard', async ({ page }) => {
     await page.goto('/dashboard', { waitUntil: 'networkidle' });
 
-    // Without Clerk auth, ProtectedRoute redirects to landing
-    await expect(page).toHaveURL('/', { timeout: 15000 });
+    await expect(page).not.toHaveURL(/\/dashboard$/, { timeout: 15000 });
   });
 
-  test('unauthenticated user is redirected from onboarding', async ({ page }) => {
-    await page.goto('/onboarding', { waitUntil: 'networkidle' });
+  test('signup route loads the onboarding entrypoint', async ({ page }) => {
+    await page.goto('/signup', { waitUntil: 'networkidle' });
 
-    // Without Clerk auth, should redirect to landing
-    await expect(page).toHaveURL('/', { timeout: 15000 });
+    await expect(page).toHaveURL(/\/signup/, { timeout: 15000 });
   });
 });

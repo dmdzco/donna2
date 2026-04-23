@@ -27,6 +27,8 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Speech transcription (Deepgram Nova 3)
 - LLM responses (Claude Haiku 4.5 via Pipecat AnthropicLLMService, prompt caching enabled)
 - Text-to-speech (ElevenLabs by default; Cartesia remains an evaluation-only provider flag; active Telnyx calls use 16kHz PCM)
+- English/Spanish Donna call language support (caregiver-selected; switches STT language, prompt instruction, and optional Spanish TTS voice)
+- Rich senior profile context in calls: local timezone, age/birthday awareness, interest descriptions, caregiver-provided additional context, and topics to avoid
 - Semantic memory with decay + deduplication (pgvector + HNSW index)
 - Full in-call context retention (APPEND strategy, no summary truncation)
 - Cross-call turn history (recent turns from previous calls in system prompt)
@@ -40,7 +42,8 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 - Call context snapshot (pre-computed JSONB, eliminates 6 DB queries per call)
 - Context + news pre-caching at 5 AM local time
 - Caregiver notes delivery (family can leave notes read during calls)
-- Per-senior call settings (configurable time limits, greeting style, memory decay)
+- AI interest discovery maps post-call topics to predefined mobile interest categories and saves editable interest details
+- Per-senior profile and call settings (timezone, language, birthday, interests, time limits, greeting style, memory decay)
 - 2 active LLM tools: web_search and mark_reminder_acknowledged (fire-and-forget)
 - Ephemeral context model (Director injections stripped each turn, prevents prompt bloat)
 
@@ -53,7 +56,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 
 ### Frontend Apps
 - **Admin Dashboard v2** — React + Vite + Tailwind ([admin-v2-liart.vercel.app](https://admin-v2-liart.vercel.app))
-- **Consumer App** — Caregiver onboarding + dashboard ([consumer-ruddy.vercel.app](https://consumer-ruddy.vercel.app))
+- **Public Website** — Marketing, signup, legal pages, and caregiver dashboard ([calldonna.co](https://calldonna.co))
 - **Observability Dashboard** — Live call monitoring ([observability-five.vercel.app](https://observability-five.vercel.app))
 
 ### Security
@@ -109,7 +112,7 @@ make test-regression         # Scenario-based regression tests
 npx playwright install chromium  # First time only
 npm run test:e2e                 # Run all (~15s)
 npm run test:e2e:admin           # Admin dashboard only
-npm run test:e2e:consumer        # Consumer app only
+npm run test:e2e:website         # Public website only
 npx playwright test --ui         # Interactive debug mode
 ```
 
@@ -117,7 +120,7 @@ See [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) for ful
 
 **Frontend apps** (run locally against the Railway API):
 - Admin dashboard: `cd apps/admin-v2 && npm run dev` → http://localhost:5175
-- Consumer app: `cd apps/consumer && npm run dev` → http://localhost:5174
+- Public website and caregiver web app: `cd apps/website && npm run dev` → http://localhost:5174
 - Observability: `cd apps/observability && npm run dev` → http://localhost:3002
 - Mobile app: `cd apps/mobile && npm run ios` after setting `EXPO_PUBLIC_API_URL` in `apps/mobile/.env`
 
@@ -125,7 +128,7 @@ See [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) for ful
 
 ### Pipecat Voice Pipeline (bot.py)
 
-Linear pipeline of `FrameProcessor`s. The Conversation Director is **non-blocking** — it passes frames through instantly while running analysis in a background task.
+Linear pipeline of `FrameProcessor`s. The Conversation Director is **non-blocking for LLM analysis** — Groq/Gemini work runs in background tasks, while final transcripts may briefly wait for the memory prefetch cache before Claude responds.
 
 ```
 Phone Call → Telnyx → WebSocket → Pipecat Pipeline
@@ -154,7 +157,7 @@ Phone Call → Telnyx → WebSocket → Pipecat Pipeline
                              │                      │   │ + Memory prefetch      │
                              │                      │   └───────────────────────┘
                              └─────────┬───────────┘
-                                       │ (no delay)
+                                       │ (0-500ms memory gate)
                                        ▼
                              Context Aggregator (user)
                                        ▼
@@ -166,7 +169,7 @@ Phone Call → Telnyx → WebSocket → Pipecat Pipeline
                              TTS 16kHz PCM → Telnyx Audio Out (L16)
                                        │
                                        ▼ (on disconnect)
-                             Post-Call: Analysis + Memory + Daily Context
+                             Post-Call: Analysis + Interest Discovery + Memory + Daily Context
 ```
 
 ### Split Director Architecture
@@ -233,8 +236,8 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 │   ├── conversations.py                # Conversation CRUD
 │   ├── daily_context.py                # Cross-call same-day memory
 │   ├── greetings.py                    # Greeting templates + rotation
-│   ├── interest_discovery.py           # Interest extraction from conversations
-│   ├── seniors.py                      # Senior profile CRUD
+│   ├── interest_discovery.py           # Interest extraction, category mapping, editable details
+│   ├── seniors.py                      # Senior profile CRUD + encrypted PHI fields
 │   ├── caregivers.py                   # Caregiver-senior relationships
 │   └── news.py                         # OpenAI cached news + Tavily/OpenAI web_search
 ├── api/
@@ -255,13 +258,14 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 /                                       # Node.js admin API (Express, Railway port 3001)
 ├── index.js                            # Express server entry
 ├── routes/                             # 17 route modules (frontend APIs, health, waitlist)
-├── services/                           # DB access and scheduler services for admin/consumer APIs
+├── services/                           # DB access and scheduler services for admin/website APIs
 ├── middleware/                          # auth, api-auth, rate-limit, security, validation
 └── db/                                 # Drizzle ORM schema + client
 
 apps/                                   # Frontend apps (Vercel)
 ├── admin-v2/                           # Admin dashboard (React + Vite + Tailwind)
-├── consumer/                           # Caregiver onboarding + dashboard (React + Clerk)
+├── website/                            # Public site + caregiver onboarding/dashboard (React + Clerk)
+├── _old-consumer-do-not-use/           # Archived previous caregiver web app
 └── observability/                      # Live call monitoring dashboard
 ```
 
@@ -294,8 +298,10 @@ ANTHROPIC_MODEL=claude-haiku-4-5-20251001 # Voice LLM model
 GOOGLE_API_KEY=...                      # Gemini 3 Flash (Director + Analysis)
 DEEPGRAM_API_KEY=...                    # STT (Nova 3)
 ELEVENLABS_API_KEY=...                  # TTS
+ELEVENLABS_VOICE_ID_ES=...              # Optional Spanish Donna voice
 CARTESIA_API_KEY=...                    # Optional Cartesia TTS provider
 CARTESIA_VOICE_ID=...                   # Optional Cartesia voice override
+CARTESIA_VOICE_ID_ES=...                # Optional Spanish Cartesia voice
 OPENAI_API_KEY=...                      # Embeddings + news search
 TAVILY_API_KEY=...                      # Optional fast in-call web search
 
@@ -383,7 +389,7 @@ Security follow-up: the staged PHI encryption/export migration remains a separat
 **Frontend apps (Vercel):**
 ```bash
 cd apps/admin-v2 && npx vercel --prod --yes     # Admin dashboard
-cd apps/consumer && npx vercel --prod --yes      # Consumer app
+cd apps/website && npx vercel --prod --yes       # Public website and caregiver web app
 ```
 
 | Service | Platform | URL |
@@ -391,7 +397,7 @@ cd apps/consumer && npx vercel --prod --yes      # Consumer app
 | Pipecat API | Railway | https://donna-pipecat-production.up.railway.app |
 | Node.js API | Railway | https://donna-api-production-2450.up.railway.app |
 | Admin Dashboard | Vercel | https://admin-v2-liart.vercel.app |
-| Consumer App | Vercel | https://consumer-ruddy.vercel.app |
+| Public Website | Vercel | https://calldonna.co |
 | Observability | Vercel | https://observability-five.vercel.app |
 
 ## Documentation

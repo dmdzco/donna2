@@ -7,7 +7,7 @@ Read `DIRECTORY.md` before writing code. It is the navigation map for active vs.
 - Donna has two active backends.
 - `pipecat/` owns the real-time voice pipeline, Telnyx WebSocket path, call behavior, post-call processing, and Python API routes.
 - Repo-root Node/Express owns the frontend-facing `/api/*` routes, admin/consumer APIs, and the active scheduler.
-- Frontends do not call Pipecat directly. `apps/admin-v2`, `apps/consumer`, `apps/mobile`, and `apps/observability` should be treated as Node API clients.
+- Frontends do not call Pipecat directly. `apps/admin-v2`, `apps/website`, `apps/mobile`, and `apps/observability` should be treated as Node API clients.
 - Do not confuse `services/*.js` with `pipecat/services/*.py`. They are separate implementations over the same database.
 
 ## Active Surfaces
@@ -15,7 +15,7 @@ Read `DIRECTORY.md` before writing code. It is the navigation map for active vs.
 - Voice behavior, prompts, flow nodes, tools, Director, Quick Observer, and post-call logic: `pipecat/`
 - Frontend APIs, auth routes, and scheduler: repo root
 - Primary admin UI: `apps/admin-v2/`
-- Caregiver-facing web UI: `apps/consumer/`
+- Public website and caregiver-facing web UI: `apps/website/`
 - Mobile app: `apps/mobile/`
 - Docs and compliance references: `docs/`
 
@@ -76,7 +76,7 @@ Read `DIRECTORY.md` before writing code. It is the navigation map for active vs.
 - Change frontend/manual call initiation: `routes/calls.js` (Node asks Pipecat to create a Telnyx call)
 - Change frontend APIs: `routes/*.js`, `middleware/*.js`, `validators/schemas.js`
 - Change admin UI: `apps/admin-v2/src/`
-- Change caregiver web UI: `apps/consumer/src/`
+- Change public website or caregiver web UI: `apps/website/src/`
 - Change mobile UI: `apps/mobile/`
 
 ## Repo-Local Skills

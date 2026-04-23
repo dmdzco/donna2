@@ -10,7 +10,7 @@ Hard-won lessons from building and optimizing the real-time voice pipeline. Each
 Claude says "goodbye" in text but inconsistently calls the `transition_to_winding_down` tool. The call stays open and the senior hears silence. **Solution:** Quick Observer detects goodbye via regex (0ms) and injects `EndFrame` programmatically after the configured goodbye delay. Never rely on Claude tool calls for call-ending logic.
 
 ### Non-Blocking Director Is Essential
-The Conversation Director must NEVER block the pipeline. It passes frames through instantly and runs analysis in `asyncio.create_task()`. A blocking Director would add 200-700ms to every turn. The tradeoff: guidance is injected same-turn (via speculative) or previous-turn (fallback), never synchronously.
+The Conversation Director must never block on LLM analysis. Groq/Gemini work runs in `asyncio.create_task()`, while the only intentional wait is the bounded final-transcript memory gate (up to 500ms) used to pick up prefetch results before Claude responds. A synchronous Director LLM call would add 200-700ms to every turn. The tradeoff: guidance is injected same-turn (via speculative) or previous-turn (fallback), never synchronously.
 
 ### Two-Director Split: Query vs Guidance
 A single Director prompt doing everything (query extraction + guidance + phase detection + reminders) costs ~700ms. Splitting into two specialized calls halves the latency on the critical path:

@@ -563,7 +563,6 @@ Maintain an up-to-date contact list for incident response. Update this section w
 | Legal Counsel | TBD | TBD | TBD | TBD |
 | Cyber Insurance Provider | TBD | TBD | TBD | TBD |
 | Telnyx Account Manager | TBD | TBD | TBD | TBD |
-| Twilio Account Manager | TBD | TBD | TBD | TBD |
 | Neon Account Manager | TBD | TBD | TBD | TBD |
 
 ### External Resources

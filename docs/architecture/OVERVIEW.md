@@ -75,7 +75,7 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 │   │         │                       │  │ + memory prefetch       │      │   │
 │   │         │                       │  │ + force end at 9/12min  │      │   │
 │   │         └───────────┬───────────┘  └─────────────────────────┘      │   │
-│   │                     │ (no delay)                                     │   │
+│   │                     │ (0-500ms memory gate)                         │   │
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (user) ← builds LLM context              │   │
 │   │                     ▼                                                │   │
@@ -98,10 +98,11 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 │   │              Post-Call Processing (services/post_call.py)             │   │
 │   │              1. Complete conversation record (DB)                     │   │
 │   │              2. Call analysis — Gemini Flash (summary, concerns)     │   │
-│   │              3. Memory extraction — OpenAI (facts, preferences)      │   │
-│   │              4. Daily context — cross-call same-day memory            │   │
-│   │              5. Reminder cleanup + cache clearing                     │   │
-│   │              6. Snapshot rebuild — pre-compute context for next call  │   │
+│   │              3. Interest discovery + scores                           │   │
+│   │              4. Memory extraction — OpenAI (facts, preferences)      │   │
+│   │              5. Daily context — cross-call same-day memory            │   │
+│   │              6. Reminder cleanup + cache clearing                     │   │
+│   │              7. Snapshot rebuild — pre-compute context for next call  │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
@@ -147,6 +148,7 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 | Process | File | Model | Trigger | Output |
 |---------|------|-------|---------|--------|
 | Call Analysis | `services/call_analysis.py` | Gemini 3 Flash Preview | Call ends | Summary, concerns, engagement score, follow-ups |
+| Interest Discovery | `services/interest_discovery.py` | Rule/category mapping over analysis output | After call analysis | New interest categories, editable interest details, engagement scores |
 | Memory Extraction | `services/memory.py` | OpenAI GPT-4o-mini | Call ends | Facts, preferences, events stored with embeddings |
 
 ---
@@ -237,8 +239,8 @@ Quick Observer pattern categories:
 | **Director** | Groq (`gpt-oss-20b`) | Active fast provider for query/speculative guidance |
 | **Director Fallback Helper** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Regular non-speculative fallback in `director_llm.py` |
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
-| **STT** | Deepgram Nova 3 (`nova-3-general`) | Real-time, interim results, 16kHz linear PCM |
-| **TTS** | ElevenLabs (`eleven_flash_v2_5`) by default; Cartesia behind provider flag | Telnyx calls use native 16kHz PCM from TTS; non-phone paths can use higher internal rates |
+| **STT** | Deepgram Nova 3 (`nova-3-general`) | Real-time, interim results, 16kHz linear PCM; English/Spanish based on senior call language |
+| **TTS** | ElevenLabs (`eleven_flash_v2_5`) by default; Cartesia behind provider flag | Telnyx calls use native 16kHz PCM from TTS; optional Spanish voice IDs for Spanish calls |
 | **VAD** | Silero | confidence=0.6, stop_secs=1.2, min_volume=0.5 |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
@@ -281,8 +283,8 @@ pipecat/
 │   ├── conversations.py             ← Conversation CRUD + transcripts
 │   ├── daily_context.py             ← Cross-call same-day memory
 │   ├── greetings.py                 ← Greeting templates + rotation
-│   ├── interest_discovery.py        ← Interest extraction from conversations
-│   ├── seniors.py                   ← Senior profile CRUD
+│   ├── interest_discovery.py        ← Interest extraction, category mapping, editable details
+│   ├── seniors.py                   ← Senior profile CRUD + encrypted PHI fields
 │   ├── caregivers.py                ← Caregiver relationships
 │   └── news.py                      ← Cached news + live web_search provider fallback
 ├── api/
@@ -302,7 +304,7 @@ pipecat/
 
 | Table | Purpose | Key Fields |
 |-------|---------|------------|
-| **seniors** | User profiles | name, phone, interests, familyInfo, medicalNotes, timezone, call_settings (JSONB), call_context_snapshot (JSONB), cached_news (TEXT) |
+| **seniors** | User profiles | name, phone, timezone, interests, encrypted familyInfo/additionalInfo/medicalNotes, call_settings (JSONB), call_context_snapshot (JSONB), cached_news (TEXT) |
 | **conversations** | Call records | callSid, encrypted transcript, duration, status, encrypted summary |
 | **memories** | Long-term memory | content, type, importance, embedding (1536d, HNSW index) |
 | **reminders** | Scheduled reminders | title, scheduledTime, isRecurring, type |

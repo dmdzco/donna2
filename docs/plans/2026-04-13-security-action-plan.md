@@ -1,5 +1,7 @@
 # Security Remediation Action Plan
 
+> Historical remediation plan. Current voice ingress uses Telnyx Ed25519 webhook verification plus single-use WebSocket tokens; Twilio-specific findings below describe the old archived voice path.
+
 Date: 2026-04-13
 Branch: `security`
 

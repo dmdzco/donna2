@@ -1,0 +1,38 @@
+# Manual flow: live instant-call regression
+# Run only against a dev/test backend and a test senior phone setup.
+# This flow intentionally submits the instant-call action.
+
+appId: com.donna.caregiver
+
+env:
+  TEST_EMAIL: "maestro+clerk_test@calldonna.co"
+  TEST_PASSWORD: "Maestro2026!"
+
+---
+
+- runFlow: ../subflows/sign_in.yaml
+
+- assertVisible:
+    id: "instant-call-open"
+
+- tapOn:
+    id: "instant-call-open"
+
+- assertVisible: "Instant Call"
+
+- tapOn: "e.g. Remind .*"
+- inputText: "Maestro instant-call regression check"
+
+- assertVisible:
+    id: "instant-call-submit"
+
+- tapOn:
+    id: "instant-call-submit"
+
+- extendedWaitUntil:
+    notVisible: "Instant Call"
+    timeout: 15000
+
+- assertVisible: "Dashboard, tab.*"
+
+- takeScreenshot: 12_instant_call

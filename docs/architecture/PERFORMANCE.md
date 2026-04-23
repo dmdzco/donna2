@@ -22,7 +22,7 @@ User speaks → [STT] → [Observer] → [Director] → [LLM] → [TTS] → Audi
 | TTS | ~200-400ms | Streaming | ElevenLabs by default; active Telnyx calls request 16kHz PCM for stable output frames |
 | **Total perceived** | **~1-2s** | | First audio chunk to user |
 
-**Key insight**: The Director runs asynchronously — it doesn't add to the pipeline's critical path. Its analysis from the previous turn is injected before the current LLM call.
+**Key insight**: Director LLM analysis runs asynchronously, so Groq/Gemini calls do not sit on the critical path. The only intentional Director delay is the bounded memory prefetch gate on final transcripts (up to 500ms), which trades a small wait for avoiding slower live memory tool calls. Speculative guidance can be injected same-turn when it completes before final transcription, otherwise the previous-turn/fallback guidance is used.
 
 ### Audio Quality Policy
 
@@ -179,7 +179,13 @@ CLOSED ──(failure_threshold reached)──► OPEN ──(recovery_timeout e
 
 | Breaker | Timeout | Failures to Open | Recovery | Fallback |
 |---------|---------|-------------------|----------|----------|
-| `gemini_director` | 5s | 3 | 60s | Skip Director analysis (call continues without guidance) |
+| `groq_director` | 8s | 5 | 60s | Fall back to Gemini/full guidance path where available |
+| `groq_speculative` | 5s | 3 | 30s | Skip same-turn speculative guidance |
+| `groq_query` | 3s | 3 | 30s | Skip query-derived memory prefetch for that turn |
+| `gemini_director` | 10s | 3 | 60s | Skip fallback Director analysis (call continues without guidance) |
+| `gemini_analysis` | 15s | 3 | 60s | Use default post-call analysis fallback |
+| `openai_news` | 10s | 3 | 60s | Skip cached news fetch |
+| `tavily_search` | 8s | 3 | 60s | Fall back to OpenAI web search |
 | `openai_embedding` | 10s | 3 | 60s | Skip memory store/search for that turn |
 
 ### Health Reporting
@@ -189,7 +195,13 @@ Circuit breaker states exposed on `/health`:
 ```json
 {
   "circuit_breakers": {
+    "groq_director": "closed",
+    "groq_speculative": "closed",
+    "groq_query": "closed",
     "gemini_director": "closed",
+    "gemini_analysis": "closed",
+    "openai_news": "closed",
+    "tavily_search": "closed",
     "openai_embedding": "closed"
   }
 }
@@ -197,7 +209,8 @@ Circuit breaker states exposed on `/health`:
 
 ### Degraded Operation
 When a circuit breaker opens, the call continues in degraded mode:
-- **Director open**: No per-turn guidance — Claude responds based on system prompt alone
+- **Director open**: No same-turn guidance or fallback guidance — Claude responds based on system prompt and existing context
+- **News/search open**: Donna skips cached news or uses the fallback search provider where possible
 - **Embedding open**: No memory search/store — call relies on pre-loaded context only
 - Both are non-fatal: the user still has a conversation, just with less contextual awareness
 
@@ -259,14 +272,17 @@ User: "Bye Donna!"
     │
     ├── Quick Observer detects STRONG goodbye pattern
     ├── Sets _goodbye_in_progress flag (suppresses Director)
-    ├── Starts 3.5s timer
+    ├── If call is at least 60s old, starts 5s timer (default)
     │
-    ▼ (3.5s later — lets Claude finish speaking)
+    ▼ (5s later — lets Claude/TTS finish the goodbye)
     │
     EndFrame injected → Pipeline shutdown → active telephony serializer terminates call
 ```
 
-- 3.5s delay allows Claude to complete a natural goodbye response
+- 60s minimum call-age guard reduces false early hangups
+- Single "bye", "take care", and "have a good day" style phrases are weak signals and do not force-end by themselves
+- Same-utterance continuations such as "goodbye... oh wait" are downgraded and do not force-end
+- 5s default delay allows Claude/TTS to complete a natural goodbye response
 - Bypasses LLM decision-making entirely (100% reliable)
 - Director suppressed during goodbye to prevent stale "RE-ENGAGE" guidance
 
@@ -299,7 +315,13 @@ call metrics.
   "database": "ok",
   "pool": { "size": 15, "idle": 8, "max": 50, "min": 5 },
   "circuit_breakers": {
+    "groq_director": "closed",
+    "groq_speculative": "closed",
+    "groq_query": "closed",
     "gemini_director": "closed",
+    "gemini_analysis": "closed",
+    "openai_news": "closed",
+    "tavily_search": "closed",
     "openai_embedding": "closed"
   }
 }

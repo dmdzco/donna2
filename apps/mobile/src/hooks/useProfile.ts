@@ -1,25 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@clerk/clerk-expo";
-import { api } from "@/src/lib/api";
+import { ApiError, api } from "@/src/lib/api";
+import { getProfileQueryKey } from "@/src/lib/profileSession";
 
 export function useProfile() {
-  const { getToken } = useAuth();
+  const { getToken, isLoaded, isSignedIn, userId } = useAuth();
 
   return useQuery({
-    queryKey: ["profile"],
+    queryKey: getProfileQueryKey(userId),
+    enabled: isLoaded && isSignedIn && !!userId,
     queryFn: async () => {
       const token = await getToken();
-      if (!token) { console.log("[profile] no token"); return null; }
-      try {
-        const result = await api.caregivers.me(token);
-        console.log("[profile] response:", JSON.stringify(result));
-        return result;
-      } catch (e: any) {
-        console.log("[profile] error:", e?.status, e?.message);
-        throw e;
+      if (!token) {
+        throw new ApiError("Authentication required", 401, {}, "unauthorized");
       }
+      return api.caregivers.me(token);
     },
-    staleTime: 0,
-    gcTime: 0,
   });
 }

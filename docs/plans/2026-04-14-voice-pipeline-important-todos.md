@@ -1,5 +1,7 @@
 # Voice Pipeline Important TODOs
 
+> Historical follow-up list. Current live-call source of truth is Telnyx L16/16k in `pipecat/api/routes/telnyx.py`, `pipecat/main.py`, `pipecat/bot.py`, and `pipecat/docs/ARCHITECTURE.md`. Twilio-specific wording below describes the old carrier path and should not be copied into new work.
+
 Captured after the April 14, 2026 voice pipeline audit. The timezone fallback bug was fixed separately; the remaining items below should be treated as prioritized follow-up work.
 
 ## Implementation Status
@@ -29,7 +31,7 @@ Fixed on branch `codex/voice-pipeline-todos`:
 ### 2. Persist Node-created outbound call context across the Node to Pipecat boundary
 
 - **Status**: Fixed by Pipecat-side hydration. Redis reminder context remains in place; generic manual/welfare outbound calls hydrate memory, snapshot, notes, news, greeting, and settings inside `/voice/answer`.
-- **Why it matters**: Node creates manual and welfare calls, then stores prefetch context only in local Maps. Twilio answers on Pipecat, which cannot read Node process memory.
+- **Why it matters**: Node creates manual and welfare calls, then stores prefetch context only in local Maps. The telephony callback lands on Pipecat, which cannot read Node process memory.
 - **Risk**: Manual/welfare calls can start without the memory context, snapshot, caregiver notes, news, greeting, and call settings that Node just prepared.
 - **Fix direction**: Either hydrate full context in Pipecat for every known outbound senior, or persist Node prefetch by `CallSid` in shared Redis/DB and have Pipecat consume it.
 
@@ -42,15 +44,15 @@ Fixed on branch `codex/voice-pipeline-todos`:
 
 ### 4. Authenticate WebSockets before consuming active-call capacity
 
-- **Status**: Fixed. The Twilio start frame and `ws_token` are validated before semaphore acquisition; token consumption happens only after capacity is reserved.
-- **Why it matters**: `/ws` accepts a WebSocket and consumes the call semaphore before the Twilio start frame is parsed and the `ws_token` is validated.
+- **Status**: Fixed. The Telnyx media-stream start frame and `ws_token` are validated before semaphore acquisition; token consumption happens only after capacity is reserved.
+- **Why it matters**: `/ws` accepts a WebSocket and consumes the call semaphore before the Telnyx start frame is parsed and the `ws_token` is validated.
 - **Risk**: A client can connect and stall before auth, tying up active-call capacity without starting AI services.
-- **Fix direction**: Add a short handshake/auth timeout and only count calls as active after the Twilio start frame is received and the token validates.
+- **Fix direction**: Add a short handshake/auth timeout and only count calls as active after the Telnyx start frame is received and the token validates.
 
 ### 4.5. Avoid the Node reminder delivery row race
 
-- **Status**: Fixed. Node and Pipecat reminder schedulers tag Twilio answer URLs with `call_type=reminder`; Pipecat uses that tag to retry the DB lookup briefly before treating the call as generic outbound.
-- **Why it matters**: Twilio can request `/voice/answer` before Node has committed the `reminder_deliveries` row containing the new `call_sid`.
+- **Status**: Fixed. Node and Pipecat reminder schedulers pass reminder call context to Pipecat; Pipecat uses that context to retry the DB lookup briefly before treating the call as generic outbound.
+- **Why it matters**: Telephony callbacks can arrive before Node has committed the `reminder_deliveries` row containing the new call identifier.
 - **Risk**: A medication or appointment reminder can hydrate as a generic outbound check-in and skip the reminder prompt/acknowledgment tracking.
 - **Fix direction**: Keep the retry path scoped to tagged reminder calls so manual and welfare calls do not pay the delay.
 

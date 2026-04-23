@@ -5,6 +5,7 @@ import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
 import {
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -131,6 +132,7 @@ export default function CreateAccountScreen() {
   }
 
   async function handleCreateAccount() {
+    Keyboard.dismiss();
     const nextErrors: { email?: string; password?: string } = {};
 
     if (!email.trim()) nextErrors.email = t("auth.emailRequired");
@@ -187,6 +189,7 @@ export default function CreateAccountScreen() {
   }
 
   async function handleEmailVerification() {
+    Keyboard.dismiss();
     const normalizedCode = verificationCode.replace(/\s+/g, "");
 
     if (!normalizedCode) {
@@ -334,6 +337,8 @@ export default function CreateAccountScreen() {
                   secureTextEntry
                   textContentType="oneTimeCode"
                   autoComplete="one-time-code"
+                  returnKeyType="done"
+                  onSubmitEditing={handleCreateAccount}
                   testID="create-account-password"
                 />
                 {!errors.password && (
@@ -424,6 +429,8 @@ export default function CreateAccountScreen() {
                   autoComplete="one-time-code"
                   autoCapitalize="none"
                   autoCorrect={false}
+                  returnKeyType="done"
+                  onSubmitEditing={handleEmailVerification}
                   testID="create-account-verification-code"
                 />
               </View>

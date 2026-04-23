@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,7 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react-native";
-import { Button, Input, ProgressBar } from "@/src/components/ui";
+import { Button, Input, KeyboardAwareFooter, ProgressBar } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
 import { useOnboardingStore } from "@/src/stores/onboarding";
 
@@ -36,6 +37,7 @@ export default function Step1Screen() {
   }
 
   function handleNext() {
+    Keyboard.dismiss();
     if (validate()) {
       router.push("/(onboarding)/step2");
     }
@@ -130,9 +132,9 @@ export default function Step1Screen() {
         </ScrollView>
 
         {/* Fixed bottom button */}
-        <View className="absolute bottom-0 left-0 right-0 bg-cream border-t border-charcoal/10 px-6 pt-4 pb-8">
+        <KeyboardAwareFooter>
           <Button title={t("common.next")} onPress={handleNext} />
-        </View>
+        </KeyboardAwareFooter>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

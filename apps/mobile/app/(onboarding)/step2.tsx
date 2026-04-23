@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,7 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { ArrowLeft, ChevronDown, Check } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
-import { Button, Input, Modal, ProgressBar } from "@/src/components/ui";
+import { Button, Input, KeyboardAwareFooter, Modal, ProgressBar } from "@/src/components/ui";
 import { COLORS, RELATIONSHIP_OPTIONS } from "@/src/constants/theme";
 import { useOnboardingStore } from "@/src/stores/onboarding";
 
@@ -49,6 +50,7 @@ export default function Step2Screen() {
   }
 
   function handleNext() {
+    Keyboard.dismiss();
     if (validate()) {
       router.push("/(onboarding)/language");
     }
@@ -192,9 +194,9 @@ export default function Step2Screen() {
         </ScrollView>
 
         {/* Fixed bottom button */}
-        <View className="absolute bottom-0 left-0 right-0 bg-cream border-t border-charcoal/10 px-6 pt-4 pb-8">
+        <KeyboardAwareFooter>
           <Button title={t("common.next")} onPress={handleNext} />
-        </View>
+        </KeyboardAwareFooter>
       </KeyboardAvoidingView>
 
       {/* Relationship picker modal */}

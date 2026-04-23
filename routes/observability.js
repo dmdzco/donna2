@@ -55,9 +55,14 @@ function pickLatencyBreakdown(traceBreakdown, fallbackBreakdown) {
 
 function readContextTrace(metric) {
   const fallbackBreakdown = readLatencyBreakdown(metric);
-  const trace = metric?.context_trace_encrypted
-    ? decryptJson(metric.context_trace_encrypted)
-    : null;
+  let trace = null;
+  if (metric?.context_trace_encrypted) {
+    try {
+      trace = decryptJson(metric.context_trace_encrypted);
+    } catch {
+      trace = null;
+    }
+  }
   if (!trace) {
     return Object.keys(fallbackBreakdown).length > 0
       ? { version: 1, event_count: 0, latency_breakdown: fallbackBreakdown, events: [] }

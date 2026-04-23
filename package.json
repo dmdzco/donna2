@@ -17,6 +17,7 @@
     "test:e2e:consumer": "playwright test --project=consumer",
     "test:e2e:website": "playwright test --project=consumer",
     "test:e2e:observability": "playwright test --project=observability",
+    "test:e2e:ci:mocked": "playwright test --project=admin --project=consumer --project=observability",
     "test:e2e:integration": "playwright test --config=playwright.integration.config.ts"
   },
   "dependencies": {

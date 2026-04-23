@@ -1,4 +1,4 @@
-import { useAuth, useOAuth, useSignUp } from "@clerk/clerk-expo";
+import { useAuth, useOAuth, useSignInWithApple, useSignUp } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
@@ -62,9 +62,7 @@ export default function CreateAccountScreen() {
   const { startOAuthFlow: startGoogleOAuth } = useOAuth({
     strategy: "oauth_google",
   });
-  const { startOAuthFlow: startAppleOAuth } = useOAuth({
-    strategy: "oauth_apple",
-  });
+  const { startAppleAuthenticationFlow } = useSignInWithApple();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -143,6 +141,15 @@ export default function CreateAccountScreen() {
         return;
       }
 
+      if (
+        Array.isArray((result as any).unverifiedFields) &&
+        (result as any).unverifiedFields.includes("email_address")
+      ) {
+        throw new Error(
+          "Email verification is still enabled for mobile sign-up in Clerk. Turn it off before using this flow."
+        );
+      }
+
       Alert.alert(
         t("auth.signUpFailed"),
         t("auth.couldNotCreateAccount"),
@@ -176,10 +183,21 @@ export default function CreateAccountScreen() {
     setOauthLoading(provider);
 
     try {
-      const startFlow =
-        provider === "google" ? startGoogleOAuth : startAppleOAuth;
+      if (provider === "apple") {
+        if (Platform.OS !== "ios") return;
+
+        const { createdSessionId, setActive: setAppleActive } =
+          await startAppleAuthenticationFlow();
+
+        if (createdSessionId && setAppleActive) {
+          await setAppleActive({ session: createdSessionId });
+          await navigateAfterAuth();
+        }
+        return;
+      }
+
       const { createdSessionId, setActive: setOAuthActive } =
-        await startFlow();
+        await startGoogleOAuth();
 
       if (createdSessionId && setOAuthActive) {
         await setOAuthActive({ session: createdSessionId });
@@ -290,20 +308,22 @@ export default function CreateAccountScreen() {
           </View>
 
           <View className="gap-3 mb-8">
-            <Button
-              title={t("auth.continueWithApple")}
-              onPress={() => handleOAuth("apple")}
-              variant="secondary"
-              loading={oauthLoading === "apple"}
-              disabled={loading || oauthLoading !== null}
-              icon={
-                <Ionicons
-                  name="logo-apple"
-                  size={20}
-                  color={COLORS.charcoal}
-                />
-              }
-            />
+            {Platform.OS === "ios" && (
+              <Button
+                title={t("auth.continueWithApple")}
+                onPress={() => handleOAuth("apple")}
+                variant="secondary"
+                loading={oauthLoading === "apple"}
+                disabled={loading || oauthLoading !== null}
+                icon={
+                  <Ionicons
+                    name="logo-apple"
+                    size={20}
+                    color={COLORS.charcoal}
+                  />
+                }
+              />
+            )}
             <Button
               title={t("auth.continueWithGoogle")}
               onPress={() => handleOAuth("google")}

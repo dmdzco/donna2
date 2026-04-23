@@ -15,8 +15,10 @@
     },
     "ios": {
       "supportsTablet": false,
+      "usesAppleSignIn": true,
       "bundleIdentifier": "com.donna.caregiver",
       "infoPlist": {
+        "CFBundleAllowMixedLocalizations": true,
         "NSFaceIDUsageDescription": "Use Face ID for quick sign-in",
         "NSCameraUsageDescription": "Donna uses the camera to let you set a profile photo",
         "NSPhotoLibraryUsageDescription": "Donna uses your photo library to let you set a profile photo"
@@ -46,6 +48,7 @@
       "expo-font",
       "expo-splash-screen",
       "expo-system-ui",
+      "expo-apple-authentication",
       "@sentry/react-native"
     ],
     "experiments": {

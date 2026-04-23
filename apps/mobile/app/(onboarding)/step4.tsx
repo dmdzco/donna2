@@ -163,9 +163,13 @@ export default function Step4Screen() {
                       placeholder={t(`interests.${interest.id}.placeholder`)}
                       placeholderTextColor="rgba(255,255,255,0.5)"
                       value={selectedInterests[interest.id] ?? ""}
+                      testID={`interest-detail-${interest.id}`}
                       onChangeText={(v) =>
                         updateInterestDetail(interest.id, v)
                       }
+                      returnKeyType="done"
+                      blurOnSubmit
+                      onSubmitEditing={() => handleDone(interest.id)}
                       multiline
                     />
                     <Button
@@ -173,6 +177,7 @@ export default function Step4Screen() {
                       onPress={() => handleDone(interest.id)}
                       variant="secondary"
                       className="mt-3"
+                      testID={`interest-done-${interest.id}`}
                     />
                   </View>
                 );
@@ -190,6 +195,7 @@ export default function Step4Screen() {
                   style={{ width: "31%" }}
                   accessibilityRole="button"
                   accessibilityLabel={`${t(`interests.${interest.id}.label`)}${isSelected ? ", selected" : ""}`}
+                  testID={`interest-tile-${interest.id}`}
                 >
                   {/* X badge for selected */}
                   {isSelected && (

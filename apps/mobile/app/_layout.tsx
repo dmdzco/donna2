@@ -38,8 +38,6 @@ import { getClerkPublishableKey } from "@/src/lib/runtimeConfig";
 
 SplashScreen.preventAutoHideAsync();
 
-const CLERK_KEY = getClerkPublishableKey();
-
 function AuthGuard() {
   const { isLoaded, isSignedIn, userId } = useAuth();
   const { data: profile, isLoading: profileLoading, isError: profileError, error: profileErrorObj } = useProfile();
@@ -199,9 +197,51 @@ function RootLayout() {
 
   if (!fontsLoaded) return null;
 
+  let clerkKey: string;
+  try {
+    clerkKey = getClerkPublishableKey();
+  } catch (error) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          paddingHorizontal: 24,
+          backgroundColor: COLORS.cream,
+        }}
+      >
+        <View style={{ width: "100%", maxWidth: 360 }}>
+          <Text
+            style={{
+              fontSize: 28,
+              lineHeight: 34,
+              fontWeight: "600",
+              color: COLORS.charcoal,
+              textAlign: "center",
+            }}
+          >
+            Donna is missing mobile auth configuration
+          </Text>
+          <Text
+            style={{
+              marginTop: 12,
+              fontSize: 15,
+              lineHeight: 22,
+              color: COLORS.muted,
+              textAlign: "center",
+            }}
+          >
+            {error instanceof Error ? error.message : "Set the public Clerk key for this build and relaunch the app."}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <ErrorBoundary>
-      <ClerkProvider publishableKey={CLERK_KEY} tokenCache={tokenCache}>
+      <ClerkProvider publishableKey={clerkKey} tokenCache={tokenCache}>
         <ClerkLoaded>
           <QueryClientProvider client={queryClient}>
             <GestureHandlerRootView style={{ flex: 1 }}>

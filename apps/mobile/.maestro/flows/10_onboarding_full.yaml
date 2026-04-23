@@ -1,50 +1,92 @@
 # Flow 10: Full Onboarding (Fresh User)
-# Signs in with a fresh verified test user → completes all 5 onboarding steps → dashboard
+# Signs in with a fresh verified test user → completes all 6 onboarding steps → dashboard
 # NOTE: This flow creates a new senior — run separately or last
 #
 # KEY LEARNINGS:
 #   - Input component: use testID to reliably target TextInput fields.
 #     The label <Text> and TextInput share the same accessibility text.
-#   - hideKeyboard fails on iOS. Use pressKey:enter (single-line) to dismiss.
-#   - For phone-pad keyboard (no Return key), tap a non-interactive heading.
-#   - Between fields, just tap the next field directly — keyboard stays open.
-#   - Before tapping fixed-bottom buttons (Next/Continue), dismiss keyboard first.
+#   - Text keyboard fields can use inputText, then pressKey:enter when a Return
+#     key is visible.
+#   - Phone-pad/number-pad fields must use ../subflows/tap_digits.yaml so the
+#     test taps the visible keypad digits like a caregiver would.
+#   - Do not use placeholder values as test input. Assert the unique typed value
+#     is visible before continuing so Maestro cannot silently miss focus.
+#   - Do not tap random headings or empty screen space to dismiss keyboards.
+#     The CTA should stay clear above the keyboard; tap it directly.
 
 appId: com.donna.caregiver
-
-env:
-  TEST_EMAIL: ${TEST_FRESH_EMAIL}
-  TEST_PASSWORD: ${TEST_FRESH_PASSWORD}
 
 ---
 
 - evalScript: ${output.onboardingSeniorPhone = "555" + String(Date.now()).slice(-7)}
 
-- runFlow: ../subflows/sign_in.yaml
+- runFlow:
+    file: ../subflows/sign_in.yaml
+    env:
+      TEST_EMAIL: ${TEST_FRESH_EMAIL}
+      TEST_PASSWORD: ${TEST_FRESH_PASSWORD}
 
 # ── Step 1: About You (Caregiver) ──
 - extendedWaitUntil:
     visible: "About You"
     timeout: 10000
 
-# Fields start empty — no eraseText needed. Use testID to target TextInput.
+# Clear fields first so rerunning after an interrupted onboarding attempt does
+# not append to draft values left in the form.
 - tapOn:
     id: "input-first-name"
-- inputText: "Jane"
+- eraseText: 50
+- inputText: "Avery"
+- runFlow:
+    when:
+      notVisible: "Avery"
+    commands:
+      # Fallback to the center of the visible first-name input when XCTest
+      # reports the ID tap as completed without actually focusing the field.
+      - tapOn:
+          point: "50%,36%"
+      - eraseText: 50
+      - inputText: "Avery"
+- extendedWaitUntil:
+    visible: "Avery"
+    timeout: 3000
 - tapOn:
     id: "input-last-name"
-- inputText: "Tester"
+- eraseText: 50
+- inputText: "Marlowe"
+- runFlow:
+    when:
+      notVisible: "Marlowe"
+    commands:
+      - tapOn:
+          point: "50%,47%"
+      - eraseText: 50
+      - inputText: "Marlowe"
+- extendedWaitUntil:
+    visible: "Marlowe"
+    timeout: 3000
+- pressKey: enter
 - tapOn:
     id: "input-phone"
-- tapOn:
-    id: "input-phone"
-    optional: true
-- inputText: "5551234567"
-
-# Dismiss phone-pad keyboard (no Return key) by tapping non-interactive heading
-- tapOn:
-    text: "About You"
-    index: 0
+- eraseText: 20
+- runFlow:
+    file: ../subflows/tap_digits.yaml
+    env:
+      DIGITS: "2145550199"
+- runFlow:
+    when:
+      notVisible: "2145550199"
+    commands:
+      - tapOn:
+          point: "50%,57%"
+      - eraseText: 20
+      - runFlow:
+          file: ../subflows/tap_digits.yaml
+          env:
+            DIGITS: "2145550199"
+- extendedWaitUntil:
+    visible: "2145550199"
+    timeout: 3000
 - tapOn: "Next"
 
 # ── Step 2: About Your Loved One ──
@@ -54,93 +96,184 @@ env:
 
 - tapOn:
     id: "input-their-name"
-- inputText: "Margaret"
+- eraseText: 50
+- inputText: "Nora"
+- runFlow:
+    when:
+      notVisible: "Nora"
+    commands:
+      - tapOn:
+          point: "50%,36%"
+      - eraseText: 50
+      - inputText: "Nora"
+- extendedWaitUntil:
+    visible: "Nora"
+    timeout: 3000
 - pressKey: enter
 - tapOn:
     id: "input-their-phone"
-- tapOn:
-    id: "input-their-phone"
-    optional: true
 - eraseText: 20
-- inputText: ${output.onboardingSeniorPhone}
+- runFlow:
+    file: ../subflows/tap_digits.yaml
+    env:
+      DIGITS: ${output.onboardingSeniorPhone}
+- runFlow:
+    when:
+      notVisible: ${output.onboardingSeniorPhone}
+    commands:
+      - tapOn:
+          point: "50%,47%"
+      - eraseText: 20
+      - runFlow:
+          file: ../subflows/tap_digits.yaml
+          env:
+            DIGITS: ${output.onboardingSeniorPhone}
+- extendedWaitUntil:
+    visible: ${output.onboardingSeniorPhone}
+    timeout: 3000
 
 # Relationship picker
-- tapOn: "Select relationship"
+- tapOn:
+    id: "input-relationship"
+- runFlow:
+    when:
+      notVisible: "Daughter"
+    commands:
+      # Maestro can match/tap the picker Pressable without delivering the
+      # native press. This taps the center of the visible relationship control.
+      - tapOn:
+          point: "50%,54%"
 - extendedWaitUntil:
-    visible: "Select Relationship"
+    visible: "Daughter"
     timeout: 5000
-- tapOn: "Daughter"
+- tapOn:
+    id: "relationship-option-Daughter"
 
 - tapOn:
     id: "input-city"
-- inputText: "Dallas"
+- eraseText: 50
+- inputText: "Plano"
+- runFlow:
+    when:
+      notVisible: "Plano"
+    commands:
+      - tapOn:
+          point: "50%,64%"
+      - eraseText: 50
+      - inputText: "Plano"
+- extendedWaitUntil:
+    visible: "Plano"
+    timeout: 3000
+- pressKey: enter
 - tapOn:
     id: "input-state"
-- inputText: "TX"
+- eraseText: 10
+- inputText: "CA"
+- runFlow:
+    when:
+      notVisible: "CA"
+    commands:
+      - tapOn:
+          point: "25%,73%"
+      - eraseText: 10
+      - inputText: "CA"
+- extendedWaitUntil:
+    visible: "CA"
+    timeout: 3000
+- pressKey: enter
 - tapOn:
     id: "input-zipcode"
-- inputText: "75201"
-
-# Dismiss keyboard before tapping Next
-- pressKey: enter
+- eraseText: 10
+- runFlow:
+    file: ../subflows/tap_digits.yaml
+    env:
+      DIGITS: "94105"
+- runFlow:
+    when:
+      notVisible: "94105"
+    commands:
+      - tapOn:
+          point: "75%,73%"
+      - eraseText: 10
+      - runFlow:
+          file: ../subflows/tap_digits.yaml
+          env:
+            DIGITS: "94105"
+- extendedWaitUntil:
+    visible: "94105"
+    timeout: 3000
 - tapOn: "Next"
 
-# ── Step 3: Reminders ──
+# ── Step 3: Language ──
+- extendedWaitUntil:
+    visible: "Language"
+    timeout: 10000
+
+# English is selected by default; tap the visible CTA to continue.
+- tapOn: "Next"
+
+# ── Step 4: Reminders ──
 - extendedWaitUntil:
     visible: "Reminders"
     timeout: 10000
 
 - tapOn:
     id: "input-reminder-title-0"
-- inputText: "Morning medication"
+- inputText: "Water orchids"
+- extendedWaitUntil:
+    visible: "Water orchids"
+    timeout: 3000
 
-# Dismiss keyboard then Continue
+# Dismiss keyboard then Next
 - pressKey: enter
-- tapOn: "Continue"
+- tapOn: "Next"
 
-# ── Step 4: Interests ──
+# ── Step 5: Interests ──
 - extendedWaitUntil:
     visible: "Interests"
     timeout: 10000
 
 # Tap interest tile to expand it
-- tapOn: "Music"
+- tapOn:
+    id: "interest-tile-music"
 - extendedWaitUntil:
-    visible: "Done"
+    visible:
+      id: "interest-detail-music"
     timeout: 3000
-- tapOn: "e.g., jazz, Frank Sinatra, classical..."
+- tapOn:
+    id: "interest-detail-music"
 - inputText: "Loves Frank Sinatra and jazz"
-- tapOn:
-    text: "Interests"
-    index: 0
-- tapOn: "Done"
+- pressKey: enter
 
-- tapOn: "Gardening"
-- extendedWaitUntil:
-    visible: "Done"
-    timeout: 3000
-- tapOn: "e.g., roses, vegetable garden..."
-- inputText: "Grows tomatoes and roses"
-- tapOn:
-    text: "Interests"
-    index: 0
-- tapOn: "Done"
-
-# Scroll to Continue button
 - scrollUntilVisible:
-    element: "Continue"
+    element: "Gardening"
     direction: DOWN
-- tapOn: "Continue"
-
-# ── Step 5: Schedule Donna ──
+- tapOn:
+    id: "interest-tile-gardening"
 - extendedWaitUntil:
-    visible: "Schedule Donna"
+    visible:
+      id: "interest-detail-gardening"
+    timeout: 3000
+- tapOn:
+    id: "interest-detail-gardening"
+- inputText: "Grows tomatoes and roses"
+- pressKey: enter
+
+# Scroll to Next button if needed; the footer should normally keep it visible.
+- scrollUntilVisible:
+    element: "Next"
+    direction: DOWN
+- tapOn: "Next"
+
+# ── Step 6: Call Schedule ──
+- extendedWaitUntil:
+    visible: "Call Schedule"
     timeout: 10000
 
 # Default title and time are pre-selected — no changes needed
 # Check the reminder checkbox if visible
 - tapOn:
-    text: "Morning medication"
+    text: "Water orchids"
     optional: true
 
 # Tap Create Profile

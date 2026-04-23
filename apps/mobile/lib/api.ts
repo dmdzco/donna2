@@ -1,9 +1,8 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { getApiUrl } from '@/src/lib/runtimeConfig';
 
-const API_URL = getApiUrl();
-
 async function fetchWithAuth(path: string, options: RequestInit = {}, token?: string | null) {
+  const apiUrl = getApiUrl();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
@@ -13,7 +12,7 @@ async function fetchWithAuth(path: string, options: RequestInit = {}, token?: st
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+  const res = await fetch(`${apiUrl}${path}`, { ...options, headers });
 
   if (!res.ok) {
     const error = await res.text();

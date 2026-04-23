@@ -8,8 +8,6 @@ import type {
 } from "@/src/types";
 import { getApiUrl } from "@/src/lib/runtimeConfig";
 
-const API_URL = getApiUrl();
-
 type WriteOptions = { idempotencyKey?: string };
 type FetchOptions = RequestInit & { token?: string } & WriteOptions;
 
@@ -60,6 +58,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 async function fetchJson<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
   const { token, idempotencyKey, ...fetchOpts } = options;
+  const apiUrl = getApiUrl();
   const requestId = createRequestId();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -82,7 +81,7 @@ async function fetchJson<T>(endpoint: string, options: FetchOptions = {}): Promi
 
   let res: Response;
   try {
-    res = await fetch(`${API_URL}${endpoint}`, {
+    res = await fetch(`${apiUrl}${endpoint}`, {
       ...fetchOpts,
       headers,
       signal: controller.signal,

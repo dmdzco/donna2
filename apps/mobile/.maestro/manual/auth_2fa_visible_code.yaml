@@ -65,7 +65,10 @@ env:
     id: "auth-verification-code"
 - tapOn:
     id: "auth-verification-code"
-- inputText: "424242"
+- runFlow:
+    file: ../subflows/tap_digits.yaml
+    env:
+      DIGITS: "424242"
 - tapOn:
     id: "auth-verification-submit"
 

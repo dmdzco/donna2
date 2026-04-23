@@ -49,54 +49,39 @@ vi.mock('../../lib/growthbook.js', () => ({
 
 const { schedulerService } = await import('../../services/scheduler.js');
 
-function buildReminderSpec() {
-  const scheduledFor = new Date(Date.now() + 5 * 60 * 1000);
+function buildScheduleSpec() {
   return {
-    type: 'reminder',
+    type: 'schedule',
     senior: {
       id: 'senior-1',
       timezone: 'America/New_York',
     },
-    reminder: {
-      id: 'reminder-1',
-      scheduledTime: scheduledFor.toISOString(),
-      isRecurring: false,
+    scheduleItem: {
+      id: 'sched-1',
+      title: 'Morning call',
+      time: '9:00 AM',
+      frequency: 'daily',
     },
-    scheduledFor,
+    dedupKey: 'senior-1:sched-1',
+    pendingReminders: [
+      { id: 'rem-1', title: 'Take medication', description: 'Blood pressure pills', type: 'medication' },
+    ],
   };
 }
 
-function buildPrewarmedContext(spec, overrides = {}) {
-  const warmedAt = new Date(Date.now());
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+function buildWelfareSpec() {
   return {
-    version: 1,
-    seniorId: spec.senior.id,
-    callType: 'reminder',
-    reminderId: spec.reminder.id,
-    scheduledFor: spec.scheduledFor.toISOString(),
-    warmedAt: warmedAt.toISOString(),
-    expiresAt: expiresAt.toISOString(),
-    contextSeedSource: 'context_cache',
-    hydratedContext: {
-      memoryContext: 'Warm memory',
-      preGeneratedGreeting: 'Hi there',
-      newsContext: 'Fresh news',
-      recentTurns: 'Recent turns',
-      previousCallsSummary: 'Previous summary',
-      todaysContext: 'Today',
-      lastCallAnalysis: { summary: 'Yesterday' },
-      callSettings: { preferred_call_window: 'morning' },
-      caregiverNotesContent: [],
+    type: 'welfare',
+    senior: {
+      id: 'senior-2',
+      timezone: 'America/New_York',
     },
-    ...overrides,
   };
 }
 
-describe('schedulerService reminder prewarm', () => {
+describe('schedulerService schedule-driven calls', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    schedulerService.clearReminderPrewarmCache();
     mocks.initiateTelnyxOutboundCall.mockResolvedValue({
       callSid: 'v3:test-call',
       callControlId: 'v3:test-call',
@@ -106,70 +91,54 @@ describe('schedulerService reminder prewarm', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    schedulerService.clearReminderPrewarmCache();
   });
 
-  it('caches a usable reminder prewarm payload', async () => {
-    const spec = buildReminderSpec();
-    mocks.prewarmTelnyxOutboundContext.mockResolvedValue({
-      success: true,
-      prewarmedContext: buildPrewarmedContext(spec),
-    });
+  it('triggers a scheduled call with reminderIds and contextNotes', async () => {
+    const spec = buildScheduleSpec();
+    spec.scheduleItem.contextNotes = 'Ask about doctor visit';
 
-    const summary = await schedulerService.prewarmReminderCalls([spec], 'https://pipecat.example.test');
-
-    expect(summary).toEqual({
-      attempted: 1,
-      warmed: 1,
-      cacheHits: 0,
-      failed: 0,
-    });
-    expect(schedulerService.getReminderPrewarm(spec)).toEqual(
-      expect.objectContaining({
-        seniorId: 'senior-1',
-        reminderId: 'reminder-1',
-      }),
-    );
-  });
-
-  it('reuses prewarmed reminder context on the outbound call request', async () => {
-    const spec = buildReminderSpec();
-    mocks.prewarmTelnyxOutboundContext.mockResolvedValue({
-      success: true,
-      prewarmedContext: buildPrewarmedContext(spec),
-    });
-
-    await schedulerService.prewarmReminderCalls([spec], 'https://pipecat.example.test');
     await schedulerService.triggerOutboundCall(spec, 'https://pipecat.example.test');
 
     expect(mocks.initiateTelnyxOutboundCall).toHaveBeenCalledWith(
       expect.objectContaining({
         seniorId: 'senior-1',
-        callType: 'reminder',
-        reminderId: 'reminder-1',
-        prewarmedContext: expect.objectContaining({
-          seniorId: 'senior-1',
-          reminderId: 'reminder-1',
-        }),
+        callType: 'schedule',
+        reminderIds: ['rem-1'],
+        contextNotes: 'Ask about doctor visit',
         baseUrl: 'https://pipecat.example.test',
       }),
     );
-    expect(schedulerService.getReminderPrewarm(spec)).toBeNull();
   });
 
-  it('falls back to live hydration when the cached prewarm is expired', async () => {
-    const spec = buildReminderSpec();
-    mocks.prewarmTelnyxOutboundContext.mockResolvedValue({
-      success: true,
-      prewarmedContext: buildPrewarmedContext(spec, {
-        expiresAt: new Date(Date.now() - 60 * 1000).toISOString(),
-      }),
-    });
+  it('triggers a welfare call for seniors without scheduled calls', async () => {
+    const spec = buildWelfareSpec();
 
-    const summary = await schedulerService.prewarmReminderCalls([spec], 'https://pipecat.example.test');
     await schedulerService.triggerOutboundCall(spec, 'https://pipecat.example.test');
 
-    expect(summary.failed).toBe(1);
-    expect(mocks.initiateTelnyxOutboundCall.mock.calls[0][0].prewarmedContext).toBeUndefined();
+    expect(mocks.initiateTelnyxOutboundCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        seniorId: 'senior-2',
+        callType: 'check-in',
+        baseUrl: 'https://pipecat.example.test',
+      }),
+    );
+  });
+
+  it('buildCallPlan deduplicates — scheduled calls prevent welfare for same senior', () => {
+    const schedCalls = [{
+      senior: { id: 'senior-1' },
+      scheduleItem: { id: 's1', time: '9:00 AM', frequency: 'daily' },
+      dedupKey: 'senior-1:s1',
+      pendingReminders: [],
+    }];
+    const welfareSeniors = [{ id: 'senior-1' }, { id: 'senior-2' }];
+
+    const plan = schedulerService.buildCallPlan(schedCalls, welfareSeniors);
+
+    expect(plan).toHaveLength(2);
+    expect(plan[0].type).toBe('schedule');
+    expect(plan[0].senior.id).toBe('senior-1');
+    expect(plan[1].type).toBe('welfare');
+    expect(plan[1].senior.id).toBe('senior-2');
   });
 });

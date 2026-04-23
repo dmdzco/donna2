@@ -136,7 +136,8 @@ async def get_reminder_by_id(reminder_id: str) -> dict | None:
     row = await query_one(
         """SELECT r.id AS reminder_id, r.senior_id,
                   r.title, r.title_encrypted, r.description,
-                  r.description_encrypted, r.type AS reminder_type
+                  r.description_encrypted, r.type AS reminder_type,
+                  r.scheduled_time, r.is_recurring, r.cron_expression
            FROM reminders r
            WHERE r.id = $1
            LIMIT 1""",

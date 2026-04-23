@@ -831,6 +831,14 @@ def build_initial_node(session_state: dict, flows_tools: dict) -> NodeConfig:
 
     reminder_prompt = session_state.get("reminder_prompt")
     reminders_delivered = session_state.get("reminders_delivered") or set()
+    call_type = session_state.get("call_type", "")
+
+    # Scheduled calls always go to main node — reminders are mentioned naturally
+    # during conversation, not as a dedicated delivery phase.
+    if call_type == "schedule":
+        logger.info("Initial node: main (scheduled call, reminders as context)")
+        _record_phase_transition(session_state, "main")
+        return build_main_node(session_state, flows_tools, with_greeting=True)
 
     if reminder_prompt and not reminders_delivered:
         logger.info("Initial node: reminder (pending reminders)")

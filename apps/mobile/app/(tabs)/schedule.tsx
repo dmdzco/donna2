@@ -36,7 +36,6 @@ import {
   addWeeks,
   subWeeks,
   startOfDay,
-  isBefore,
   getDay,
 } from "date-fns";
 import { useTranslation } from "react-i18next";
@@ -47,11 +46,10 @@ import {
   useSchedule,
   useUpdateSchedule,
   useReminders,
-  useConversations,
 } from "@/src/hooks";
 import { Button, Input, Modal, TimePickerField } from "@/src/components/ui";
 import { getErrorMessage } from "@/src/lib/api";
-import type { Reminder, Conversation } from "@/src/types";
+import type { Reminder } from "@/src/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -73,8 +71,6 @@ interface ScheduleItem {
 interface CallCardData {
   schedule: ScheduleItem;
   index: number;
-  isPast: boolean;
-  conversation?: Conversation;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,23 +78,6 @@ interface CallCardData {
 // ---------------------------------------------------------------------------
 
 // DAY_LETTERS and DAY_LABELS are now loaded from translations inside the component
-
-function parseTimeString(timeStr: string): { hours: number; minutes: number } | null {
-  const matchAmPm = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (matchAmPm) {
-    let hours = parseInt(matchAmPm[1], 10);
-    const minutes = parseInt(matchAmPm[2], 10);
-    const period = matchAmPm[3].toUpperCase();
-    if (period === "PM" && hours !== 12) hours += 12;
-    if (period === "AM" && hours === 12) hours = 0;
-    return { hours, minutes };
-  }
-  const match24 = timeStr.match(/^(\d{1,2}):(\d{2})$/);
-  if (match24) {
-    return { hours: parseInt(match24[1], 10), minutes: parseInt(match24[2], 10) };
-  }
-  return null;
-}
 
 function getScheduleForDate(date: Date, scheduleData: ScheduleItem[]): ScheduleItem[] {
   return scheduleData.filter((schedule) => {
@@ -111,14 +90,6 @@ function getScheduleForDate(date: Date, scheduleData: ScheduleItem[]): ScheduleI
     }
     return false;
   });
-}
-
-function isCallPast(date: Date, timeStr: string): boolean {
-  const parsed = parseTimeString(timeStr);
-  if (!parsed) return false;
-  const callDate = new Date(date);
-  callDate.setHours(parsed.hours, parsed.minutes, 0, 0);
-  return isBefore(callDate, new Date());
 }
 
 function normalizeScheduleData(raw: any): ScheduleItem[] {
@@ -152,24 +123,6 @@ function normalizeScheduleData(raw: any): ScheduleItem[] {
   return [];
 }
 
-function getConversationForDate(date: Date, conversations: Conversation[]): Conversation | undefined {
-  return conversations.find((c) => {
-    try {
-      return isSameDay(new Date(c.startedAt), date);
-    } catch {
-      return false;
-    }
-  });
-}
-
-function getCallStatusKey(conversation: Conversation): "answered" | "missed" {
-  const duration = conversation.durationSeconds ?? 0;
-  if (conversation.status === "completed" || (conversation.endedAt && duration > 10)) {
-    return "answered";
-  }
-  return "missed";
-}
-
 // ---------------------------------------------------------------------------
 // Component: Schedule Screen
 // ---------------------------------------------------------------------------
@@ -183,7 +136,6 @@ export default function ScheduleScreen() {
   const { data: rawSchedule, isLoading: scheduleLoading } = useSchedule(seniorId);
   const updateSchedule = useUpdateSchedule(seniorId);
   const { data: reminders } = useReminders(seniorId);
-  const { data: conversations } = useConversations(seniorId);
 
   const [selectedDate, setSelectedDate] = useState(startOfDay(new Date()));
   const [baseWeekDate, setBaseWeekDate] = useState(startOfWeek(new Date(), { weekStartsOn: 0 }));
@@ -229,17 +181,11 @@ export default function ScheduleScreen() {
 
   // Build card data
   const cardData = useMemo<CallCardData[]>(() => {
-    const convo = conversations
-      ? getConversationForDate(selectedDate, conversations)
-      : undefined;
-
-    return dailyItems.map((schedule, index) => ({
+    return dailyItems.map((schedule) => ({
       schedule,
       index: scheduleItems.indexOf(schedule),
-      isPast: isCallPast(selectedDate, schedule.time),
-      conversation: convo,
     }));
-  }, [dailyItems, selectedDate, scheduleItems, conversations]);
+  }, [dailyItems, scheduleItems]);
 
   useEffect(() => {
     if (!recentlySavedTitle) return;
@@ -962,10 +908,8 @@ function ScheduleCallCard({
   onEdit: () => void;
 }) {
   const { t } = useTranslation();
-  const { schedule, isPast, conversation } = data;
+  const { schedule } = data;
   const displayTitle = schedule.title;
-  const statusKey = conversation ? getCallStatusKey(conversation) : null;
-  const isAnswered = statusKey === "answered";
 
   // Get reminder titles for this call
   const callReminders = useMemo(() => {
@@ -973,60 +917,6 @@ function ScheduleCallCard({
     return reminders.filter((r) => schedule.reminderIds!.includes(r.id));
   }, [schedule.reminderIds, reminders]);
 
-  // Past call with conversation data
-  if (isPast && conversation) {
-    return (
-      <View
-        className="rounded-2xl p-4 mb-3"
-        style={{
-          backgroundColor: isAnswered ? COLORS.successBg : COLORS.warningBg,
-          borderWidth: 1,
-          borderColor: isAnswered
-            ? "rgba(46, 125, 50, 0.15)"
-            : "rgba(230, 81, 0, 0.15)",
-        }}
-      >
-        {/* Header */}
-        <View className="flex-row items-center justify-between mb-2">
-          <View className="flex-row items-center flex-1">
-            <Text className="text-[16px] font-semibold text-charcoal" numberOfLines={1}>
-              {displayTitle}
-            </Text>
-          </View>
-          <View
-            className="rounded-full px-3 py-1 ml-2"
-            style={{
-              backgroundColor: isAnswered
-                ? "rgba(46, 125, 50, 0.15)"
-                : "rgba(230, 81, 0, 0.15)",
-            }}
-          >
-            <Text
-              className="text-[12px] font-semibold"
-              style={{ color: isAnswered ? COLORS.success : COLORS.warning }}
-            >
-              {statusKey ? t(`dashboard.${statusKey}`) : ""}
-            </Text>
-          </View>
-        </View>
-
-        {/* Time */}
-        <View className="flex-row items-center mb-2">
-          <Clock size={14} color={COLORS.muted} />
-          <Text className="text-[13px] text-muted ml-1.5">{schedule.time}</Text>
-        </View>
-
-        {/* Summary */}
-        {conversation.summary && (
-          <Text className="text-[14px] text-muted leading-5" numberOfLines={3}>
-            {conversation.summary}
-          </Text>
-        )}
-      </View>
-    );
-  }
-
-  // Future or past without conversation (upcoming/missed)
   return (
     <View
       className="bg-white rounded-2xl p-4 mb-3"

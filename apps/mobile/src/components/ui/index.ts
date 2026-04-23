@@ -1,6 +1,7 @@
 export { Button } from "./Button";
 export { DatePickerField } from "./DatePickerField";
 export { Input } from "./Input";
+export { KeyboardAwareFooter } from "./KeyboardAwareFooter";
 export { Card } from "./Card";
 export { Modal } from "./Modal";
 export { TimePickerField } from "./TimePickerField";

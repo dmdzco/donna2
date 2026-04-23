@@ -136,7 +136,7 @@ Stored in `tests/e2e/.env.test` (gitignored):
 ```
 CLERK_PUBLISHABLE_KEY=pk_test_...
 CLERK_SECRET_KEY=sk_test_...
-E2E_CLERK_USER_EMAIL=e2etest@donna.ai
+E2E_CLERK_USER_EMAIL=e2etest@calldonna.co
 E2E_CLERK_USER_PASSWORD=...
 ```
 
@@ -147,7 +147,7 @@ curl -X POST https://api.clerk.com/v1/users \
   -H "Authorization: Bearer $CLERK_SECRET_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "email_address": ["newuser@donna.ai"],
+    "email_address": ["newuser@calldonna.co"],
     "phone_number": ["+19785550199"],
     "password": "SomeSecurePassword123"
   }'

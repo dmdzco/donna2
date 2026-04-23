@@ -55,8 +55,8 @@ const CORS_ORIGINS = [
   'https://admin-v2-liart.vercel.app',
   'https://consumer-ruddy.vercel.app',
   'https://observability-five.vercel.app',
-  'https://www.calldonna.co',
   'https://calldonna.co',
+  'https://www.calldonna.co',
   'https://www.call-donna.com',
   'https://call-donna.com',
 ];

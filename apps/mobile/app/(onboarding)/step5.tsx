@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -18,7 +19,7 @@ import {
   Lightbulb,
 } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
-import { Button, Input, Modal, ProgressBar } from "@/src/components/ui";
+import { Button, Input, KeyboardAwareFooter, Modal, ProgressBar } from "@/src/components/ui";
 import { COLORS, TIME_OPTIONS } from "@/src/constants/theme";
 import { useOnboardingStore, type OnboardingCall } from "@/src/stores/onboarding";
 
@@ -54,6 +55,7 @@ export default function Step5Screen() {
   }
 
   function handleCreateProfile() {
+    Keyboard.dismiss();
     const nextErrors: Record<number, string> = {};
     calls.forEach((call, index) => {
       if (call.frequency === "recurring" && call.selectedDays.length === 0) {
@@ -343,9 +345,9 @@ export default function Step5Screen() {
         </ScrollView>
 
         {/* Fixed bottom button */}
-        <View className="absolute bottom-0 left-0 right-0 bg-cream border-t border-charcoal/10 px-6 pt-4 pb-8">
+        <KeyboardAwareFooter>
           <Button title={t("onboarding.step5.createProfile")} onPress={handleCreateProfile} />
-        </View>
+        </KeyboardAwareFooter>
       </KeyboardAvoidingView>
 
       {/* Time picker modal */}

@@ -26,6 +26,10 @@ import { COLORS } from "@/src/constants/theme";
 import { Modal } from "@/src/components/ui/Modal";
 import { Button } from "@/src/components/ui/Button";
 
+const SUPPORT_EMAIL = "support@calldonna.co";
+const PRIVACY_POLICY_URL = "https://calldonna.co/privacy";
+const TERMS_OF_SERVICE_URL = "https://calldonna.co/terms";
+
 type HelpRow = {
   icon: React.ReactNode;
   labelKey: string;
@@ -42,22 +46,34 @@ export default function HelpCenterScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmitFeedback = async (type: string) => {
-    if (!feedbackText.trim()) {
+    const message = feedbackText.trim();
+
+    if (!message) {
       Alert.alert(t("helpCenter.required"), t("helpCenter.requiredMessage"));
       return;
     }
+
     setSubmitting(true);
-    // Simulate submission -- in production this would call an API
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setSubmitting(false);
-    setFeedbackText("");
-    setContactModalVisible(false);
-    setReportModalVisible(false);
-    setSuggestModalVisible(false);
-    Alert.alert(
-      t("helpCenter.thankYou"),
-      t("helpCenter.submittedMessage", { type: t(`helpCenter.${type}`) })
-    );
+
+    const typeLabel = t(`helpCenter.${type}`);
+    const subject = encodeURIComponent(`Donna ${typeLabel}`);
+    const body = encodeURIComponent(`${message}\n\n${t("helpCenter.emailFooter")}`);
+
+    try {
+      await Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`);
+      setFeedbackText("");
+      setContactModalVisible(false);
+      setReportModalVisible(false);
+      setSuggestModalVisible(false);
+      Alert.alert(t("helpCenter.emailOpened"), t("helpCenter.emailOpenedMessage"));
+    } catch {
+      Alert.alert(
+        t("helpCenter.errorTitle"),
+        t("helpCenter.emailFallbackMessage", { email: SUPPORT_EMAIL }),
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const openURL = (url: string) => {
@@ -109,12 +125,12 @@ export default function HelpCenterScreen() {
     {
       icon: <Shield size={18} color={COLORS.sage} />,
       labelKey: "helpCenter.privacyPolicy",
-      action: () => openURL("https://getdonna.ai/privacy"),
+      action: () => openURL(PRIVACY_POLICY_URL),
     },
     {
       icon: <ExternalLink size={18} color={COLORS.sage} />,
-      labelKey: "helpCenter.thirdPartyServices",
-      action: () => openURL("https://getdonna.ai/third-party"),
+      labelKey: "helpCenter.termsOfService",
+      action: () => openURL(TERMS_OF_SERVICE_URL),
     },
   ];
 
@@ -162,6 +178,9 @@ export default function HelpCenterScreen() {
     return (
       <Modal visible={visible} onClose={onClose} title={t(titleKey)}>
         <View className="py-2">
+          <Text className="text-[13px] text-muted mb-3">
+            {t("helpCenter.privateFeedbackNotice")}
+          </Text>
           <TextInput
             className="bg-beige px-4 py-3 rounded-xl text-[15px] text-charcoal border border-charcoal/5"
             placeholder={t(placeholderKey)}

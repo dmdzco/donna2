@@ -17,7 +17,6 @@ interface OnboardingState {
   // Caregiver
   firstName: string;
   lastName: string;
-  email: string;
   phone: string;
   // Loved one
   lovedOneName: string;
@@ -74,7 +73,6 @@ const INITIAL_STATE = {
   donnaLanguage: "en" as "en" | "es",
   firstName: "",
   lastName: "",
-  email: "",
   phone: "",
   lovedOneName: "",
   lovedOnePhone: "",
@@ -93,7 +91,6 @@ const draftFields = (state: OnboardingState) => ({
   donnaLanguage: state.donnaLanguage,
   firstName: state.firstName,
   lastName: state.lastName,
-  email: state.email,
   phone: state.phone,
   lovedOneName: state.lovedOneName,
   lovedOnePhone: state.lovedOnePhone,

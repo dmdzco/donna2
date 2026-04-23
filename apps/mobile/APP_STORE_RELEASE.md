@@ -1,6 +1,6 @@
 # Donna Mobile App Store Release Guide
 
-Last updated: April 13, 2026.
+Last updated: April 22, 2026.
 
 ## Current Local Status
 
@@ -9,6 +9,10 @@ Last updated: April 13, 2026.
 - App icons are present at `1024x1024`; the iOS app icon has no alpha channel.
 - Java is available through Homebrew for Maestro.
 - Mobile settings includes an in-app account deletion path.
+- Official website: `https://calldonna.co`.
+- App Store privacy policy URL: `https://calldonna.co/privacy`.
+- App Store support URL: `https://calldonna.co/support`.
+- Third-party services URL: `https://calldonna.co/third-party`.
 - The iOS privacy manifest declares linked, non-tracking data collection for app functionality.
 - EAS project is linked as `@dmdzco/donna-caregiver`.
 - EAS project ID is `aa482a04-3f14-4373-a654-42e51f1bd7b0`.

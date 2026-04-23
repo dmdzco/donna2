@@ -17,6 +17,7 @@ import { COLORS } from "@/src/constants/theme";
 import { INTERESTS } from "@/src/constants/interests";
 import { Input } from "@/src/components/ui/Input";
 import { Button } from "@/src/components/ui/Button";
+import { DatePickerField } from "@/src/components/ui/DatePickerField";
 import { useCurrentSenior, useSenior, useUpdateSenior } from "@/src/hooks";
 import { getErrorMessage } from "@/src/lib/api";
 import { getDeviceTimezone } from "@/src/lib/timezone";
@@ -46,8 +47,80 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; color?: stri
   Dumbbell, Landmark, Music, Film, Vote, Feather, Globe, PawPrint, BookOpen, Flower2, Plane, ChefHat,
 };
 
+const BIRTHDATE_MIN_DATE = new Date(1900, 0, 1);
+const BIRTHDATE_MAX_DATE = new Date();
+const BIRTHDATE_INITIAL_DATE = new Date(
+  BIRTHDATE_MAX_DATE.getFullYear() - 80,
+  0,
+  1,
+);
+
 function sanitizePhoneInput(value: string): string {
   return value.replace(/[^\d+\-\s()]/g, "").slice(0, 20);
+}
+
+function dateFromParts(year: number, month: number, day: number): Date | null {
+  const date = new Date(year, month - 1, day);
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+function parseDateOfBirth(value: string): Date | null {
+  const trimmed = value.trim();
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+  if (slashMatch) {
+    return dateFromParts(
+      Number(slashMatch[3]),
+      Number(slashMatch[1]),
+      Number(slashMatch[2]),
+    );
+  }
+
+  const isoMatch = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(trimmed);
+  if (isoMatch) {
+    return dateFromParts(
+      Number(isoMatch[1]),
+      Number(isoMatch[2]),
+      Number(isoMatch[3]),
+    );
+  }
+
+  return null;
+}
+
+function formatDateOfBirth(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const year = date.getFullYear();
+  return `${month}/${day}/${year}`;
+}
+
+function formatDateOfBirthDisplay(value: string): string {
+  const date = parseDateOfBirth(value);
+  if (!date) return value;
+
+  return date.toLocaleDateString(undefined, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function normalizeDateOfBirth(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  const date = parseDateOfBirth(trimmed);
+  return date ? formatDateOfBirth(date) : trimmed;
 }
 
 export default function LovedOneProfileScreen() {
@@ -121,7 +194,7 @@ export default function LovedOneProfileScreen() {
         familyInfo: {
           interestDetails,
           topicsToAvoid: topicsToAvoid.trim(),
-          dateOfBirth: dateOfBirth.trim() || undefined,
+          dateOfBirth: normalizeDateOfBirth(dateOfBirth),
           donnaLanguage,
         } as unknown as Record<string, string>,
       });
@@ -194,13 +267,21 @@ export default function LovedOneProfileScreen() {
               maxLength={20}
               testID="loved-one-phone-input"
             />
-            <Input
+            <DatePickerField
               label={t("lovedOneProfile.dateOfBirth")}
               value={dateOfBirth}
-              onChangeText={setDateOfBirth}
+              onChange={setDateOfBirth}
               placeholder={t("lovedOneProfile.dateOfBirthPlaceholder")}
-              keyboardType="number-pad"
-              maxLength={10}
+              minimumDate={BIRTHDATE_MIN_DATE}
+              maximumDate={BIRTHDATE_MAX_DATE}
+              initialDate={BIRTHDATE_INITIAL_DATE}
+              parseValue={parseDateOfBirth}
+              serializeDate={formatDateOfBirth}
+              formatValue={formatDateOfBirthDisplay}
+              accessibilityLabel={t("lovedOneProfile.dateOfBirth")}
+              doneLabel={t("common.done")}
+              onClear={() => setDateOfBirth("")}
+              clearLabel={t("lovedOneProfile.clearDateOfBirth")}
               testID="loved-one-dob-input"
             />
             <View className="flex-row gap-3">

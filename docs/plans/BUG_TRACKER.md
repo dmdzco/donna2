@@ -2,6 +2,22 @@
 
 ## Open Bugs
 
+### BUG-012: Duplicate phone number error appears too late — should show on loved one info page
+- **Reported**: 2026-04-23
+- **Reporter**: Nick
+- **App**: Mobile (iOS)
+- **Severity**: High — confusing UX, user completes entire onboarding before learning of the issue
+- **Description**: When a user completes the entire signup/onboarding flow and reaches the final "You're all set!" page, if the loved one's phone number is already in use, they only then get a generic error ("That information is already in use. Check it and try again."). This error needs to be shown earlier — on the "Info about your loved one" page where the phone number is entered — so users can fix it immediately rather than completing the whole flow, getting confused, and having to go back.
+- **Steps to Reproduce**:
+  1. Start onboarding and enter a phone number that's already in use for another senior
+  2. Complete all remaining onboarding steps
+  3. Reach the "You're all set!" page
+  4. See error: "That information is already in use. Check it and try again."
+- **Expected**: The duplicate phone number error should appear on the loved one info page (where the number is entered), not at the very end after the user has completed everything
+- **Screenshot**: ![BUG-012](screenshots/bug-012-duplicate-phone-late-error.jpg)
+
+---
+
 ### BUG-003: App auto-skips Get Started / Sign In page after ~1 second
 - **Reported**: 2026-04-22
 - **Reporter**: Nick

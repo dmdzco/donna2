@@ -19,7 +19,7 @@ import { useOnboardingStore } from "@/src/stores/onboarding";
 export default function Step1Screen() {
   const router = useRouter();
   const { t } = useTranslation();
-  const { firstName, lastName, email, phone, setField } =
+  const { firstName, lastName, phone, setField } =
     useOnboardingStore();
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -28,9 +28,6 @@ export default function Step1Screen() {
     const next: Record<string, string> = {};
     if (!firstName.trim()) next.firstName = t("onboarding.step1.firstNameRequired");
     if (!lastName.trim()) next.lastName = t("onboarding.step1.lastNameRequired");
-    if (!email.trim()) next.email = t("onboarding.step1.emailRequired");
-    else if (!/\S+@\S+\.\S+/.test(email.trim()))
-      next.email = t("onboarding.step1.invalidEmail");
     if (!phone.trim()) next.phone = t("onboarding.step1.phoneRequired");
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -103,19 +100,6 @@ export default function Step1Screen() {
               textContentType="familyName"
               autoComplete="family-name"
               testID="input-last-name"
-            />
-            <Input
-              label={t("onboarding.step1.email")}
-              placeholder="jane@example.com"
-              value={email}
-              onChangeText={(v) => setField("email", v)}
-              error={errors.email}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              textContentType="emailAddress"
-              autoComplete="email"
-              testID="input-email"
             />
             <Input
               label={t("onboarding.step1.phone")}

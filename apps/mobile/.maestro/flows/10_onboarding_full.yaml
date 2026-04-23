@@ -149,10 +149,6 @@ appId: com.donna.caregiver
     id: "input-last-name"
 - inputText: "Tester"
 - tapOn:
-    id: "input-email"
-- inputText: "jane+clerk_test@calldonna.co"
-- pressKey: enter
-- tapOn:
     id: "input-phone"
 - tapOn:
     id: "input-phone"

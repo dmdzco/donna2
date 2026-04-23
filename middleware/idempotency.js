@@ -17,11 +17,23 @@ function getIdempotencyKey(req) {
   return Array.isArray(header) ? header[0] : header;
 }
 
+function errorChain(error) {
+  const chain = [];
+  let current = error;
+  while (current && !chain.includes(current)) {
+    chain.push(current);
+    current = current.cause;
+  }
+  return chain;
+}
+
 function isStorageUnavailableError(error) {
-  const message = String(error?.message || '');
-  return error?.code === '42P01' ||
-    error?.code === '42703' ||
-    (/idempotency_keys/i.test(message) && /does not exist|relation|column/i.test(message));
+  return errorChain(error).some((entry) => {
+    const message = String(entry?.message || '');
+    return entry?.code === '42P01' ||
+      entry?.code === '42703' ||
+      (/idempotency_keys/i.test(message) && /does not exist|relation|column/i.test(message));
+  });
 }
 
 function canonicalStringify(value) {

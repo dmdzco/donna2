@@ -55,7 +55,9 @@ describe('idempotency replay cache', () => {
   });
 
   it('fails open when legacy idempotency storage is missing path_hash', () => {
-    expect(middlewareSource).toContain("error?.code === '42703'");
+    expect(middlewareSource).toContain('function errorChain(error)');
+    expect(middlewareSource).toContain('current = current.cause');
+    expect(middlewareSource).toContain("entry?.code === '42703'");
     expect(middlewareSource).toContain('Idempotency storage unavailable; continuing without replay protection');
     expect(middlewareSource).toContain('/does not exist|relation|column/i');
     expect(migrationBackfillSource).toContain('ADD COLUMN IF NOT EXISTS path_hash varchar(64)');

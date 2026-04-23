@@ -100,4 +100,12 @@ describe('Onboarding Route — Security', () => {
   it('requires Clerk authentication (rejects cofounder token)', () => {
     expect(routeSource).toContain("clerkUserId === 'cofounder'");
   });
+
+  it('does not auto-link a new Clerk user to an existing senior by phone', () => {
+    expect(routeSource).toContain("pgCode === '23505'");
+    expect(routeSource).toContain('This phone number is already registered for another senior');
+    expect(routeSource).not.toContain('seniorService.findByPhone');
+    expect(routeSource).not.toContain('caregiverService.linkUserToSenior');
+    expect(routeSource).not.toContain('Reused existing senior');
+  });
 });

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -27,7 +28,7 @@ import {
   ChefHat,
 } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
-import { Button, Input, ProgressBar } from "@/src/components/ui";
+import { Button, Input, KeyboardAwareFooter, ProgressBar } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
 import { INTERESTS } from "@/src/constants/interests";
 import { useOnboardingStore } from "@/src/stores/onboarding";
@@ -82,6 +83,7 @@ export default function Step4Screen() {
   }
 
   function handleContinue() {
+    Keyboard.dismiss();
     router.push("/(onboarding)/step5");
   }
 
@@ -248,9 +250,9 @@ export default function Step4Screen() {
         </ScrollView>
 
         {/* Fixed bottom button */}
-        <View className="absolute bottom-0 left-0 right-0 bg-cream border-t border-charcoal/10 px-6 pt-4 pb-8">
+        <KeyboardAwareFooter>
           <Button title={t("common.next")} onPress={handleContinue} />
-        </View>
+        </KeyboardAwareFooter>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

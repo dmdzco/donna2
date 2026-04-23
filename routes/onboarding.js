@@ -1,9 +1,6 @@
 import { Router } from 'express';
-import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { caregivers, reminders, seniors } from '../db/schema.js';
-import { seniorService } from '../services/seniors.js';
-import { caregiverService } from '../services/caregivers.js';
 import { requireAuth } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js';
@@ -24,7 +21,6 @@ function normalizePhone(phone) {
 // Complete onboarding - creates senior + links to Clerk user + creates reminders
 router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   let clerkUserId;
-  let seniorCreateData;
 
   try {
     const { senior: seniorData, relation, interests, additionalInfo, reminders: reminderStrings, topicsToAvoid, callSchedule } = req.body;
@@ -43,7 +39,7 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
       : topicsToAvoid || '';
 
     // Prepare senior data with structured info in JSON fields
-    seniorCreateData = {
+    const seniorCreateData = {
       name: seniorData.name,
       phone: seniorData.phone,
       timezone: seniorData.timezone || 'America/New_York',
@@ -116,23 +112,9 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
   } catch (error) {
     console.error('Onboarding failed:', error);
 
-    // If phone already exists, find and reuse the existing senior + link caregiver
     const pgCode = error.code || error.cause?.code;
     const pgConstraint = error.constraint || error.cause?.constraint;
     if (pgCode === '23505' && pgConstraint?.includes('phone')) {
-      try {
-        const existing = seniorCreateData?.phone
-          ? await seniorService.findByPhone(seniorCreateData.phone)
-          : null;
-        if (existing) {
-          await caregiverService.linkUserToSenior(clerkUserId, existing.id, 'caregiver');
-          console.log(`[Onboarding] Reused existing senior: user=${clerkUserId}, senior=${maskName(existing.name)}`);
-          return res.json({ senior: existing, reminders: [] });
-        }
-      } catch (linkErr) {
-        console.error('Onboarding duplicate phone fallback failed:', linkErr);
-        return routeError(res, linkErr, 'POST /api/onboarding duplicate fallback');
-      }
       return sendError(res, 409, { error: 'This phone number is already registered for another senior' });
     }
 

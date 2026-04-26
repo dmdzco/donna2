@@ -90,10 +90,14 @@ function OnboardingInner() {
     // Clerk hooks are unavailable during static rendering and local dev fallbacks.
   }
 
-  // If already signed in and still on create account step, skip ahead
+  // If already signed in, skip create account; if they completed onboarding, go to dashboard
   useEffect(() => {
-    if (isSignedIn && data.step === 0 && !devMode) {
+    if (!isSignedIn || devMode) return;
+    if (data.step === 0) {
       setStep(1);
+    } else if (data.step === 8) {
+      // Already completed onboarding — send them to dashboard
+      window.location.href = '/dashboard';
     }
   }, [isSignedIn, data.step, devMode, setStep]);
 

@@ -1,12 +1,14 @@
 import { useState, useCallback } from 'react';
-import { useSignUp } from '@clerk/clerk-react';
+import { useSignUp, useSignIn } from '@clerk/clerk-react';
 
 export default function CreateAccount({ data, update, onNext, devMode }) {
   const { signUp, isLoaded: signUpLoaded, setActive } = useSignUp();
+  const { signIn, isLoaded: signInLoaded } = useSignIn();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [code, setCode] = useState('');
+  const [mode, setMode] = useState('signup'); // 'signup' or 'signin'
 
   const handleEmailSignUp = async (e) => {
     e.preventDefault();
@@ -75,6 +77,84 @@ export default function CreateAccount({ data, update, onNext, devMode }) {
   const handleComingSoon = useCallback((provider) => {
     setError(`${provider} sign-in will be available soon. Please use email and password for now.`);
   }, []);
+
+  const handleSignIn = async (e) => {
+    e.preventDefault();
+    if (!signInLoaded) return;
+    setError('');
+    setLoading(true);
+    try {
+      const result = await signIn.create({
+        identifier: data.email,
+        password: data.password,
+      });
+      if (result.status === 'complete') {
+        await setActive({ session: result.createdSessionId });
+        // Existing user — go straight to dashboard
+        window.location.href = '/dashboard';
+      } else {
+        setError('Sign in incomplete. Please try again.');
+      }
+    } catch (err) {
+      const msg = err.errors?.[0]?.longMessage || err.message || 'Invalid email or password.';
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (mode === 'signin') {
+    return (
+      <div className="ob-create-account">
+        <h1 className="ob-step-title">Sign in</h1>
+        <p className="ob-step-subtitle">
+          Welcome back! Sign in to access your dashboard.
+        </p>
+        <form onSubmit={handleSignIn}>
+          <div className="ob-form-group">
+            <label className="ob-label">Email</label>
+            <input
+              className="ob-input"
+              type="email"
+              value={data.email}
+              onChange={(e) => update({ email: e.target.value })}
+              placeholder="you@email.com"
+              required
+              autoFocus
+            />
+          </div>
+          <div className="ob-form-group">
+            <label className="ob-label">Password</label>
+            <input
+              className="ob-input"
+              type="password"
+              value={data.password}
+              onChange={(e) => update({ password: e.target.value })}
+              placeholder="Your password"
+              required
+            />
+          </div>
+          {error && <p className="ob-error">{error}</p>}
+          <button
+            type="submit"
+            className="ob-footer__btn"
+            disabled={loading || !data.email || !data.password}
+            style={{ marginTop: 8 }}
+          >
+            {loading ? 'Signing in...' : 'Sign In'}
+          </button>
+        </form>
+        <button
+          type="button"
+          className="ob-link-btn"
+          onClick={() => { setMode('signup'); setError(''); }}
+          style={{ marginTop: 16 }}
+        >
+          Don&apos;t have an account? Create one
+        </button>
+      </div>
+    );
+  }
 
   if (verifying) {
     return (
@@ -182,6 +262,14 @@ export default function CreateAccount({ data, update, onNext, devMode }) {
           {loading ? 'Creating account...' : 'Create Account'}
         </button>
       </form>
+      <button
+        type="button"
+        className="ob-link-btn"
+        onClick={() => { setMode('signin'); setError(''); }}
+        style={{ marginTop: 16 }}
+      >
+        Already have an account? Sign in
+      </button>
     </div>
   );
 }

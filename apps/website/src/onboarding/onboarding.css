@@ -234,6 +234,19 @@
   margin-top: 4px;
 }
 
+.ob-link-btn {
+  background: none;
+  border: none;
+  color: var(--ob-accent);
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+.ob-link-btn:hover {
+  opacity: 0.8;
+}
+
 .ob-form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

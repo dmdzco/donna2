@@ -1,0 +1,65 @@
+name: Bug Report
+description: Report a bug in Donna
+title: "BUG: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What's wrong?
+      placeholder: Describe the bug...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this?
+      placeholder: |
+        1. Go to...
+        2. Tap on...
+        3. See error...
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened instead?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Critical
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+
+  - type: dropdown
+    id: app
+    attributes:
+      label: App
+      options:
+        - Mobile iOS
+        - Website
+        - API
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / Videos
+      description: Drag and drop screenshots or screen recordings here
+      placeholder: Paste or drag images here...
+    validations:
+      required: false

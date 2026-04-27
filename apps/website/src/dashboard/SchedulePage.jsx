@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
 import { useDashboard } from './DashboardContext';
-import ScheduleCalendar from './components/ScheduleCalendar';
+import WeekStrip from './components/WeekStrip';
+import MonthPicker from './components/MonthPicker';
 import ScheduleCallCard from './components/ScheduleCallCard';
 import ScheduleCallModal from './components/ScheduleCallModal';
+
+const DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export default function SchedulePage() {
   const { senior, loading: ctxLoading, api } = useDashboard();
@@ -69,22 +71,31 @@ export default function SchedulePage() {
     }
   };
 
+  const navigateWeek = (delta) => {
+    setSelectedDate((prev) => {
+      const d = new Date(prev);
+      d.setDate(d.getDate() + delta * 7);
+      return d;
+    });
+  };
+
+  const handleMonthSelect = (date) => {
+    setSelectedDate(date);
+  };
+
   if (ctxLoading || loading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
   }
 
-  // Get calls for selected day
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const selectedDayName = days[selectedDate.getDay()];
+  const selectedDayName = DAYS_FULL[selectedDate.getDay()];
   const callsForDay = calls
     .map((c, i) => ({ ...c, _index: i }))
     .filter((c) => c.days?.includes(selectedDayName) || c.frequency === 'daily');
 
-  // Get all scheduled day names for calendar dots
   const scheduledDays = new Set();
   for (const call of calls) {
     if (call.frequency === 'daily') {
-      days.forEach((d) => scheduledDays.add(d));
+      DAYS_FULL.forEach((d) => scheduledDays.add(d));
     } else if (call.days) {
       call.days.forEach((d) => scheduledDays.add(d));
     }
@@ -92,36 +103,35 @@ export default function SchedulePage() {
 
   return (
     <div>
-      <motion.div
+      <div
         className="db-page__header"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
       >
-        <div>
-          <h1 className="db-page__title">Schedule</h1>
-          <p className="db-page__subtitle">Manage call schedule for {senior?.name || senior?.seniorName}</p>
-        </div>
+        <h1 className="db-page__title">Schedule</h1>
         <button className="db-btn db-btn--primary db-btn--small" onClick={handleAdd}>
-          + Add Call
+          Add Call
         </button>
-      </motion.div>
+      </div>
 
-      <ScheduleCalendar
+      <MonthPicker currentDate={selectedDate} onSelectMonth={handleMonthSelect} />
+
+      <WeekStrip
         selectedDate={selectedDate}
         onSelectDate={setSelectedDate}
         scheduledDays={scheduledDays}
+        onPrevWeek={() => navigateWeek(-1)}
+        onNextWeek={() => navigateWeek(1)}
       />
 
-      <div className="db-section" style={{ marginTop: 24 }}>
+      <div className="db-section">
         <h2 className="db-section__title">
-          Calls on {selectedDayName}
+          {selectedDayName}
         </h2>
         {callsForDay.length === 0 ? (
           <div className="db-empty">
             <p className="db-empty__text">No calls scheduled for {selectedDayName}.</p>
             <button className="db-btn db-btn--primary db-btn--small" onClick={handleAdd}>
-              + Schedule a Call
+              Schedule a Call
             </button>
           </div>
         ) : (

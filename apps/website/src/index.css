@@ -21,6 +21,51 @@
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
   --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.08);
   --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.12);
+
+  /* ===== Design System Additions ===== */
+  --color-sage-deeper: #3D4E42;
+  --color-sage-tint: #E8F5E9;
+  --color-cream-warm: #FDFCF8;
+  --color-cream-deep: #F2F0E9;
+  --color-ink: #1A1A1A;
+  --color-ink-soft: #5E5D5A;
+  --color-ink-muted: #9A9995;
+  --color-rose: #E8A0A0;
+  --color-rose-soft: #F1C4C4;
+  --color-rose-bg: #FEF2F2;
+  --color-hairline: rgba(26,26,26,0.1);
+  --color-overlay: rgba(0,0,0,0.4);
+  --color-success: #2E7D32;
+  --color-success-bg: #E8F5E9;
+  --color-warn: #E65100;
+  --color-warn-bg: #FFF3E0;
+  --color-danger: #E7000B;
+
+  /* Semantic aliases */
+  --fg-1: var(--color-ink);
+  --fg-2: var(--color-ink-soft);
+  --fg-3: var(--color-ink-muted);
+  --bg-card: #FFFFFF;
+  --bg-inset: var(--color-cream-deep);
+
+  /* Spacing scale */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px;
+  --space-4: 16px; --space-5: 20px; --space-6: 24px;
+  --space-8: 32px; --space-10: 40px;
+
+  /* Radius scale */
+  --radius-sm: 8px;  --radius-md: 12px;  --radius-lg: 16px;
+  --radius-xl: 20px; --radius-pill: 9999px;
+
+  /* Shadow system */
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-button: 0 4px 6px -4px rgba(0,0,0,0.1), 0 10px 15px -3px rgba(0,0,0,0.1);
+  --shadow-overlay: 0 24px 60px rgba(0,0,0,0.18);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 150ms;  --dur-base: 250ms;  --dur-slow: 400ms;
 }
 
 /* ===== Reset & Global ===== */

@@ -10,38 +10,24 @@ export default function CallCard({ conversation }) {
     minute: '2-digit',
   });
 
-  const duration = conversation.durationSeconds
-    ? formatDuration(conversation.durationSeconds)
-    : null;
-
   const status = conversation.status || 'completed';
   const summary = conversation.summary || conversation.analysis?.summary;
 
+  const badgeClass = status === 'missed' ? 'db-badge--missed' : 'db-badge--completed';
+
   return (
-    <div className="db-card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-        <div>
-          <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--color-charcoal)' }}>
-            {dateStr} at {timeStr}
-          </div>
-          {duration && (
-            <div style={{ fontSize: '0.8rem', color: '#888', marginTop: 2 }}>{duration}</div>
-          )}
+    <div className="db-card" style={{ padding: 16, borderRadius: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: summary ? 8 : 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-1)' }}>
+          {dateStr} at {timeStr}
         </div>
-        <span className={`db-badge db-badge--${status}`}>{status}</span>
+        <span className={`db-badge ${badgeClass}`}>{status}</span>
       </div>
       {summary && (
-        <p style={{ fontSize: '0.9rem', color: '#555', lineHeight: 1.5, marginTop: 8 }}>
+        <p style={{ fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.5, marginTop: 4 }}>
           {summary}
         </p>
       )}
     </div>
   );
-}
-
-function formatDuration(seconds) {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  if (mins === 0) return `${secs}s`;
-  return `${mins}m ${secs}s`;
 }

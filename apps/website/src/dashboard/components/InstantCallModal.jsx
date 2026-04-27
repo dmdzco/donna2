@@ -18,17 +18,19 @@ export default function InstantCallModal({ senior, api, onClose }) {
     }
   };
 
+  const seniorName = senior?.name || senior?.seniorName || 'Loved One';
+
   return (
     <div className="db-modal-overlay" onClick={onClose}>
       <div className="db-modal" onClick={(e) => e.stopPropagation()}>
         <h2 className="db-modal__title">
-          {success ? 'Call Initiated!' : `Call ${senior?.name || senior?.seniorName || 'Loved One'}`}
+          {success ? 'Call Initiated!' : `Call ${seniorName}`}
         </h2>
 
         {success ? (
           <div>
-            <p style={{ color: '#555', lineHeight: 1.6, marginBottom: 24 }}>
-              Donna is now calling {senior?.name || senior?.seniorName}. The call will begin shortly.
+            <p style={{ color: 'var(--fg-2)', lineHeight: 1.6, marginBottom: 24 }}>
+              Donna is now calling {seniorName}. The call will begin shortly.
             </p>
             <div className="db-modal__actions">
               <button className="db-btn db-btn--primary" onClick={onClose}>Done</button>
@@ -36,18 +38,25 @@ export default function InstantCallModal({ senior, api, onClose }) {
           </div>
         ) : (
           <div>
-            <p style={{ color: '#555', lineHeight: 1.6, marginBottom: 24 }}>
-              Donna will call {senior?.name || senior?.seniorName} right now for a friendly check-in conversation.
+            <p style={{ color: 'var(--fg-2)', lineHeight: 1.6, marginBottom: 24 }}>
+              Donna will call {seniorName} right now for a friendly check-in conversation.
             </p>
 
             {error && (
-              <div style={{ color: '#d44', fontSize: '0.9rem', marginBottom: 16, padding: '12px', background: 'rgba(221,68,68,0.05)', borderRadius: 8 }}>
+              <div style={{
+                color: 'var(--color-danger)',
+                fontSize: 14,
+                marginBottom: 16,
+                padding: 12,
+                background: 'var(--color-rose-bg)',
+                borderRadius: 'var(--radius-md)',
+              }}>
                 {error}
               </div>
             )}
 
             <div className="db-modal__actions">
-              <button className="db-btn db-btn--secondary" onClick={onClose} disabled={calling}>
+              <button className="db-btn db-btn--ghost" onClick={onClose} disabled={calling}>
                 Cancel
               </button>
               <button className="db-btn db-btn--primary" onClick={handleCall} disabled={calling}>

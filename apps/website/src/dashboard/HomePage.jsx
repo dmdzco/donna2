@@ -3,12 +3,11 @@ import { useUser } from '@clerk/clerk-react';
 import { motion } from 'framer-motion';
 import { useDashboard } from './DashboardContext';
 import CallCard from './components/CallCard';
-import InstantCallModal from './components/InstantCallModal';
 
 const fadeUp = {
   initial: { opacity: 0, y: 20 },
   animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.4 },
+  transition: { duration: 0.25, ease: [0.22, 1, 0.36, 1] },
 };
 
 export default function HomePage() {
@@ -17,7 +16,6 @@ export default function HomePage() {
   const [conversations, setConversations] = useState([]);
   const [schedule, setSchedule] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [callModalOpen, setCallModalOpen] = useState(false);
 
   useEffect(() => {
     if (!senior) return;
@@ -48,52 +46,45 @@ export default function HomePage() {
 
   const firstName = user?.firstName || 'there';
   const seniorName = senior?.name || senior?.seniorName || 'your loved one';
-
-  // Find next scheduled call
+  const seniorInitial = seniorName.charAt(0).toUpperCase();
   const nextCall = getNextCall(schedule);
 
   return (
     <div>
-      <motion.div className="db-page__header" {...fadeUp}>
-        <h1 className="db-page__title">Hello, {firstName}</h1>
-        <p className="db-page__subtitle">Here&apos;s how {seniorName} is doing</p>
+      {/* Header */}
+      <motion.div
+        className="db-page__header"
+        {...fadeUp}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
+      >
+        <div>
+          <h1 className="db-page__title">Hello, {firstName}</h1>
+          <p className="db-page__subtitle">Here&apos;s what&apos;s happening with {seniorName}</p>
+        </div>
+        <div className="db-avatar">{seniorInitial}</div>
       </motion.div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         {/* Next Call Card */}
         {nextCall && (
-          <motion.div className="db-card db-card--sage" {...fadeUp} transition={{ delay: 0.1 }}>
+          <motion.div className="db-card db-card--sage" {...fadeUp} transition={{ delay: 0.1, duration: 0.25, ease: [0.22, 1, 0.36, 1] }}>
             <div className="db-card__label">Next Call</div>
-            <div className="db-card__title" style={{ fontSize: '1.25rem' }}>
+            <div style={{ fontSize: 26, fontWeight: 600, fontFamily: 'var(--font-heading)' }}>
               {nextCall.day} at {nextCall.time}
             </div>
-            {nextCall.title && (
-              <div style={{ opacity: 0.8, fontSize: '0.9rem', marginTop: 4 }}>{nextCall.title}</div>
-            )}
+            <div style={{ opacity: 0.75, fontSize: 13, marginTop: 4 }}>
+              with {seniorName}
+            </div>
           </motion.div>
         )}
 
-        {/* Instant Call */}
-        <motion.div {...fadeUp} transition={{ delay: 0.15 }}>
-          <button
-            className="db-btn db-btn--primary"
-            style={{ width: '100%', padding: '16px 24px', fontSize: '1rem' }}
-            onClick={() => setCallModalOpen(true)}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" />
-            </svg>
-            Call {seniorName} Now
-          </button>
-        </motion.div>
-
         {/* Recent Calls */}
-        <motion.div className="db-section" {...fadeUp} transition={{ delay: 0.2 }}>
+        <motion.div className="db-section" {...fadeUp} transition={{ delay: 0.15, duration: 0.25, ease: [0.22, 1, 0.36, 1] }}>
           <h2 className="db-section__title">Recent Calls</h2>
           {conversations.length === 0 ? (
             <div className="db-empty">
               <div className="db-empty__icon">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3 }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" />
                 </svg>
               </div>
@@ -108,14 +99,6 @@ export default function HomePage() {
           )}
         </motion.div>
       </div>
-
-      {callModalOpen && (
-        <InstantCallModal
-          senior={senior}
-          api={api}
-          onClose={() => setCallModalOpen(false)}
-        />
-      )}
     </div>
   );
 }

@@ -9,7 +9,7 @@ export default function InstantCallModal({ senior, api, onClose }) {
     setCalling(true);
     setError(null);
     try {
-      await api.initiateCall({ phoneNumber: senior.phone || senior.seniorPhone });
+      await api.initiateCall({ seniorId: senior.id });
       setSuccess(true);
     } catch (err) {
       setError(err.message || 'Failed to initiate call');

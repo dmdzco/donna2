@@ -541,18 +541,48 @@ export default function SignInScreen() {
     try {
       const startFlow =
         provider === "google" ? startGoogleOAuth : startAppleOAuth;
-      const { createdSessionId, setActive: setOAuthActive } =
-        await startFlow();
+      const result = await startFlow();
 
-      if (createdSessionId && setOAuthActive) {
-        await setOAuthActive({ session: createdSessionId });
+      // Clerk OAuth may return the session ID at top level, or nested inside
+      // signIn/signUp when the flow involves account transfer or creation.
+      const sessionId =
+        result.createdSessionId ??
+        (result.signIn as any)?.createdSessionId ??
+        (result.signUp as any)?.createdSessionId;
+      const activateFn = result.setActive;
+
+      if (sessionId && activateFn) {
+        await activateFn({ session: sessionId });
         await navigateAfterAuth();
+        return;
+      }
+
+      // Clerk may return "needs_new_password" when an email/password user
+      // links an OAuth provider. Skip the password step by resetting it to a
+      // random value — the user can always sign in via OAuth going forward.
+      const oauthSignIn = result.signIn as any;
+      if (oauthSignIn?.status === "needs_new_password") {
+        const random = `OAuth_${Date.now()}_${Math.random().toString(36).slice(2)}!`;
+        const resetResult = await oauthSignIn.resetPassword({
+          password: random,
+          signOutOfOtherSessions: false,
+        });
+
+        const finalSessionId = resetResult?.createdSessionId;
+        if (finalSessionId && result.setActive) {
+          await result.setActive({ session: finalSessionId });
+          await navigateAfterAuth();
+          return;
+        }
       }
     } catch (err: unknown) {
-      Alert.alert(
-        t("auth.oauthError"),
-        getClerkErrorMessage(err, `${provider} sign in failed`)
-      );
+      const message = getClerkErrorMessage(err, "");
+      if (message) {
+        Alert.alert(
+          t("auth.oauthError"),
+          message || `${provider} sign in failed`,
+        );
+      }
     } finally {
       setOauthLoading(null);
     }

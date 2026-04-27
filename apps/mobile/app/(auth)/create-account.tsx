@@ -245,18 +245,45 @@ export default function CreateAccountScreen() {
     try {
       const startFlow =
         provider === "google" ? startGoogleOAuth : startAppleOAuth;
-      const { createdSessionId, setActive: setOAuthActive } =
-        await startFlow();
+      const result = await startFlow();
 
-      if (createdSessionId && setOAuthActive) {
-        await setOAuthActive({ session: createdSessionId });
+      const sessionId =
+        result.createdSessionId ??
+        (result.signIn as any)?.createdSessionId ??
+        (result.signUp as any)?.createdSessionId;
+      const activateFn = result.setActive;
+
+      if (sessionId && activateFn) {
+        await activateFn({ session: sessionId });
         await navigateAfterAuth();
+        return;
+      }
+
+      // Handle "needs_new_password" — auto-set a random password so OAuth
+      // users aren't blocked by a password requirement from a prior account.
+      const oauthSignIn = result.signIn as any;
+      if (oauthSignIn?.status === "needs_new_password") {
+        const random = `OAuth_${Date.now()}_${Math.random().toString(36).slice(2)}!`;
+        const resetResult = await oauthSignIn.resetPassword({
+          password: random,
+          signOutOfOtherSessions: false,
+        });
+
+        const finalSessionId = resetResult?.createdSessionId;
+        if (finalSessionId && result.setActive) {
+          await result.setActive({ session: finalSessionId });
+          await navigateAfterAuth();
+          return;
+        }
       }
     } catch (err: unknown) {
-      Alert.alert(
-        t("auth.oauthError"),
-        getClerkErrorMessage(err, `${provider} sign up failed`)
-      );
+      const message = getClerkErrorMessage(err, "");
+      if (message) {
+        Alert.alert(
+          t("auth.oauthError"),
+          message || `${provider} sign up failed`,
+        );
+      }
     } finally {
       setOauthLoading(null);
     }

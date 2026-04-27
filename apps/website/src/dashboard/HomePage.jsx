@@ -103,9 +103,8 @@ export default function HomePage() {
   );
 }
 
-function getNextCall(schedule) {
-  if (!schedule?.preferredCallTimes) return null;
-  const calls = schedule.preferredCallTimes;
+function getNextCall(scheduleData) {
+  const calls = scheduleData?.schedule;
   if (!Array.isArray(calls) || calls.length === 0) return null;
 
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -117,12 +116,20 @@ function getNextCall(schedule) {
   let bestDistance = Infinity;
 
   for (const call of calls) {
-    const callDays = call.days || [];
-    for (const day of callDays) {
-      const dayIdx = days.indexOf(day);
-      if (dayIdx === -1) continue;
+    // Build list of day indices this call occurs on
+    let dayIndices = [];
+    if (call.frequency === 'daily') {
+      dayIndices = [0, 1, 2, 3, 4, 5, 6];
+    } else if (call.frequency === 'recurring' && call.recurringDays) {
+      dayIndices = call.recurringDays;
+    }
 
-      const [h, m] = (call.time || '10:00').split(':').map(Number);
+    for (const dayIdx of dayIndices) {
+      const timeStr = call.time || '10:00';
+      const timeParts = timeStr.replace(/\s*(AM|PM)/i, '').split(':').map(Number);
+      let [h, m] = timeParts;
+      if (/PM/i.test(timeStr) && h < 12) h += 12;
+      if (/AM/i.test(timeStr) && h === 12) h = 0;
       const callMinutes = h * 60 + m;
 
       let distance = (dayIdx - currentDay) * 1440 + (callMinutes - currentTime);
@@ -131,7 +138,7 @@ function getNextCall(schedule) {
       if (distance < bestDistance) {
         bestDistance = distance;
         best = {
-          day: day,
+          day: days[dayIdx],
           time: formatTime(call.time || '10:00'),
           title: call.title,
         };

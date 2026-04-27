@@ -1,6 +1,15 @@
 import { useState } from 'react';
 
-const ALL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const ALL_DAYS = [
+  { idx: 1, label: 'Mon' },
+  { idx: 2, label: 'Tue' },
+  { idx: 3, label: 'Wed' },
+  { idx: 4, label: 'Thu' },
+  { idx: 5, label: 'Fri' },
+  { idx: 6, label: 'Sat' },
+  { idx: 0, label: 'Sun' },
+];
+
 const TIME_OPTIONS = [];
 for (let h = 7; h <= 21; h++) {
   for (const m of ['00', '30']) {
@@ -10,32 +19,43 @@ for (let h = 7; h <= 21; h++) {
   }
 }
 
-export default function ScheduleCallModal({ call, onSave, onClose }) {
+export default function ScheduleCallModal({ call, reminders = [], onSave, onClose }) {
   const [title, setTitle] = useState(call?.title || 'Daily Check-in');
-  const [frequency, setFrequency] = useState(
-    call?.frequency || (call?.days?.length === 7 ? 'daily' : call?.days?.length ? 'specific' : 'daily')
+  const [frequency, setFrequency] = useState(call?.frequency || 'daily');
+  const [recurringDays, setRecurringDays] = useState(
+    call?.recurringDays || [1, 2, 3, 4, 5]
   );
-  const [days, setDays] = useState(call?.days || [...ALL_DAYS]);
   const [time, setTime] = useState(call?.time || '10:00');
+  const [selectedReminderIds, setSelectedReminderIds] = useState(call?.reminderIds || []);
   const [saving, setSaving] = useState(false);
 
-  const toggleDay = (day) => {
-    setDays((prev) =>
-      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+  const toggleDay = (dayIdx) => {
+    setRecurringDays((prev) =>
+      prev.includes(dayIdx) ? prev.filter((d) => d !== dayIdx) : [...prev, dayIdx]
+    );
+  };
+
+  const toggleReminder = (reminderId) => {
+    setSelectedReminderIds((prev) =>
+      prev.includes(reminderId) ? prev.filter((id) => id !== reminderId) : [...prev, reminderId]
     );
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
-    const callDays = frequency === 'daily' ? [...ALL_DAYS] : days;
-    await onSave({
+    const callData = {
       title: title.trim() || 'Daily Check-in',
       frequency,
-      days: callDays,
       time,
-      reminderIds: call?.reminderIds || [],
-    });
+    };
+    if (frequency === 'recurring') {
+      callData.recurringDays = recurringDays;
+    }
+    if (selectedReminderIds.length > 0) {
+      callData.reminderIds = selectedReminderIds;
+    }
+    await onSave(callData);
     setSaving(false);
   };
 
@@ -67,26 +87,26 @@ export default function ScheduleCallModal({ call, onSave, onClose }) {
               </button>
               <button
                 type="button"
-                className={`db-pill ${frequency === 'specific' ? 'db-pill--active' : ''}`}
-                onClick={() => setFrequency('specific')}
+                className={`db-pill ${frequency === 'recurring' ? 'db-pill--active' : ''}`}
+                onClick={() => setFrequency('recurring')}
               >
                 Specific Days
               </button>
             </div>
           </div>
 
-          {frequency === 'specific' && (
+          {frequency === 'recurring' && (
             <div className="db-field">
               <label className="db-label">Days</label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {ALL_DAYS.map((day) => (
+                {ALL_DAYS.map(({ idx, label }) => (
                   <button
-                    key={day}
+                    key={idx}
                     type="button"
-                    className={`db-pill ${days.includes(day) ? 'db-pill--active' : ''}`}
-                    onClick={() => toggleDay(day)}
+                    className={`db-pill ${recurringDays.includes(idx) ? 'db-pill--active' : ''}`}
+                    onClick={() => toggleDay(idx)}
                   >
-                    {day.slice(0, 3)}
+                    {label}
                   </button>
                 ))}
               </div>
@@ -106,6 +126,35 @@ export default function ScheduleCallModal({ call, onSave, onClose }) {
             </select>
           </div>
 
+          {reminders.length > 0 && (
+            <div className="db-field">
+              <label className="db-label">Reminders to deliver on this call</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {reminders.filter((r) => r.isActive !== false).map((reminder) => (
+                  <label
+                    key={reminder.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      color: 'var(--fg-1)',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedReminderIds.includes(reminder.id)}
+                      onChange={() => toggleReminder(reminder.id)}
+                      style={{ accentColor: 'var(--color-sage-dark)' }}
+                    />
+                    {reminder.title}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="db-modal__actions">
             <button type="button" className="db-btn db-btn--ghost" onClick={onClose} disabled={saving}>
               Cancel
@@ -113,7 +162,7 @@ export default function ScheduleCallModal({ call, onSave, onClose }) {
             <button
               type="submit"
               className="db-btn db-btn--primary"
-              disabled={saving || (frequency === 'specific' && days.length === 0)}
+              disabled={saving || (frequency === 'recurring' && recurringDays.length === 0)}
             >
               {saving ? 'Saving...' : call ? 'Save Changes' : 'Add Call'}
             </button>

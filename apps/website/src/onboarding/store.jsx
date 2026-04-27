@@ -59,6 +59,11 @@ export function OnboardingProvider({ children }) {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
+        // Step 8 (success) should never be restored — onboarding is done
+        if (parsed.step >= 8) {
+          localStorage.removeItem(STORAGE_KEY);
+          return initialState;
+        }
         return { ...initialState, ...parsed };
       }
     } catch {
@@ -67,10 +72,14 @@ export function OnboardingProvider({ children }) {
     return initialState;
   });
 
-  // Persist to localStorage on every state change
+  // Persist to localStorage on every state change (but not the success screen)
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      if (state.step >= 8) {
+        localStorage.removeItem(STORAGE_KEY);
+      } else {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      }
     } catch {
       // Ignore persistence failures; onboarding state still works in memory.
     }

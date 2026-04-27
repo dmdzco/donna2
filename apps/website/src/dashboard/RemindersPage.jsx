@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
 import { useDashboard } from './DashboardContext';
 import ReminderCard from './components/ReminderCard';
 import ReminderModal from './components/ReminderModal';
@@ -38,13 +37,18 @@ export default function RemindersPage() {
     setModalOpen(true);
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Delete this reminder?')) return;
+  const handleToggle = async (reminder) => {
+    const newActive = reminder.isActive === false;
+    setReminders((prev) =>
+      prev.map((r) => (r.id === reminder.id ? { ...r, isActive: newActive } : r))
+    );
     try {
-      await api.deleteReminder(id);
-      setReminders((prev) => prev.filter((r) => r.id !== id));
+      await api.updateReminder(reminder.id, { isActive: newActive });
     } catch (err) {
-      alert('Failed to delete reminder: ' + err.message);
+      setReminders((prev) =>
+        prev.map((r) => (r.id === reminder.id ? { ...r, isActive: !newActive } : r))
+      );
+      alert('Failed to update reminder: ' + err.message);
     }
   };
 
@@ -74,20 +78,15 @@ export default function RemindersPage() {
 
   return (
     <div>
-      <motion.div
+      <div
         className="db-page__header"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
       >
-        <div>
-          <h1 className="db-page__title">Reminders</h1>
-          <p className="db-page__subtitle">Manage reminders for {senior?.name || senior?.seniorName}</p>
-        </div>
+        <h1 className="db-page__title">Reminders</h1>
         <button className="db-btn db-btn--primary db-btn--small" onClick={handleAdd}>
-          + Add Reminder
+          Add
         </button>
-      </motion.div>
+      </div>
 
       <div className="db-pills">
         <button
@@ -107,7 +106,7 @@ export default function RemindersPage() {
       {filtered.length === 0 ? (
         <div className="db-empty">
           <div className="db-empty__icon">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3 }}>
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
               <path d="M13.73 21a2 2 0 01-3.46 0" />
             </svg>
@@ -119,18 +118,18 @@ export default function RemindersPage() {
           </p>
           {tab === 'active' && (
             <button className="db-btn db-btn--primary db-btn--small" onClick={handleAdd}>
-              + Add Reminder
+              Add Reminder
             </button>
           )}
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
           {filtered.map((reminder) => (
             <ReminderCard
               key={reminder.id}
               reminder={reminder}
               onEdit={() => handleEdit(reminder)}
-              onDelete={() => handleDelete(reminder.id)}
+              onToggle={() => handleToggle(reminder)}
             />
           ))}
         </div>

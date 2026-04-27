@@ -16,7 +16,11 @@ const DashboardLayout = lazy(() => import('./dashboard/DashboardLayout.jsx'));
 const HomePage = lazy(() => import('./dashboard/HomePage.jsx'));
 const RemindersPage = lazy(() => import('./dashboard/RemindersPage.jsx'));
 const SchedulePage = lazy(() => import('./dashboard/SchedulePage.jsx'));
-const SettingsPage = lazy(() => import('./dashboard/SettingsPage.jsx'));
+const SettingsHub = lazy(() => import('./dashboard/SettingsHub.jsx'));
+const LovedOneSettings = lazy(() => import('./dashboard/LovedOneSettings.jsx'));
+const AccountSettings = lazy(() => import('./dashboard/AccountSettings.jsx'));
+const NotificationSettings = lazy(() => import('./dashboard/NotificationSettings.jsx'));
+const HelpCenter = lazy(() => import('./dashboard/HelpCenter.jsx'));
 
 const clerkFallback = <div style={{ minHeight: '100vh', background: 'var(--color-cream)' }} />;
 
@@ -81,7 +85,11 @@ const router = createBrowserRouter([
           { index: true, element: <Suspense fallback={clerkFallback}><HomePage /></Suspense> },
           { path: 'reminders', element: <Suspense fallback={clerkFallback}><RemindersPage /></Suspense> },
           { path: 'schedule', element: <Suspense fallback={clerkFallback}><SchedulePage /></Suspense> },
-          { path: 'settings', element: <Suspense fallback={clerkFallback}><SettingsPage /></Suspense> },
+          { path: 'settings', element: <Suspense fallback={clerkFallback}><SettingsHub /></Suspense> },
+          { path: 'settings/loved-one', element: <Suspense fallback={clerkFallback}><LovedOneSettings /></Suspense> },
+          { path: 'settings/account', element: <Suspense fallback={clerkFallback}><AccountSettings /></Suspense> },
+          { path: 'settings/notifications', element: <Suspense fallback={clerkFallback}><NotificationSettings /></Suspense> },
+          { path: 'settings/help', element: <Suspense fallback={clerkFallback}><HelpCenter /></Suspense> },
         ],
       },
     ],

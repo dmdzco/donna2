@@ -57,21 +57,21 @@ export default function ScheduleCallModal({ call, onSave, onClose }) {
 
           <div className="db-field">
             <label className="db-label">Frequency</label>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              {[
-                { value: 'daily', label: 'Every Day' },
-                { value: 'specific', label: 'Specific Days' },
-              ].map((opt) => (
-                <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.9rem' }}>
-                  <input
-                    type="radio"
-                    name="frequency"
-                    checked={frequency === opt.value}
-                    onChange={() => setFrequency(opt.value)}
-                  />
-                  {opt.label}
-                </label>
-              ))}
+            <div className="db-pills">
+              <button
+                type="button"
+                className={`db-pill ${frequency === 'daily' ? 'db-pill--active' : ''}`}
+                onClick={() => setFrequency('daily')}
+              >
+                Every Day
+              </button>
+              <button
+                type="button"
+                className={`db-pill ${frequency === 'specific' ? 'db-pill--active' : ''}`}
+                onClick={() => setFrequency('specific')}
+              >
+                Specific Days
+              </button>
             </div>
           </div>
 
@@ -107,7 +107,7 @@ export default function ScheduleCallModal({ call, onSave, onClose }) {
           </div>
 
           <div className="db-modal__actions">
-            <button type="button" className="db-btn db-btn--secondary" onClick={onClose} disabled={saving}>
+            <button type="button" className="db-btn db-btn--ghost" onClick={onClose} disabled={saving}>
               Cancel
             </button>
             <button

@@ -47,29 +47,25 @@ export default function ReminderModal({ reminder, onSave, onClose }) {
           </div>
           <div className="db-field">
             <label className="db-label">Frequency</label>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.9rem' }}>
-                <input
-                  type="radio"
-                  name="frequency"
-                  checked={isRecurring}
-                  onChange={() => setIsRecurring(true)}
-                />
+            <div className="db-pills">
+              <button
+                type="button"
+                className={`db-pill ${isRecurring ? 'db-pill--active' : ''}`}
+                onClick={() => setIsRecurring(true)}
+              >
                 Daily
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.9rem' }}>
-                <input
-                  type="radio"
-                  name="frequency"
-                  checked={!isRecurring}
-                  onChange={() => setIsRecurring(false)}
-                />
+              </button>
+              <button
+                type="button"
+                className={`db-pill ${!isRecurring ? 'db-pill--active' : ''}`}
+                onClick={() => setIsRecurring(false)}
+              >
                 One-time
-              </label>
+              </button>
             </div>
           </div>
           <div className="db-modal__actions">
-            <button type="button" className="db-btn db-btn--secondary" onClick={onClose} disabled={saving}>
+            <button type="button" className="db-btn db-btn--ghost" onClick={onClose} disabled={saving}>
               Cancel
             </button>
             <button type="submit" className="db-btn db-btn--primary" disabled={saving || !title.trim()}>

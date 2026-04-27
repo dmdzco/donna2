@@ -86,23 +86,10 @@ export default function SchedulePage() {
     setSelectedDate(date);
   };
 
-  if (ctxLoading || loading) {
-    return <div className="db-loading"><div className="db-spinner" /></div>;
-  }
-
+  // Hooks must be called before any early return
   const selectedDayIdx = selectedDate.getDay();
   const selectedDayName = DAYS_FULL[selectedDayIdx];
 
-  // Filter calls for the selected day
-  const callsForDay = schedule
-    .map((c, i) => ({ ...c, _index: i }))
-    .filter((c) => {
-      if (c.frequency === 'daily') return true;
-      if (c.frequency === 'recurring' && c.recurringDays?.includes(selectedDayIdx)) return true;
-      return false;
-    });
-
-  // Build set of day names that have calls (for week strip dots)
   const scheduledDays = useMemo(() => {
     const days = new Set();
     for (const call of schedule) {
@@ -115,7 +102,6 @@ export default function SchedulePage() {
     return days;
   }, [schedule]);
 
-  // Build a map of reminder id → title for display
   const reminderMap = useMemo(() => {
     const map = {};
     for (const r of reminders) {
@@ -123,6 +109,18 @@ export default function SchedulePage() {
     }
     return map;
   }, [reminders]);
+
+  const callsForDay = schedule
+    .map((c, i) => ({ ...c, _index: i }))
+    .filter((c) => {
+      if (c.frequency === 'daily') return true;
+      if (c.frequency === 'recurring' && c.recurringDays?.includes(selectedDayIdx)) return true;
+      return false;
+    });
+
+  if (ctxLoading || loading) {
+    return <div className="db-loading"><div className="db-spinner" /></div>;
+  }
 
   return (
     <div>

@@ -1,13 +1,7 @@
-import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { CheckIcon } from './icons';
 
 export default function Success({ data }) {
-  // Clear onboarding localStorage so returning to /signup doesn't show this page
-  useEffect(() => {
-    try { localStorage.removeItem('donna_onboarding'); } catch {}
-  }, []);
-
   const selectedInterests = Object.entries(data.interests || {})
     .filter(([, v]) => v.selected)
     .map(([k]) => k)

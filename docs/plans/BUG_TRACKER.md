@@ -1,143 +1,30 @@
 # Bug Tracker
 
-## Open Bugs
+## Open Bugs — Moved to GitHub Issues
 
-### BUG-012: Duplicate phone number error appears too late — should show on loved one info page
-- **Reported**: 2026-04-23
-- **Reporter**: Nick
-- **App**: Mobile (iOS)
-- **Severity**: High — confusing UX, user completes entire onboarding before learning of the issue
-- **Description**: When a user completes the entire signup/onboarding flow and reaches the final "You're all set!" page, if the loved one's phone number is already in use, they only then get a generic error ("That information is already in use. Check it and try again."). This error needs to be shown earlier — on the "Info about your loved one" page where the phone number is entered — so users can fix it immediately rather than completing the whole flow, getting confused, and having to go back.
-- **Steps to Reproduce**:
-  1. Start onboarding and enter a phone number that's already in use for another senior
-  2. Complete all remaining onboarding steps
-  3. Reach the "You're all set!" page
-  4. See error: "That information is already in use. Check it and try again."
-- **Expected**: The duplicate phone number error should appear on the loved one info page (where the number is entered), not at the very end after the user has completed everything
-- **Screenshot**: ![BUG-012](screenshots/bug-012-duplicate-phone-late-error.jpg)
+Bug tracking has moved to **GitHub Issues** for easier filing from mobile.
 
----
+**[View all open bugs](https://github.com/dmdzco/donna2/issues?q=is%3Aissue+is%3Aopen+label%3Abug)**
 
-### BUG-003: App auto-skips Get Started / Sign In page after ~1 second
-- **Reported**: 2026-04-22
-- **Reporter**: Nick
-- **App**: Mobile (iOS)
-- **Severity**: Critical — users never see the sign-in screen
-- **Description**: When the user opens the app, even after force quitting it, after a ~1 second delay it automatically jumps past the Get Started / Sign In page. The user never gets a chance to interact with it.
-- **Steps to Reproduce**:
-  1. Force quit the app
-  2. Reopen it
-  3. The Get Started / Sign In page flashes for ~1 second then auto-navigates away
-- **Expected**: The Get Started / Sign In page should remain until the user taps a button
-- **Video**: See [bug-005-onboarding issues.MP4](screenshots/bug-005-onboarding%20issues.MP4) and [bug-005-onboarding issues v2.MP4](screenshots/bug-005-onboarding%20issues%20v2.MP4)
+To file a new bug: open the GitHub mobile app → tap "+" → "New Issue" → select "Bug Report" template.
+
+### Migrated Issues (April 2026)
+| Bug | GitHub Issue |
+|-----|-------------|
+| BUG-003: App auto-skips Get Started page | [#171](https://github.com/dmdzco/donna2/issues/171) |
+| BUG-004: Error on "Go to Dashboard" after onboarding | [#172](https://github.com/dmdzco/donna2/issues/172) |
+| BUG-005: User data persists after force quit | [#173](https://github.com/dmdzco/donna2/issues/173) |
+| BUG-006: No splash screen while app loads | [#174](https://github.com/dmdzco/donna2/issues/174) |
+| BUG-007: No "Done" button on keyboard | [#175](https://github.com/dmdzco/donna2/issues/175) |
+| BUG-008: Buttons/Power Bar text should be lower | [#176](https://github.com/dmdzco/donna2/issues/176) |
+| BUG-009: Add "Myself" option in onboarding | [#177](https://github.com/dmdzco/donna2/issues/177) |
+| BUG-010: Sign In button should be centered | [#178](https://github.com/dmdzco/donna2/issues/178) |
+| BUG-011: Dark mode call times not visible | [#179](https://github.com/dmdzco/donna2/issues/179) |
+| BUG-012: Duplicate phone error appears too late | [#180](https://github.com/dmdzco/donna2/issues/180) |
 
 ---
 
-### BUG-004: Error when clicking "Go to Dashboard" after completing onboarding
-- **Reported**: 2026-04-22
-- **Reporter**: Nick
-- **App**: Mobile (iOS)
-- **Severity**: Critical — blocks user from reaching dashboard after onboarding
-- **Description**: After filling out the entire onboarding flow, clicking to go to the dashboard triggers an error popup. The user is stuck on the success screen with no way to proceed.
-- **Steps to Reproduce**:
-  1. Complete the full onboarding flow
-  2. Tap the button to go to the dashboard
-  3. Error pops up
-- **Expected**: User should navigate to the dashboard successfully
-- **Video**: See [bug-005-onboarding issues.MP4](screenshots/bug-005-onboarding%20issues.MP4) and [bug-005-onboarding issues v2.MP4](screenshots/bug-005-onboarding%20issues%20v2.MP4)
-
----
-
-### BUG-005: User data persists in onboarding fields after force quit
-- **Reported**: 2026-04-22
-- **Reporter**: Nick
-- **App**: Mobile (iOS)
-- **Severity**: Low — unconventional behavior, not strictly a bug
-- **Description**: After force quitting the app, all the user data previously entered in the onboarding fields is still there. This is unconventional — most apps clear unsaved form data on force quit.
-- **Steps to Reproduce**:
-  1. Fill out some onboarding fields
-  2. Force quit the app
-  3. Reopen the app and navigate to onboarding
-  4. All previously entered data is still populated
-- **Expected**: Fields should either be cleared on force quit, or this should be an intentional "save draft" feature with clear UX indication
-- **Video**: See [bug-005-onboarding issues.MP4](screenshots/bug-005-onboarding%20issues.MP4) and [bug-005-onboarding issues v2.MP4](screenshots/bug-005-onboarding%20issues%20v2.MP4)
-
----
-
-### BUG-006: No splash screen while app loads
-- **Reported**: 2026-04-22
-- **Reporter**: Nick
-- **App**: Mobile (iOS)
-- **Severity**: Medium — polish / UX improvement
-- **Description**: Ideally the app should show a splash screen upon opening while things load. The splash screen should be dark sage everywhere except for the Donna logo, which should be in the off-white color.
-- **Expected**: A branded splash screen (dark sage background, off-white Donna logo) displays while the app initializes
-
----
-
-### BUG-007: No "Done" button on iPhone keyboard during onboarding
-- **Reported**: 2026-04-22
-- **Reporter**: Nick
-- **App**: Mobile (iOS)
-- **Severity**: High — significant UX issue
-- **Description**: After typing to fill out fields in the app, the keyboard that pops up on the iPhone has no "Done" button. Users have to tap random places on the screen to dismiss the keyboard so they can access the Continue button. This is a poor user experience — there should be a "Done" button or toolbar above the keyboard to dismiss it.
-- **Steps to Reproduce**:
-  1. Open the app and navigate to any onboarding field
-  2. Tap a text field — keyboard appears
-  3. No "Done" button is visible on the keyboard
-  4. User must tap elsewhere on the screen to dismiss it
-- **Expected**: A "Done" button (or input accessory toolbar) should appear above the keyboard, allowing users to dismiss it easily and access the Continue button
-- **Video**: See [bug-005-onboarding issues.MP4](screenshots/bug-005-onboarding%20issues.MP4) and [bug-005-onboarding issues v2.MP4](screenshots/bug-005-onboarding%20issues%20v2.MP4)
-
----
-
-### BUG-008: Instant Call button, Call Schedule button, and Power Bar text should be slightly lower
-- **Reported**: 2026-04-22
-- **Reporter**: Nick
-- **App**: Mobile (iOS)
-- **Severity**: Low — UI polish
-- **Description**: The Instant Call button, Call Schedule button, and the words on the Power Bar (below their icons) should all be moved a tiny bit lower for better visual alignment.
-- **Screenshot**: ![BUG-008](screenshots/bug-008-move-buttons-lower.png)
-
----
-
-### BUG-009: Add "Myself" as an option for who Donna is for
-- **Reported**: 2026-04-22
-- **Reporter**: Nick
-- **App**: Mobile (iOS)
-- **Severity**: Medium — missing option in onboarding
-- **Description**: When the user is asked who Donna is for during onboarding, "Myself" should be one of the available options. Currently it is not listed.
-- **Screenshot**: ![BUG-009](screenshots/bug-009-add-myself-option.png)
-
----
-
-### BUG-010: Sign In button should be centered below "Already have an account?"
-- **Reported**: 2026-04-22
-- **Reporter**: Nick
-- **App**: Mobile (iOS)
-- **Severity**: Low — UI polish
-- **Description**: On the initial/Get Started page, the Sign In button should be positioned below the "Already have an account?" text and centered on the screen.
-- **Screenshot**: ![BUG-010](screenshots/bug-010-center-sign-in.png)
-
----
-
-### BUG-011: Call times not visible in dark mode when scheduling a call
-- **Reported**: 2026-04-22
-- **Reporter**: Nick
-- **App**: Mobile (iOS)
-- **Severity**: High — content invisible to dark mode users
-- **Description**: When the user has dark mode enabled on their iPhone, the call times are not visible when scheduling a call. The text likely blends into the background.
-- **Screenshot**: ![BUG-011](screenshots/bug-011-dark-mode-call-times.png)
-
----
-
-### Note: Splash Screen Draft Available
-- **Date**: 2026-04-22
-- **Description**: This image can be used as a splash screen if needed (dark sage background, off-white Donna logo). Relates to BUG-006.
-- **Image**: ![Splash Screen Draft](screenshots/splash-screen-draft.jpg)
-
----
-
-## Resolved Bugs
+## Resolved Bugs (Archive)
 
 ### BUG-001: Signup rejects all passwords as "found in data leak"
 - **Reported**: 2026-04-13

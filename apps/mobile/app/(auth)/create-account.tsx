@@ -183,31 +183,52 @@ export default function CreateAccountScreen() {
     setOauthLoading(provider);
 
     try {
+      let result: any;
+
       if (provider === "apple") {
         if (Platform.OS !== "ios") return;
+        result = await startAppleAuthenticationFlow();
+      } else {
+        result = await startGoogleOAuth();
+      }
 
-        const { createdSessionId, setActive: setAppleActive } =
-          await startAppleAuthenticationFlow();
+      const sessionId =
+        result.createdSessionId ??
+        (result.signIn as any)?.createdSessionId ??
+        (result.signUp as any)?.createdSessionId;
+      const activateFn = result.setActive;
 
-        if (createdSessionId && setAppleActive) {
-          await setAppleActive({ session: createdSessionId });
-          await navigateAfterAuth();
-        }
+      if (sessionId && activateFn) {
+        await activateFn({ session: sessionId });
+        await navigateAfterAuth();
         return;
       }
 
-      const { createdSessionId, setActive: setOAuthActive } =
-        await startGoogleOAuth();
+      // Handle "needs_new_password" — auto-set a random password so OAuth
+      // users aren't blocked by a password requirement from a prior account.
+      const oauthSignIn = result.signIn as any;
+      if (oauthSignIn?.status === "needs_new_password") {
+        const random = `OAuth_${Date.now()}_${Math.random().toString(36).slice(2)}!`;
+        const resetResult = await oauthSignIn.resetPassword({
+          password: random,
+          signOutOfOtherSessions: false,
+        });
 
-      if (createdSessionId && setOAuthActive) {
-        await setOAuthActive({ session: createdSessionId });
-        await navigateAfterAuth();
+        const finalSessionId = resetResult?.createdSessionId;
+        if (finalSessionId && result.setActive) {
+          await result.setActive({ session: finalSessionId });
+          await navigateAfterAuth();
+          return;
+        }
       }
     } catch (err: unknown) {
-      Alert.alert(
-        t("auth.oauthError"),
-        getClerkErrorMessage(err, `${provider} sign up failed`)
-      );
+      const message = getClerkErrorMessage(err, "");
+      if (message) {
+        Alert.alert(
+          t("auth.oauthError"),
+          message || `${provider} sign up failed`,
+        );
+      }
     } finally {
       setOauthLoading(null);
     }

@@ -58,11 +58,20 @@ function AuthGuard() {
       error: profileError ? profileErrorObj : undefined,
     });
 
+    console.log(`[AuthGuard]`, JSON.stringify({
+      isSignedIn, pathname, firstSegment, profileLoading, profileError: !!profileError,
+      nextRoute, hasSeniors: profile?.seniors?.length ?? 0,
+    }));
+
     if (!isSignedIn && inTabsGroup) {
+      console.log(`[AuthGuard] Not signed in but in tabs → redirect to /`);
       router.replace("/");
     } else if (isSignedIn && (isLanding || inAuthGroup)) {
       if (!profileLoading && nextRoute) {
+        console.log(`[AuthGuard] Signed in + auth area → navigating to ${nextRoute}`);
         router.replace(nextRoute as any);
+      } else {
+        console.log(`[AuthGuard] Signed in + auth area but waiting (profileLoading=${profileLoading}, nextRoute=${nextRoute})`);
       }
     } else if (
       isSignedIn &&

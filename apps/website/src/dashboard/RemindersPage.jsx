@@ -30,7 +30,8 @@ export default function RemindersPage() {
         api.getSchedule(senior.id),
       ]);
       setReminders(Array.isArray(remData) ? remData : []);
-      setSchedule(schedData?.schedule || []);
+      const sched = schedData?.schedule;
+      setSchedule(Array.isArray(sched) ? sched : []);
     } catch (err) {
       console.error('Failed to load reminders:', err);
     } finally {

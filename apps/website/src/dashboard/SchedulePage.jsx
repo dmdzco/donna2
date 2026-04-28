@@ -27,7 +27,8 @@ export default function SchedulePage() {
         api.getSchedule(senior.id),
         api.getReminders(),
       ]);
-      setSchedule(schedData?.schedule || []);
+      const sched = schedData?.schedule;
+      setSchedule(Array.isArray(sched) ? sched : []);
       setReminders(Array.isArray(remData) ? remData : []);
     } catch (err) {
       console.error('Failed to load schedule:', err);

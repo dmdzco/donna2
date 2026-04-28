@@ -37,4 +37,3 @@ def test_format_call_time_label_yesterday():
     label = format_call_time_label(started, "America/Chicago", now=now)
 
     assert label.startswith("Yesterday")
-

@@ -89,4 +89,3 @@ def format_call_time_label(
     if local_started.year == local_now.year:
         return f"{local_started.strftime('%B %-d')} at {clock} ({days} days ago)"
     return f"{local_started.strftime('%B %-d, %Y')} at {clock}"
-

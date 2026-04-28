@@ -150,6 +150,7 @@ function getNextCall(scheduleData) {
 }
 
 function formatTime(time) {
+  if (/am|pm/i.test(time)) return time;
   const [h, m] = time.split(':').map(Number);
   const ampm = h >= 12 ? 'PM' : 'AM';
   const hour = h % 12 || 12;

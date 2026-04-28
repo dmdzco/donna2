@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useClerk } from '@clerk/clerk-react';
 import { useNavigate } from 'react-router-dom';
 import { useDashboard } from './DashboardContext';
@@ -6,12 +7,29 @@ import SettingsRow from './components/SettingsRow';
 export default function SettingsHub() {
   const { signOut } = useClerk();
   const navigate = useNavigate();
-  const { senior } = useDashboard();
+  const { senior, api } = useDashboard();
   const seniorName = senior?.name || senior?.seniorName || 'Loved One';
+
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const handleSignOut = async () => {
     await signOut();
     navigate('/');
+  };
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    try {
+      await api.deleteAccount();
+      await signOut();
+      navigate('/');
+    } catch (err) {
+      alert('Failed to delete account: ' + err.message);
+    } finally {
+      setDeleting(false);
+      setShowDeleteModal(false);
+    }
   };
 
   return (
@@ -68,11 +86,49 @@ export default function SettingsHub() {
         />
       </div>
 
-      <div style={{ marginTop: 32 }}>
+      <div style={{ marginTop: 32, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <button className="db-btn db-btn--danger-text" onClick={handleSignOut}>
           Sign Out
         </button>
+        <button className="db-btn db-btn--danger-text" onClick={() => setShowDeleteModal(true)}>
+          Delete Account
+        </button>
       </div>
+
+      {/* Delete Account Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="db-modal-overlay" onClick={() => !deleting && setShowDeleteModal(false)}>
+          <div className="db-modal" onClick={(e) => e.stopPropagation()}>
+            <h2 className="db-modal__title">Delete Account</h2>
+            <p style={{ fontSize: 15, color: 'var(--fg-2)', lineHeight: 1.6, marginBottom: 8 }}>
+              Are you sure you want to delete your account? This action is permanent and cannot be undone.
+            </p>
+            <p style={{ fontSize: 14, color: 'var(--color-danger)', lineHeight: 1.5 }}>
+              All of your data will be permanently removed, including your loved one&apos;s profile, call history, reminders, and conversation memories.
+            </p>
+            <div className="db-modal__actions">
+              <button
+                className="db-btn db-btn--ghost"
+                onClick={() => setShowDeleteModal(false)}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                className="db-btn"
+                onClick={handleDeleteAccount}
+                disabled={deleting}
+                style={{
+                  background: 'var(--color-danger)',
+                  color: 'white',
+                }}
+              >
+                {deleting ? 'Deleting...' : 'Yes, Delete My Account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

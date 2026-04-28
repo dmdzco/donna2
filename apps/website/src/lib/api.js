@@ -71,5 +71,8 @@ export function useApi() {
     // Notifications
     getNotificationPrefs: () => get('/api/notifications/preferences'),
     updateNotificationPrefs: (data) => patch('/api/notifications/preferences', data),
+
+    // Account
+    deleteAccount: () => del('/api/caregivers/me/account'),
   };
 }

@@ -8,8 +8,8 @@ import './dashboard.css';
 
 const navItems = [
   { to: '/dashboard', label: 'Home', icon: 'home', end: true },
-  { to: '/dashboard/reminders', label: 'Reminders', icon: 'reminders' },
   { to: '/dashboard/schedule', label: 'Schedule', icon: 'schedule' },
+  { to: '/dashboard/reminders', label: 'Reminders', icon: 'reminders' },
   { to: '/dashboard/settings', label: 'Settings', icon: 'settings' },
 ];
 

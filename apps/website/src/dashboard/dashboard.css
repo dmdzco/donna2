@@ -778,15 +778,15 @@
 /* ===== Reminder Card (app-style) ===== */
 .db-reminder {
   display: grid;
-  grid-template-columns: 40px 1fr auto;
-  align-items: center;
+  grid-template-columns: 1fr auto;
+  align-items: start;
   gap: var(--space-3);
   background: var(--bg-card);
   border-radius: var(--radius-lg);
   padding: var(--space-4);
   box-shadow: var(--shadow-sm);
   margin-bottom: 10px;
-  cursor: pointer;
+  cursor: default;
   transition: box-shadow var(--dur-fast) var(--ease-out);
 }
 
@@ -794,29 +794,88 @@
   box-shadow: var(--shadow-md);
 }
 
-.db-reminder__icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--color-cream-deep);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-sage-dark);
-}
-
 .db-reminder__title {
   font-family: var(--font-body);
   font-size: 15px;
   font-weight: 600;
   color: var(--fg-1);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.db-reminder__meta {
+.db-reminder__desc {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--fg-2);
+  margin-top: 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.db-reminder__calls {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.db-reminder__actions {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  align-items: center;
+}
+
+/* ===== Inline Error ===== */
+.db-error-inline {
   font-family: var(--font-body);
   font-size: 13px;
+  color: var(--color-danger);
+  text-align: center;
+  margin-top: var(--space-3);
+}
+
+/* ===== Helper Text ===== */
+.db-helper-text {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--fg-3);
+  margin-top: 4px;
+}
+
+/* ===== Call Checkbox (Reminder Modal) ===== */
+.db-call-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--fg-1);
+  padding: var(--space-2) 0;
+}
+
+.db-call-check input[type="checkbox"] {
+  accent-color: var(--color-sage-dark);
+  flex-shrink: 0;
+}
+
+.db-call-check__info {
+  display: flex;
+  flex-direction: column;
+}
+
+.db-call-check__title {
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.db-call-check__schedule {
+  font-size: 12px;
   color: var(--fg-2);
-  margin-top: 2px;
 }
 
 /* ===== Avatar ===== */

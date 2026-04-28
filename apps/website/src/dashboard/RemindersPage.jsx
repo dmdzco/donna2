@@ -2,29 +2,46 @@ import { useState, useEffect } from 'react';
 import { useDashboard } from './DashboardContext';
 import ReminderCard from './components/ReminderCard';
 import ReminderModal from './components/ReminderModal';
+import DeleteReminderModal from './components/DeleteReminderModal';
 
 export default function RemindersPage() {
   const { senior, loading: ctxLoading, api } = useDashboard();
   const [reminders, setReminders] = useState([]);
+  const [schedule, setSchedule] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState('active');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingReminder, setEditingReminder] = useState(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deletingReminder, setDeletingReminder] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  const seniorFirstName = senior?.name?.split(' ')[0] || 'your senior';
 
   useEffect(() => {
     if (!senior) return;
-    loadReminders();
+    loadData();
   }, [senior]);
 
-  async function loadReminders() {
+  async function loadData() {
     try {
-      const data = await api.getReminders();
-      setReminders(Array.isArray(data) ? data : []);
+      const [remData, schedData] = await Promise.all([
+        api.getReminders(),
+        api.getSchedule(senior.id),
+      ]);
+      setReminders(Array.isArray(remData) ? remData : []);
+      setSchedule(schedData?.schedule || []);
     } catch (err) {
       console.error('Failed to load reminders:', err);
     } finally {
       setLoading(false);
     }
+  }
+
+  const activeReminders = reminders.filter((r) => r.isActive !== false);
+
+  function getLinkedCalls(reminderId) {
+    return schedule.filter((call) => (call.reminderIds || []).includes(reminderId));
   }
 
   const handleAdd = () => {
@@ -37,73 +54,88 @@ export default function RemindersPage() {
     setModalOpen(true);
   };
 
-  const handleToggle = async (reminder) => {
-    const newActive = reminder.isActive === false;
-    setReminders((prev) =>
-      prev.map((r) => (r.id === reminder.id ? { ...r, isActive: newActive } : r))
-    );
+  const handleDeleteClick = (reminder) => {
+    setDeletingReminder(reminder);
+    setDeleteError('');
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deletingReminder) return;
+    setDeleting(true);
+    setDeleteError('');
     try {
-      await api.updateReminder(reminder.id, { isActive: newActive });
+      await api.deleteReminder(deletingReminder.id);
+      // Remove reminder ID from all schedule entries
+      const updatedSchedule = schedule.map((call) => {
+        if (!(call.reminderIds || []).includes(deletingReminder.id)) return call;
+        return { ...call, reminderIds: call.reminderIds.filter((id) => id !== deletingReminder.id) };
+      });
+      if (JSON.stringify(updatedSchedule) !== JSON.stringify(schedule)) {
+        await api.updateSchedule(senior.id, { schedule: updatedSchedule });
+        setSchedule(updatedSchedule);
+      }
+      setReminders((prev) => prev.filter((r) => r.id !== deletingReminder.id));
+      setDeleteModalOpen(false);
+      setDeletingReminder(null);
     } catch (err) {
-      setReminders((prev) =>
-        prev.map((r) => (r.id === reminder.id ? { ...r, isActive: !newActive } : r))
-      );
-      alert('Failed to update reminder: ' + err.message);
+      setDeleteError(err.message || 'Failed to delete reminder.');
+    } finally {
+      setDeleting(false);
     }
   };
 
-  const handleSave = async (data) => {
-    try {
-      if (editingReminder) {
-        const updated = await api.updateReminder(editingReminder.id, data);
-        setReminders((prev) => prev.map((r) => (r.id === editingReminder.id ? { ...r, ...updated, ...data } : r)));
-      } else {
-        const created = await api.createReminder({ ...data, seniorId: senior.id });
-        setReminders((prev) => [...prev, created]);
-      }
-      setModalOpen(false);
-      setEditingReminder(null);
-    } catch (err) {
-      alert('Failed to save reminder: ' + err.message);
+  const handleSave = async (reminderData, selectedCallIndices) => {
+    let savedReminder;
+    if (editingReminder) {
+      savedReminder = await api.updateReminder(editingReminder.id, reminderData);
+      savedReminder = { ...editingReminder, ...savedReminder, ...reminderData };
+      setReminders((prev) => prev.map((r) => (r.id === editingReminder.id ? savedReminder : r)));
+    } else {
+      savedReminder = await api.createReminder({ ...reminderData, seniorId: senior.id });
+      setReminders((prev) => [...prev, savedReminder]);
     }
+
+    // Update schedule: add/remove this reminder's ID from calls
+    const reminderId = savedReminder.id;
+    const updatedSchedule = schedule.map((call, idx) => {
+      const currentIds = call.reminderIds || [];
+      const shouldHave = selectedCallIndices.includes(idx);
+      const hasIt = currentIds.includes(reminderId);
+      if (shouldHave && !hasIt) return { ...call, reminderIds: [...currentIds, reminderId] };
+      if (!shouldHave && hasIt) return { ...call, reminderIds: currentIds.filter((id) => id !== reminderId) };
+      return call;
+    });
+
+    if (JSON.stringify(updatedSchedule) !== JSON.stringify(schedule)) {
+      await api.updateSchedule(senior.id, { schedule: updatedSchedule });
+      setSchedule(updatedSchedule);
+    }
+
+    setModalOpen(false);
+    setEditingReminder(null);
   };
 
   if (ctxLoading || loading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
   }
 
-  const filtered = reminders.filter((r) =>
-    tab === 'active' ? r.isActive !== false : r.isActive === false
-  );
-
   return (
     <div>
-      <div
-        className="db-page__header"
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
-      >
+      <div className="db-page__header">
         <h1 className="db-page__title">Reminders</h1>
-        <button className="db-btn db-btn--primary db-btn--small" onClick={handleAdd}>
-          Add
-        </button>
+        <p className="db-page__subtitle">Manage what Donna reminds {seniorFirstName} about</p>
       </div>
 
-      <div className="db-pills">
-        <button
-          className={`db-pill ${tab === 'active' ? 'db-pill--active' : ''}`}
-          onClick={() => setTab('active')}
-        >
-          Active
-        </button>
-        <button
-          className={`db-pill ${tab === 'completed' ? 'db-pill--active' : ''}`}
-          onClick={() => setTab('completed')}
-        >
-          Completed
-        </button>
-      </div>
+      <button
+        className="db-btn db-btn--primary db-btn--wide"
+        onClick={handleAdd}
+        style={{ marginBottom: 'var(--space-6)' }}
+      >
+        + Add New Reminder
+      </button>
 
-      {filtered.length === 0 ? (
+      {activeReminders.length === 0 ? (
         <div className="db-empty">
           <div className="db-empty__icon">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -112,24 +144,18 @@ export default function RemindersPage() {
             </svg>
           </div>
           <p className="db-empty__text">
-            {tab === 'active'
-              ? 'No active reminders. Add one to help Donna remember important things.'
-              : 'No completed reminders yet.'}
+            No reminders yet. Add a reminder for Donna to mention during calls with {seniorFirstName}.
           </p>
-          {tab === 'active' && (
-            <button className="db-btn db-btn--primary db-btn--small" onClick={handleAdd}>
-              Add Reminder
-            </button>
-          )}
         </div>
       ) : (
         <div>
-          {filtered.map((reminder) => (
+          {activeReminders.map((reminder) => (
             <ReminderCard
               key={reminder.id}
               reminder={reminder}
+              linkedCalls={getLinkedCalls(reminder.id)}
               onEdit={() => handleEdit(reminder)}
-              onToggle={() => handleToggle(reminder)}
+              onDelete={() => handleDeleteClick(reminder)}
             />
           ))}
         </div>
@@ -138,8 +164,20 @@ export default function RemindersPage() {
       {modalOpen && (
         <ReminderModal
           reminder={editingReminder}
+          schedule={schedule}
           onSave={handleSave}
           onClose={() => { setModalOpen(false); setEditingReminder(null); }}
+        />
+      )}
+
+      {deleteModalOpen && deletingReminder && (
+        <DeleteReminderModal
+          reminder={deletingReminder}
+          seniorName={seniorFirstName}
+          onConfirm={handleDeleteConfirm}
+          onClose={() => { setDeleteModalOpen(false); setDeletingReminder(null); }}
+          deleting={deleting}
+          error={deleteError}
         />
       )}
     </div>
